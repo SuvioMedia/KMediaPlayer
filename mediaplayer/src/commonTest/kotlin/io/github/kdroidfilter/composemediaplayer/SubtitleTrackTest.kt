@@ -18,6 +18,9 @@ class SubtitleTrackTest {
         assertEquals("English", track.label)
         assertEquals("en", track.language)
         assertEquals("subtitles/en.vtt", track.src)
+        assertEquals(SubtitleFormat.AUTO, track.format)
+        assertEquals(SubtitleFormat.WEBVTT, track.resolvedFormat())
+        assertEquals("subtitles/en.vtt", track.id)
     }
 
     @Test
@@ -81,5 +84,60 @@ class SubtitleTrackTest {
         assertTrue(toString.contains("English"))
         assertTrue(toString.contains("en"))
         assertTrue(toString.contains("subtitles/en.vtt"))
+    }
+
+    @Test
+    fun testSubtitleFormatDetection() {
+        assertEquals(
+            SubtitleFormat.ASS,
+            SubtitleFormat.fromSource(src = "blob:local", label = "episode.ass"),
+        )
+        assertEquals(
+            SubtitleFormat.SSA,
+            SubtitleFormat.fromSource(src = "https://example.com/subtitle.ssa?token=1"),
+        )
+        assertEquals(
+            SubtitleFormat.SRT,
+            SubtitleFormat.fromContent("1\n00:00:01,000 --> 00:00:02,000\nHello"),
+        )
+        assertEquals(
+            SubtitleFormat.ASS,
+            SubtitleFormat.fromContent("[Script Info]\nTitle: Demo"),
+        )
+    }
+
+    @Test
+    fun testEmbeddedSubtitleTrackCreation() {
+        val track =
+            SubtitleTrack(
+                label = "English CC",
+                language = "en",
+                src = "",
+                id = "web:text:0",
+                isEmbedded = true,
+                kind = "captions",
+            )
+
+        assertEquals("web:text:0", track.id)
+        assertTrue(track.isEmbedded)
+        assertEquals("captions", track.kind)
+    }
+
+    @Test
+    fun testAudioTrackCreation() {
+        val track =
+            AudioTrack(
+                id = "web:audio:0",
+                label = "English",
+                language = "en",
+                channels = 2,
+                sampleRate = 48000,
+            )
+
+        assertEquals("web:audio:0", track.id)
+        assertEquals("English", track.label)
+        assertEquals("en", track.language)
+        assertEquals(2, track.channels)
+        assertEquals(48000, track.sampleRate)
     }
 }

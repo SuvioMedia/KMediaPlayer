@@ -64,7 +64,10 @@ fun LinuxVideoPlayerSurface(
             }
 
             // Add Compose-based subtitle layer
-            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+            if (playerState.subtitlesEnabled &&
+                playerState.currentSubtitleTrack != null &&
+                playerState.currentSubtitleTrack?.isEmbedded != true
+            ) {
                 val currentTimeMs =
                     (
                         playerState.sliderPos / 1000f *

@@ -1,11 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import kotlinx.browser.document
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.js.ExperimentalWasmJsInterop
+import kotlin.js.js
 
 /**
  * Manages fullscreen functionality for the video player
@@ -17,17 +14,20 @@ object FullscreenManager {
     @OptIn(ExperimentalWasmJsInterop::class)
     fun exitFullscreen() {
         if (document.fullscreenElement != null) {
-            document.exitFullscreen()
+            exitDocumentFullscreen { message ->
+                webVideoLogger.e { "Failed to exit fullscreen: $message" }
+            }
         }
     }
 
     /**
      * Request fullscreen mode
      */
-    @OptIn(ExperimentalWasmJsInterop::class)
-    fun requestFullScreen() {
-        val document = document.documentElement
-        document?.requestFullscreen()
+    fun requestFullScreen(
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        requestDocumentFullscreen(onSuccess, onError)
     }
 
     /**
@@ -40,13 +40,67 @@ object FullscreenManager {
         onFullscreenChange: (Boolean) -> Unit,
     ) {
         if (!isCurrentlyFullscreen) {
-            requestFullScreen()
-            CoroutineScope(Dispatchers.Default).launch {
-                delay(500)
-            }
+            requestFullScreen(
+                onSuccess = { onFullscreenChange(true) },
+                onError = { message ->
+                    webVideoLogger.e { "Failed to enter fullscreen: $message" }
+                },
+            )
         } else {
             exitFullscreen()
+            onFullscreenChange(false)
         }
-        onFullscreenChange(!isCurrentlyFullscreen)
     }
 }
+
+@Suppress("UNUSED_PARAMETER")
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun requestDocumentFullscreen(
+    onSuccess: () -> Unit,
+    onError: (String) -> Unit,
+): Unit =
+    js(
+        """
+        {
+            const element = document.documentElement;
+            if (!element || typeof element.requestFullscreen !== "function") {
+                onError("Fullscreen API is not available");
+            } else {
+                try {
+                    const result = element.requestFullscreen();
+                    if (result && typeof result.then === "function") {
+                        result.then(function() {
+                            onSuccess();
+                        }).catch(function(error) {
+                            onError(error && error.message ? error.message : String(error));
+                        });
+                    } else {
+                        onSuccess();
+                    }
+                } catch (error) {
+                    onError(error && error.message ? error.message : String(error));
+                }
+            }
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun exitDocumentFullscreen(onError: (String) -> Unit): Unit =
+    js(
+        """
+        {
+            try {
+                const result = document.exitFullscreen();
+                if (result && typeof result.catch === "function") {
+                    result.catch(function(error) {
+                        onError(error && error.message ? error.message : String(error));
+                    });
+                }
+            } catch (error) {
+                onError(error && error.message ? error.message : String(error));
+            }
+        }
+        """,
+    )

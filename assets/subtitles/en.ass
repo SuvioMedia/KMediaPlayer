@@ -1,0 +1,18 @@
+[Script Info]
+Title: Compose Media Player ASS sample
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+PlayResX: 1280
+PlayResY: 720
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,44,&H00FFFFFF,&H000000FF,&H00202020,&H90000000,0,0,0,0,100,100,0,0,1,2,1,2,32,32,48,1
+Style: Accent,Arial,52,&H0000D7FF,&H000000FF,&H00101010,&H90000000,1,0,0,0,100,100,0,0,1,2,1,2,32,32,64,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:01:00.00,Default,,0,0,0,,ASS subtitles rendered with libass on web/wasm.
+Dialogue: 0,0:00:00.00,0:01:00.00,Accent,,0,0,0,,Styled text, outline and shadow come from the .ass file.

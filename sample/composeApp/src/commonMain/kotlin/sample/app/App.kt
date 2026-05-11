@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import sample.app.feed.FeedScreen
@@ -61,7 +62,7 @@ fun App() {
 private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerState: VideoPlayerState) {
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(modifier = Modifier.zIndex(2f)) {
                 Screen.entries.forEach { screen ->
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = screen.label) },
@@ -73,7 +74,7 @@ private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerS
             }
         },
     ) { padding ->
-        ScreenContent(current, Modifier.fillMaxSize().padding(padding), playerState)
+        ScreenContent(current, Modifier.fillMaxSize().padding(padding).zIndex(0f), playerState)
     }
 }
 
@@ -81,7 +82,7 @@ private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerS
 @Composable
 private fun RailLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerState: VideoPlayerState) {
     Row(modifier = Modifier.fillMaxSize()) {
-        NavigationRail {
+        NavigationRail(modifier = Modifier.zIndex(2f)) {
             Spacer(Modifier.weight(1f))
             Screen.entries.forEach { screen ->
                 NavigationRailItem(
@@ -93,7 +94,7 @@ private fun RailLayout(current: Screen, onScreenChange: (Screen) -> Unit, player
             }
             Spacer(Modifier.weight(1f))
         }
-        ScreenContent(current, Modifier.weight(1f).fillMaxHeight(), playerState)
+        ScreenContent(current, Modifier.weight(1f).fillMaxHeight().zIndex(0f), playerState)
     }
 }
 

@@ -11,6 +11,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -222,6 +223,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
     override var subtitlesEnabled = false
     override var currentSubtitleTrack: SubtitleTrack? = null
     override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    override var currentAudioTrack: AudioTrack? = null
+    override val availableAudioTracks = mutableListOf<AudioTrack>()
     override var subtitleTextStyle: TextStyle =
         TextStyle(
             color = Color.White,
@@ -1378,6 +1381,14 @@ class WindowsVideoPlayerState : VideoPlayerState {
             withContext(Dispatchers.Main) {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
+            }
+        }
+    }
+
+    override fun selectAudioTrack(track: AudioTrack?) {
+        scope.launch {
+            withContext(Dispatchers.Main) {
+                currentAudioTrack = track
             }
         }
     }

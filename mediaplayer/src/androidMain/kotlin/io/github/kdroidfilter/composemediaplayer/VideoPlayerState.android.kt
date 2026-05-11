@@ -15,6 +15,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -110,7 +111,7 @@ open class DefaultVideoPlayerState(
 
     // Protection against race conditions
     private var isPlayerReleased = false
-    private val playerInitializationLock = Object()
+    private val playerInitializationLock = Any()
     private var playerListener: Player.Listener? = null
 
     // Screen lock detection
@@ -136,7 +137,7 @@ open class DefaultVideoPlayerState(
     // Subtitle state
     override var subtitlesEnabled by mutableStateOf(false)
     override var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
-    override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    override val availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
     override var subtitleTextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
@@ -148,7 +149,38 @@ open class DefaultVideoPlayerState(
 
     override var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
 
+    // Audio track state
+    override var currentAudioTrack by mutableStateOf<AudioTrack?>(null)
+    override val availableAudioTracks = mutableStateListOf<AudioTrack>()
+
     private var playerView: PlayerView? = null
+
+    override fun selectAudioTrack(track: AudioTrack?) {
+        currentAudioTrack = track
+
+        exoPlayer?.let { player ->
+            if (track == null) {
+                player.trackSelectionParameters =
+                    player.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                        .build()
+                return@let
+            }
+
+            val trackSelectionOverride = track.toAndroidTrackSelectionOverride(player, C.TRACK_TYPE_AUDIO)
+            if (trackSelectionOverride != null) {
+                player.trackSelectionParameters =
+                    player.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                        .setOverrideForType(trackSelectionOverride)
+                        .build()
+            }
+        }
+    }
 
     // Select an external subtitle track
     override fun selectSubtitleTrack(track: SubtitleTrack?) {
@@ -161,14 +193,30 @@ open class DefaultVideoPlayerState(
         subtitlesEnabled = true
 
         exoPlayer?.let { player ->
-            val trackParameters =
-                player.trackSelectionParameters
-                    .buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    .build()
-            player.trackSelectionParameters = trackParameters
+            if (track.isEmbedded) {
+                val trackSelectionOverride = track.toAndroidTrackSelectionOverride(player, C.TRACK_TYPE_TEXT)
+                if (trackSelectionOverride != null) {
+                    player.trackSelectionParameters =
+                        player.trackSelectionParameters
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                            .setOverrideForType(trackSelectionOverride)
+                            .build()
 
-            playerView?.subtitleView?.visibility = android.view.View.GONE
+                    playerView?.subtitleView?.visibility = android.view.View.VISIBLE
+                }
+            } else {
+                val trackParameters =
+                    player.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .build()
+                player.trackSelectionParameters = trackParameters
+
+                playerView?.subtitleView?.visibility = android.view.View.GONE
+            }
         }
     }
 
@@ -182,6 +230,7 @@ open class DefaultVideoPlayerState(
                     .buildUpon()
                     .setPreferredTextLanguage(null)
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                     .build()
             player.trackSelectionParameters = parameters
 
@@ -507,6 +556,14 @@ open class DefaultVideoPlayerState(
                 }
             }
 
+            override fun onTracksChanged(tracks: Tracks) {
+                if (!isPlayerReleased) {
+                    exoPlayer?.let { player ->
+                        syncAvailableMediaTracks(player)
+                    }
+                }
+            }
+
             override fun onPlayerError(error: PlaybackException) {
                 androidVideoLogger.e { "Player error occurred: ${error.errorCode} - ${error.message}" }
 
@@ -811,6 +868,8 @@ open class DefaultVideoPlayerState(
                 _metadata.duration = player.duration
             }
 
+            syncAvailableMediaTracks(player)
+
             player.currentTracks.groups.forEach { group ->
                 for (i in 0 until group.length) {
                     val trackFormat = group.getTrackFormat(i)
@@ -851,6 +910,129 @@ open class DefaultVideoPlayerState(
         }
     }
 
+    private fun syncAvailableMediaTracks(player: Player) {
+        val audioTracks = mutableListOf<AudioTrack>()
+        val embeddedSubtitleTracks = mutableListOf<SubtitleTrack>()
+        var selectedAudioTrackId: String? = null
+        var selectedSubtitleTrackId: String? = null
+        var audioGroupIndex = 0
+        var subtitleGroupIndex = 0
+
+        player.currentTracks.groups.forEach { group ->
+            when (group.type) {
+                C.TRACK_TYPE_AUDIO -> {
+                    for (trackIndex in 0 until group.length) {
+                        val format = group.getTrackFormat(trackIndex)
+                        val id = androidTrackId(C.TRACK_TYPE_AUDIO, audioGroupIndex, trackIndex)
+                        if (group.isTrackSelected(trackIndex)) selectedAudioTrackId = id
+                        audioTracks.add(
+                            AudioTrack(
+                                id = id,
+                                label = format.label ?: format.language ?: "Audio ${audioTracks.size + 1}",
+                                language = format.language.orEmpty(),
+                                channels = format.channelCount.takeIf { it > 0 },
+                                sampleRate = format.sampleRate.takeIf { it > 0 },
+                                bitrate = format.bitrate.takeIf { it > 0 },
+                            ),
+                        )
+                    }
+                    audioGroupIndex += 1
+                }
+
+                C.TRACK_TYPE_TEXT -> {
+                    for (trackIndex in 0 until group.length) {
+                        val format = group.getTrackFormat(trackIndex)
+                        val id = androidTrackId(C.TRACK_TYPE_TEXT, subtitleGroupIndex, trackIndex)
+                        if (group.isTrackSelected(trackIndex)) selectedSubtitleTrackId = id
+                        embeddedSubtitleTracks.add(
+                            SubtitleTrack(
+                                label = format.label ?: format.language ?: "Subtitle ${embeddedSubtitleTracks.size + 1}",
+                                language = format.language.orEmpty(),
+                                src = "",
+                                format = SubtitleFormat.AUTO,
+                                id = id,
+                                isEmbedded = true,
+                                kind = format.sampleMimeType ?: "subtitles",
+                            ),
+                        )
+                    }
+                    subtitleGroupIndex += 1
+                }
+            }
+        }
+
+        availableAudioTracks.clear()
+        availableAudioTracks.addAll(audioTracks)
+        currentAudioTrack =
+            selectedAudioTrackId
+                ?.let { id -> audioTracks.firstOrNull { it.id == id } }
+                ?: currentAudioTrack?.let { current -> audioTracks.firstOrNull { it.id == current.id } }
+                ?: audioTracks.firstOrNull()
+
+        val externalSubtitleTracks = availableSubtitleTracks.filterNot { it.isEmbedded }
+        availableSubtitleTracks.clear()
+        availableSubtitleTracks.addAll(externalSubtitleTracks)
+        availableSubtitleTracks.addAll(embeddedSubtitleTracks)
+
+        if (currentSubtitleTrack?.isEmbedded == true) {
+            val refreshedTrack =
+                currentSubtitleTrack
+                    ?.let { current -> embeddedSubtitleTracks.firstOrNull { it.id == current.id } }
+                    ?: selectedSubtitleTrackId?.let { id -> embeddedSubtitleTracks.firstOrNull { it.id == id } }
+            if (refreshedTrack == null) {
+                disableSubtitles()
+            } else {
+                currentSubtitleTrack = refreshedTrack
+                subtitlesEnabled = true
+            }
+        } else if (currentSubtitleTrack == null && selectedSubtitleTrackId != null) {
+            currentSubtitleTrack = embeddedSubtitleTracks.firstOrNull { it.id == selectedSubtitleTrackId }
+            subtitlesEnabled = currentSubtitleTrack != null
+        }
+    }
+
+    private fun AudioTrack.toAndroidTrackSelectionOverride(
+        player: Player,
+        trackType: Int,
+    ): TrackSelectionOverride? = toAndroidTrackSelectionOverride(id, player, trackType)
+
+    private fun SubtitleTrack.toAndroidTrackSelectionOverride(
+        player: Player,
+        trackType: Int,
+    ): TrackSelectionOverride? = toAndroidTrackSelectionOverride(id, player, trackType)
+
+    private fun toAndroidTrackSelectionOverride(
+        id: String,
+        player: Player,
+        trackType: Int,
+    ): TrackSelectionOverride? {
+        val (targetGroupIndex, targetTrackIndex) = id.toAndroidTrackIndices(trackType) ?: return null
+        var groupIndex = 0
+        player.currentTracks.groups.forEach { group ->
+            if (group.type == trackType) {
+                if (groupIndex == targetGroupIndex && targetTrackIndex in 0 until group.length) {
+                    return TrackSelectionOverride(group.mediaTrackGroup, targetTrackIndex)
+                }
+                groupIndex += 1
+            }
+        }
+        return null
+    }
+
+    private fun androidTrackId(
+        trackType: Int,
+        groupIndex: Int,
+        trackIndex: Int,
+    ): String = "android:$trackType:$groupIndex:$trackIndex"
+
+    private fun String.toAndroidTrackIndices(trackType: Int): Pair<Int, Int>? {
+        val parts = split(':')
+        if (parts.size != 4 || parts[0] != "android" || parts[1].toIntOrNull() != trackType) return null
+        val groupIndex = parts[2].toIntOrNull() ?: return null
+        val trackIndex = parts[3].toIntOrNull() ?: return null
+        return groupIndex to trackIndex
+    }
+
     private fun extractMediaItemMetadata(mediaItem: MediaItem?) {
         try {
             mediaItem?.mediaMetadata?.let { metadata ->
@@ -872,6 +1054,13 @@ open class DefaultVideoPlayerState(
         _playbackSpeed = 1.0f
         _metadata = VideoMetadata()
         exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
+        currentAudioTrack = null
+        availableAudioTracks.clear()
+        if (currentSubtitleTrack?.isEmbedded == true) {
+            currentSubtitleTrack = null
+            subtitlesEnabled = false
+        }
+        availableSubtitleTracks.removeAll { it.isEmbedded }
         if (!keepMedia) {
             _hasMedia = false
         }

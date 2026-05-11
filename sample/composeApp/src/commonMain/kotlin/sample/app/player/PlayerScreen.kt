@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,7 +43,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
@@ -89,11 +88,9 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
 
     var videoUrl by remember { mutableStateOf(SAMPLE_VIDEOS.first().second) }
     var initialPlayerState by remember { mutableStateOf(InitialPlayerState.PLAY) }
-    val subtitleTracks = remember { mutableStateListOf<SubtitleTrack>() }
-    var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
     var selectedContentScale by remember { mutableStateOf(ContentScale.Fit) }
 
-    var controlsVisible by remember { mutableStateOf(true) }
+    val controlsVisible = true
     var showSourceSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showSubtitleSheet by remember { mutableStateOf(false) }
@@ -103,19 +100,48 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
     // visible fails silently because iOS cannot stack two modals.
     var pendingPickVideo by remember { mutableStateOf(false) }
     var pendingPickSubtitle by remember { mutableStateOf(false) }
+    var demoLoaded by remember { mutableStateOf(false) }
 
     val videoFileLauncher = rememberFilePickerLauncher(type = FileKitType.Video) { file ->
         file?.let { playerState.openFile(it, initialPlayerState) }
     }
     val subtitleFileLauncher = rememberFilePickerLauncher(
-        type = FileKitType.File("vtt", "srt"),
+        type = FileKitType.File("vtt", "srt", "ass", "ssa"),
     ) { file ->
         file?.let {
-            val track = SubtitleTrack(label = it.name, language = "en", src = it.getUri())
-            subtitleTracks.add(track)
-            selectedSubtitleTrack = track
+            val track =
+                SubtitleTrack(
+                    label = it.name,
+                    language = "en",
+                    src = it.getUri(),
+                    format = SubtitleFormat.fromSource(src = it.getUri(), label = it.name),
+            )
+            playerState.availableSubtitleTracks.addIfMissing(track)
             playerState.selectSubtitleTrack(track)
         }
+    }
+
+    LaunchedEffect(playerState) {
+        if (!demoLoaded && !playerState.hasMedia) {
+            val track =
+                SubtitleTrack(
+                    label = "ASS demo",
+                    language = "en",
+                    src = DEFAULT_DEMO_ASS_SUBTITLE_URL,
+                    format = SubtitleFormat.ASS,
+                )
+            playerState.availableSubtitleTracks.addIfMissing(track)
+            playerState.selectSubtitleTrack(track)
+            playerState.openUri(videoUrl, initialPlayerState)
+            demoLoaded = true
+        }
+    }
+
+    fun disableDemoSubtitleForNewSource() {
+        if (playerState.currentSubtitleTrack?.src == DEFAULT_DEMO_ASS_SUBTITLE_URL) {
+            playerState.disableSubtitles()
+        }
+        playerState.availableSubtitleTracks.removeAll { it.src == DEFAULT_DEMO_ASS_SUBTITLE_URL }
     }
 
     // Launch pickers only after the sheet is gone
@@ -136,14 +162,6 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
     // Example: detect when playback reaches the end
     playerState.onPlaybackEnded = {
         println("Playback ended")
-    }
-
-    // Auto-hide controls when playing
-    LaunchedEffect(controlsVisible, playerState.isPlaying) {
-        if (controlsVisible && playerState.isPlaying) {
-            delay(4000)
-            controlsVisible = false
-        }
     }
 
     Box(modifier = modifier.background(Color.Black)) {
@@ -188,16 +206,9 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
             )
         }
 
-        // Tap handler + animated controls overlay
+        // Animated controls overlay
         if (!playerState.isFullscreen) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                    ) { controlsVisible = !controlsVisible },
-            ) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 AnimatedVisibility(
                     visible = controlsVisible,
                     enter = fadeIn(tween(250)),
@@ -246,15 +257,20 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
             videoUrl = videoUrl,
             onUrlChange = { videoUrl = it },
             onLoadUrl = {
-                if (videoUrl.isNotEmpty()) playerState.openUri(videoUrl, initialPlayerState)
+                if (videoUrl.isNotEmpty()) {
+                    disableDemoSubtitleForNewSource()
+                    playerState.openUri(videoUrl, initialPlayerState)
+                }
                 showSourceSheet = false
             },
             onPickFile = {
+                disableDemoSubtitleForNewSource()
                 pendingPickVideo = true
                 showSourceSheet = false
             },
             onSelectPreset = { url ->
                 videoUrl = url
+                disableDemoSubtitleForNewSource()
                 playerState.openUri(url, initialPlayerState)
                 showSourceSheet = false
             },
@@ -273,14 +289,17 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
     }
     if (showSubtitleSheet) {
         SubtitleSheet(
-            subtitleTracks = subtitleTracks,
-            selectedTrack = selectedSubtitleTrack,
-            onTrackSelected = { track ->
-                selectedSubtitleTrack = track
+            audioTracks = playerState.availableAudioTracks,
+            selectedAudioTrack = playerState.currentAudioTrack,
+            onAudioTrackSelected = { track ->
+                playerState.selectAudioTrack(track)
+            },
+            subtitleTracks = playerState.availableSubtitleTracks,
+            selectedSubtitleTrack = playerState.currentSubtitleTrack,
+            onSubtitleTrackSelected = { track ->
                 playerState.selectSubtitleTrack(track)
             },
             onDisableSubtitles = {
-                selectedSubtitleTrack = null
                 playerState.disableSubtitles()
             },
             onPickFile = {
@@ -288,8 +307,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
                 showSubtitleSheet = false
             },
             onAddTrack = { track ->
-                subtitleTracks.add(track)
-                selectedSubtitleTrack = track
+                playerState.availableSubtitleTracks.addIfMissing(track)
                 playerState.selectSubtitleTrack(track)
             },
             onDismiss = { showSubtitleSheet = false },
@@ -499,8 +517,15 @@ private fun FullscreenOverlay(playerState: VideoPlayerState) {
 internal val SAMPLE_VIDEOS = listOf(
     "Big Buck Bunny" to "https://media.w3.org/2010/05/bunny/trailer.mp4",
     "Sintel" to "https://media.w3.org/2010/05/sintel/trailer.mp4",
-    "W3C Test Video" to "https://media.w3.org/2010/05/video/movie_300.mp4",
     "Big Buck Bunny (clip)" to "https://www.w3schools.com/html/mov_bbb.mp4",
     "Sample Video" to "https://archive.org/download/big-bunny-sample-video/SampleVideo.mp4",
     "Big Buck Bunny (full)" to "https://media.w3.org/2010/05/bunny/movie.mp4",
 )
+
+private const val DEFAULT_DEMO_ASS_SUBTITLE_URL = "/assets/subtitles/en.ass"
+
+private fun MutableList<SubtitleTrack>.addIfMissing(track: SubtitleTrack) {
+    if (none { it.id == track.id && it.src == track.src }) {
+        add(track)
+    }
+}

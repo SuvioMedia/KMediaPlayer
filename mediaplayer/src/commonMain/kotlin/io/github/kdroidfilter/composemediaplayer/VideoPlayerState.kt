@@ -184,6 +184,12 @@ interface VideoPlayerState {
     // Metadata
     val metadata: VideoMetadata
 
+    // Audio track management
+    var currentAudioTrack: AudioTrack?
+    val availableAudioTracks: MutableList<AudioTrack>
+
+    fun selectAudioTrack(track: AudioTrack?)
+
     // Subtitle management
     var subtitlesEnabled: Boolean
     var currentSubtitleTrack: SubtitleTrack?
@@ -299,6 +305,8 @@ data class PreviewableVideoPlayerState(
     override val aspectRatio: Float = 1.7f,
     override val error: VideoPlayerError? = null,
     override val metadata: VideoMetadata = VideoMetadata(),
+    override var currentAudioTrack: AudioTrack? = null,
+    override val availableAudioTracks: MutableList<AudioTrack> = emptyList<AudioTrack>().toMutableList(),
     override var subtitlesEnabled: Boolean = false,
     override var currentSubtitleTrack: SubtitleTrack? = null,
     override val availableSubtitleTracks: MutableList<SubtitleTrack> = emptyList<SubtitleTrack>().toMutableList(),
@@ -331,6 +339,8 @@ data class PreviewableVideoPlayerState(
     ) {}
 
     override fun clearError() {}
+
+    override fun selectAudioTrack(track: AudioTrack?) {}
 
     override fun selectSubtitleTrack(track: SubtitleTrack?) {}
 

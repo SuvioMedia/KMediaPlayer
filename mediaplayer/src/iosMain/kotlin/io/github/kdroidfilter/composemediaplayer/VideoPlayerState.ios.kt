@@ -740,6 +740,23 @@ open class DefaultVideoPlayerState(
     override val metadata: VideoMetadata
         get() = _metadata
 
+    // Audio track state. Native AVFoundation track selection can be added here later;
+    // for now the common API exposes an empty list on iOS.
+    private var _currentAudioTrack by mutableStateOf<AudioTrack?>(null)
+    override var currentAudioTrack: AudioTrack?
+        get() = _currentAudioTrack
+        set(value) {
+            _currentAudioTrack = value
+        }
+
+    private val _availableAudioTracks = mutableListOf<AudioTrack>()
+    override val availableAudioTracks: MutableList<AudioTrack>
+        get() = _availableAudioTracks
+
+    override fun selectAudioTrack(track: AudioTrack?) {
+        _currentAudioTrack = track
+    }
+
     // Subtitle state
     private var _subtitlesEnabled by mutableStateOf(false)
     override var subtitlesEnabled: Boolean

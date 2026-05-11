@@ -2,14 +2,13 @@
 
 <img src="/assets/banner.jpg" style="border-radius: 10px;"/>
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.kdroidfilter/composemediaplayer.svg)](https://search.maven.org/artifact/io.github.kdroidfilter/composemediaplayer)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Maven](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fshusek.github.io%2FKMediaPlayer%2Fmaven%2Fio%2Fgithub%2Fshusek%2Fcomposemediaplayer%2Fmaven-metadata.xml&label=maven)](https://shusek.github.io/KMediaPlayer/maven/io/github/shusek/composemediaplayer/maven-metadata.xml)
 [![Kotlin](https://img.shields.io/badge/kotlin-multiplatform-blue.svg?logo=kotlin)](https://kotlinlang.org/docs/multiplatform.html)
-[![Platforms](https://img.shields.io/badge/platforms-Android%20|%20iOS%20|%20macOS%20JVM%20|%20Windows%20JVM%20|%20Linux%20JVM%20|%20Web-lightgrey.svg)](https://github.com/kdroidfilter/ComposeMediaPlayer)
-[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/kdroidfilter/ComposeMediaPlayer/issues)
-[![Documentation](https://img.shields.io/badge/docs-Dokka-blue.svg)](https://kdroidfilter.github.io/ComposeMediaPlayer/)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/kdroidfilter/ComposeMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/kdroidfilter/ComposeMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
-[![GitHub last commit](https://img.shields.io/github/last-commit/kdroidfilter/ComposeMediaPlayer)](https://github.com/kdroidfilter/ComposeMediaPlayer/commits/master)
+[![Platforms](https://img.shields.io/badge/platforms-Android%20|%20iOS%20|%20macOS%20JVM%20|%20Windows%20JVM%20|%20Linux%20JVM%20|%20Web-lightgrey.svg)](https://github.com/Shusek/KMediaPlayer)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/Shusek/KMediaPlayer/issues)
+[![Documentation](https://img.shields.io/badge/docs-Dokka-blue.svg)](https://shusek.github.io/KMediaPlayer/)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Shusek/KMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/Shusek/KMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
+[![GitHub last commit](https://img.shields.io/github/last-commit/Shusek/KMediaPlayer)](https://github.com/Shusek/KMediaPlayer/commits/master)
 
 ### Supported by
 [![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
@@ -26,6 +25,7 @@
 - [Live Demo](#-live-demo)
 - [Features](#-features)
 - [Supported Video Formats](#-supported-video-formats)
+- [Supported Codec Checks](#-supported-codec-checks)
 - [Installation](#-installation)
 - [Compatibility Table](#-compatibility-table)
 - [Getting Started](#-getting-started)
@@ -42,6 +42,8 @@
   - [Using Subtitles](#using-subtitles)
     - [Supported Formats](#-supported-formats)
     - [Adding Subtitles from URL or Local File](#-adding-subtitles-from-url-or-local-file)
+    - [Browser ASS/SSA subtitles with JASSUB/libass](#browser-assssa-subtitles-with-jassublibass)
+    - [Selecting Embedded Audio and Subtitle Tracks](#selecting-embedded-audio-and-subtitle-tracks)
     - [Customizing Subtitle Appearance](#-customizing-subtitle-appearance)
     - [Disabling Subtitles](#-disabling-subtitles)
   - [Fullscreen Mode](#️-fullscreen-mode)
@@ -51,14 +53,11 @@
 - [Metadata Support](#-metadata-support)
   - [Example Usage](#example-usage)
   - [Basic Example](#-basic-example)
-- [License](#-license)
 - [Roadmap](#-roadmap)
-- [Applications Using This Library](#-applications-using-this-library)
-- [Star History](#-star-history)
 
 ## 🚀 Live Demo
 
-Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/ComposeMediaPlayer/sample/)
+Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlayer/sample/)
 
 ## ✨ Features
 
@@ -93,6 +92,24 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 > implementation("androidx.media3:media3-exoplayer-hls:<version>")
 > ```
 
+## ✅ Supported Codec Checks
+
+The library exposes a codec enum and suspendable platform-specific queries so apps can check whether a codec is reported as supported by the current backend:
+
+```kotlin
+val codecSupport = SupportedMediaCodecs.query()
+
+val h264Supported = codecSupport.isSupported(MediaCodec.H264)
+val supportedVideoCodecs = codecSupport.videoCodecs
+val supportedAudioCodecs = codecSupport.audioCodecs
+val supportedCodecs = codecSupport.allCodecs
+
+// Or query a single codec from a coroutine:
+val aacSupported = SupportedMediaCodecs.queryIsSupported(MediaCodec.AAC)
+```
+
+> [!NOTE]
+> Codec support can still depend on the device, OS version, browser, installed system components, or GStreamer plugins. Android and web targets query the current runtime where possible. Desktop and iOS expose conservative backend capability lists. Query methods are suspend functions so callers can run them from `LaunchedEffect`, `async`, `produceState`, or their own coroutine/lazy strategy.
 
 ## 🔧 Installation
 
@@ -382,11 +399,11 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. Subtitles are now rendered using Compose, providing a uniform appearance across all platforms.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered on browser targets with JASSUB, which runs libass in WebAssembly.
 
 #### 🎯 Supported Formats
 
-The player supports both SRT and VTT subtitle formats with automatic format detection.
+The player supports SRT and VTT subtitle formats with automatic format detection. On browser targets, `.ass` and `.ssa` subtitles are supported through JASSUB/libass running in WebAssembly.
 
 #### 🎯 Adding Subtitles from URL or Local File
 
@@ -396,10 +413,94 @@ You can add subtitles by specifying a URL:
 val track = SubtitleTrack(
     label = "English Subtitles",
     language = "en",
-    src = "https://example.com/subtitles.vtt" // Works with both .srt and .vtt files
+    src = "https://example.com/subtitles.vtt" // Works with .srt, .vtt and browser .ass/.ssa files
 )
 playerState.selectSubtitleTrack(track)
 ```
+
+#### Browser ASS/SSA subtitles with JASSUB/libass
+
+ASS/SSA subtitle rendering is enabled by default on `js` and `wasmJs` browser targets. As a library user, you do not need to add `jassub`, libass, worker scripts, or WASM files manually. The library declares the `jassub` npm dependency and the browser bundle includes the default JASSUB worker, WASM and fallback font assets.
+
+For a basic browser app, just select an `.ass` or `.ssa` subtitle track:
+
+```kotlin
+val playerState = rememberVideoPlayerState()
+
+LaunchedEffect(Unit) {
+    playerState.openUri("https://example.com/video.mp4")
+    playerState.selectSubtitleTrack(
+        SubtitleTrack(
+            label = "English ASS",
+            language = "en",
+            src = "https://example.com/subtitles.ass",
+        )
+    )
+}
+```
+
+If you use `VideoPlayerControls`, the selected track is rendered automatically by `VideoPlayerSurface`. If you build custom controls, keep using the same `playerState.selectSubtitleTrack(...)` and `playerState.disableSubtitles()` APIs.
+
+You can configure the renderer once in your browser entry point before rendering your Compose app:
+
+```kotlin
+import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
+
+fun main() {
+    AssSubtitleRendererConfig.debug = false
+    AssSubtitleRendererConfig.queryFonts = false
+
+    // Start your Compose app here.
+}
+```
+
+Configuration options:
+
+| Option | Default | Description |
+| :--- | :--- | :--- |
+| `enabled` | `true` | Enables or disables browser ASS/SSA rendering. When disabled, ASS/SSA tracks are ignored by the JASSUB renderer. |
+| `workerUrl` | `""` | Optional URL for a self-hosted JASSUB worker. Leave empty to use the bundled npm asset. |
+| `wasmUrl` | `""` | Optional URL for `jassub-worker.wasm`. Leave empty to use the bundled npm asset. |
+| `modernWasmUrl` | `""` | Optional URL for `jassub-worker-modern.wasm`. Leave empty to use the bundled npm asset. |
+| `fallbackFontUrl` | `""` | Optional URL for the fallback font used by libass. Leave empty to use JASSUB defaults. |
+| `fallbackFontFamily` | `"liberation sans"` | Font family name mapped to `fallbackFontUrl`. |
+| `queryFonts` | `false` | Lets JASSUB query browser fonts when supported. This may prompt or vary by browser. |
+| `debug` | `false` | Enables JASSUB debug logging. |
+
+For production deployments you can optionally self-host the worker, WASM and fallback font assets. This is useful when your hosting/CDN needs explicit cache headers, predictable URLs, or a strict Content Security Policy:
+
+```kotlin
+AssSubtitleRendererConfig.workerUrl = "/jassub/worker/worker.js"
+AssSubtitleRendererConfig.wasmUrl = "/jassub/wasm/jassub-worker.wasm"
+AssSubtitleRendererConfig.modernWasmUrl = "/jassub/wasm/jassub-worker-modern.wasm"
+AssSubtitleRendererConfig.fallbackFontUrl = "/jassub/default.woff2"
+```
+
+The URLs may be relative to your app base URL or absolute. Prefer same-origin URLs. If you host the video, subtitle, worker, WASM or font files on another domain, configure CORS headers so the browser can load them from your app origin.
+
+Browser notes:
+- ASS/SSA rendering requires browser support for `OffscreenCanvas` and `canvas.transferControlToOffscreen()`.
+- Web fullscreen should keep the same video element alive; entering fullscreen should not restart playback.
+- SRT and VTT do not use JASSUB. They continue to use the Compose subtitle renderer.
+- Native Android, iOS and desktop targets do not use this JASSUB configuration.
+
+#### Selecting Embedded Audio and Subtitle Tracks
+
+When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, and Android reads Media3 track groups.
+
+```kotlin
+val audioTrack = playerState.availableAudioTracks.firstOrNull()
+if (audioTrack != null) {
+    playerState.selectAudioTrack(audioTrack)
+}
+
+val subtitleTrack = playerState.availableSubtitleTracks.firstOrNull { it.isEmbedded }
+if (subtitleTrack != null) {
+    playerState.selectSubtitleTrack(subtitleTrack)
+}
+```
+
+`availableSubtitleTracks` can contain both external tracks added by your app and embedded tracks discovered from the current media.
 
 #### 🎨 Customizing Subtitle Appearance
 
@@ -695,22 +796,7 @@ fun App() {
 }
 ```
 
-## 📄 License
-
-Compose Media Player is licensed under the MIT License. See [LICENSE](LICENSE) for details.
-
 ## 📊 Roadmap
 
 - **Audio Player**: Introduce a standalone audio player for handling audio-only content.
 - **Player with Separate Audio and Video Streams**: Add functionality to support different audio and video streams for advanced playback scenarios.
-
-## 🚀 Applications Using This Library
-
-- [Pushscroll](https://pushscroll.com) - Pushscroll: Screen-Time Gym
-- [Pixelix](https://github.com/ghostbyte-dev/pixelix) - Pixelfed client for Android and iOS
-
-If you're using this library in your project, please let us know and we'll add it to this list!
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=kdroidfilter/ComposeMediaPlayer&type=Date)](https://www.star-history.com/#kdroidfilter/ComposeMediaPlayer&Date)

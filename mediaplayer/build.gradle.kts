@@ -2,11 +2,12 @@
 
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 
 plugins {
     alias(libs.plugins.multiplatform)
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.android.multiplatform.library)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose)
     alias(libs.plugins.vannitktech.maven.publish)
@@ -14,21 +15,51 @@ plugins {
     alias(libs.plugins.kotlinCocoapods)
 }
 
-group = "io.github.kdroidfilter.composemediaplayer"
-
 val ref = System.getenv("GITHUB_REF") ?: ""
-val projectVersion =
+val isJitPack = System.getenv("JITPACK") == "true"
+val tagVersion =
     if (ref.startsWith("refs/tags/")) {
         val tag = ref.removePrefix("refs/tags/")
         if (tag.startsWith("v")) tag.substring(1) else tag
     } else {
-        "dev"
+        null
     }
+val projectVersion =
+    providers.gradleProperty("publicationVersion").orNull
+        ?: System.getenv("VERSION")
+        ?: tagVersion
+        ?: "dev"
+val projectGroup =
+    providers.gradleProperty("publicationGroup").orNull
+        ?: if (isJitPack) {
+            listOfNotNull(System.getenv("GROUP"), System.getenv("ARTIFACT")).joinToString(".")
+        } else {
+            "io.github.kdroidfilter"
+        }
+val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+
+group = projectGroup
 
 kotlin {
     jvmToolchain(17)
-    @Suppress("DEPRECATION")
-    androidTarget { publishLibraryVariants("release") }
+    android {
+        namespace = "io.github.kdroidfilter.composemediaplayer"
+        compileSdk = 37
+        minSdk =
+            libs.versions.android.minSdk
+                .get()
+                .toInt()
+
+        androidResources.enable = true
+
+        withHostTest {
+            isIncludeAndroidResources = true
+        }
+
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
     jvm()
     js {
         browser()
@@ -54,7 +85,7 @@ kotlin {
     cocoapods {
         version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
         summary = "A multiplatform video player library for Compose applications"
-        homepage = "https://github.com/kdroidFilter/Compose-Media-Player"
+        homepage = "https://github.com/Shusek/KMediaPlayer"
         name = "ComposeMediaPlayer"
 
         framework {
@@ -95,10 +126,12 @@ kotlin {
             implementation(libs.androidx.lifecycle.runtime.ktx)
         }
 
-        androidUnitTest.dependencies {
-            implementation(kotlin("test"))
-            implementation(kotlin("test-junit"))
-            implementation(libs.kotlinx.coroutines.test)
+        named("androidHostTest") {
+            dependencies {
+                implementation(kotlin("test"))
+                implementation(kotlin("test-junit"))
+                implementation(libs.kotlinx.coroutines.test)
+            }
         }
 
         jvmMain.dependencies {
@@ -124,6 +157,7 @@ kotlin {
         webMain.dependencies {
             implementation(libs.kotlinx.browser)
             implementation(libs.compose.ui)
+            implementation(npm("jassub", "2.5.1"))
         }
 
         wasmJsTest.dependencies {
@@ -139,18 +173,6 @@ kotlin {
                 freeCompilerArgs.add("-Xexport-kdoc")
             }
         }
-    }
-}
-
-android {
-    namespace = "io.github.kdroidfilter.composemediaplayer"
-    compileSdk = 36
-
-    defaultConfig {
-        minSdk =
-            libs.versions.android.minSdk
-                .get()
-                .toInt()
     }
 }
 
@@ -214,15 +236,20 @@ tasks.named("jvmProcessResources") {
     dependsOn(buildNativeMacOs, buildNativeWindows, buildNativeLinux)
 }
 
-tasks.configureEach {
-    if (name == "sourcesJar") {
-        dependsOn(buildNativeMacOs, buildNativeWindows, buildNativeLinux)
+publishing {
+    repositories {
+        githubPagesMavenRepository?.let { repositoryPath ->
+            maven {
+                name = "githubPages"
+                url = uri(repositoryPath)
+            }
+        }
     }
 }
 
 mavenPublishing {
     coordinates(
-        groupId = "io.github.kdroidfilter",
+        groupId = projectGroup,
         artifactId = "composemediaplayer",
         version = projectVersion,
     )
@@ -231,35 +258,26 @@ mavenPublishing {
         name.set("Compose Media Player")
         description.set("A multiplatform video player library for Compose applications.")
         inceptionYear.set("2025")
-        url.set("https://github.com/kdroidFilter/Compose-Media-Player")
-
-        licenses {
-            license {
-                name.set("MIT License")
-                url.set("https://opensource.org/licenses/MIT")
-            }
-        }
+        url.set("https://github.com/Shusek/KMediaPlayer")
 
         developers {
             developer {
-                id.set("kdroidfilter")
-                name.set("Elyahou Hadass")
-                email.set("elyahou.hadass@gmail.com")
+                id.set("Shusek")
+                name.set("Shusek")
             }
         }
 
         scm {
-            connection.set("scm:git:git://github.com/kdroidFilter/Compose-Media-Player.git")
-            developerConnection.set("scm:git:ssh://git@github.com:kdroidFilter/Compose-Media-Player.git")
-            url.set("https://github.com/kdroidFilter/Compose-Media-Player")
+            connection.set("scm:git:https://github.com/Shusek/KMediaPlayer.git")
+            developerConnection.set("scm:git:ssh://git@github.com/Shusek/KMediaPlayer.git")
+            url.set("https://github.com/Shusek/KMediaPlayer")
         }
     }
 
     publishToMavenCentral()
 
     // Only sign publications in CI environments to avoid requiring local GPG signing setup.
-    if (System.getenv("CI") != null) {
+    if (System.getenv("CI") != null && githubPagesMavenRepository == null) {
         signAllPublications()
     }
-
 }

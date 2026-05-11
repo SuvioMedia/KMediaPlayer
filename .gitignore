@@ -30,3 +30,4 @@ Pods/
 /sample/composeApp/debug/
 NUL
 .claude/
+.cache/

@@ -8,6 +8,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -85,6 +86,8 @@ class MacVideoPlayerState : VideoPlayerState {
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
     override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableListOf()
+    override var currentAudioTrack: AudioTrack? by mutableStateOf(null)
+    override val availableAudioTracks: MutableList<AudioTrack> = mutableListOf()
     override var subtitleTextStyle: TextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
@@ -1010,6 +1013,14 @@ class MacVideoPlayerState : VideoPlayerState {
     }
 
     // Subtitle methods (stub implementations)
+    override fun selectAudioTrack(track: AudioTrack?) {
+        ioScope.launch {
+            withContext(Dispatchers.Main) {
+                currentAudioTrack = track
+            }
+        }
+    }
+
     override fun selectSubtitleTrack(track: SubtitleTrack?) {
         ioScope.launch {
             withContext(Dispatchers.Main) {

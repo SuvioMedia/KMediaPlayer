@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalWasmJsInterop::class)
+
 package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.foundation.background
@@ -15,15 +17,16 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
-import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
+import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.math.abs
 
 internal val webVideoLogger = TaggedLogger("WebVideoPlayerSurface")
@@ -41,12 +44,27 @@ internal val EXTENSION_TO_MIME_TYPE =
 
 // Helper functions for common operations
 internal fun HTMLVideoElement.safePlay() {
+    if (src.isEmpty() && currentSrc.isEmpty()) return
+
     try {
-        play()
+        playHtmlVideo(this)
     } catch (e: Exception) {
         webVideoLogger.e { "Error playing video: ${e.message}" }
     }
 }
+
+@Suppress("UNUSED_PARAMETER")
+private fun playHtmlVideo(video: HTMLVideoElement): Unit =
+    js(
+        """
+        {
+            const result = video.play();
+            if (result && typeof result.catch === "function") {
+                result.catch(function() {});
+            }
+        }
+        """,
+    )
 
 internal fun HTMLVideoElement.safePause() {
     try {
@@ -85,7 +103,12 @@ internal fun HTMLVideoElement.addEventListeners(
     loadingEvents.forEach { (event, isLoading) ->
         if (playerState is DefaultVideoPlayerState) {
             addEventListener(event) {
-                scope.launch { playerState._isLoading = isLoading }
+                scope.launch {
+                    playerState._isLoading = isLoading
+                    if (!isLoading) {
+                        playerState.clearError()
+                    }
+                }
             }
         }
     }
@@ -201,7 +224,12 @@ private fun DrawScope.drawVideoRatioRect(
 
 @Composable
 internal fun SubtitleOverlay(playerState: VideoPlayerState) {
-    if (!playerState.subtitlesEnabled || playerState.currentSubtitleTrack == null) {
+    val subtitleTrack = playerState.currentSubtitleTrack
+    if (!playerState.subtitlesEnabled ||
+        subtitleTrack == null ||
+        subtitleTrack.isEmbedded ||
+        subtitleTrack.resolvedFormat().isAssFamily
+    ) {
         return
     }
 
@@ -219,7 +247,7 @@ internal fun SubtitleOverlay(playerState: VideoPlayerState) {
         currentTimeMs = currentTimeMs,
         durationMs = durationMs,
         isPlaying = playerState.isPlaying,
-        subtitleTrack = playerState.currentSubtitleTrack,
+        subtitleTrack = subtitleTrack,
         subtitlesEnabled = true,
         textStyle = playerState.subtitleTextStyle,
         backgroundColor = playerState.subtitleBackgroundColor,
@@ -257,21 +285,14 @@ internal fun VideoContentLayout(
     overlay: @Composable () -> Unit,
     videoElementContent: @Composable () -> Unit,
 ) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (playerState.isFullscreen) {
-            FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {
-                Box(
-                    modifier = Modifier.fillMaxSize().background(Color.Black),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    VideoBox(playerState, videoRatio, contentScale, true, overlay)
-                }
-            }
-        } else {
-            Box(modifier = modifier) {
-                VideoBox(playerState, videoRatio, contentScale, false, overlay)
-            }
-        }
+    Box(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .background(if (playerState.isFullscreen) Color.Black else Color.Transparent),
+        contentAlignment = Alignment.Center,
+    ) {
+        VideoBox(playerState, videoRatio, contentScale, playerState.isFullscreen, overlay)
         videoElementContent()
     }
 }
@@ -279,13 +300,14 @@ internal fun VideoContentLayout(
 internal fun HTMLVideoElement.applyInteropBehindCanvas() {
     val wrapper = parentElement as? HTMLElement ?: return
     wrapper.style.apply {
-        zIndex = "-1"
+        setProperty("z-index", "-2", "important")
         setProperty("pointer-events", "none")
         backgroundColor = "transparent"
         display = "flex"
         alignItems = "center"
         justifyContent = "center"
     }
+    (wrapper.parentElement as? HTMLElement)?.style?.setProperty("pointer-events", "none")
 }
 
 internal fun HTMLVideoElement.applyContentScale(
@@ -354,7 +376,7 @@ internal fun createVideoElement(useCors: Boolean = true): HTMLVideoElement =
 
         setAttribute("playsinline", "")
         setAttribute("webkit-playsinline", "")
-        setAttribute("preload", "auto")
+        setAttribute("preload", "metadata")
         setAttribute("x-webkit-airplay", "allow")
     }
 
@@ -366,10 +388,23 @@ internal fun setupVideoElement(
     onCorsError: () -> Unit = {},
 ) {
     var corsErrorDetected = false
+    var mediaLoaded = false
 
     playerState.clearError()
     playerState.metadata.audioChannels = null
     playerState.metadata.audioSampleRate = null
+
+    val syncMediaTracks = {
+        if (playerState is DefaultVideoPlayerState) {
+            scope.launch {
+                playerState.syncWebMediaTracks(video)
+                video.applySelectedAudioTrack(playerState.currentAudioTrack)
+                video.applySelectedSubtitleTrack(
+                    if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null,
+                )
+            }
+        }
+    }
 
     if (playerState is DefaultVideoPlayerState) {
         video.addEventListeners(
@@ -414,10 +449,13 @@ internal fun setupVideoElement(
         video.addEventListener(event) {
             scope.launch {
                 if (playerState is DefaultVideoPlayerState && condition()) {
+                    mediaLoaded = true
                     playerState._isLoading = false
+                    playerState.clearError()
                 }
 
                 if (event == "loadedmetadata") {
+                    syncMediaTracks()
                     if (playerState.isPlaying) {
                         video.safePlay()
                     }
@@ -425,6 +463,23 @@ internal fun setupVideoElement(
             }
         }
     }
+
+    listOf("loadeddata", "canplay", "canplaythrough").forEach { event ->
+        video.addEventListener(event) {
+            mediaLoaded = true
+            if (playerState is DefaultVideoPlayerState) {
+                playerState.clearError()
+            }
+            syncMediaTracks()
+        }
+    }
+    video.addEventListener("playing") {
+        mediaLoaded = true
+        if (playerState is DefaultVideoPlayerState) {
+            playerState.clearError()
+        }
+    }
+    addWebMediaTrackListeners(video, syncMediaTracks)
 
     video.addEventListener("error") {
         scope.launch {
@@ -438,15 +493,25 @@ internal fun setupVideoElement(
                 if (useCors) {
                     playerState.clearError()
                     onCorsError()
+                } else if (
+                    error.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED &&
+                    (mediaLoaded || video.readyState > 0 || video.duration > 0.0)
+                ) {
+                    playerState.clearError()
                 } else {
-                    val errorMsg =
-                        if (error.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-                            "Failed to load because the video format is not supported"
-                        } else {
-                            "Failed to load because no supported source was found"
-                        }
                     if (playerState is DefaultVideoPlayerState) {
-                        playerState.setError(VideoPlayerError.SourceError(errorMsg))
+                        delay(500)
+                        if (mediaLoaded || video.readyState > 0 || video.duration > 0.0) {
+                            playerState.clearError()
+                        } else {
+                            val errorMsg =
+                                if (error.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+                                    "Failed to load because the video format is not supported"
+                                } else {
+                                    "Failed to load because no supported source was found"
+                                }
+                            playerState.setError(VideoPlayerError.SourceError(errorMsg))
+                        }
                     }
                 }
             }
@@ -570,8 +635,29 @@ internal fun VideoPlayerEffects(
                 val sourceUri = playerState.sourceUri ?: ""
                 if (sourceUri.isNotEmpty()) {
                     playerState.clearError()
+                    if (sourceUri.isHlsSource()) {
+                        video.destroyMkvSidecarTracks()
+                        val configured =
+                            video.configureHlsSource(
+                                playerState = playerState,
+                                sourceUri = sourceUri,
+                                scope = scope,
+                            )
+                        if (configured) {
+                            if (playerState.isPlaying) video.safePlay() else video.safePause()
+                            return@let
+                        }
+                    }
+
+                    video.destroyHlsController()
+                    video.destroyMkvSidecarTracks()
                     video.src = sourceUri
                     video.load()
+                    video.configureMkvSidecarTracks(
+                        playerState = playerState,
+                        sourceUri = sourceUri,
+                        scope = scope,
+                    )
                     if (playerState.isPlaying) video.safePlay() else video.safePause()
                 }
             }
@@ -597,13 +683,35 @@ internal fun VideoPlayerEffects(
     // Restore state after video element recreation
     LaunchedEffect(videoElement, useCors) {
         videoElement?.let { video ->
-            if (lastPosition > 0) {
-                video.safeSetCurrentTime(lastPosition)
+            val restorePosition = lastPosition
+            val restoreWasPlaying = wasPlaying
+
+            fun restorePlaybackState() {
+                if (restorePosition > 0) {
+                    video.safeSetCurrentTime(restorePosition)
+                }
+                if (restoreWasPlaying) {
+                    playerState.play()
+                    video.safePlay()
+                }
+            }
+
+            if (restorePosition > 0 && video.readyState < 1) {
+                lateinit var metadataListener: (Event) -> Unit
+                metadataListener = {
+                    video.removeEventListener("loadedmetadata", metadataListener)
+                    restorePlaybackState()
+                }
+                video.addEventListener("loadedmetadata", metadataListener)
+            } else {
+                restorePlaybackState()
+            }
+
+            if (restorePosition > 0) {
                 onLastPositionChange(0.0)
             }
 
-            if (wasPlaying) {
-                video.safePlay()
+            if (restoreWasPlaying) {
                 onWasPlayingChange(false)
             }
         }
@@ -698,6 +806,66 @@ internal fun VideoVolumeAndSpeedEffects(
             video.removeEventListener("canplay", videoLoadedListener)
             playerState.applyVolumeCallback = null
             playerState.applyPlaybackSpeedCallback = null
+        }
+    }
+}
+
+@Composable
+internal fun VideoMediaTrackEffects(
+    playerState: VideoPlayerState,
+    videoElement: HTMLVideoElement?,
+    scope: CoroutineScope,
+) {
+    if (playerState !is DefaultVideoPlayerState) return
+
+    LaunchedEffect(
+        videoElement,
+        playerState.subtitlesEnabled,
+        playerState.currentSubtitleTrack?.id,
+    ) {
+        val video = videoElement ?: return@LaunchedEffect
+        val track = if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null
+        if (track?.id?.startsWith(MKV_SUBTITLE_TRACK_ID_PREFIX) == true) {
+            video.extractMkvSubtitleTrack(track, playerState, scope)
+        } else {
+            video.cancelMkvSubtitleExtraction()
+        }
+    }
+
+    DisposableEffect(videoElement) {
+        val video = videoElement ?: return@DisposableEffect onDispose {}
+        val refreshMkvSubtitleAfterSeek: (Event) -> Unit = {
+            val track = if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null
+            if (track?.id?.startsWith(MKV_SUBTITLE_TRACK_ID_PREFIX) == true) {
+                scope.launch {
+                    video.extractMkvSubtitleTrack(track, playerState, scope)
+                }
+            }
+        }
+
+        playerState.applyAudioTrackCallback = { track ->
+            video.applySelectedAudioTrack(track)
+            playerState.syncWebMediaTracks(video)
+        }
+        playerState.applySubtitleTrackCallback = { track ->
+            video.applySelectedSubtitleTrack(track)
+            scope.launch {
+                video.extractMkvSubtitleTrack(track, playerState, scope)
+            }
+            playerState.syncWebMediaTracks(video)
+        }
+
+        playerState.syncWebMediaTracks(video)
+        video.applySelectedAudioTrack(playerState.currentAudioTrack)
+        video.applySelectedSubtitleTrack(
+            if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null,
+        )
+        video.addEventListener("seeked", refreshMkvSubtitleAfterSeek)
+
+        onDispose {
+            video.removeEventListener("seeked", refreshMkvSubtitleAfterSeek)
+            playerState.applyAudioTrackCallback = null
+            playerState.applySubtitleTrackCallback = null
         }
     }
 }

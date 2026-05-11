@@ -1,7 +1,7 @@
 Pod::Spec.new do |spec|
     spec.name                     = 'ComposeMediaPlayer'
     spec.version                  = '0.0.1-dev'
-    spec.homepage                 = 'https://github.com/kdroidFilter/Compose-Media-Player'
+    spec.homepage                 = 'https://github.com/Shusek/KMediaPlayer'
     spec.source                   = { :http=> ''}
     spec.authors                  = ''
     spec.license                  = ''
@@ -41,5 +41,5 @@ Pod::Spec.new do |spec|
             SCRIPT
         }
     ]
-    spec.resources = ['build\compose\cocoapods\compose-resources']
+    spec.resources = ['build/compose/cocoapods/compose-resources']
 end

@@ -7,7 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.viewinterop.WebElementView
+import androidx.compose.ui.viewinterop.HtmlElementView
 import org.w3c.dom.HTMLVideoElement
 
 @Composable
@@ -20,7 +20,7 @@ actual fun VideoPlayerSurface(
     if (playerState.hasMedia) {
         var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
         var videoRatio by remember { mutableStateOf<Float?>(null) }
-        var useCors by remember { mutableStateOf(true) }
+        var useCors by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
         // State for CORS mode changes
@@ -44,7 +44,13 @@ actual fun VideoPlayerSurface(
             videoElement = videoElement,
         )
 
-        // Video content layout with WebElementView
+        VideoMediaTrackEffects(
+            playerState = playerState,
+            videoElement = videoElement,
+            scope = scope,
+        )
+
+        // Video content layout with HtmlElementView
         VideoContentLayout(
             playerState = playerState,
             modifier = modifier,
@@ -53,7 +59,7 @@ actual fun VideoPlayerSurface(
             overlay = overlay,
         ) {
             key(useCors) {
-                WebElementView(
+                HtmlElementView(
                     factory = {
                         createVideoElement(useCors).apply {
                             setupMetadataListener(playerState) { ratio ->
@@ -68,16 +74,27 @@ actual fun VideoPlayerSurface(
                             )
                         }
                     },
-                    modifier = if (playerState.isFullscreen) Modifier.fillMaxSize() else modifier,
+                    modifier = Modifier.fillMaxSize(),
                     update = { video ->
                         videoElement = video
                         video.applyInteropBehindCanvas()
                         video.applyContentScale(contentScale, videoRatio)
                     },
                     onRelease = { video ->
+                        if (!video.currentTime.isNaN() && video.currentTime > 0.0) {
+                            lastPosition = video.currentTime
+                        }
+                        wasPlaying = playerState.isPlaying || !video.paused
                         video.safePause()
+                        video.destroyHlsController()
+                        video.destroyMkvSidecarTracks()
                         videoElement = null
                     },
+                )
+                AssSubtitleCanvas(
+                    playerState = playerState,
+                    videoElement = videoElement,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
