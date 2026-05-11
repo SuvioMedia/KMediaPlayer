@@ -803,8 +803,30 @@ internal fun VideoMediaTrackEffects(
 ) {
     if (playerState !is DefaultVideoPlayerState) return
 
+    LaunchedEffect(
+        videoElement,
+        playerState.subtitlesEnabled,
+        playerState.currentSubtitleTrack?.id,
+    ) {
+        val video = videoElement ?: return@LaunchedEffect
+        val track = if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null
+        if (track?.id?.startsWith(MKV_SUBTITLE_TRACK_ID_PREFIX) == true) {
+            video.extractMkvSubtitleTrack(track, playerState, scope)
+        } else {
+            video.cancelMkvSubtitleExtraction()
+        }
+    }
+
     DisposableEffect(videoElement) {
         val video = videoElement ?: return@DisposableEffect onDispose {}
+        val refreshMkvSubtitleAfterSeek: (Event) -> Unit = {
+            val track = if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null
+            if (track?.id?.startsWith(MKV_SUBTITLE_TRACK_ID_PREFIX) == true) {
+                scope.launch {
+                    video.extractMkvSubtitleTrack(track, playerState, scope)
+                }
+            }
+        }
 
         playerState.applyAudioTrackCallback = { track ->
             video.applySelectedAudioTrack(track)
@@ -823,8 +845,10 @@ internal fun VideoMediaTrackEffects(
         video.applySelectedSubtitleTrack(
             if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null,
         )
+        video.addEventListener("seeked", refreshMkvSubtitleAfterSeek)
 
         onDispose {
+            video.removeEventListener("seeked", refreshMkvSubtitleAfterSeek)
             playerState.applyAudioTrackCallback = null
             playerState.applySubtitleTrackCallback = null
         }

@@ -116,11 +116,36 @@ internal fun createAssSubtitleRenderer(
 
             const effectiveWorkerUrl = toWorkerUrl(workerUrl);
             const effectiveLegacyWorkerUrl = toWorkerUrl(legacyWorkerUrl);
-            const effectiveSubUrl = new URL(subUrl, document.baseURI).toString();
+            function decodeDataUrl(url) {
+                if (typeof url !== "string" || url.indexOf("data:") !== 0) return null;
+                const comma = url.indexOf(",");
+                if (comma === -1) return null;
+
+                const metadata = url.substring(5, comma).toLowerCase();
+                const payload = url.substring(comma + 1);
+                if (metadata.indexOf(";base64") !== -1) {
+                    const binary = atob(payload);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let index = 0; index < binary.length; index += 1) {
+                        bytes[index] = binary.charCodeAt(index);
+                    }
+                    return new TextDecoder("utf-8").decode(bytes);
+                }
+                return decodeURIComponent(payload);
+            }
+
+            const subtitleOptions = {};
+            const subContent = decodeDataUrl(subUrl);
+            if (subContent != null) {
+                subtitleOptions.subContent = subContent;
+            } else {
+                subtitleOptions.subUrl = new URL(subUrl, document.baseURI).toString();
+            }
+
             const instance =
-                new globalThis.SubtitlesOctopus({
+                new globalThis.SubtitlesOctopus(Object.assign({
+                    video: video,
                     canvas: canvas,
-                    subUrl: effectiveSubUrl,
                     workerUrl: effectiveWorkerUrl,
                     legacyWorkerUrl: effectiveLegacyWorkerUrl,
                     fallbackFont: fallbackFontUrl,
@@ -131,7 +156,7 @@ internal fun createAssSubtitleRenderer(
                     onError: function(err) {
                         onError(err && err.message ? err.message : String(err));
                     }
-                });
+                }, subtitleOptions));
             instance.__composeMediaPlayerWorkerUrls = [effectiveWorkerUrl, effectiveLegacyWorkerUrl]
                 .filter(function(url) { return url.indexOf("blob:") === 0; });
             if (!instance.canvasParent && canvas.parentElement) {
