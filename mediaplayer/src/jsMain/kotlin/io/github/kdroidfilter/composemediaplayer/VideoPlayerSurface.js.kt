@@ -81,6 +81,10 @@ actual fun VideoPlayerSurface(
                         video.applyContentScale(contentScale, videoRatio)
                     },
                     onRelease = { video ->
+                        if (!video.currentTime.isNaN() && video.currentTime > 0.0) {
+                            lastPosition = video.currentTime
+                        }
+                        wasPlaying = playerState.isPlaying || !video.paused
                         video.safePause()
                         video.destroyHlsController()
                         video.destroyMkvSidecarTracks()

@@ -138,6 +138,7 @@ kotlin {
         webMain.dependencies {
             implementation(libs.kotlinx.browser)
             implementation(libs.compose.ui)
+            implementation(npm("jassub", "2.5.1"))
         }
 
         wasmJsTest.dependencies {

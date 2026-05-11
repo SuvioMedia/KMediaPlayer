@@ -17,7 +17,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
-import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
@@ -286,21 +285,15 @@ internal fun VideoContentLayout(
     overlay: @Composable () -> Unit,
     videoElementContent: @Composable () -> Unit,
 ) {
-    if (playerState.isFullscreen) {
-        FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color.Black),
-                contentAlignment = Alignment.Center,
-            ) {
-                VideoBox(playerState, videoRatio, contentScale, true, overlay)
-                videoElementContent()
-            }
-        }
-    } else {
-        Box(modifier = modifier) {
-            VideoBox(playerState, videoRatio, contentScale, false, overlay)
-            videoElementContent()
-        }
+    Box(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .background(if (playerState.isFullscreen) Color.Black else Color.Transparent),
+        contentAlignment = Alignment.Center,
+    ) {
+        VideoBox(playerState, videoRatio, contentScale, playerState.isFullscreen, overlay)
+        videoElementContent()
     }
 }
 
@@ -690,13 +683,35 @@ internal fun VideoPlayerEffects(
     // Restore state after video element recreation
     LaunchedEffect(videoElement, useCors) {
         videoElement?.let { video ->
-            if (lastPosition > 0) {
-                video.safeSetCurrentTime(lastPosition)
+            val restorePosition = lastPosition
+            val restoreWasPlaying = wasPlaying
+
+            fun restorePlaybackState() {
+                if (restorePosition > 0) {
+                    video.safeSetCurrentTime(restorePosition)
+                }
+                if (restoreWasPlaying) {
+                    playerState.play()
+                    video.safePlay()
+                }
+            }
+
+            if (restorePosition > 0 && video.readyState < 1) {
+                lateinit var metadataListener: (Event) -> Unit
+                metadataListener = {
+                    video.removeEventListener("loadedmetadata", metadataListener)
+                    restorePlaybackState()
+                }
+                video.addEventListener("loadedmetadata", metadataListener)
+            } else {
+                restorePlaybackState()
+            }
+
+            if (restorePosition > 0) {
                 onLastPositionChange(0.0)
             }
 
-            if (wasPlaying) {
-                video.safePlay()
+            if (restoreWasPlaying) {
                 onWasPlayingChange(false)
             }
         }

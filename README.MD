@@ -387,7 +387,7 @@ Compose Media Player supports adding subtitles from both URLs and local files. S
 
 #### 🎯 Supported Formats
 
-The player supports SRT and VTT subtitle formats with automatic format detection. On browser targets, `.ass` and `.ssa` subtitles are supported through JavascriptSubtitlesOctopus/libass running in WebAssembly.
+The player supports SRT and VTT subtitle formats with automatic format detection. On browser targets, `.ass` and `.ssa` subtitles are supported through JASSUB/libass running in WebAssembly.
 
 #### 🎯 Adding Subtitles from URL or Local File
 
@@ -402,13 +402,13 @@ val track = SubtitleTrack(
 playerState.selectSubtitleTrack(track)
 ```
 
-For production browser deployments you can self-host the libass assets instead of using the default CDN URLs:
+JASSUB is bundled from the npm dependency by default. For production browser deployments you can optionally self-host the worker, WASM and fallback font assets:
 
 ```kotlin
-AssSubtitleRendererConfig.scriptUrl = "/libass/subtitles-octopus.js"
-AssSubtitleRendererConfig.workerUrl = "/libass/subtitles-octopus-worker.js"
-AssSubtitleRendererConfig.legacyWorkerUrl = "/libass/subtitles-octopus-worker-legacy.js"
-AssSubtitleRendererConfig.fallbackFontUrl = "/libass/default.woff2"
+AssSubtitleRendererConfig.workerUrl = "/jassub/worker/worker.js"
+AssSubtitleRendererConfig.wasmUrl = "/jassub/wasm/jassub-worker.wasm"
+AssSubtitleRendererConfig.modernWasmUrl = "/jassub/wasm/jassub-worker-modern.wasm"
+AssSubtitleRendererConfig.fallbackFontUrl = "/jassub/default.woff2"
 ```
 
 #### Selecting Embedded Audio and Subtitle Tracks

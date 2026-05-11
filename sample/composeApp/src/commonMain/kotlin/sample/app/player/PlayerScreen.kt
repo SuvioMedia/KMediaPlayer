@@ -527,7 +527,7 @@ internal val SAMPLE_VIDEOS = listOf(
 )
 
 private const val FRIEREN_MKV_DIRECT_URL =
-    "https://nexus-094.weur.tb-cdn.st/dld/bd6391cb-34d8-44c0-abdc-f31186648eb9?token=98c6d3f2-648a-4f3e-9653-0cdfc0bd4b21"
+    "https://nexus-060.weur.tb-cdn.st/dld/d8599018-3fc0-431f-af47-b313e5384935?token=98c6d3f2-648a-4f3e-9653-0cdfc0bd4b21&filename=Frieren.Beyond.Journeys.End.S02E10.A.Beautiful.Sight.1080p.CR.WEB-DL.DUAL.AAC2.0.H.264-VARYG.mkv"
 
 private const val DEFAULT_DEMO_ASS_SUBTITLE_URL = "/assets/subtitles/en.ass"
 

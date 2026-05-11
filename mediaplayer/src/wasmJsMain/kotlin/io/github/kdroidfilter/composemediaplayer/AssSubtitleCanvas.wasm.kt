@@ -73,9 +73,6 @@ internal fun AssSubtitleCanvas(
                             video = video,
                             canvas = canvas,
                             subUrl = subtitleTrack.src,
-                            workerUrl = AssSubtitleRendererConfig.workerUrl,
-                            legacyWorkerUrl = AssSubtitleRendererConfig.legacyWorkerUrl,
-                            fallbackFontUrl = AssSubtitleRendererConfig.fallbackFontUrl,
                             debug = AssSubtitleRendererConfig.debug,
                             onReady = { resizeAssSubtitleRenderer(instance) },
                             onError = { message ->

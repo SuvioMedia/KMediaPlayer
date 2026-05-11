@@ -3,18 +3,14 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import kotlinx.browser.document
-import kotlinx.coroutines.CompletableDeferred
 import org.w3c.dom.HTMLCanvasElement
 import org.w3c.dom.HTMLElement
-import org.w3c.dom.HTMLScriptElement
 import org.w3c.dom.HTMLVideoElement
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.JsAny
 import kotlin.js.js
 
-private const val ASS_RENDERER_SCRIPT_ID = "compose-media-player-libass"
-
-private var assRendererScriptLoad: CompletableDeferred<Boolean>? = null
+internal expect fun createJassubRenderer(options: JsAny): JsAny
 
 internal fun createAssSubtitleCanvasElement(): HTMLCanvasElement =
     (document.createElement("canvas") as HTMLCanvasElement).apply {
@@ -40,62 +36,54 @@ internal fun HTMLCanvasElement.applyAssSubtitleCanvasStyle() {
     }
 }
 
-internal suspend fun ensureAssRendererScriptLoaded(): Boolean {
-    if (isAssSubtitleRendererLoaded()) return true
-
-    assRendererScriptLoad?.let { return it.await() }
-
-    val deferred = CompletableDeferred<Boolean>()
-    assRendererScriptLoad = deferred
-
-    val script =
-        (document.getElementById(ASS_RENDERER_SCRIPT_ID) as? HTMLScriptElement)
-            ?: (document.createElement("script") as HTMLScriptElement).apply {
-                id = ASS_RENDERER_SCRIPT_ID
-                src = AssSubtitleRendererConfig.scriptUrl
-                setAttribute("async", "true")
-            }
-
-    if (script.getAttribute("data-loaded") == "true") {
-        deferred.complete(true)
-    } else {
-        script.addEventListener("load", {
-            script.setAttribute("data-loaded", "true")
-            deferred.complete(true)
-        })
-        script.addEventListener("error", {
-            webVideoLogger.e { "Failed to load ${AssSubtitleRendererConfig.scriptUrl}" }
-            deferred.complete(false)
-        })
-    }
-
-    if (script.parentNode == null) {
-        (document.head ?: document.body)?.appendChild(script)
-    }
-
-    val loaded = deferred.await()
-    if (!loaded) assRendererScriptLoad = null
-    return loaded && isAssSubtitleRendererLoaded()
-}
-
-private fun isAssSubtitleRendererLoaded(): Boolean =
-    js("typeof globalThis.SubtitlesOctopus === 'function'")
+internal suspend fun ensureAssRendererScriptLoaded(): Boolean = true
 
 internal fun createAssSubtitleRenderer(
     video: HTMLVideoElement,
     canvas: HTMLCanvasElement,
     subUrl: String,
-    workerUrl: String,
-    legacyWorkerUrl: String,
-    fallbackFontUrl: String,
     debug: Boolean,
     onReady: () -> Unit,
+    onError: (String) -> Unit,
+): JsAny {
+    val options =
+        createJassubRendererOptions(
+            video = video,
+            canvas = canvas,
+            subUrl = subUrl,
+            workerUrl = AssSubtitleRendererConfig.workerUrl,
+            wasmUrl = AssSubtitleRendererConfig.wasmUrl,
+            modernWasmUrl = AssSubtitleRendererConfig.modernWasmUrl,
+            fallbackFontUrl = AssSubtitleRendererConfig.fallbackFontUrl,
+            fallbackFontFamily = AssSubtitleRendererConfig.fallbackFontFamily,
+            queryFonts = AssSubtitleRendererConfig.queryFonts,
+            debug = debug,
+            onError = onError,
+        )
+    val instance = createJassubRenderer(options)
+    attachJassubRendererWorkerUrls(instance, options)
+    configureJassubRendererInstance(instance, onReady, onError)
+    return instance
+}
+
+@Suppress("UNUSED_PARAMETER")
+private fun createJassubRendererOptions(
+    video: HTMLVideoElement,
+    canvas: HTMLCanvasElement,
+    subUrl: String,
+    workerUrl: String,
+    wasmUrl: String,
+    modernWasmUrl: String,
+    fallbackFontUrl: String,
+    fallbackFontFamily: String,
+    queryFonts: Boolean,
+    debug: Boolean,
     onError: (String) -> Unit,
 ): JsAny =
     js(
         """
         (function() {
-            function toWorkerUrl(url) {
+            function toModuleWorkerUrl(url) {
                 const resolvedUrl = new URL(url, document.baseURI);
                 if (
                     resolvedUrl.origin === globalThis.location.origin ||
@@ -105,17 +93,10 @@ internal fun createAssSubtitleRenderer(
                     return resolvedUrl.toString();
                 }
 
-                const workerBaseUrl = new URL(".", resolvedUrl).toString();
-                const source = [
-                    "self.Module = self.Module || {};",
-                    "self.Module.locateFile = function(path) { return " + JSON.stringify(workerBaseUrl) + " + path; };",
-                    "importScripts(" + JSON.stringify(resolvedUrl.toString()) + ");"
-                ].join("\n");
+                const source = "import " + JSON.stringify(resolvedUrl.toString()) + ";";
                 return URL.createObjectURL(new Blob([source], { type: "application/javascript" }));
             }
 
-            const effectiveWorkerUrl = toWorkerUrl(workerUrl);
-            const effectiveLegacyWorkerUrl = toWorkerUrl(legacyWorkerUrl);
             function decodeDataUrl(url) {
                 if (typeof url !== "string" || url.indexOf("data:") !== 0) return null;
                 const comma = url.indexOf(",");
@@ -134,42 +115,88 @@ internal fun createAssSubtitleRenderer(
                 return decodeURIComponent(payload);
             }
 
-            const subtitleOptions = {};
-            const subContent = decodeDataUrl(subUrl);
-            if (subContent != null) {
-                subtitleOptions.subContent = subContent;
-            } else {
-                subtitleOptions.subUrl = new URL(subUrl, document.baseURI).toString();
+            if (!canvas || typeof canvas.transferControlToOffscreen !== "function") {
+                onError("JASSUB requires canvas.transferControlToOffscreen support");
             }
 
-            const instance =
-                new globalThis.SubtitlesOctopus(Object.assign({
-                    video: video,
-                    canvas: canvas,
-                    workerUrl: effectiveWorkerUrl,
-                    legacyWorkerUrl: effectiveLegacyWorkerUrl,
-                    fallbackFont: fallbackFontUrl,
-                    renderMode: "wasm-blend",
-                    targetFps: 60,
-                    debug: debug,
-                    onReady: onReady,
-                    onError: function(err) {
-                        onError(err && err.message ? err.message : String(err));
-                    }
-                }, subtitleOptions));
-            instance.__composeMediaPlayerWorkerUrls = [effectiveWorkerUrl, effectiveLegacyWorkerUrl]
-                .filter(function(url) { return url.indexOf("blob:") === 0; });
-            if (!instance.canvasParent && canvas.parentElement) {
-                instance.canvasParent = canvas.parentElement;
+            const options = {
+                video: video,
+                canvas: canvas,
+                queryFonts: queryFonts,
+                debug: debug
+            };
+            const workerUrls = [];
+
+            const subContent = decodeDataUrl(subUrl);
+            if (subContent != null) {
+                options.subContent = subContent;
+            } else {
+                options.subUrl = new URL(subUrl, document.baseURI).toString();
             }
-            if (typeof instance.setVideo === "function") {
-                instance.setVideo(video);
+
+            if (workerUrl) {
+                options.workerUrl = toModuleWorkerUrl(workerUrl);
+                if (options.workerUrl.indexOf("blob:") === 0) {
+                    workerUrls.push(options.workerUrl);
+                }
             }
-            if (typeof instance.resize === "function") {
-                instance.resize();
+            if (wasmUrl) {
+                options.wasmUrl = new URL(wasmUrl, document.baseURI).toString();
             }
-            return instance;
+            if (modernWasmUrl) {
+                options.modernWasmUrl = new URL(modernWasmUrl, document.baseURI).toString();
+            }
+            if (fallbackFontUrl) {
+                const fontFamily = (fallbackFontFamily || "liberation sans").trim().toLowerCase();
+                const availableFonts = {};
+                availableFonts[fontFamily] = new URL(fallbackFontUrl, document.baseURI).toString();
+                options.availableFonts = availableFonts;
+                options.defaultFont = fontFamily;
+            }
+
+            options.__composeMediaPlayerWorkerUrls = workerUrls;
+            return options;
         })()
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+private fun attachJassubRendererWorkerUrls(
+    instance: JsAny,
+    options: JsAny,
+): Unit =
+    js(
+        """
+        {
+            if (instance && options && options.__composeMediaPlayerWorkerUrls) {
+                instance.__composeMediaPlayerWorkerUrls = options.__composeMediaPlayerWorkerUrls;
+            }
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+private fun configureJassubRendererInstance(
+    instance: JsAny,
+    onReady: () -> Unit,
+    onError: (String) -> Unit,
+): Unit =
+    js(
+        """
+        {
+            if (instance && instance.ready && typeof instance.ready.then === "function") {
+                instance.ready.then(function() {
+                    onReady();
+                    if (typeof instance.resize === "function") {
+                        instance.resize(true);
+                    }
+                }).catch(function(error) {
+                    onError(error && error.message ? error.message : String(error));
+                });
+            } else {
+                onReady();
+            }
+        }
         """,
     )
 
@@ -177,12 +204,11 @@ internal fun disposeAssSubtitleRenderer(instance: JsAny): Unit =
     js(
         """
         {
-            if (instance && typeof instance.dispose === "function") {
+            if (instance && typeof instance.destroy === "function") {
                 try {
-                    instance.dispose();
+                    instance.destroy();
                 } catch (err) {
-                    // SubtitlesOctopus may already have had its canvas moved or removed
-                    // by Compose WebElementView during media element recreation.
+                    // JASSUB may already be shutting down after its canvas was released.
                 }
             }
             if (instance && instance.__composeMediaPlayerWorkerUrls) {
@@ -200,7 +226,7 @@ internal fun resizeAssSubtitleRenderer(instance: JsAny?): Unit =
         """
         {
             if (instance && typeof instance.resize === "function") {
-                instance.resize();
+                instance.resize(true);
             }
         }
         """,
@@ -223,9 +249,14 @@ internal fun clearAssSubtitleCanvas(canvas: HTMLCanvasElement): Unit =
         """
         {
             if (canvas) {
-                const context = canvas.getContext("2d");
-                if (context) {
-                    context.clearRect(0, 0, canvas.width, canvas.height);
+                try {
+                    const context = canvas.getContext("2d");
+                    if (context) {
+                        context.clearRect(0, 0, canvas.width, canvas.height);
+                    }
+                } catch (_) {
+                    // JASSUB transfers the canvas to OffscreenCanvas, so getContext()
+                    // is no longer valid on the DOM-side canvas after initialization.
                 }
             }
         }
