@@ -16,7 +16,7 @@ if [ -z "$JAVA_HOME" ]; then
     echo "ERROR: JAVA_HOME is not set and could not be detected automatically."
     exit 1
 fi
-JNI_INCLUDES="-I${JAVA_HOME}/include -I${JAVA_HOME}/include/darwin"
+JNI_INCLUDES=("-I${JAVA_HOME}/include" "-I${JAVA_HOME}/include/darwin")
 
 # Output directories
 ARM64_DIR="$OUTPUT_DIR/darwin-aarch64"
@@ -32,7 +32,7 @@ build_arch() {
 
     echo "=== Compiling JNI bridge for ${ARCH} ==="
     clang -c -arch "$ARCH" -target "$TARGET" \
-        $JNI_INCLUDES \
+        "${JNI_INCLUDES[@]}" \
         "$JNI_BRIDGE" -o "$BRIDGE_OBJ"
 
     echo "=== Building NativeVideoPlayer dylib for ${ARCH} ==="

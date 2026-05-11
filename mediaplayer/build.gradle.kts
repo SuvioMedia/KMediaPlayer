@@ -14,16 +14,30 @@ plugins {
     alias(libs.plugins.kotlinCocoapods)
 }
 
-group = "io.github.kdroidfilter.composemediaplayer"
-
 val ref = System.getenv("GITHUB_REF") ?: ""
-val projectVersion =
+val isJitPack = System.getenv("JITPACK") == "true"
+val tagVersion =
     if (ref.startsWith("refs/tags/")) {
         val tag = ref.removePrefix("refs/tags/")
         if (tag.startsWith("v")) tag.substring(1) else tag
     } else {
-        "dev"
+        null
     }
+val projectVersion =
+    providers.gradleProperty("publicationVersion").orNull
+        ?: System.getenv("VERSION")
+        ?: tagVersion
+        ?: "dev"
+val projectGroup =
+    providers.gradleProperty("publicationGroup").orNull
+        ?: if (isJitPack) {
+            listOfNotNull(System.getenv("GROUP"), System.getenv("ARTIFACT")).joinToString(".")
+        } else {
+            "io.github.kdroidfilter"
+        }
+val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+
+group = projectGroup
 
 kotlin {
     jvmToolchain(17)
@@ -144,7 +158,7 @@ kotlin {
 
 android {
     namespace = "io.github.kdroidfilter.composemediaplayer"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk =
@@ -214,15 +228,20 @@ tasks.named("jvmProcessResources") {
     dependsOn(buildNativeMacOs, buildNativeWindows, buildNativeLinux)
 }
 
-tasks.configureEach {
-    if (name == "sourcesJar") {
-        dependsOn(buildNativeMacOs, buildNativeWindows, buildNativeLinux)
+publishing {
+    repositories {
+        githubPagesMavenRepository?.let { repositoryPath ->
+            maven {
+                name = "githubPages"
+                url = uri(repositoryPath)
+            }
+        }
     }
 }
 
 mavenPublishing {
     coordinates(
-        groupId = "io.github.kdroidfilter",
+        groupId = projectGroup,
         artifactId = "composemediaplayer",
         version = projectVersion,
     )
@@ -258,7 +277,7 @@ mavenPublishing {
     publishToMavenCentral()
 
     // Only sign publications in CI environments to avoid requiring local GPG signing setup.
-    if (System.getenv("CI") != null) {
+    if (System.getenv("CI") != null && githubPagesMavenRepository == null) {
         signAllPublications()
     }
 

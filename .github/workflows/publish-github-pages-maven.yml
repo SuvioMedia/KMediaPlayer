@@ -1,0 +1,99 @@
+name: Publish Maven Repository to GitHub Pages
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-natives:
+    uses: ./.github/workflows/build-natives.yml
+
+  publish:
+    needs: build-natives
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download all native libraries
+        uses: actions/download-artifact@v8
+        with:
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/
+          pattern: native-*
+          merge-multiple: true
+
+      - name: Verify all natives present
+        run: |
+          EXPECTED=(
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-aarch64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-x86-64/libNativeVideoPlayer.so"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-aarch64/libNativeVideoPlayer.so"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-x86-64/NativeVideoPlayer.dll"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-arm64/NativeVideoPlayer.dll"
+          )
+          MISSING=0
+          for f in "${EXPECTED[@]}"; do
+            if [ -f "$f" ]; then
+              echo "OK: $f ($(wc -c < "$f") bytes)"
+            else
+              echo "MISSING: $f" >&2
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" = "1" ]; then exit 1; fi
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Publish Maven artifacts locally
+        run: >
+          ./gradlew :mediaplayer:publishAllPublicationsToGithubPagesRepository
+          -PpublicationGroup=io.github.shusek
+          -PgithubPagesMavenRepository="$PWD/build/maven-repo"
+          --no-configuration-cache
+          --no-daemon
+
+      - name: Push Maven repository to gh-pages
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          tmp_dir="$(mktemp -d)"
+          pages_dir="$tmp_dir/pages"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages
+            git worktree add "$pages_dir" origin/gh-pages
+          else
+            git worktree add --detach "$pages_dir"
+            git -C "$pages_dir" checkout --orphan gh-pages
+            git -C "$pages_dir" rm -rf . || true
+          fi
+
+          mkdir -p "$pages_dir/maven"
+          rsync -a build/maven-repo/ "$pages_dir/maven/"
+          touch "$pages_dir/.nojekyll"
+
+          git -C "$pages_dir" add .nojekyll maven
+          if git -C "$pages_dir" diff --cached --quiet; then
+            echo "No Maven repository changes to publish."
+          else
+            git -C "$pages_dir" commit -m "Publish Maven artifacts ${GITHUB_REF_NAME:-manual}"
+            git -C "$pages_dir" push origin HEAD:gh-pages
+          fi
