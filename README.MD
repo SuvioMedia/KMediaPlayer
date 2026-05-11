@@ -42,6 +42,7 @@
   - [Using Subtitles](#using-subtitles)
     - [Supported Formats](#-supported-formats)
     - [Adding Subtitles from URL or Local File](#-adding-subtitles-from-url-or-local-file)
+    - [Selecting Embedded Audio and Subtitle Tracks](#selecting-embedded-audio-and-subtitle-tracks)
     - [Customizing Subtitle Appearance](#-customizing-subtitle-appearance)
     - [Disabling Subtitles](#-disabling-subtitles)
   - [Fullscreen Mode](#️-fullscreen-mode)
@@ -382,11 +383,11 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. Subtitles are now rendered using Compose, providing a uniform appearance across all platforms.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered on web and wasm with libass.
 
 #### 🎯 Supported Formats
 
-The player supports both SRT and VTT subtitle formats with automatic format detection.
+The player supports SRT and VTT subtitle formats with automatic format detection. On browser targets, `.ass` and `.ssa` subtitles are supported through JavascriptSubtitlesOctopus/libass running in WebAssembly.
 
 #### 🎯 Adding Subtitles from URL or Local File
 
@@ -396,10 +397,37 @@ You can add subtitles by specifying a URL:
 val track = SubtitleTrack(
     label = "English Subtitles",
     language = "en",
-    src = "https://example.com/subtitles.vtt" // Works with both .srt and .vtt files
+    src = "https://example.com/subtitles.vtt" // Works with .srt, .vtt and browser .ass/.ssa files
 )
 playerState.selectSubtitleTrack(track)
 ```
+
+For production browser deployments you can self-host the libass assets instead of using the default CDN URLs:
+
+```kotlin
+AssSubtitleRendererConfig.scriptUrl = "/libass/subtitles-octopus.js"
+AssSubtitleRendererConfig.workerUrl = "/libass/subtitles-octopus-worker.js"
+AssSubtitleRendererConfig.legacyWorkerUrl = "/libass/subtitles-octopus-worker-legacy.js"
+AssSubtitleRendererConfig.fallbackFontUrl = "/libass/default.woff2"
+```
+
+#### Selecting Embedded Audio and Subtitle Tracks
+
+When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, and Android reads Media3 track groups.
+
+```kotlin
+val audioTrack = playerState.availableAudioTracks.firstOrNull()
+if (audioTrack != null) {
+    playerState.selectAudioTrack(audioTrack)
+}
+
+val subtitleTrack = playerState.availableSubtitleTracks.firstOrNull { it.isEmbedded }
+if (subtitleTrack != null) {
+    playerState.selectSubtitleTrack(subtitleTrack)
+}
+```
+
+`availableSubtitleTracks` can contain both external tracks added by your app and embedded tracks discovered from the current media.
 
 #### 🎨 Customizing Subtitle Appearance
 

@@ -137,7 +137,10 @@ fun VideoPlayerSurfaceImpl(
             )
 
             // Add Compose-based subtitle layer
-            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+            if (playerState.subtitlesEnabled &&
+                playerState.currentSubtitleTrack != null &&
+                playerState.currentSubtitleTrack?.isEmbedded != true
+            ) {
                 // Calculate current time in milliseconds
                 val currentTimeMs =
                     (

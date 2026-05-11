@@ -85,6 +85,15 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override val metadata: VideoMetadata get() = delegate.metadata
     override val aspectRatio: Float get() = delegate.aspectRatio
 
+    override var currentAudioTrack: AudioTrack?
+        get() = delegate.currentAudioTrack
+        set(value) {
+            delegate.currentAudioTrack = value
+        }
+    override val availableAudioTracks = delegate.availableAudioTracks
+
+    override fun selectAudioTrack(track: AudioTrack?) = delegate.selectAudioTrack(track)
+
     override var subtitlesEnabled = delegate.subtitlesEnabled
     override var currentSubtitleTrack: SubtitleTrack? = delegate.currentSubtitleTrack
     override val availableSubtitleTracks = delegate.availableSubtitleTracks

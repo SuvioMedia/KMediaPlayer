@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
@@ -77,7 +78,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     // Subtitle management
     override var subtitlesEnabled by mutableStateOf(false)
     override var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
-    override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    override val availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
     override var subtitleTextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
@@ -87,6 +88,13 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         ),
     )
     override var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+
+    // Audio track management
+    override var currentAudioTrack by mutableStateOf<AudioTrack?>(null)
+    override val availableAudioTracks = mutableStateListOf<AudioTrack>()
+
+    var applyAudioTrackCallback: ((AudioTrack?) -> Unit)? = null
+    var applySubtitleTrackCallback: ((SubtitleTrack?) -> Unit)? = null
 
     // Playback control properties
     private var _volume by mutableStateOf(1.0f)
@@ -216,6 +224,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override fun selectSubtitleTrack(track: SubtitleTrack?) {
         currentSubtitleTrack = track
         subtitlesEnabled = (track != null)
+        applySubtitleTrackCallback?.invoke(track)
     }
 
     /**
@@ -224,6 +233,38 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override fun disableSubtitles() {
         currentSubtitleTrack = null
         subtitlesEnabled = false
+        applySubtitleTrackCallback?.invoke(null)
+    }
+
+    override fun selectAudioTrack(track: AudioTrack?) {
+        currentAudioTrack = track
+        applyAudioTrackCallback?.invoke(track)
+    }
+
+    internal fun replaceAvailableAudioTracks(tracks: List<AudioTrack>) {
+        availableAudioTracks.clear()
+        availableAudioTracks.addAll(tracks)
+
+        currentAudioTrack =
+            currentAudioTrack
+                ?.let { current -> tracks.firstOrNull { it.id == current.id } }
+                ?: tracks.firstOrNull()
+    }
+
+    internal fun replaceEmbeddedSubtitleTracks(tracks: List<SubtitleTrack>) {
+        val externalTracks = availableSubtitleTracks.filterNot { it.isEmbedded }
+        availableSubtitleTracks.clear()
+        availableSubtitleTracks.addAll(externalTracks)
+        availableSubtitleTracks.addAll(tracks)
+
+        if (currentSubtitleTrack?.isEmbedded == true) {
+            val refreshedTrack = tracks.firstOrNull { it.id == currentSubtitleTrack?.id }
+            if (refreshedTrack == null) {
+                disableSubtitles()
+            } else {
+                currentSubtitleTrack = refreshedTrack
+            }
+        }
     }
 
     /**
@@ -246,6 +287,13 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _isLoading = true // Set initial loading state
         _error = null
         _isPlaying = false
+        currentAudioTrack = null
+        availableAudioTracks.clear()
+        if (currentSubtitleTrack?.isEmbedded == true) {
+            currentSubtitleTrack = null
+            subtitlesEnabled = false
+        }
+        availableSubtitleTracks.removeAll { it.isEmbedded }
 
         // Don't set isLoading to false here - let the video events handle it
         playerScope.launch {

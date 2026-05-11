@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -58,27 +59,18 @@ fun ComposeSubtitleLayer(
                         val content = loadSubtitleContent(subtitleTrack.src)
 
                         // Determine the subtitle format based on file extension and content
-                        val isSrtByExtension = subtitleTrack.src.endsWith(".srt", ignoreCase = true)
+                        val resolvedFormat =
+                            subtitleTrack.resolvedFormat().takeUnless { it == SubtitleFormat.AUTO }
+                                ?: SubtitleFormat.fromContent(content)
 
-                        // Check content for SRT format (typically starts with a number followed by timing)
-                        val isSrtByContent =
-                            content.trim().let {
-                                val lines = it.lines()
-                                lines.size >= 2 &&
-                                    lines[0].trim().toIntOrNull() != null &&
-                                    lines[1].contains("-->") &&
-                                    lines[1].contains(",") // SRT uses comma for milliseconds
-                            }
-
-                        // Check content for WebVTT format (starts with WEBVTT)
-                        val isVttByContent = content.trim().startsWith("WEBVTT")
-
-                        // Use the appropriate parser based on format detection
-                        if (isSrtByExtension || (isSrtByContent && !isVttByContent)) {
-                            SrtParser.parse(content)
-                        } else {
-                            // Default to WebVTT parser for other formats
-                            WebVttParser.parse(content)
+                        when (resolvedFormat) {
+                            SubtitleFormat.SRT -> SrtParser.parse(content)
+                            SubtitleFormat.ASS,
+                            SubtitleFormat.SSA,
+                            -> SubtitleCueList()
+                            SubtitleFormat.WEBVTT,
+                            SubtitleFormat.AUTO,
+                            -> WebVttParser.parse(content)
                         }
                     }
                 } catch (e: Exception) {

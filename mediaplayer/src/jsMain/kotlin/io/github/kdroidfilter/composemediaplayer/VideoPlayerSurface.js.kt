@@ -20,7 +20,7 @@ actual fun VideoPlayerSurface(
     if (playerState.hasMedia) {
         var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
         var videoRatio by remember { mutableStateOf<Float?>(null) }
-        var useCors by remember { mutableStateOf(true) }
+        var useCors by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
         // State for CORS mode changes
@@ -42,6 +42,12 @@ actual fun VideoPlayerSurface(
         VideoVolumeAndSpeedEffects(
             playerState = playerState,
             videoElement = videoElement,
+        )
+
+        VideoMediaTrackEffects(
+            playerState = playerState,
+            videoElement = videoElement,
+            scope = scope,
         )
 
         // Video content layout with WebElementView
@@ -68,7 +74,7 @@ actual fun VideoPlayerSurface(
                             )
                         }
                     },
-                    modifier = if (playerState.isFullscreen) Modifier.fillMaxSize() else modifier,
+                    modifier = Modifier.fillMaxSize(),
                     update = { video ->
                         videoElement = video
                         video.applyInteropBehindCanvas()
@@ -76,8 +82,15 @@ actual fun VideoPlayerSurface(
                     },
                     onRelease = { video ->
                         video.safePause()
+                        video.destroyHlsController()
+                        video.destroyMkvSidecarTracks()
                         videoElement = null
                     },
+                )
+                AssSubtitleCanvas(
+                    playerState = playerState,
+                    videoElement = videoElement,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
