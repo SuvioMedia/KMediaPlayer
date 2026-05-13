@@ -253,13 +253,6 @@ mavenPublishing {
         inceptionYear.set("2025")
         url.set("https://github.com/kdroidFilter/Compose-Media-Player")
 
-        licenses {
-            license {
-                name.set("MIT License")
-                url.set("https://opensource.org/licenses/MIT")
-            }
-        }
-
         developers {
             developer {
                 id.set("kdroidfilter")

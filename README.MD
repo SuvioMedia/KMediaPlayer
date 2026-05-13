@@ -26,6 +26,7 @@
 - [Live Demo](#-live-demo)
 - [Features](#-features)
 - [Supported Video Formats](#-supported-video-formats)
+- [Supported Codec Checks](#-supported-codec-checks)
 - [Installation](#-installation)
 - [Compatibility Table](#-compatibility-table)
 - [Getting Started](#-getting-started)
@@ -42,6 +43,7 @@
   - [Using Subtitles](#using-subtitles)
     - [Supported Formats](#-supported-formats)
     - [Adding Subtitles from URL or Local File](#-adding-subtitles-from-url-or-local-file)
+    - [Browser ASS/SSA subtitles with JASSUB/libass](#browser-assssa-subtitles-with-jassublibass)
     - [Selecting Embedded Audio and Subtitle Tracks](#selecting-embedded-audio-and-subtitle-tracks)
     - [Customizing Subtitle Appearance](#-customizing-subtitle-appearance)
     - [Disabling Subtitles](#-disabling-subtitles)
@@ -94,6 +96,24 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 > implementation("androidx.media3:media3-exoplayer-hls:<version>")
 > ```
 
+## ✅ Supported Codec Checks
+
+The library exposes a codec enum and suspendable platform-specific queries so apps can check whether a codec is reported as supported by the current backend:
+
+```kotlin
+val codecSupport = SupportedMediaCodecs.query()
+
+val h264Supported = codecSupport.isSupported(MediaCodec.H264)
+val supportedVideoCodecs = codecSupport.videoCodecs
+val supportedAudioCodecs = codecSupport.audioCodecs
+val supportedCodecs = codecSupport.allCodecs
+
+// Or query a single codec from a coroutine:
+val aacSupported = SupportedMediaCodecs.queryIsSupported(MediaCodec.AAC)
+```
+
+> [!NOTE]
+> Codec support can still depend on the device, OS version, browser, installed system components, or GStreamer plugins. Android and web targets query the current runtime where possible. Desktop and iOS expose conservative backend capability lists. Query methods are suspend functions so callers can run them from `LaunchedEffect`, `async`, `produceState`, or their own coroutine/lazy strategy.
 
 ## 🔧 Installation
 
@@ -383,7 +403,7 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered on web and wasm with libass.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered on browser targets with JASSUB, which runs libass in WebAssembly.
 
 #### 🎯 Supported Formats
 
@@ -402,7 +422,56 @@ val track = SubtitleTrack(
 playerState.selectSubtitleTrack(track)
 ```
 
-JASSUB is bundled from the npm dependency by default. For production browser deployments you can optionally self-host the worker, WASM and fallback font assets:
+#### Browser ASS/SSA subtitles with JASSUB/libass
+
+ASS/SSA subtitle rendering is enabled by default on `js` and `wasmJs` browser targets. As a library user, you do not need to add `jassub`, libass, worker scripts, or WASM files manually. The library declares the `jassub` npm dependency and the browser bundle includes the default JASSUB worker, WASM and fallback font assets.
+
+For a basic browser app, just select an `.ass` or `.ssa` subtitle track:
+
+```kotlin
+val playerState = rememberVideoPlayerState()
+
+LaunchedEffect(Unit) {
+    playerState.openUri("https://example.com/video.mp4")
+    playerState.selectSubtitleTrack(
+        SubtitleTrack(
+            label = "English ASS",
+            language = "en",
+            src = "https://example.com/subtitles.ass",
+        )
+    )
+}
+```
+
+If you use `VideoPlayerControls`, the selected track is rendered automatically by `VideoPlayerSurface`. If you build custom controls, keep using the same `playerState.selectSubtitleTrack(...)` and `playerState.disableSubtitles()` APIs.
+
+You can configure the renderer once in your browser entry point before rendering your Compose app:
+
+```kotlin
+import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
+
+fun main() {
+    AssSubtitleRendererConfig.debug = false
+    AssSubtitleRendererConfig.queryFonts = false
+
+    // Start your Compose app here.
+}
+```
+
+Configuration options:
+
+| Option | Default | Description |
+| :--- | :--- | :--- |
+| `enabled` | `true` | Enables or disables browser ASS/SSA rendering. When disabled, ASS/SSA tracks are ignored by the JASSUB renderer. |
+| `workerUrl` | `""` | Optional URL for a self-hosted JASSUB worker. Leave empty to use the bundled npm asset. |
+| `wasmUrl` | `""` | Optional URL for `jassub-worker.wasm`. Leave empty to use the bundled npm asset. |
+| `modernWasmUrl` | `""` | Optional URL for `jassub-worker-modern.wasm`. Leave empty to use the bundled npm asset. |
+| `fallbackFontUrl` | `""` | Optional URL for the fallback font used by libass. Leave empty to use JASSUB defaults. |
+| `fallbackFontFamily` | `"liberation sans"` | Font family name mapped to `fallbackFontUrl`. |
+| `queryFonts` | `false` | Lets JASSUB query browser fonts when supported. This may prompt or vary by browser. |
+| `debug` | `false` | Enables JASSUB debug logging. |
+
+For production deployments you can optionally self-host the worker, WASM and fallback font assets. This is useful when your hosting/CDN needs explicit cache headers, predictable URLs, or a strict Content Security Policy:
 
 ```kotlin
 AssSubtitleRendererConfig.workerUrl = "/jassub/worker/worker.js"
@@ -410,6 +479,14 @@ AssSubtitleRendererConfig.wasmUrl = "/jassub/wasm/jassub-worker.wasm"
 AssSubtitleRendererConfig.modernWasmUrl = "/jassub/wasm/jassub-worker-modern.wasm"
 AssSubtitleRendererConfig.fallbackFontUrl = "/jassub/default.woff2"
 ```
+
+The URLs may be relative to your app base URL or absolute. Prefer same-origin URLs. If you host the video, subtitle, worker, WASM or font files on another domain, configure CORS headers so the browser can load them from your app origin.
+
+Browser notes:
+- ASS/SSA rendering requires browser support for `OffscreenCanvas` and `canvas.transferControlToOffscreen()`.
+- Web fullscreen should keep the same video element alive; entering fullscreen should not restart playback.
+- SRT and VTT do not use JASSUB. They continue to use the Compose subtitle renderer.
+- Native Android, iOS and desktop targets do not use this JASSUB configuration.
 
 #### Selecting Embedded Audio and Subtitle Tracks
 
