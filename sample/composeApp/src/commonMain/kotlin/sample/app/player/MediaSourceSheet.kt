@@ -34,7 +34,10 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun MediaSourceSheet(
     videoUrl: String,
+    macMkvBackendAvailable: Boolean,
+    selectedMacMkvBackend: MacMkvPlaybackBackend,
     onUrlChange: (String) -> Unit,
+    onMacMkvBackendChange: (MacMkvPlaybackBackend) -> Unit,
     onLoadUrl: () -> Unit,
     onPickFile: () -> Unit,
     onSelectPreset: (String) -> Unit,
@@ -75,6 +78,28 @@ internal fun MediaSourceSheet(
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
             )
+
+            if (macMkvBackendAvailable) {
+                HorizontalDivider()
+
+                Text(
+                    text = "macOS MKV backend",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    MacMkvPlaybackBackend.entries.forEach { backend ->
+                        FilterChip(
+                            selected = selectedMacMkvBackend == backend,
+                            onClick = { onMacMkvBackendChange(backend) },
+                            label = { Text(backend.label) },
+                        )
+                    }
+                }
+            }
 
             // File picker
             OutlinedButton(

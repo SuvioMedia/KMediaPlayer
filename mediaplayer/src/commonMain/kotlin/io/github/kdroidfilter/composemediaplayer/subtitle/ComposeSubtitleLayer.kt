@@ -10,9 +10,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
+import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
@@ -50,39 +52,19 @@ fun ComposeSubtitleLayer(
     var subtitles by remember { mutableStateOf<SubtitleCueList?>(null) }
 
     // Load subtitles when the subtitle track changes
-    LaunchedEffect(subtitleTrack) {
-        subtitles =
-            if (subtitleTrack != null && subtitlesEnabled) {
-                try {
-                    withContext(Dispatchers.Default) {
-                        // Load and parse the subtitle file
-                        val content = loadSubtitleContent(subtitleTrack.src)
+    LaunchedEffect(subtitleTrack, subtitlesEnabled) {
+        if (subtitleTrack == null || !subtitlesEnabled) {
+            subtitles = null
+            return@LaunchedEffect
+        }
 
-                        // Determine the subtitle format based on file extension and content
-                        val resolvedFormat =
-                            subtitleTrack.resolvedFormat().takeUnless { it == SubtitleFormat.AUTO }
-                                ?: SubtitleFormat.fromContent(content)
-
-                        when (resolvedFormat) {
-                            SubtitleFormat.SRT -> SrtParser.parse(content)
-                            SubtitleFormat.ASS,
-                            SubtitleFormat.SSA,
-                            -> SubtitleCueList()
-                            SubtitleFormat.WEBVTT,
-                            SubtitleFormat.AUTO,
-                            -> WebVttParser.parse(content)
-                        }
-                    }
-                } catch (e: Exception) {
-                    // If there's an error loading or parsing the subtitle file,
-                    // return an empty subtitle list
-                    SubtitleCueList()
-                }
-            } else {
-                // If no subtitle track is selected or subtitles are disabled,
-                // return null to hide the subtitle display
-                null
+        val shouldRefreshLiveSidecar = subtitleTrack.id.startsWith(MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX)
+        do {
+            subtitles = loadAndParseSubtitles(subtitleTrack)
+            if (shouldRefreshLiveSidecar) {
+                delay(2_000)
             }
+        } while (shouldRefreshLiveSidecar)
     }
 
     // Display the subtitles if available
@@ -103,6 +85,33 @@ fun ComposeSubtitleLayer(
         }
     }
 }
+
+private suspend fun loadAndParseSubtitles(subtitleTrack: SubtitleTrack): SubtitleCueList =
+    try {
+        withContext(Dispatchers.Default) {
+            // Load and parse the subtitle file
+            val content = loadSubtitleContent(subtitleTrack.src)
+
+            // Determine the subtitle format based on file extension and content
+            val resolvedFormat =
+                subtitleTrack.resolvedFormat().takeUnless { it == SubtitleFormat.AUTO }
+                    ?: SubtitleFormat.fromContent(content)
+
+            when (resolvedFormat) {
+                SubtitleFormat.SRT -> SrtParser.parse(content)
+                SubtitleFormat.ASS,
+                SubtitleFormat.SSA,
+                -> AssParser.parse(content)
+                SubtitleFormat.WEBVTT,
+                SubtitleFormat.AUTO,
+                -> WebVttParser.parse(content)
+            }
+        }
+    } catch (e: Exception) {
+        // If there's an error loading or parsing the subtitle file,
+        // return an empty subtitle list
+        SubtitleCueList()
+    }
 
 /**
  * Loads the content of a subtitle file from the given source.

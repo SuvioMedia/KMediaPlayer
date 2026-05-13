@@ -10,13 +10,49 @@ JNI_BRIDGE="$SCRIPT_DIR/jni_bridge.c"
 echo "=== Building macOS NativeVideoPlayer ==="
 echo "Output dir: $OUTPUT_DIR"
 
-# Resolve JDK include paths (required to compile jni_bridge.c)
-JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home 2>/dev/null || echo '')}"
-if [ -z "$JAVA_HOME" ]; then
-    echo "ERROR: JAVA_HOME is not set and could not be detected automatically."
+# Resolve JDK include paths (required to compile jni_bridge.c).
+# IntelliJ/Android Studio may launch Gradle with JAVA_HOME pointing to a bundled
+# runtime that does not ship JNI headers, so validate before using it.
+has_jni_headers() {
+    local CANDIDATE="$1"
+    [ -n "$CANDIDATE" ] &&
+        [ -f "$CANDIDATE/include/jni.h" ] &&
+        [ -f "$CANDIDATE/include/darwin/jni_md.h" ]
+}
+
+resolve_java_home() {
+    local CANDIDATE="${JAVA_HOME:-}"
+    if has_jni_headers "$CANDIDATE"; then
+        echo "$CANDIDATE"
+        return 0
+    fi
+
+    CANDIDATE="$(/usr/libexec/java_home 2>/dev/null || echo '')"
+    if has_jni_headers "$CANDIDATE"; then
+        echo "$CANDIDATE"
+        return 0
+    fi
+
+    for VERSION in 23 21 17; do
+        CANDIDATE="$(/usr/libexec/java_home -v "$VERSION" 2>/dev/null || echo '')"
+        if has_jni_headers "$CANDIDATE"; then
+            echo "$CANDIDATE"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+RESOLVED_JAVA_HOME="$(resolve_java_home || true)"
+if [ -z "$RESOLVED_JAVA_HOME" ]; then
+    echo "ERROR: Could not find a full JDK with JNI headers."
+    echo "       Configure IntelliJ Gradle JVM to a JDK, not a bundled runtime/JRE."
+    echo "       Required files: include/jni.h and include/darwin/jni_md.h"
     exit 1
 fi
-JNI_INCLUDES=("-I${JAVA_HOME}/include" "-I${JAVA_HOME}/include/darwin")
+echo "Using JDK for JNI headers: $RESOLVED_JAVA_HOME"
+JNI_INCLUDES=("-I${RESOLVED_JAVA_HOME}/include" "-I${RESOLVED_JAVA_HOME}/include/darwin")
 
 # Output directories
 ARM64_DIR="$OUTPUT_DIR/darwin-aarch64"

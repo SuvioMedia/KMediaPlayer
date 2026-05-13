@@ -13,7 +13,7 @@
 ### Supported by
 [![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
 
-**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations. All desktop platforms communicate with their native backends through **pure JNI** — no JNA, no GStreamer Java bindings, no external runtime dependencies. The library leverages:
+**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations for its native backends. All desktop platforms communicate with their native backends through **pure JNI** — no JNA and no Java media bindings. The library leverages:
 
 - **GStreamer** (via JNI) for Linux
 - **Media Foundation** (via JNI) for Windows
@@ -79,10 +79,10 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 | **Player** | [MediaFoundation](https://learn.microsoft.com/en-us/windows/win32/medfound/microsoft-media-foundation-sdk) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | [HTML5 Video](https://www.w3schools.com/html/html5_video.asp) |
 | MP4 (H.264) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ✅ |
 | AVI | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
-| MKV | ❌                                                                                                                 | ✅ | ❌                                                                           | ✅ | ❌ |
+| MKV | ❌                                                                                                                 | ✅ | ⚠️†                                                                          | ✅ | ❌ |
 | MOV | ✅                                                                                                                 | ✅ | ✅                                                                           | ❌ | ✅ |
 | FLV | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
-| WEBM | ❌                                                                                                                 | ✅ | ❌                                                                           | ✅ | ✅ |
+| WEBM | ❌                                                                                                                 | ✅ | ⚠️†                                                                          | ✅ | ✅ |
 | WMV | ✅                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
 | 3GP | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ❌ |
 | HLS (M3U8) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅* | ❌ |
@@ -91,6 +91,38 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 > ```kotlin
 > implementation("androidx.media3:media3-exoplayer-hls:<version>")
 > ```
+
+> † On macOS, MKV/WebM support is an optional fallback for formats that AVPlayer cannot demux directly.
+> In `auto` mode, Compose Media Player first looks for a user-installed VLC.app with a `libVLC` dylib matching the
+> current app/JVM architecture. When found, it loads `libvlc.5.dylib` and the sibling `libvlccore.dylib` dynamically at
+> runtime, uses libVLC video callbacks inside the Compose surface, exposes embedded audio/subtitle tracks, reports native
+> progress/duration, and keeps playback inside the app. The app never launches the visible VLC UI. VLC's memory callback
+> path does not expose fully blended subtitle pixels to the Compose surface, so selecting an embedded text subtitle track
+> switches that MKV/WebM playback to the external HLS renderer described below.
+> Set `COMPOSE_MEDIA_PLAYER_MACOS_FALLBACK_BACKEND=libvlc` or
+> `-Dcomposemediaplayer.macos.fallbackBackend=libvlc` to require this in-process backend. To point at a specific install,
+> set `COMPOSE_MEDIA_PLAYER_LIBVLC=/path/to/libvlc.5.dylib` and
+> `COMPOSE_MEDIA_PLAYER_LIBVLC_PLUGINS=/path/to/plugins`, or the equivalent system properties
+> `composemediaplayer.macos.libvlc` and `composemediaplayer.macos.libvlc.plugins`.
+>
+> If compatible libVLC is not available, or if an embedded subtitle track is selected, the external HLS fallback can use
+> user-installed `ffmpeg` or VLC. The ffmpeg backend transcodes the first video stream and selected audio stream to
+> H.264/AAC HLS in a bounded temporary buffer, serves that HLS source from `127.0.0.1`, and hands it to AVPlayer.
+> Selecting an embedded text subtitle track such as ASS/SSA/SRT/WebVTT restarts the HLS fallback with ffmpeg's
+> `subtitles` filter, so ASS/SSA is rendered by libass and burned into the temporary HLS video. The configured `ffmpeg`
+> must expose that filter. On Homebrew, the regular `ffmpeg` formula may not include libass; install `ffmpeg-full` or
+> point `COMPOSE_MEDIA_PLAYER_FFMPEG` to another ffmpeg build that exposes the `subtitles` filter. Homebrew's keg-only
+> `ffmpeg-full` is auto-detected for embedded subtitle rendering when it is installed. Set
+> `COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND=vlc` or
+> `-Dcomposemediaplayer.macos.hlsFallbackBackend=vlc` to use VLC as the external HLS fallback. That backend uses VLC's
+> `soverlay` transcode path for embedded subtitle rendering. Set
+> `COMPOSE_MEDIA_PLAYER_VLC=/path/to/VLC` or `-Dcomposemediaplayer.macos.vlc=/path/to/VLC` to choose a specific
+> executable.
+>
+> The library does **not** bundle, compile-link, or redistribute `ffmpeg`, VLC, libVLC, mpv, IINA, `vlcj`, JNA, or GPL
+> code. VLC/libVLC remains a user-installed runtime component; if you bundle or redistribute external binaries yourself,
+> their license terms remain your responsibility. Disable the macOS fallback with
+> `COMPOSE_MEDIA_PLAYER_MACOS_FFMPEG_FALLBACK=false` or `-Dcomposemediaplayer.macos.ffmpegFallback=false`.
 
 ## ✅ Supported Codec Checks
 
@@ -399,11 +431,11 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered on browser targets with JASSUB, which runs libass in WebAssembly.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered as plain dialogue text by Compose on native targets and with full styling on browser targets through JASSUB/libass. On macOS MKV/WebM fallback, selecting an embedded ASS/SSA track switches playback to the external VLC/ffmpeg HLS renderer so the subtitles are burned into the temporary stream with the user's installed renderer.
 
 #### 🎯 Supported Formats
 
-The player supports SRT and VTT subtitle formats with automatic format detection. On browser targets, `.ass` and `.ssa` subtitles are supported through JASSUB/libass running in WebAssembly.
+The player supports SRT, VTT, ASS and SSA subtitle formats with automatic format detection. Browser targets use JASSUB/libass for styled ASS/SSA rendering; native targets parse ASS/SSA timing and dialogue text in Compose unless a platform-specific backend, such as the macOS MKV/WebM external ffmpeg/VLC fallback, provides full libass rendering.
 
 #### 🎯 Adding Subtitles from URL or Local File
 
@@ -413,7 +445,7 @@ You can add subtitles by specifying a URL:
 val track = SubtitleTrack(
     label = "English Subtitles",
     language = "en",
-    src = "https://example.com/subtitles.vtt" // Works with .srt, .vtt and browser .ass/.ssa files
+    src = "https://example.com/subtitles.vtt" // Works with .srt, .vtt, .ass and .ssa files
 )
 playerState.selectSubtitleTrack(track)
 ```
@@ -486,7 +518,7 @@ Browser notes:
 
 #### Selecting Embedded Audio and Subtitle Tracks
 
-When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, and Android reads Media3 track groups.
+When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, Android reads Media3 track groups, and the macOS MKV/WebM fallback exposes embedded audio/subtitle tracks when `ffprobe` is available.
 
 ```kotlin
 val audioTrack = playerState.availableAudioTracks.firstOrNull()

@@ -15,6 +15,11 @@ internal object MacNativeBridge {
     // Playback control
     @JvmStatic external fun nCreatePlayer(): Long
 
+    @JvmStatic external fun nCreateLibVlcPlayer(
+        libVlcPath: String,
+        pluginPath: String,
+    ): Long
+
     @JvmStatic external fun nOpenUri(
         handle: Long,
         uri: String,
@@ -95,4 +100,16 @@ internal object MacNativeBridge {
 
     // Playback completion
     @JvmStatic external fun nConsumeDidPlayToEnd(handle: Long): Boolean
+
+    @JvmStatic external fun nSelectLibVlcAudioTrack(
+        handle: Long,
+        ordinal: Int,
+    ): Boolean
+
+    @JvmStatic external fun nSelectLibVlcSubtitleTrack(
+        handle: Long,
+        ordinal: Int,
+    ): Boolean
+
+    @JvmStatic external fun nDisableLibVlcSubtitles(handle: Long): Boolean
 }

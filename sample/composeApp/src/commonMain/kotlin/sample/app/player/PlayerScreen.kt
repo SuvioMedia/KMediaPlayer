@@ -81,6 +81,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
             if (playerState.isPlaying) {
                 playerState.pause()
             }
+            restoreMacMkvPlaybackBackend()
         }
     }
 
@@ -89,6 +90,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
     var videoUrl by remember { mutableStateOf(SAMPLE_VIDEOS.first().second) }
     var initialPlayerState by remember { mutableStateOf(InitialPlayerState.PLAY) }
     var selectedContentScale by remember { mutableStateOf(ContentScale.Fit) }
+    var selectedMacMkvBackend by remember { mutableStateOf(MacMkvPlaybackBackend.AUTO) }
 
     val controlsVisible = true
     var showSourceSheet by remember { mutableStateOf(false) }
@@ -102,8 +104,20 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
     var pendingPickSubtitle by remember { mutableStateOf(false) }
     var demoLoaded by remember { mutableStateOf(false) }
 
+    fun applyMacMkvBackend() {
+        applyMacMkvPlaybackBackend(selectedMacMkvBackend)
+    }
+
+    fun openVideoUrl(url: String) {
+        applyMacMkvBackend()
+        playerState.openUri(url, initialPlayerState)
+    }
+
     val videoFileLauncher = rememberFilePickerLauncher(type = FileKitType.Video) { file ->
-        file?.let { playerState.openFile(it, initialPlayerState) }
+        file?.let {
+            applyMacMkvBackend()
+            playerState.openFile(it, initialPlayerState)
+        }
     }
     val subtitleFileLauncher = rememberFilePickerLauncher(
         type = FileKitType.File("vtt", "srt", "ass", "ssa"),
@@ -115,7 +129,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
                     language = "en",
                     src = it.getUri(),
                     format = SubtitleFormat.fromSource(src = it.getUri(), label = it.name),
-            )
+                )
             playerState.availableSubtitleTracks.addIfMissing(track)
             playerState.selectSubtitleTrack(track)
         }
@@ -132,7 +146,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
                 )
             playerState.availableSubtitleTracks.addIfMissing(track)
             playerState.selectSubtitleTrack(track)
-            playerState.openUri(videoUrl, initialPlayerState)
+            openVideoUrl(videoUrl)
             demoLoaded = true
         }
     }
@@ -255,11 +269,17 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
     if (showSourceSheet) {
         MediaSourceSheet(
             videoUrl = videoUrl,
+            macMkvBackendAvailable = macMkvPlaybackBackendSelectionAvailable,
+            selectedMacMkvBackend = selectedMacMkvBackend,
             onUrlChange = { videoUrl = it },
+            onMacMkvBackendChange = { backend ->
+                selectedMacMkvBackend = backend
+                applyMacMkvPlaybackBackend(backend)
+            },
             onLoadUrl = {
                 if (videoUrl.isNotEmpty()) {
                     disableDemoSubtitleForNewSource()
-                    playerState.openUri(videoUrl, initialPlayerState)
+                    openVideoUrl(videoUrl)
                 }
                 showSourceSheet = false
             },
@@ -271,7 +291,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
             onSelectPreset = { url ->
                 videoUrl = url
                 disableDemoSubtitleForNewSource()
-                playerState.openUri(url, initialPlayerState)
+                openVideoUrl(url)
                 showSourceSheet = false
             },
             onDismiss = { showSourceSheet = false },
