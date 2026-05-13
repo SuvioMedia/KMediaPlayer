@@ -79,6 +79,28 @@ private val MediaCodec.webCanPlayTypes: Set<String>
                 )
             MediaCodec.AC3 -> setOf("audio/mp4; codecs=\"ac-3\"")
             MediaCodec.EAC3 -> setOf("audio/mp4; codecs=\"ec-3\"")
+            MediaCodec.TRUEHD ->
+                setOf(
+                    "audio/true-hd",
+                    "audio/mp4; codecs=\"mlpa\"",
+                )
+            MediaCodec.DTS ->
+                setOf(
+                    "audio/vnd.dts",
+                    "audio/mp4; codecs=\"dtsc\"",
+                )
+            MediaCodec.DTS_HD ->
+                setOf(
+                    "audio/vnd.dts.hd",
+                    "audio/mp4; codecs=\"dtsh\"",
+                    "audio/mp4; codecs=\"dtsl\"",
+                )
+            MediaCodec.DTS_EXPRESS -> setOf("audio/vnd.dts.hd;profile=lbr")
+            MediaCodec.DTS_X ->
+                setOf(
+                    "audio/vnd.dts.uhd;profile=p2",
+                    "audio/mp4; codecs=\"dtsx\"",
+                )
             MediaCodec.ALAC -> setOf("audio/mp4; codecs=\"alac\"")
             MediaCodec.PCM ->
                 setOf(

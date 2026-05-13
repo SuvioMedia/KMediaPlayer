@@ -2,40 +2,37 @@ package io.github.kdroidfilter.composemediaplayer
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class VideoPlayerErrorTest {
     @Test
     fun testCodecError() {
-        val error = VideoPlayerError.CodecError("Unsupported codec")
+        val error: VideoPlayerError = VideoPlayerError.CodecError("Unsupported codec")
 
-        assertTrue(error is VideoPlayerError.CodecError)
-        assertEquals("Unsupported codec", (error as VideoPlayerError.CodecError).message)
+        assertEquals("Unsupported codec", assertIs<VideoPlayerError.CodecError>(error).message)
     }
 
     @Test
     fun testNetworkError() {
-        val error = VideoPlayerError.NetworkError("Connection timeout")
+        val error: VideoPlayerError = VideoPlayerError.NetworkError("Connection timeout")
 
-        assertTrue(error is VideoPlayerError.NetworkError)
-        assertEquals("Connection timeout", (error as VideoPlayerError.NetworkError).message)
+        assertEquals("Connection timeout", assertIs<VideoPlayerError.NetworkError>(error).message)
     }
 
     @Test
     fun testSourceError() {
-        val error = VideoPlayerError.SourceError("File not found")
+        val error: VideoPlayerError = VideoPlayerError.SourceError("File not found")
 
-        assertTrue(error is VideoPlayerError.SourceError)
-        assertEquals("File not found", (error as VideoPlayerError.SourceError).message)
+        assertEquals("File not found", assertIs<VideoPlayerError.SourceError>(error).message)
     }
 
     @Test
     fun testUnknownError() {
-        val error = VideoPlayerError.UnknownError("Unexpected error")
+        val error: VideoPlayerError = VideoPlayerError.UnknownError("Unexpected error")
 
-        assertTrue(error is VideoPlayerError.UnknownError)
-        assertEquals("Unexpected error", (error as VideoPlayerError.UnknownError).message)
+        assertEquals("Unexpected error", assertIs<VideoPlayerError.UnknownError>(error).message)
     }
 
     @Test
@@ -54,19 +51,15 @@ class VideoPlayerErrorTest {
 
     @Test
     fun testErrorTypes() {
-        val codecError = VideoPlayerError.CodecError("Codec error")
-        val networkError = VideoPlayerError.NetworkError("Network error")
-        val sourceError = VideoPlayerError.SourceError("Source error")
-        val unknownError = VideoPlayerError.UnknownError("Unknown error")
-
-        // Verify that each error is an instance of VideoPlayerError
-        assertTrue(codecError is VideoPlayerError)
-        assertTrue(networkError is VideoPlayerError)
-        assertTrue(sourceError is VideoPlayerError)
-        assertTrue(unknownError is VideoPlayerError)
+        val errors =
+            listOf<VideoPlayerError>(
+                VideoPlayerError.CodecError("Codec error"),
+                VideoPlayerError.NetworkError("Network error"),
+                VideoPlayerError.SourceError("Source error"),
+                VideoPlayerError.UnknownError("Unknown error"),
+            )
 
         // Verify that errors of different types are not equal
-        val errors = listOf(codecError, networkError, sourceError, unknownError)
         for (i in errors.indices) {
             for (j in errors.indices) {
                 if (i != j) {

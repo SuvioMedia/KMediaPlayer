@@ -2,11 +2,12 @@
 
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 
 plugins {
     alias(libs.plugins.multiplatform)
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.android.multiplatform.library)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose)
     alias(libs.plugins.vannitktech.maven.publish)
@@ -41,8 +42,24 @@ group = projectGroup
 
 kotlin {
     jvmToolchain(17)
-    @Suppress("DEPRECATION")
-    androidTarget { publishLibraryVariants("release") }
+    android {
+        namespace = "io.github.kdroidfilter.composemediaplayer"
+        compileSdk = 37
+        minSdk =
+            libs.versions.android.minSdk
+                .get()
+                .toInt()
+
+        androidResources.enable = true
+
+        withHostTest {
+            isIncludeAndroidResources = true
+        }
+
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
     jvm()
     js {
         browser()
@@ -109,10 +126,12 @@ kotlin {
             implementation(libs.androidx.lifecycle.runtime.ktx)
         }
 
-        androidUnitTest.dependencies {
-            implementation(kotlin("test"))
-            implementation(kotlin("test-junit"))
-            implementation(libs.kotlinx.coroutines.test)
+        named("androidHostTest") {
+            dependencies {
+                implementation(kotlin("test"))
+                implementation(kotlin("test-junit"))
+                implementation(libs.kotlinx.coroutines.test)
+            }
         }
 
         jvmMain.dependencies {
@@ -154,18 +173,6 @@ kotlin {
                 freeCompilerArgs.add("-Xexport-kdoc")
             }
         }
-    }
-}
-
-android {
-    namespace = "io.github.kdroidfilter.composemediaplayer"
-    compileSdk = 37
-
-    defaultConfig {
-        minSdk =
-            libs.versions.android.minSdk
-                .get()
-                .toInt()
     }
 }
 
@@ -273,5 +280,4 @@ mavenPublishing {
     if (System.getenv("CI") != null && githubPagesMavenRepository == null) {
         signAllPublications()
     }
-
 }

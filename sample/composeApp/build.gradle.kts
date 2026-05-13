@@ -1,27 +1,37 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
 import io.github.kdroidfilter.nucleus.desktop.application.dsl.CompressionLevel
-import org.apache.tools.ant.taskdefs.condition.Os
 import io.github.kdroidfilter.nucleus.desktop.application.dsl.TargetFormat
+import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
 
 plugins {
     alias(libs.plugins.multiplatform)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose)
-    alias(libs.plugins.android.application)
+    alias(libs.plugins.android.multiplatform.library)
     alias(libs.plugins.nucleus)
 }
-
 
 kotlin {
     jvmToolchain(17)
 
-    @Suppress("DEPRECATION")
-    androidTarget()
+    android {
+        namespace = "sample.app.shared"
+        compileSdk = 37
+        minSdk =
+            libs.versions.android.minSdk
+                .get()
+                .toInt()
+
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
     jvm()
-    js(IR) {
+    js {
         outputModuleName.set("composeApp")
         browser {
             val rootDirPath = project.rootDir.path
@@ -76,11 +86,6 @@ kotlin {
             implementation(libs.filekit.dialogs.compose)
         }
 
-        androidMain.dependencies {
-            implementation(libs.androidx.activityCompose)
-            implementation(libs.androidx.core)
-        }
-
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.nucleus.graalvm.runtime)
@@ -89,24 +94,6 @@ kotlin {
             implementation(libs.kotlinx.browser)
         }
     }
-}
-
-android {
-    namespace = "sample.app"
-    compileSdk = 36
-
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-        targetSdk = 36
-
-        applicationId = "sample.app.androidApp"
-        versionCode = 1
-        versionName = "1.0.0"
-    }
-}
-
-dependencies {
-    debugImplementation(libs.compose.ui.tooling)
 }
 
 nucleus.application {
@@ -137,5 +124,3 @@ nucleus.application {
         )
     }
 }
-
-

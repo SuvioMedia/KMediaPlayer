@@ -14,7 +14,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.viewinterop.WebElementView
+import androidx.compose.ui.viewinterop.HtmlElementView
 import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLCanvasElement
 import org.w3c.dom.HTMLVideoElement
@@ -29,7 +29,7 @@ internal fun AssSubtitleCanvas(
 ) {
     val subtitleTrack = playerState.currentSubtitleTrack
     val shouldRenderAss =
-            AssSubtitleRendererConfig.enabled &&
+        AssSubtitleRendererConfig.enabled &&
             playerState.subtitlesEnabled &&
             subtitleTrack?.resolvedFormat()?.isAssFamily == true &&
             subtitleTrack.src.isNotBlank() &&
@@ -42,7 +42,7 @@ internal fun AssSubtitleCanvas(
     val scope = rememberCoroutineScope()
 
     key(subtitleTrack.src) {
-        WebElementView(
+        HtmlElementView(
             factory = { createAssSubtitleCanvasElement() },
             modifier = if (playerState.isFullscreen) Modifier.fillMaxSize() else modifier,
             update = { canvas ->

@@ -111,7 +111,7 @@ open class DefaultVideoPlayerState(
 
     // Protection against race conditions
     private var isPlayerReleased = false
-    private val playerInitializationLock = Object()
+    private val playerInitializationLock = Any()
     private var playerListener: Player.Listener? = null
 
     // Screen lock detection

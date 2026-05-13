@@ -123,17 +123,15 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
 
     LaunchedEffect(playerState) {
         if (!demoLoaded && !playerState.hasMedia) {
-            if (!videoUrl.usesEmbeddedTrackSample()) {
-                val track =
-                    SubtitleTrack(
-                        label = "ASS demo",
-                        language = "en",
-                        src = DEFAULT_DEMO_ASS_SUBTITLE_URL,
-                        format = SubtitleFormat.ASS,
-                    )
-                playerState.availableSubtitleTracks.addIfMissing(track)
-                playerState.selectSubtitleTrack(track)
-            }
+            val track =
+                SubtitleTrack(
+                    label = "ASS demo",
+                    language = "en",
+                    src = DEFAULT_DEMO_ASS_SUBTITLE_URL,
+                    format = SubtitleFormat.ASS,
+                )
+            playerState.availableSubtitleTracks.addIfMissing(track)
+            playerState.selectSubtitleTrack(track)
             playerState.openUri(videoUrl, initialPlayerState)
             demoLoaded = true
         }
@@ -517,22 +515,14 @@ private fun FullscreenOverlay(playerState: VideoPlayerState) {
 // endregion
 
 internal val SAMPLE_VIDEOS = listOf(
-    "Frieren MKV direct" to FRIEREN_MKV_DIRECT_URL,
     "Big Buck Bunny" to "https://media.w3.org/2010/05/bunny/trailer.mp4",
     "Sintel" to "https://media.w3.org/2010/05/sintel/trailer.mp4",
-    "W3C Test Video" to "https://media.w3.org/2010/05/video/movie_300.mp4",
     "Big Buck Bunny (clip)" to "https://www.w3schools.com/html/mov_bbb.mp4",
     "Sample Video" to "https://archive.org/download/big-bunny-sample-video/SampleVideo.mp4",
     "Big Buck Bunny (full)" to "https://media.w3.org/2010/05/bunny/movie.mp4",
 )
 
-private const val FRIEREN_MKV_DIRECT_URL =
-    "https://nexus-060.weur.tb-cdn.st/dld/d8599018-3fc0-431f-af47-b313e5384935?token=98c6d3f2-648a-4f3e-9653-0cdfc0bd4b21&filename=Frieren.Beyond.Journeys.End.S02E10.A.Beautiful.Sight.1080p.CR.WEB-DL.DUAL.AAC2.0.H.264-VARYG.mkv"
-
 private const val DEFAULT_DEMO_ASS_SUBTITLE_URL = "/assets/subtitles/en.ass"
-
-private fun String.usesEmbeddedTrackSample(): Boolean =
-    this == FRIEREN_MKV_DIRECT_URL
 
 private fun MutableList<SubtitleTrack>.addIfMissing(track: SubtitleTrack) {
     if (none { it.id == track.id && it.src == track.src }) {

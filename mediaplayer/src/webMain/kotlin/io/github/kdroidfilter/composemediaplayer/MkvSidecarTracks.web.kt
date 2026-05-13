@@ -24,8 +24,7 @@ private var matroskaSubtitlesScriptLoad: CompletableDeferred<Boolean>? = null
 internal fun String.isLikelyMkvSource(): Boolean {
     val clean = substringBefore('?').substringBefore('#').lowercase()
     return clean.endsWith(".mkv") ||
-        contains("content-disposition", ignoreCase = true) ||
-        contains("nexus-", ignoreCase = true)
+        contains("content-disposition", ignoreCase = true)
 }
 
 internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(

@@ -10,7 +10,6 @@ import io.github.vinceglb.filekit.dialogs.init
 import java.lang.ref.WeakReference
 
 class AppActivity : ComponentActivity() {
-    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FileKit.init(this)
@@ -18,9 +17,11 @@ class AppActivity : ComponentActivity() {
         setContent { App() }
     }
 
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         DefaultVideoPlayerState.onPictureInPictureModeChanged(isInPictureInPictureMode)
     }
-
 }

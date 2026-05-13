@@ -13,6 +13,8 @@ enum class MediaCodecType {
  *
  * Codec support is platform and runtime dependent. Android and web targets query the current
  * runtime where possible, while desktop and iOS expose conservative backend capabilities.
+ * Android queries advertised decoders, so passthrough-only audio support can still depend on the
+ * active output device and may not be reported here.
  *
  * @property type Whether the codec belongs to an audio or video track.
  * @property displayName Human-readable codec name.
@@ -41,6 +43,11 @@ enum class MediaCodec(
     FLAC(MediaCodecType.AUDIO, "FLAC", setOf("audio/flac")),
     AC3(MediaCodecType.AUDIO, "AC-3", setOf("audio/ac3")),
     EAC3(MediaCodecType.AUDIO, "E-AC-3", setOf("audio/eac3", "audio/eac3-joc")),
+    TRUEHD(MediaCodecType.AUDIO, "Dolby TrueHD", setOf("audio/true-hd")),
+    DTS(MediaCodecType.AUDIO, "DTS", setOf("audio/vnd.dts")),
+    DTS_HD(MediaCodecType.AUDIO, "DTS-HD", setOf("audio/vnd.dts.hd")),
+    DTS_EXPRESS(MediaCodecType.AUDIO, "DTS Express", setOf("audio/vnd.dts.hd;profile=lbr")),
+    DTS_X(MediaCodecType.AUDIO, "DTS:X", setOf("audio/vnd.dts.uhd;profile=p2")),
     ALAC(MediaCodecType.AUDIO, "ALAC", setOf("audio/alac")),
     PCM(MediaCodecType.AUDIO, "PCM", setOf("audio/raw", "audio/wav")),
     AMR_NB(MediaCodecType.AUDIO, "AMR-NB", setOf("audio/3gpp", "audio/amr")),

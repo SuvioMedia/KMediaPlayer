@@ -82,15 +82,6 @@ private val posts = listOf(
         comments = "94",
         timeAgo = "5h",
     ),
-    Post(
-        author = "W3C",
-        handle = "@w3c",
-        text = "A short test video for web media playback compatibility.",
-        videoUrl = "https://media.w3.org/2010/05/video/movie_300.mp4",
-        likes = "956",
-        comments = "42",
-        timeAgo = "1d",
-    ),
 )
 
 @Composable

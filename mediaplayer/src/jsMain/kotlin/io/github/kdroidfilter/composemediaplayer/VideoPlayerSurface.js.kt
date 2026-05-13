@@ -7,7 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.viewinterop.WebElementView
+import androidx.compose.ui.viewinterop.HtmlElementView
 import org.w3c.dom.HTMLVideoElement
 
 @Composable
@@ -50,7 +50,7 @@ actual fun VideoPlayerSurface(
             scope = scope,
         )
 
-        // Video content layout with WebElementView
+        // Video content layout with HtmlElementView
         VideoContentLayout(
             playerState = playerState,
             modifier = modifier,
@@ -59,7 +59,7 @@ actual fun VideoPlayerSurface(
             overlay = overlay,
         ) {
             key(useCors) {
-                WebElementView(
+                HtmlElementView(
                     factory = {
                         createVideoElement(useCors).apply {
                             setupMetadataListener(playerState) { ratio ->

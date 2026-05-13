@@ -2,8 +2,7 @@
 
 <img src="/assets/banner.jpg" style="border-radius: 10px;"/>
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.kdroidfilter/composemediaplayer.svg)](https://search.maven.org/artifact/io.github.kdroidfilter/composemediaplayer)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Maven](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fshusek.github.io%2FKMediaPlayer%2Fmaven%2Fio%2Fgithub%2Fshusek%2Fcomposemediaplayer%2Fmaven-metadata.xml&label=maven)](https://shusek.github.io/KMediaPlayer/maven/io/github/shusek/composemediaplayer/maven-metadata.xml)
 [![Kotlin](https://img.shields.io/badge/kotlin-multiplatform-blue.svg?logo=kotlin)](https://kotlinlang.org/docs/multiplatform.html)
 [![Platforms](https://img.shields.io/badge/platforms-Android%20|%20iOS%20|%20macOS%20JVM%20|%20Windows%20JVM%20|%20Linux%20JVM%20|%20Web-lightgrey.svg)](https://github.com/Shusek/KMediaPlayer)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/Shusek/KMediaPlayer/issues)
@@ -54,10 +53,7 @@
 - [Metadata Support](#-metadata-support)
   - [Example Usage](#example-usage)
   - [Basic Example](#-basic-example)
-- [License](#-license)
 - [Roadmap](#-roadmap)
-- [Applications Using This Library](#-applications-using-this-library)
-- [Star History](#-star-history)
 
 ## 🚀 Live Demo
 
@@ -800,22 +796,7 @@ fun App() {
 }
 ```
 
-## 📄 License
-
-Compose Media Player is licensed under the MIT License. See [LICENSE](LICENSE) for details.
-
 ## 📊 Roadmap
 
 - **Audio Player**: Introduce a standalone audio player for handling audio-only content.
 - **Player with Separate Audio and Video Streams**: Add functionality to support different audio and video streams for advanced playback scenarios.
-
-## 🚀 Applications Using This Library
-
-- [Pushscroll](https://pushscroll.com) - Pushscroll: Screen-Time Gym
-- [Pixelix](https://github.com/ghostbyte-dev/pixelix) - Pixelfed client for Android and iOS
-
-If you're using this library in your project, please let us know and we'll add it to this list!
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Shusek/KMediaPlayer&type=Date)](https://www.star-history.com/#Shusek/KMediaPlayer&Date)
