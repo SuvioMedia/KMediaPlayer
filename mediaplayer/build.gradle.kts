@@ -181,13 +181,7 @@ val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources/compo
 val buildNativeMacOs by tasks.registering(Exec::class) {
     description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
     group = "build"
-    val hasPrebuilt =
-        nativeResourceDir
-            .dir("darwin-aarch64")
-            .file("libNativeVideoPlayer.dylib")
-            .asFile
-            .exists()
-    enabled = Os.isFamily(Os.FAMILY_MAC) && !hasPrebuilt
+    enabled = Os.isFamily(Os.FAMILY_MAC)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/macos")
     inputs.dir(nativeDir)
@@ -264,6 +258,14 @@ mavenPublishing {
             developer {
                 id.set("Shusek")
                 name.set("Shusek")
+            }
+        }
+
+        licenses {
+            license {
+                name.set("Internal Use Notice and Limited License")
+                url.set("https://github.com/Shusek/KMediaPlayer/blob/master/LICENSE")
+                distribution.set("repo")
             }
         }
 

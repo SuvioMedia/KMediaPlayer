@@ -44,8 +44,9 @@ fun MacVideoPlayerSurface(
             },
         contentAlignment = Alignment.Center,
     ) {
-        // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
-        if (playerState.hasMedia && (!playerState.isFullscreen || isInFullscreenWindow)) {
+        // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window.
+        val shouldRenderVideo = playerState.hasMedia && (!playerState.isFullscreen || isInFullscreenWindow)
+        if (shouldRenderVideo) {
             // Force recomposition when currentFrameState changes
             val currentFrame by remember(playerState) { playerState.currentFrameState }
 
@@ -69,7 +70,8 @@ fun MacVideoPlayerSurface(
             // Add Compose-based subtitle layer
             if (playerState.subtitlesEnabled &&
                 playerState.currentSubtitleTrack != null &&
-                playerState.currentSubtitleTrack?.isEmbedded != true
+                playerState.currentSubtitleTrack?.isEmbedded != true &&
+                !playerState.usesLibAssSubtitleOverlay
             ) {
                 // Calculate current time in milliseconds
                 val currentTimeMs =

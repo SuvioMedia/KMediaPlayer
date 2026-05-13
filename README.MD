@@ -10,10 +10,7 @@
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Shusek/KMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/Shusek/KMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
 [![GitHub last commit](https://img.shields.io/github/last-commit/Shusek/KMediaPlayer)](https://github.com/Shusek/KMediaPlayer/commits/master)
 
-### Supported by
-[![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
-
-**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations. All desktop platforms communicate with their native backends through **pure JNI** — no JNA, no GStreamer Java bindings, no external runtime dependencies. The library leverages:
+**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations for its native backends. All desktop platforms communicate with their native backends through **pure JNI** — no JNA and no Java media bindings. The library leverages:
 
 - **GStreamer** (via JNI) for Linux
 - **Media Foundation** (via JNI) for Windows
@@ -21,7 +18,12 @@
 - **Media3** for Android
 - **HTML5 Player** for WASMJS
 
+## Project Status
+
+This repository is a personal fork maintained for my own projects and integration needs. It is published for transparency and reproducible builds, but it is not a supported public distribution of the library. Releases may change without compatibility guarantees, and I cannot provide support for third-party usage. If you need a stable library for your own project, please use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
+
 ## Table of Contents
+- [Project Status](#project-status)
 - [Live Demo](#-live-demo)
 - [Features](#-features)
 - [Supported Video Formats](#-supported-video-formats)
@@ -79,10 +81,10 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 | **Player** | [MediaFoundation](https://learn.microsoft.com/en-us/windows/win32/medfound/microsoft-media-foundation-sdk) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | [HTML5 Video](https://www.w3schools.com/html/html5_video.asp) |
 | MP4 (H.264) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ✅ |
 | AVI | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
-| MKV | ❌                                                                                                                 | ✅ | ❌                                                                           | ✅ | ❌ |
+| MKV | ❌                                                                                                                 | ✅ | ⚠️†                                                                          | ✅ | ❌ |
 | MOV | ✅                                                                                                                 | ✅ | ✅                                                                           | ❌ | ✅ |
 | FLV | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
-| WEBM | ❌                                                                                                                 | ✅ | ❌                                                                           | ✅ | ✅ |
+| WEBM | ❌                                                                                                                 | ✅ | ⚠️†                                                                          | ✅ | ✅ |
 | WMV | ✅                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
 | 3GP | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ❌ |
 | HLS (M3U8) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅* | ❌ |
@@ -91,6 +93,8 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 > ```kotlin
 > implementation("androidx.media3:media3-exoplayer-hls:<version>")
 > ```
+
+> † On macOS, MKV/WebM support is handled by optional fallback backends for formats AVPlayer cannot demux directly; see [macOS MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
 ## ✅ Supported Codec Checks
 
@@ -113,11 +117,22 @@ val aacSupported = SupportedMediaCodecs.queryIsSupported(MediaCodec.AAC)
 
 ## 🔧 Installation
 
-To add Compose Media Player to your project, include the following dependency in your `build.gradle.kts` file:
+To add Compose Media Player to your project, add the GitHub Pages Maven repository in your `settings.gradle.kts` file:
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven("https://shusek.github.io/KMediaPlayer/maven")
+    }
+}
+```
+
+Then include the dependency in your module `build.gradle.kts` file:
 
 ```kotlin
 dependencies {
-    implementation("io.github.kdroidfilter:composemediaplayer:<version>")
+    implementation("io.github.shusek:composemediaplayer:<version>")
 }
 ```
 
@@ -399,11 +414,11 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered on browser targets with JASSUB, which runs libass in WebAssembly.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered as plain dialogue text by Compose on native targets and with full styling on browser targets through JASSUB/libass. On macOS JVM, the libVLC memory-callback MKV/WebM backend can dynamically load user-installed libass and blend full ASS/SSA rendering into the Compose/Skia frame.
 
 #### 🎯 Supported Formats
 
-The player supports SRT and VTT subtitle formats with automatic format detection. On browser targets, `.ass` and `.ssa` subtitles are supported through JASSUB/libass running in WebAssembly.
+The player supports SRT, VTT, ASS and SSA subtitle formats with automatic format detection. Browser targets use JASSUB/libass for styled ASS/SSA rendering; native targets parse ASS/SSA timing and dialogue text in Compose unless a platform-specific backend, such as the macOS JVM libVLC canvas backend, provides full libass rendering.
 
 #### 🎯 Adding Subtitles from URL or Local File
 
@@ -413,7 +428,7 @@ You can add subtitles by specifying a URL:
 val track = SubtitleTrack(
     label = "English Subtitles",
     language = "en",
-    src = "https://example.com/subtitles.vtt" // Works with .srt, .vtt and browser .ass/.ssa files
+    src = "https://example.com/subtitles.vtt" // Works with .srt, .vtt, .ass and .ssa files
 )
 playerState.selectSubtitleTrack(track)
 ```
@@ -486,7 +501,7 @@ Browser notes:
 
 #### Selecting Embedded Audio and Subtitle Tracks
 
-When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, and Android reads Media3 track groups.
+When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, Android reads Media3 track groups, and the macOS MKV/WebM fallback exposes embedded audio/subtitle tracks when `ffprobe` is available.
 
 ```kotlin
 val audioTrack = playerState.availableAudioTracks.firstOrNull()
@@ -798,5 +813,4 @@ fun App() {
 
 ## 📊 Roadmap
 
-- **Audio Player**: Introduce a standalone audio player for handling audio-only content.
 - **Player with Separate Audio and Video Streams**: Add functionality to support different audio and video streams for advanced playback scenarios.

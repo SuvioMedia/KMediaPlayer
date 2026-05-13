@@ -180,6 +180,22 @@ internal fun SettingsSheet(
                     }
                 }
             }
+
+            if (!playerState.renderingInfo.isAllNull()) {
+                HorizontalDivider()
+                Section("Rendering") {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        playerState.renderingInfo.backend?.let { InfoRow("Backend", it) }
+                        playerState.renderingInfo.container?.let { InfoRow("Container", it) }
+                        playerState.renderingInfo.videoDecoder?.let { InfoRow("Video decode", it) }
+                        playerState.renderingInfo.videoRenderer?.let { InfoRow("Video render", it) }
+                        playerState.renderingInfo.audioRenderer?.let { InfoRow("Audio", it) }
+                        playerState.renderingInfo.subtitleRenderer?.let { InfoRow("Subtitles", it) }
+                        playerState.renderingInfo.subtitleSource?.let { InfoRow("Subtitle source", it) }
+                        playerState.renderingInfo.notes?.let { InfoRow("Notes", it) }
+                    }
+                }
+            }
         }
     }
 }

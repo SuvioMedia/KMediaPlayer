@@ -81,6 +81,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
             if (playerState.isPlaying) {
                 playerState.pause()
             }
+            restoreMacMkvPlaybackBackend()
         }
     }
 
@@ -89,6 +90,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
     var videoUrl by remember { mutableStateOf(SAMPLE_VIDEOS.first().second) }
     var initialPlayerState by remember { mutableStateOf(InitialPlayerState.PLAY) }
     var selectedContentScale by remember { mutableStateOf(ContentScale.Fit) }
+    var selectedMacMkvBackend by remember { mutableStateOf(MacMkvPlaybackBackend.AUTO) }
 
     val controlsVisible = true
     var showSourceSheet by remember { mutableStateOf(false) }
@@ -102,8 +104,20 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
     var pendingPickSubtitle by remember { mutableStateOf(false) }
     var demoLoaded by remember { mutableStateOf(false) }
 
+    fun applyMacMkvBackend() {
+        applyMacMkvPlaybackBackend(selectedMacMkvBackend)
+    }
+
+    fun openVideoUrl(url: String) {
+        applyMacMkvBackend()
+        playerState.openUri(url, initialPlayerState)
+    }
+
     val videoFileLauncher = rememberFilePickerLauncher(type = FileKitType.Video) { file ->
-        file?.let { playerState.openFile(it, initialPlayerState) }
+        file?.let {
+            applyMacMkvBackend()
+            playerState.openFile(it, initialPlayerState)
+        }
     }
     val subtitleFileLauncher = rememberFilePickerLauncher(
         type = FileKitType.File("vtt", "srt", "ass", "ssa"),
@@ -115,7 +129,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
                     language = "en",
                     src = it.getUri(),
                     format = SubtitleFormat.fromSource(src = it.getUri(), label = it.name),
-            )
+                )
             playerState.availableSubtitleTracks.addIfMissing(track)
             playerState.selectSubtitleTrack(track)
         }
@@ -132,7 +146,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
                 )
             playerState.availableSubtitleTracks.addIfMissing(track)
             playerState.selectSubtitleTrack(track)
-            playerState.openUri(videoUrl, initialPlayerState)
+            openVideoUrl(videoUrl)
             demoLoaded = true
         }
     }
@@ -253,13 +267,21 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
 
     // Bottom sheets
     if (showSourceSheet) {
+        val macMkvBackendOptions = remember(showSourceSheet) { macMkvPlaybackBackendOptions() }
         MediaSourceSheet(
             videoUrl = videoUrl,
+            macMkvBackendAvailable = macMkvPlaybackBackendSelectionAvailable,
+            macMkvBackendOptions = macMkvBackendOptions,
+            selectedMacMkvBackend = selectedMacMkvBackend,
             onUrlChange = { videoUrl = it },
+            onMacMkvBackendChange = { backend ->
+                selectedMacMkvBackend = backend
+                applyMacMkvPlaybackBackend(backend)
+            },
             onLoadUrl = {
                 if (videoUrl.isNotEmpty()) {
                     disableDemoSubtitleForNewSource()
-                    playerState.openUri(videoUrl, initialPlayerState)
+                    openVideoUrl(videoUrl)
                 }
                 showSourceSheet = false
             },
@@ -271,7 +293,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
             onSelectPreset = { url ->
                 videoUrl = url
                 disableDemoSubtitleForNewSource()
-                playerState.openUri(url, initialPlayerState)
+                openVideoUrl(url)
                 showSourceSheet = false
             },
             onDismiss = { showSourceSheet = false },
@@ -291,6 +313,7 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
         SubtitleSheet(
             audioTracks = playerState.availableAudioTracks,
             selectedAudioTrack = playerState.currentAudioTrack,
+            controlsEnabled = !playerState.isLoading,
             onAudioTrackSelected = { track ->
                 playerState.selectAudioTrack(track)
             },
@@ -391,54 +414,97 @@ private fun ControlsOverlay(
         }
 
         // Bottom: seekbar + time + actions
-        Column(
+        PlayerBottomControls(
+            playerState = playerState,
+            onSourceClick = onSourceClick,
+            onSubtitlesClick = onSubtitlesClick,
+            onSettingsClick = onSettingsClick,
+            onPipClick = onPipClick,
+            showPlaybackButton = false,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+        )
+    }
+}
+
+@Composable
+private fun PlayerBottomControls(
+    playerState: VideoPlayerState,
+    onSourceClick: () -> Unit,
+    onSubtitlesClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onPipClick: () -> Unit,
+    showPlaybackButton: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val subtitlesActive = playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Slider(
+            value = playerState.sliderPos,
+            onValueChange = { playerState.seekStart(it) },
+            onValueChangeFinished = { playerState.seekFinished() },
+            valueRange = 0f..1000f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+            ),
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Seek bar
-            Slider(
-                value = playerState.sliderPos,
-                onValueChange = { playerState.seekStart(it) },
-                onValueChangeFinished = { playerState.seekFinished() },
-                valueRange = 0f..1000f,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.3f),
-                ),
+            Text(
+                text = "${playerState.positionText}  /  ${playerState.durationText}",
+                color = Color.White.copy(alpha = 0.9f),
+                style = MaterialTheme.typography.bodySmall,
             )
 
-            // Time + action icons row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "${playerState.positionText}  /  ${playerState.durationText}",
-                    color = Color.White.copy(alpha = 0.9f),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    OverlayIconButton(onClick = onSourceClick) {
-                        Icon(Icons.Default.UploadFile, "Source", tint = Color.White, modifier = Modifier.size(20.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (showPlaybackButton) {
+                    OverlayIconButton(onClick = {
+                        if (playerState.isPlaying) playerState.pause() else playerState.play()
+                    }) {
+                        Icon(
+                            imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (playerState.isPlaying) "Pause" else "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
-                    OverlayIconButton(onClick = onSubtitlesClick) {
-                        Icon(Icons.Default.Subtitles, "Subtitles", tint = Color.White, modifier = Modifier.size(20.dp))
-                    }
-                    OverlayIconButton(onClick = { playerState.toggleFullscreen() }) {
-                        Icon(Icons.Default.Fullscreen, "Fullscreen", tint = Color.White, modifier = Modifier.size(20.dp))
-                    }
-                    OverlayIconButton(onClick = onPipClick) {
-                        Icon(Icons.Default.PictureInPicture, "PiP", tint = Color.White, modifier = Modifier.size(20.dp))
-                    }
-                    OverlayIconButton(onClick = onSettingsClick) {
-                        Icon(Icons.Default.Settings, "Settings", tint = Color.White, modifier = Modifier.size(20.dp))
-                    }
+                }
+                OverlayIconButton(onClick = onSourceClick) {
+                    Icon(Icons.Default.UploadFile, "Source", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                OverlayIconButton(onClick = onSubtitlesClick) {
+                    Icon(
+                        Icons.Default.Subtitles,
+                        "Subtitles",
+                        tint =
+                            if (subtitlesActive) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color.White
+                            },
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                OverlayIconButton(onClick = { playerState.toggleFullscreen() }) {
+                    Icon(Icons.Default.Fullscreen, "Fullscreen", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                OverlayIconButton(onClick = onPipClick) {
+                    Icon(Icons.Default.PictureInPicture, "PiP", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                OverlayIconButton(onClick = onSettingsClick) {
+                    Icon(Icons.Default.Settings, "Settings", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -522,7 +588,8 @@ internal val SAMPLE_VIDEOS = listOf(
     "Big Buck Bunny (full)" to "https://media.w3.org/2010/05/bunny/movie.mp4",
 )
 
-private const val DEFAULT_DEMO_ASS_SUBTITLE_URL = "/assets/subtitles/en.ass"
+private const val DEFAULT_DEMO_ASS_SUBTITLE_URL =
+    "https://raw.githubusercontent.com/Shusek/KMediaPlayer/refs/heads/master/assets/subtitles/en.ass"
 
 private fun MutableList<SubtitleTrack>.addIfMissing(track: SubtitleTrack) {
     if (none { it.id == track.id && it.src == track.src }) {

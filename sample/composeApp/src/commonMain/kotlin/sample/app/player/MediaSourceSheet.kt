@@ -34,7 +34,11 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun MediaSourceSheet(
     videoUrl: String,
+    macMkvBackendAvailable: Boolean,
+    macMkvBackendOptions: List<MacMkvPlaybackBackendOption>,
+    selectedMacMkvBackend: MacMkvPlaybackBackend,
     onUrlChange: (String) -> Unit,
+    onMacMkvBackendChange: (MacMkvPlaybackBackend) -> Unit,
     onLoadUrl: () -> Unit,
     onPickFile: () -> Unit,
     onSelectPreset: (String) -> Unit,
@@ -75,6 +79,59 @@ internal fun MediaSourceSheet(
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
             )
+
+            if (macMkvBackendAvailable) {
+                HorizontalDivider()
+
+                val backendOptions =
+                    macMkvBackendOptions.ifEmpty {
+                        MacMkvPlaybackBackend.entries.map { backend ->
+                            MacMkvPlaybackBackendOption(
+                                backend = backend,
+                                enabled = true,
+                                status = "Availability was not reported by this platform.",
+                            )
+                        }
+                    }
+                val selectedBackendOption = backendOptions.firstOrNull { it.backend == selectedMacMkvBackend }
+
+                Text(
+                    text = "macOS MKV backend",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    backendOptions.forEach { option ->
+                        FilterChip(
+                            enabled = option.enabled,
+                            selected = selectedMacMkvBackend == option.backend,
+                            onClick = { onMacMkvBackendChange(option.backend) },
+                            label = { Text(option.backend.label) },
+                        )
+                    }
+                }
+
+                selectedBackendOption?.let { option ->
+                    Text(
+                        text = listOfNotNull(option.status, option.installHint).joinToString(" "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                backendOptions
+                    .filter { option -> !option.enabled && option.backend != MacMkvPlaybackBackend.AUTO }
+                    .forEach { option ->
+                        Text(
+                            text = "${option.backend.label}: ${listOfNotNull(option.status, option.installHint).joinToString(" ")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+            }
 
             // File picker
             OutlinedButton(

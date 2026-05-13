@@ -183,6 +183,8 @@ interface VideoPlayerState {
 
     // Metadata
     val metadata: VideoMetadata
+    val renderingInfo: VideoRenderingInfo
+        get() = VideoRenderingInfo()
 
     // Audio track management
     var currentAudioTrack: AudioTrack?
@@ -305,6 +307,7 @@ data class PreviewableVideoPlayerState(
     override val aspectRatio: Float = 1.7f,
     override val error: VideoPlayerError? = null,
     override val metadata: VideoMetadata = VideoMetadata(),
+    override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo(),
     override var currentAudioTrack: AudioTrack? = null,
     override val availableAudioTracks: MutableList<AudioTrack> = emptyList<AudioTrack>().toMutableList(),
     override var subtitlesEnabled: Boolean = false,

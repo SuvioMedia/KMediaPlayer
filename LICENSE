@@ -1,0 +1,25 @@
+Internal Use Notice and Limited License
+
+Copyright (c) 2026 Shusek
+
+This fork of Compose Media Player is maintained for the maintainer's internal
+use.
+
+Permission is granted to use, copy, modify, and distribute this fork only for
+the maintainer's internal projects and deployments, unless the maintainer gives
+explicit written permission for another use.
+
+This fork does not promise source, binary, API, ABI, behavior, Gradle metadata,
+native backend, or artifact compatibility with any previous version or with the
+upstream library. Releases may change or remove functionality without notice.
+
+This fork is provided "as is", without warranties, maintenance obligations,
+support commitments, or issue-response guarantees. The maintainer does not have
+the resources to support third-party use of this fork.
+
+For public, external, or general-purpose use, please use the original upstream
+library instead:
+
+https://github.com/kdroidFilter/ComposeMediaPlayer
+
+All rights not expressly granted above are reserved.

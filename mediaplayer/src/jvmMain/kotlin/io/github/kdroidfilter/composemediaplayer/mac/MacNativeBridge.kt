@@ -15,6 +15,35 @@ internal object MacNativeBridge {
     // Playback control
     @JvmStatic external fun nCreatePlayer(): Long
 
+    @JvmStatic external fun nCreateLibVlcPlayer(
+        libVlcPath: String,
+        pluginPath: String,
+    ): Long
+
+    @JvmStatic external fun nCreateLibAssRenderer(libAssPath: String): Long
+
+    @JvmStatic external fun nSetLibAssTrack(
+        handle: Long,
+        assData: String,
+    ): Boolean
+
+    @JvmStatic external fun nAddLibAssFont(
+        handle: Long,
+        name: String,
+        data: ByteArray,
+    ): Boolean
+
+    @JvmStatic external fun nBlendLibAssFrame(
+        handle: Long,
+        pixelsAddress: Long,
+        rowBytes: Int,
+        width: Int,
+        height: Int,
+        timeMs: Long,
+    ): Boolean
+
+    @JvmStatic external fun nDisposeLibAssRenderer(handle: Long)
+
     @JvmStatic external fun nOpenUri(
         handle: Long,
         uri: String,
@@ -45,7 +74,7 @@ internal object MacNativeBridge {
 
     @JvmStatic external fun nGetPlaybackSpeed(handle: Long): Float
 
-    // Frame access — lock/unlock CVPixelBuffer directly (zero intermediate copy)
+    // Frame access — lock/unlock the native frame buffer directly.
     // outInfo must be IntArray(3); filled with [width, height, bytesPerRow] on success.
     // Returns the native base address of the locked buffer, or 0 on failure.
     // MUST call nUnlockFrame after reading.
@@ -95,4 +124,20 @@ internal object MacNativeBridge {
 
     // Playback completion
     @JvmStatic external fun nConsumeDidPlayToEnd(handle: Long): Boolean
+
+    @JvmStatic external fun nSelectLibVlcAudioTrack(
+        handle: Long,
+        ordinal: Int,
+    ): Boolean
+
+    @JvmStatic external fun nSelectLibVlcSubtitleTrack(
+        handle: Long,
+        ordinal: Int,
+    ): Boolean
+
+    @JvmStatic external fun nGetLibVlcAudioTrackDescriptions(handle: Long): String?
+
+    @JvmStatic external fun nGetLibVlcSubtitleTrackDescriptions(handle: Long): String?
+
+    @JvmStatic external fun nDisableLibVlcSubtitles(handle: Long): Boolean
 }

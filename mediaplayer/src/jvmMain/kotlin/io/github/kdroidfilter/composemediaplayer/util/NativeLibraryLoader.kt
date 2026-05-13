@@ -52,12 +52,6 @@ internal object NativeLibraryLoader {
         cacheDir.mkdirs()
         val cachedFile = File(cacheDir, fileName)
 
-        // Validate cache: re-extract if size differs or file is missing
-        val resourceSize = resourceUrl.openConnection().contentLengthLong
-        if (cachedFile.exists() && cachedFile.length() == resourceSize) {
-            return cachedFile
-        }
-
         // Atomic extract: write to temp then move
         val tmpFile = File(cacheDir, "$fileName.tmp")
         try {

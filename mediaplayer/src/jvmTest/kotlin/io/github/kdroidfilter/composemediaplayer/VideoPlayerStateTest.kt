@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -109,6 +110,42 @@ class VideoPlayerStateTest {
 
         playerState.toggleFullscreen()
         assertFalse(playerState.isFullscreen)
+
+        playerState.dispose()
+    }
+
+    @Test
+    fun testDefaultStateReflectsDelegateSubtitleState() {
+        if (!isNativePlayerAvailable()) {
+            println("Skipping test: Native player not available")
+            return
+        }
+
+        val playerState = createVideoPlayerState()
+        val defaultState = playerState as? DefaultVideoPlayerState
+        if (defaultState == null) {
+            playerState.dispose()
+            return
+        }
+
+        val subtitleTrack =
+            SubtitleTrack(
+                label = "ASS sample",
+                language = "en",
+                src = "/tmp/sample.ass",
+                format = SubtitleFormat.ASS,
+                isEmbedded = false,
+            )
+
+        defaultState.delegate.currentSubtitleTrack = subtitleTrack
+        defaultState.delegate.subtitlesEnabled = true
+        assertEquals(subtitleTrack, defaultState.currentSubtitleTrack)
+        assertTrue(defaultState.subtitlesEnabled)
+
+        defaultState.currentSubtitleTrack = null
+        defaultState.subtitlesEnabled = false
+        assertNull(defaultState.delegate.currentSubtitleTrack)
+        assertFalse(defaultState.delegate.subtitlesEnabled)
 
         playerState.dispose()
     }

@@ -37,19 +37,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 
 private const val DEFAULT_SUBTITLE_URL =
     "https://raw.githubusercontent.com/Shusek/KMediaPlayer/refs/heads/master/assets/subtitles/en.vtt"
 
 private const val DEFAULT_ASS_SUBTITLE_URL =
-    "/assets/subtitles/en.ass"
+    "https://raw.githubusercontent.com/Shusek/KMediaPlayer/refs/heads/master/assets/subtitles/en.ass"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubtitleSheet(
     audioTracks: List<AudioTrack>,
     selectedAudioTrack: AudioTrack?,
+    controlsEnabled: Boolean,
     onAudioTrackSelected: (AudioTrack) -> Unit,
     subtitleTracks: List<SubtitleTrack>,
     selectedSubtitleTrack: SubtitleTrack?,
@@ -93,13 +95,14 @@ internal fun SubtitleSheet(
                             modifier =
                                 Modifier
                                     .fillMaxWidth()
-                                    .clickable {
+                                    .clickable(enabled = controlsEnabled) {
                                         onAudioTrackSelected(track)
                                         onDismiss()
                                     },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             RadioButton(
+                                enabled = controlsEnabled,
                                 selected = selectedAudioTrack?.id == track.id,
                                 onClick = {
                                     onAudioTrackSelected(track)
@@ -126,11 +129,12 @@ internal fun SubtitleSheet(
             OutlinedTextField(
                 value = subtitleUrl,
                 onValueChange = { subtitleUrl = it },
+                enabled = controlsEnabled,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Subtitle URL") },
                 singleLine = true,
                 trailingIcon = {
-                    FilledTonalIconButton(onClick = {
+                    FilledTonalIconButton(enabled = controlsEnabled, onClick = {
                         if (subtitleUrl.isNotBlank()) {
                             onAddTrack(
                                 SubtitleTrack(
@@ -148,6 +152,7 @@ internal fun SubtitleSheet(
             )
 
             OutlinedButton(
+                enabled = controlsEnabled,
                 onClick = {
                     subtitleUrl = DEFAULT_ASS_SUBTITLE_URL
                     onAddTrack(
@@ -155,6 +160,7 @@ internal fun SubtitleSheet(
                             label = "ASS sample",
                             language = "en",
                             src = DEFAULT_ASS_SUBTITLE_URL,
+                            format = SubtitleFormat.ASS,
                             isEmbedded = false,
                         ),
                     )
@@ -167,7 +173,7 @@ internal fun SubtitleSheet(
             }
 
             // File picker
-            OutlinedButton(onClick = onPickFile, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(enabled = controlsEnabled, onClick = onPickFile, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.FolderOpen, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Select local file (VTT / SRT / ASS)")
@@ -187,14 +193,15 @@ internal fun SubtitleSheet(
                             modifier =
                                 Modifier
                                     .fillMaxWidth()
-                                    .clickable {
+                                    .clickable(enabled = controlsEnabled) {
                                         onSubtitleTrackSelected(track)
                                         onDismiss()
                                     },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             RadioButton(
-                                selected = selectedSubtitleTrack?.id == track.id,
+                                enabled = controlsEnabled,
+                                selected = track.matchesSelectedSubtitle(selectedSubtitleTrack),
                                 onClick = {
                                     onSubtitleTrackSelected(track)
                                     onDismiss()
@@ -210,13 +217,14 @@ internal fun SubtitleSheet(
                         modifier =
                             Modifier
                                 .fillMaxWidth()
-                                .clickable {
+                                .clickable(enabled = controlsEnabled) {
                                     onDisableSubtitles()
                                     onDismiss()
                                 },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(
+                            enabled = controlsEnabled,
                             selected = selectedSubtitleTrack == null,
                             onClick = {
                                 onDisableSubtitles()
@@ -244,6 +252,16 @@ private fun AudioTrack.displayLabel(): String {
             channels?.let { "$it ch" },
         )
     return if (details.isEmpty()) label else "$label (${details.joinToString(", ")})"
+}
+
+private fun SubtitleTrack.matchesSelectedSubtitle(selected: SubtitleTrack?): Boolean {
+    if (selected == null) return false
+    if (selected.id == id) return true
+    return selected.isEmbedded &&
+        isEmbedded &&
+        selected.src == src &&
+        selected.label == label &&
+        selected.language == language
 }
 
 private fun SubtitleTrack.displayLabel(): String {
