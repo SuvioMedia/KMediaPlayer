@@ -68,7 +68,7 @@ kotlin {
     cocoapods {
         version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
         summary = "A multiplatform video player library for Compose applications"
-        homepage = "https://github.com/kdroidFilter/Compose-Media-Player"
+        homepage = "https://github.com/Shusek/KMediaPlayer"
         name = "ComposeMediaPlayer"
 
         framework {
@@ -251,20 +251,19 @@ mavenPublishing {
         name.set("Compose Media Player")
         description.set("A multiplatform video player library for Compose applications.")
         inceptionYear.set("2025")
-        url.set("https://github.com/kdroidFilter/Compose-Media-Player")
+        url.set("https://github.com/Shusek/KMediaPlayer")
 
         developers {
             developer {
-                id.set("kdroidfilter")
-                name.set("Elyahou Hadass")
-                email.set("elyahou.hadass@gmail.com")
+                id.set("Shusek")
+                name.set("Shusek")
             }
         }
 
         scm {
-            connection.set("scm:git:git://github.com/kdroidFilter/Compose-Media-Player.git")
-            developerConnection.set("scm:git:ssh://git@github.com:kdroidFilter/Compose-Media-Player.git")
-            url.set("https://github.com/kdroidFilter/Compose-Media-Player")
+            connection.set("scm:git:https://github.com/Shusek/KMediaPlayer.git")
+            developerConnection.set("scm:git:ssh://git@github.com/Shusek/KMediaPlayer.git")
+            url.set("https://github.com/Shusek/KMediaPlayer")
         }
     }
 

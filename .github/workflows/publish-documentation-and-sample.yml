@@ -7,9 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 # Prevents simultaneous deployments
 concurrency:
@@ -53,23 +51,59 @@ jobs:
           mkdir -p build/final/sample
           cp -r sample/composeApp/build/dist/wasmJs/productionExecutable/* build/final/sample
 
-      # Upload to the "pages" artifact so it is available for the next job
-      - name: Upload artifact for GitHub Pages
-        uses: actions/upload-pages-artifact@v4
+      - name: Upload documentation site artifact
+        uses: actions/upload-artifact@v7
         with:
+          name: documentation-site
           path: build/final
+          retention-days: 1
 
   # 2) GitHub Pages Deployment
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      # The final URL will be provided in the page_url output
-      url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
+          fetch-depth: 0
+
+      - name: Download documentation site artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: documentation-site
           path: build/final
+
+      - name: Push documentation and sample to gh-pages
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          tmp_dir="$(mktemp -d)"
+          pages_dir="$tmp_dir/pages"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages
+            git worktree add "$pages_dir" origin/gh-pages
+          else
+            git worktree add --detach "$pages_dir"
+            git -C "$pages_dir" checkout --orphan gh-pages
+            git -C "$pages_dir" rm -rf . || true
+          fi
+
+          rsync -a --delete \
+            --exclude='.git' \
+            --exclude='maven/' \
+            build/final/ "$pages_dir/"
+          touch "$pages_dir/.nojekyll"
+
+          git -C "$pages_dir" add -A .
+          if git -C "$pages_dir" diff --cached --quiet; then
+            echo "No documentation or sample changes to publish."
+          else
+            git -C "$pages_dir" commit -m "Publish documentation and sample ${GITHUB_SHA}"
+            git -C "$pages_dir" push origin HEAD:gh-pages
+          fi

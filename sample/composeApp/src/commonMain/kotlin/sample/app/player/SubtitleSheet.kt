@@ -40,7 +40,7 @@ import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 
 private const val DEFAULT_SUBTITLE_URL =
-    "https://raw.githubusercontent.com/kdroidFilter/ComposeMediaPlayer/refs/heads/master/assets/subtitles/en.vtt"
+    "https://raw.githubusercontent.com/Shusek/KMediaPlayer/refs/heads/master/assets/subtitles/en.vtt"
 
 private const val DEFAULT_ASS_SUBTITLE_URL =
     "/assets/subtitles/en.ass"

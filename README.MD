@@ -5,11 +5,11 @@
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kdroidfilter/composemediaplayer.svg)](https://search.maven.org/artifact/io.github.kdroidfilter/composemediaplayer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Kotlin](https://img.shields.io/badge/kotlin-multiplatform-blue.svg?logo=kotlin)](https://kotlinlang.org/docs/multiplatform.html)
-[![Platforms](https://img.shields.io/badge/platforms-Android%20|%20iOS%20|%20macOS%20JVM%20|%20Windows%20JVM%20|%20Linux%20JVM%20|%20Web-lightgrey.svg)](https://github.com/kdroidfilter/ComposeMediaPlayer)
-[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/kdroidfilter/ComposeMediaPlayer/issues)
-[![Documentation](https://img.shields.io/badge/docs-Dokka-blue.svg)](https://kdroidfilter.github.io/ComposeMediaPlayer/)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/kdroidfilter/ComposeMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/kdroidfilter/ComposeMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
-[![GitHub last commit](https://img.shields.io/github/last-commit/kdroidfilter/ComposeMediaPlayer)](https://github.com/kdroidfilter/ComposeMediaPlayer/commits/master)
+[![Platforms](https://img.shields.io/badge/platforms-Android%20|%20iOS%20|%20macOS%20JVM%20|%20Windows%20JVM%20|%20Linux%20JVM%20|%20Web-lightgrey.svg)](https://github.com/Shusek/KMediaPlayer)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/Shusek/KMediaPlayer/issues)
+[![Documentation](https://img.shields.io/badge/docs-Dokka-blue.svg)](https://shusek.github.io/KMediaPlayer/)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Shusek/KMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/Shusek/KMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
+[![GitHub last commit](https://img.shields.io/github/last-commit/Shusek/KMediaPlayer)](https://github.com/Shusek/KMediaPlayer/commits/master)
 
 ### Supported by
 [![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
@@ -61,7 +61,7 @@
 
 ## 🚀 Live Demo
 
-Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/ComposeMediaPlayer/sample/)
+Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlayer/sample/)
 
 ## ✨ Features
 
@@ -818,4 +818,4 @@ If you're using this library in your project, please let us know and we'll add i
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=kdroidfilter/ComposeMediaPlayer&type=Date)](https://www.star-history.com/#kdroidfilter/ComposeMediaPlayer&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Shusek/KMediaPlayer&type=Date)](https://www.star-history.com/#Shusek/KMediaPlayer&Date)
