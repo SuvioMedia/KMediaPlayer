@@ -302,6 +302,8 @@ internal fun HTMLVideoElement.applyInteropBehindCanvas() {
     wrapper.style.apply {
         setProperty("z-index", "-2", "important")
         setProperty("pointer-events", "none")
+        setProperty("contain", "layout paint style", "important")
+        setProperty("overflow", "hidden", "important")
         backgroundColor = "transparent"
         display = "flex"
         alignItems = "center"
@@ -317,6 +319,10 @@ internal fun HTMLVideoElement.applyContentScale(
     style.apply {
         backgroundColor = "black"
         setProperty("pointer-events", "none")
+        setProperty("contain", "strict", "important")
+        setProperty("transform", "translateZ(0)", "important")
+        setProperty("will-change", "transform", "important")
+        setProperty("backface-visibility", "hidden", "important")
         display = "block"
 
         when (contentScale) {
@@ -366,6 +372,10 @@ internal fun createVideoElement(useCors: Boolean = true): HTMLVideoElement =
         style.height = "100%"
         style.backgroundColor = "black"
         style.setProperty("pointer-events", "none")
+        style.setProperty("contain", "strict", "important")
+        style.setProperty("transform", "translateZ(0)", "important")
+        style.setProperty("will-change", "transform", "important")
+        style.setProperty("backface-visibility", "hidden", "important")
         style.display = "block"
 
         if (useCors) {
@@ -376,9 +386,93 @@ internal fun createVideoElement(useCors: Boolean = true): HTMLVideoElement =
 
         setAttribute("playsinline", "")
         setAttribute("webkit-playsinline", "")
-        setAttribute("preload", "metadata")
+        setAttribute("preload", "auto")
+        setAttribute("fetchpriority", "high")
         setAttribute("x-webkit-airplay", "allow")
     }
+
+internal fun HTMLVideoElement.startPlaybackQualityDiagnostics(playerState: DefaultVideoPlayerState) {
+    startPlaybackQualityDiagnostics(this) { notes ->
+        playerState.renderingInfo.notes = notes
+    }
+}
+
+@Suppress("UNUSED_PARAMETER")
+private fun startPlaybackQualityDiagnostics(
+    video: HTMLVideoElement,
+    onNotesChanged: (String) -> Unit,
+): Unit =
+    js(
+        """
+        {
+            if (video.__composeMediaPlayerQualityTimer) {
+                clearInterval(video.__composeMediaPlayerQualityTimer);
+                video.__composeMediaPlayerQualityTimer = null;
+            }
+
+            const readQuality = function() {
+                let total = 0;
+                let dropped = 0;
+                let corrupted = 0;
+
+                if (typeof video.getVideoPlaybackQuality === "function") {
+                    const quality = video.getVideoPlaybackQuality();
+                    total = Number(quality.totalVideoFrames || 0);
+                    dropped = Number(quality.droppedVideoFrames || 0);
+                    corrupted = Number(quality.corruptedVideoFrames || 0);
+                } else {
+                    total = Number(video.webkitDecodedFrameCount || 0);
+                    dropped = Number(video.webkitDroppedFrameCount || 0);
+                }
+
+                const droppedRatio = total > 0 ? Math.round((dropped / total) * 1000) / 10 : 0;
+                const resolution =
+                    video.videoWidth && video.videoHeight
+                        ? video.videoWidth + "x" + video.videoHeight
+                        : "unknown";
+                const parts = [
+                    "resolution=" + resolution,
+                    "dropped=" + dropped + "/" + total + " (" + droppedRatio + "%)",
+                    "readyState=" + video.readyState,
+                    "networkState=" + video.networkState
+                ];
+
+                if (corrupted > 0) {
+                    parts.push("corrupted=" + corrupted);
+                }
+
+                if (video.videoWidth >= 7680 || video.videoHeight >= 3840) {
+                    parts.push("8K HEVC needs browser hardware decode");
+                }
+
+                try {
+                    onNotesChanged(parts.join("; "));
+                } catch (_) {
+                }
+            };
+
+            readQuality();
+            video.__composeMediaPlayerQualityTimer = setInterval(readQuality, 3000);
+        }
+        """,
+    )
+
+internal fun HTMLVideoElement.stopPlaybackQualityDiagnostics() {
+    stopPlaybackQualityDiagnostics(this)
+}
+
+@Suppress("UNUSED_PARAMETER")
+private fun stopPlaybackQualityDiagnostics(video: HTMLVideoElement): Unit =
+    js(
+        """
+        {
+            if (video.__composeMediaPlayerQualityTimer) {
+                clearInterval(video.__composeMediaPlayerQualityTimer);
+                video.__composeMediaPlayerQualityTimer = null;
+            }
+        }
+        """,
+    )
 
 internal fun setupVideoElement(
     video: HTMLVideoElement,
@@ -407,6 +501,8 @@ internal fun setupVideoElement(
     }
 
     if (playerState is DefaultVideoPlayerState) {
+        video.startPlaybackQualityDiagnostics(playerState)
+
         video.addEventListeners(
             scope = scope,
             playerState = playerState,
@@ -570,6 +666,15 @@ internal fun HTMLVideoElement.setupMetadataListener(
                         webVideoLogger.w { "Failed to extract title from filename: ${e.message}" }
                     }
                 }
+            }
+
+            if (playerState is DefaultVideoPlayerState) {
+                playerState.renderingInfo.update(
+                    container = playerState.metadata.mimeType,
+                    videoDecoder = "Browser native decoder (${width}x$height)",
+                    videoRenderer = "HTMLVideoElement + browser compositor",
+                    audioRenderer = "Browser native audio",
+                )
             }
         }
     }

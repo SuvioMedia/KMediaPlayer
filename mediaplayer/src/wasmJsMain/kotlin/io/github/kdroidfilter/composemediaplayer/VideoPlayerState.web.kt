@@ -73,6 +73,13 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     // Media metadata
     override val metadata = VideoMetadata()
+    override val renderingInfo =
+        VideoRenderingInfo(
+            backend = "HTML5 video",
+            videoDecoder = "Browser native decoder",
+            videoRenderer = "HTMLVideoElement",
+            audioRenderer = "Browser native audio",
+        )
     override val aspectRatio: Float = 16f / 9f // TO DO: Get from video source
 
     // Subtitle management
@@ -287,6 +294,16 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _isLoading = true // Set initial loading state
         _error = null
         _isPlaying = false
+        renderingInfo.update(
+            backend = "HTML5 video",
+            container = null,
+            videoDecoder = "Browser native decoder",
+            videoRenderer = "HTMLVideoElement",
+            audioRenderer = "Browser native audio",
+            subtitleRenderer = null,
+            subtitleSource = null,
+            notes = null,
+        )
         currentAudioTrack = null
         availableAudioTracks.clear()
         if (currentSubtitleTrack?.isEmbedded == true) {

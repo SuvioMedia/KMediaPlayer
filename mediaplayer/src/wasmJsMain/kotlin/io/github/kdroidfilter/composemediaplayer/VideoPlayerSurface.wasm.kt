@@ -20,7 +20,7 @@ actual fun VideoPlayerSurface(
     if (playerState.hasMedia) {
         var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
         var videoRatio by remember { mutableStateOf<Float?>(null) }
-        var useCors by remember { mutableStateOf(false) }
+        var useCors by remember { mutableStateOf(true) }
         val scope = rememberCoroutineScope()
 
         // State for CORS mode changes
@@ -85,6 +85,7 @@ actual fun VideoPlayerSurface(
                             lastPosition = video.currentTime
                         }
                         wasPlaying = playerState.isPlaying || !video.paused
+                        video.stopPlaybackQualityDiagnostics()
                         video.safePause()
                         video.destroyHlsController()
                         video.destroyMkvSidecarTracks()
