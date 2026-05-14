@@ -11,5 +11,5 @@ import kotlin.js.JsName
 @JsName("default")
 private external class JassubWasmRenderer(options: JsAny) : JsAny
 
-internal actual fun createJassubRenderer(options: JsAny): JsAny =
+internal fun createJassubRenderer(options: JsAny): JsAny =
     JassubWasmRenderer(options)

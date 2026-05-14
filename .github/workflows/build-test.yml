@@ -98,22 +98,6 @@ jobs:
       - name: Build iOS
         run: ./gradlew :mediaplayer:compileKotlinIosArm64 :mediaplayer:compileKotlinIosSimulatorArm64 --no-daemon
 
-  js:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up JDK
-        uses: actions/setup-java@v5
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: gradle
-
-      - name: Build JS
-        run: ./gradlew :mediaplayer:compileKotlinJs --no-daemon
-
   wasmJs:
     runs-on: ubuntu-latest
     steps:
@@ -127,7 +111,7 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Build WasmJS
+      - name: Build WASM
         run: ./gradlew :mediaplayer:compileKotlinWasmJs --no-daemon
 
   lint:

@@ -31,7 +31,7 @@ actual fun createVideoPlayerState(
 ): VideoPlayerState = DefaultVideoPlayerState()
 
 /**
- * Implementation of VideoPlayerState for WebAssembly/JavaScript platform.
+ * Implementation of VideoPlayerState for WebAssembly.
  * Manages the state of a video player including playback controls, media information,
  * and error handling.
  */

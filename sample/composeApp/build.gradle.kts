@@ -31,22 +31,6 @@ kotlin {
         }
     }
     jvm()
-    js {
-        outputModuleName.set("composeApp")
-        browser {
-            val rootDirPath = project.rootDir.path
-            val projectDirPath = project.projectDir.path
-            commonWebpackConfig {
-                outputFileName = "composeApp.js"
-                devServer = (devServer ?: KotlinWebpackConfig.DevServer()).apply {
-                    // Serve sources to debug inside browser
-                    static(rootDirPath)
-                    static(projectDirPath)
-                }
-            }
-        }
-        binaries.executable()
-    }
     wasmJs {
         outputModuleName.set("composeApp")
         browser {
@@ -90,7 +74,7 @@ kotlin {
             implementation(compose.desktop.currentOs)
             implementation(libs.nucleus.graalvm.runtime)
         }
-        webMain.dependencies {
+        wasmJsMain.dependencies {
             implementation(libs.kotlinx.browser)
         }
     }

@@ -1,6 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer
 
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -8,19 +8,19 @@ import kotlin.test.assertTrue
 class MediaCodecTest {
     @Test
     fun supportedAudioCodecsContainOnlyAudioCodecs() =
-        runBlocking {
+        runTest {
             assertTrue(SupportedMediaCodecs.queryAudioCodecs().all { it.type == MediaCodecType.AUDIO })
         }
 
     @Test
     fun supportedVideoCodecsContainOnlyVideoCodecs() =
-        runBlocking {
+        runTest {
             assertTrue(SupportedMediaCodecs.queryVideoCodecs().all { it.type == MediaCodecType.VIDEO })
         }
 
     @Test
     fun queryReturnsSnapshotWithAudioAndVideoCodecs() =
-        runBlocking {
+        runTest {
             val support = SupportedMediaCodecs.query()
 
             assertEquals(
@@ -35,7 +35,7 @@ class MediaCodecTest {
 
     @Test
     fun allCodecsIsTheUnionOfAudioAndVideoCodecs() =
-        runBlocking {
+        runTest {
             val support = SupportedMediaCodecs.query()
 
             assertEquals(
@@ -46,7 +46,7 @@ class MediaCodecTest {
 
     @Test
     fun codecExtensionMatchesProviderResult() =
-        runBlocking {
+        runTest {
             MediaCodec.entries.forEach { codec ->
                 assertEquals(SupportedMediaCodecs.queryIsSupported(codec), codec.isSupported())
             }
@@ -54,7 +54,7 @@ class MediaCodecTest {
 
     @Test
     fun snapshotChecksCodecSupportWithoutQueryingAgain() =
-        runBlocking {
+        runTest {
             val support = SupportedMediaCodecs.query()
 
             MediaCodec.entries.forEach { codec ->

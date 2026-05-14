@@ -61,10 +61,6 @@ kotlin {
         }
     }
     jvm()
-    js {
-        browser()
-        binaries.executable()
-    }
 
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
@@ -112,6 +108,7 @@ kotlin {
 
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
         }
 
         androidMain.dependencies {
@@ -154,7 +151,7 @@ kotlin {
             }
         }
 
-        webMain.dependencies {
+        wasmJsMain.dependencies {
             implementation(libs.kotlinx.browser)
             implementation(libs.compose.ui)
             implementation(npm("jassub", "2.5.1"))

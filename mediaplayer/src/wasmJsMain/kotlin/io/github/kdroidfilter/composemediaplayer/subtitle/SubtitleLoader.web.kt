@@ -8,7 +8,7 @@ import org.w3c.xhr.XMLHttpRequest
 import kotlin.coroutines.resume
 
 /**
- * WASM JS implementation of the loadSubtitleContent function.
+ * WASM implementation of the loadSubtitleContent function.
  * Loads subtitle content from a URL using XMLHttpRequest.
  *
  * @param src The source URI of the subtitle file

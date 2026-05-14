@@ -16,7 +16,7 @@
 - **Media Foundation** (via JNI) for Windows
 - **AVPlayer** (via JNI) for macOS and iOS
 - **Media3** for Android
-- **HTML5 Player** for WASMJS
+- **HTML5 Player** for WASM
 
 ## Project Status
 
@@ -76,7 +76,7 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 - **Error handling** Simple error handling for network or playback issues.
 
 ## ✨ Supported Video Formats
-| Format | Windows                                                                                                           | Linux  | macOS & iOS                                                       | Android | WasmJS |
+| Format | Windows                                                                                                           | Linux  | macOS & iOS                                                       | Android | WASM |
 |--------|-------------------------------------------------------------------------------------------------------------------|-------------------|-----------------------------------------------------------------------------|-----------------|-------------------|
 | **Player** | [MediaFoundation](https://learn.microsoft.com/en-us/windows/win32/medfound/microsoft-media-foundation-sdk) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | [HTML5 Video](https://www.w3schools.com/html/html5_video.asp) |
 | MP4 (H.264) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ✅ |
@@ -435,7 +435,7 @@ playerState.selectSubtitleTrack(track)
 
 #### Browser ASS/SSA subtitles with JASSUB/libass
 
-ASS/SSA subtitle rendering is enabled by default on `js` and `wasmJs` browser targets. As a library user, you do not need to add `jassub`, libass, worker scripts, or WASM files manually. The library declares the `jassub` npm dependency and the browser bundle includes the default JASSUB worker, WASM and fallback font assets.
+ASS/SSA subtitle rendering is enabled by default on the `wasmJs` browser target. As a library user, you do not need to add `jassub`, libass, worker scripts, or WASM files manually. The library declares the `jassub` npm dependency and the browser bundle includes the default JASSUB worker, WASM and fallback font assets.
 
 For a basic browser app, just select an `.ass` or `.ssa` subtitle track:
 

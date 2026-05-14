@@ -10,8 +10,6 @@ import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.JsAny
 import kotlin.js.js
 
-internal expect fun createJassubRenderer(options: JsAny): JsAny
-
 internal fun createAssSubtitleCanvasElement(): HTMLCanvasElement =
     (document.createElement("canvas") as HTMLCanvasElement).apply {
         className = "compose-media-player-ass-subtitles"
