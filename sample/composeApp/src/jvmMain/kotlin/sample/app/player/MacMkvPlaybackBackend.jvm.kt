@@ -17,25 +17,25 @@ internal actual fun macMkvPlaybackBackendOptions(): List<MacMkvPlaybackBackendOp
     if (!macMkvPlaybackBackendSelectionAvailable) return emptyList()
 
     val tools = MacOsMediaTools.query()
-    val hasAutoMkvBackend =
+    val hasLibVlcCanvas = tools.libVlc.available && tools.libass.available
+    val hasHlsBackend =
         (tools.ffmpeg.available && tools.ffprobe.available && tools.ffmpegWithSubtitlesFilter.available) ||
             tools.vlc.available
-    val hasManualMkvBackend = tools.libVlc.available && tools.libass.available
 
     return listOf(
         MacMkvPlaybackBackendOption(
             backend = MacMkvPlaybackBackend.AUTO,
             enabled = true,
             status =
-                if (hasAutoMkvBackend) {
+                if (hasLibVlcCanvas) {
+                    "Uses libVLC canvas first, then falls back to HLS helpers."
+                } else if (hasHlsBackend) {
                     "Uses the first available HLS helper for macOS MKV playback."
-                } else if (hasManualMkvBackend) {
-                    "No automatic HLS helper detected; choose libVLC canvas explicitly."
                 } else {
                     "No MKV helper detected; regular AVFoundation formats can still play."
                 },
             installHint =
-                if (hasAutoMkvBackend || hasManualMkvBackend) {
+                if (hasLibVlcCanvas || hasHlsBackend) {
                     null
                 } else {
                     "Install VLC from https://www.videolan.org/vlc/ or ffmpeg from https://ffmpeg.org/download.html"

@@ -945,6 +945,13 @@ class MacVideoPlayerState : VideoPlayerState {
                 MacVlcLocator.findLibVlc()
                     ?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
                     ?: throw missingLibVlcBackendException()
+            "auto" ->
+                if (MacLibAssLocator.findLibAss() != null) {
+                    MacVlcLocator.findLibVlc()
+                        ?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
+                } else {
+                    null
+                }
             "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-nsview" ->
                 throw UnsupportedOperationException(
                     "The macOS libVLC native-view backend has been removed because it is unstable with Compose overlays. " +
