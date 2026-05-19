@@ -14,6 +14,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
@@ -166,9 +167,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private var _duration by mutableStateOf(Duration.ZERO)
     private var _progress by mutableStateOf(0f)
     override var sliderPos: Float
-        get() = _progress * 1000f
+        get() = _progress * VideoPlayerState.SLIDER_SCALE
         set(value) {
-            _progress = (value / 1000f).coerceIn(0f, 1f)
+            _progress = (value / VideoPlayerState.SLIDER_SCALE).coerceIn(0f, 1f)
         }
     private var _userDragging by mutableStateOf(false)
     override var userDragging: Boolean
@@ -208,6 +209,13 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
     private var _error: VideoPlayerError? = null
     override val error get() = _error
+    override val capabilities: PlayerCapabilities =
+        PlayerCapabilities(
+            supportsHls = true,
+            supportsMkv = false,
+            supportsExternalSubtitles = true,
+            supportsAudioTracks = true,
+        )
 
     override fun clearError() {
         _error = null
@@ -245,23 +253,13 @@ class WindowsVideoPlayerState : VideoPlayerState {
         ),
     )
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override var subtitleOffset: Duration by mutableStateOf(Duration.ZERO)
     override var isLoading by mutableStateOf(false)
         private set
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
     override val currentTime: Duration get() = _currentTime
-    override val preciseCurrentTime: Duration
-        get() {
-            val instance = videoPlayerInstance
-            if (instance == 0L) return _currentTime
-
-            val position = LongArray(1)
-            return if (player.GetMediaPosition(instance, position) >= 0) {
-                position[0].hundredNanosecondsAsDuration()
-            } else {
-                _currentTime
-            }
-        }
+    override val preciseCurrentTime: Duration get() = _currentTime
     override val duration: Duration get() = _duration
     private var errorMessage: String? by mutableStateOf(null)
 
@@ -294,7 +292,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
     // pattern that turned out to behave inconsistently under GraalVM native
     // image, leaving the video frozen after the first seek.
     private val videoReaderMutex = Mutex()
-    private val isSeeking = AtomicBoolean(false)
+    private val seekInProgress = AtomicBoolean(false)
+    override val isSeeking: Boolean get() = seekInProgress.get()
 
     // Frame channel: one slot, drop-oldest. With triple-buffering on the
     // producer side, overflow simply means the consumer was slow — safe to
@@ -724,7 +723,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         userPaused = false // Reset userPaused when looping
                         initialFrameRead.set(false) // Reset initialFrameRead flag
                         lastFrameHash = Int.MIN_VALUE // Reset hash for new loop
-                        seekTo(0f)
+                        seekTo(Duration.ZERO)
                         play()
                         onRestart?.invoke()
                     } catch (e: Exception) {
@@ -761,7 +760,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
             // Short-circuit while a seek is in progress — avoids contending
             // on videoReaderMutex which the seek flow is holding.
-            if (isSeeking.get()) {
+            if (seekInProgress.get()) {
                 delay(5.milliseconds)
                 continue
             }
@@ -1087,19 +1086,33 @@ class WindowsVideoPlayerState : VideoPlayerState {
         }
     }
 
+    override fun seekTo(time: Duration) {
+        if (_duration <= Duration.ZERO) return
+        val progress =
+            (time.inWholeMilliseconds.toDouble() / _duration.inWholeMilliseconds.toDouble())
+                .toFloat()
+                .coerceIn(0f, 1f)
+        seekToProgress(progress)
+    }
+
+    override fun seekToProgress(progress: Float) {
+        seekTo(progress.coerceIn(0f, 1f) * VideoPlayerState.SLIDER_SCALE)
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
         if (isDisposing.get()) return
         if (_duration <= Duration.ZERO) return // Live stream — seeking not supported
 
-        val clamped = value.coerceIn(0f, 1000f)
-        val targetPos = (_duration * (clamped / 1000.0)).inWhole100NanosecondTicks()
+        val clamped = value.coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
+        val targetPos = (_duration * (clamped / VideoPlayerState.SLIDER_SCALE).toDouble()).inWhole100NanosecondTicks()
 
         // Latch the newest target; whoever is running the seek loop will see it.
         pendingSeekTarget.set(targetPos)
 
         // Optimistic UI so the slider tracks the drag smoothly even while the
         // native seek is still settling.
-        _progress = (clamped / 1000f).coerceIn(0f, 1f)
+        _progress = (clamped / VideoPlayerState.SLIDER_SCALE).coerceIn(0f, 1f)
         _currentTime = _duration * _progress.toDouble()
 
         scheduleSeek()
@@ -1133,7 +1146,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * Executes a single native seek.
      *
      * Strategy: keep the producer/consumer coroutines alive and instead
-     * serialize native reader access with [videoReaderMutex] + [isSeeking].
+     * serialize native reader access with [videoReaderMutex] + [seekInProgress].
      * Cancelling & relaunching `videoJob` on every seek proved fragile
      * under GraalVM native-image (the relaunched job sometimes never ran,
      * leaving audio but no video).
@@ -1151,7 +1164,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 val instance = videoPlayerInstance
                 if (instance == 0L || !_hasMedia) return@withLock
 
-                isSeeking.set(true)
+                seekInProgress.set(true)
                 try {
                     videoReaderMutex.withLock {
                         // Inside the reader mutex: no concurrent ReadVideoFrame.
@@ -1183,7 +1196,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         }
                     }
                 } finally {
-                    isSeeking.set(false)
+                    seekInProgress.set(false)
                 }
 
                 // If the producer was never started (e.g. stop() was called

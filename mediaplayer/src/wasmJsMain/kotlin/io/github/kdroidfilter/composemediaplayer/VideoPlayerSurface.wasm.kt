@@ -20,7 +20,12 @@ actual fun VideoPlayerSurface(
     if (playerState.hasMedia) {
         var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
         var videoRatio by remember { mutableStateOf<Float?>(null) }
-        var useCors by remember { mutableStateOf(true) }
+        val sourceKind =
+            (playerState as? DefaultVideoPlayerState)
+                ?.sourceUri
+                ?.toWebMediaSourceKind()
+                ?: WebMediaSourceKind.EMPTY
+        var useCors by remember(sourceKind) { mutableStateOf(sourceKind.shouldUseCors) }
         val scope = rememberCoroutineScope()
 
         // State for CORS mode changes
@@ -58,7 +63,7 @@ actual fun VideoPlayerSurface(
             contentScale = contentScale,
             overlay = overlay,
         ) {
-            key(useCors) {
+            key(sourceKind, useCors) {
                 HtmlElementView(
                     factory = {
                         createVideoElement(useCors).apply {
@@ -70,7 +75,12 @@ actual fun VideoPlayerSurface(
                                 playerState = playerState,
                                 scope = scope,
                                 useCors = useCors,
-                                onCorsError = { useCors = false },
+                                allowCorsRetry = sourceKind.allowsCorsRetry,
+                                onCorsError = {
+                                    if (sourceKind.allowsCorsRetry) {
+                                        useCors = false
+                                    }
+                                },
                             )
                         }
                     },

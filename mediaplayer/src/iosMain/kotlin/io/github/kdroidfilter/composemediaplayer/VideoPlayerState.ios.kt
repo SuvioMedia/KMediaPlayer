@@ -117,6 +117,9 @@ open class DefaultVideoPlayerState(
     private var _isLoading by mutableStateOf(false)
     override val isLoading: Boolean
         get() = _isLoading
+    private var _isSeeking by mutableStateOf(false)
+    override val isSeeking: Boolean
+        get() = _isSeeking
 
     // Fullscreen state
     private var _isFullscreen by mutableStateOf(false)
@@ -142,6 +145,15 @@ open class DefaultVideoPlayerState(
 
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     override val error: VideoPlayerError? get() = _error
+    override val capabilities: PlayerCapabilities
+        get() =
+            PlayerCapabilities(
+                supportsHls = true,
+                supportsMkv = false,
+                supportsExternalSubtitles = true,
+                supportsAudioTracks = true,
+                supportsPiP = isPipSupported,
+            )
 
     // Observable instance of AVPlayer
     var player: AVPlayer? by mutableStateOf(null)
@@ -265,7 +277,11 @@ open class DefaultVideoPlayerState(
                         duration > Duration.ZERO &&
                         currentTime >= Duration.ZERO
                     ) {
-                        sliderPos = ((currentTime.toSecondsDouble() / duration.toSecondsDouble()) * 1000).toFloat()
+                        sliderPos =
+                            (
+                                (currentTime.toSecondsDouble() / duration.toSecondsDouble()) *
+                                    VideoPlayerState.SLIDER_SCALE
+                            ).toFloat()
                     }
                     _positionText = formatTime(currentTime)
                     _durationText = formatTime(duration)
@@ -656,6 +672,7 @@ open class DefaultVideoPlayerState(
         player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
         _isPlaying = false
         _isLoading = false
+        _isSeeking = false
         _hasMedia = false
         _currentTime = Duration.ZERO
         _duration = Duration.ZERO
@@ -666,13 +683,43 @@ open class DefaultVideoPlayerState(
         _metadata = VideoMetadata(audioChannels = 2)
     }
 
+    override fun seekTo(time: Duration) {
+        val currentPlayer = player ?: return
+        if (_duration > Duration.ZERO) {
+            val targetTime =
+                when {
+                    time < Duration.ZERO -> Duration.ZERO
+                    time > _duration -> _duration
+                    else -> time
+                }.toSecondsDouble()
+            seekToSeconds(currentPlayer, targetTime)
+        }
+    }
+
+    override fun seekToProgress(progress: Float) {
+        if (_duration > Duration.ZERO) {
+            seekTo(_duration * progress.coerceIn(0f, 1f).toDouble())
+        }
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
         val currentPlayer = player ?: return
         if (_duration > Duration.ZERO) {
-            // Set loading state to true to indicate seeking is happening
-            _isLoading = true
+            val targetTime = (_duration * (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0))
+                .toSecondsDouble()
+            seekToSeconds(currentPlayer, targetTime)
+        }
+    }
 
-            val targetTime = (_duration * (value / 1000.0).coerceIn(0.0, 1.0)).toSecondsDouble()
+    private fun seekToSeconds(
+        currentPlayer: AVPlayer,
+        targetTime: Double,
+    ) {
+        if (_duration > Duration.ZERO) {
+            _isLoading = true
+            _isSeeking = true
+
             val seekTime = CMTimeMakeWithSeconds(targetTime, NSEC_PER_SEC.toInt())
             val wasPlaying = _isPlaying
 
@@ -687,6 +734,7 @@ open class DefaultVideoPlayerState(
                 if (finished) {
                     dispatch_async(dispatch_get_main_queue()) {
                         _isLoading = false
+                        _isSeeking = false
                         if (wasPlaying) {
                             currentPlayer.playImmediatelyAtRate(_playbackSpeed)
                         }
@@ -797,6 +845,7 @@ open class DefaultVideoPlayerState(
         )
 
     override var subtitleBackgroundColor: Color = Color.Black.copy(alpha = 0.5f)
+    override var subtitleOffset: Duration by mutableStateOf(Duration.ZERO)
 
     /**
      * Selects a subtitle track for display.

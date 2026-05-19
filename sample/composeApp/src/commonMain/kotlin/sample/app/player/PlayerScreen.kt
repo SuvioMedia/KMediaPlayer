@@ -255,8 +255,13 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
                 Text(
                     text = when (error) {
                         is VideoPlayerError.CodecError -> "Codec: ${error.message}"
+                        is VideoPlayerError.UnsupportedCodecError -> "Codec: ${error.message}"
                         is VideoPlayerError.NetworkError -> "Network: ${error.message}"
+                        is VideoPlayerError.CorsError -> "CORS: ${error.message}"
                         is VideoPlayerError.SourceError -> "Source: ${error.message}"
+                        is VideoPlayerError.NoSourceError -> "Source: ${error.message}"
+                        is VideoPlayerError.TimeoutError -> "Timeout: ${error.message}"
+                        is VideoPlayerError.HlsError -> "HLS: ${error.message}"
                         is VideoPlayerError.UnknownError -> "Error: ${error.message}"
                     },
                     maxLines = 2,

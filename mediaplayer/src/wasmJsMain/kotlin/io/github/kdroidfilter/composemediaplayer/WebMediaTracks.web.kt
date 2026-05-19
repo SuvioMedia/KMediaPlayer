@@ -138,7 +138,12 @@ private fun readWebAudioTrackRows(video: HTMLVideoElement): String =
             for (let i = 0; i < list.length; i += 1) {
                 const track = list[i];
                 const sourceId = track && track.id ? String(track.id) : "";
-                const id = "web:audio:" + i + ":" + sourceId;
+                const stableKey = sourceId || [
+                    track && track.label ? String(track.label) : "",
+                    track && track.language ? String(track.language) : "",
+                    String(i)
+                ].join("|");
+                const id = "web:audio:" + encodeURIComponent(stableKey);
                 rows.push([
                     id,
                     track && track.label ? String(track.label) : "",
@@ -168,7 +173,13 @@ private fun readWebTextTrackRows(video: HTMLVideoElement): String =
                 if (kind && ["subtitles", "captions"].indexOf(kind) === -1) continue;
 
                 const sourceId = track && track.id ? String(track.id) : "";
-                const id = "web:text:" + i + ":" + sourceId;
+                const stableKey = sourceId || [
+                    track && track.label ? String(track.label) : "",
+                    track && track.language ? String(track.language) : "",
+                    kind,
+                    String(i)
+                ].join("|");
+                const id = "web:text:" + encodeURIComponent(stableKey);
                 rows.push([
                     id,
                     track && track.label ? String(track.label) : "",
@@ -197,7 +208,8 @@ private fun readHlsAudioTrackRows(video: HTMLVideoElement): String =
                 const track = list[i] || {};
                 const language = track.lang || track.language || "";
                 const name = track.name || language || "";
-                const id = "${HLS_AUDIO_TRACK_ID_PREFIX}" + i + ":" + encodeURIComponent(name);
+                const stableKey = track.id || track.url || track.uri || [name, language, track.groupId || "", String(i)].join("|");
+                const id = "${HLS_AUDIO_TRACK_ID_PREFIX}" + encodeURIComponent(stableKey);
                 rows.push([
                     id,
                     name,
@@ -252,7 +264,12 @@ private fun selectWebAudioTrackById(
                 for (let i = 0; i < list.length; i += 1) {
                     const track = list[i];
                     const sourceId = track && track.id ? String(track.id) : "";
-                    const id = "web:audio:" + i + ":" + sourceId;
+                    const stableKey = sourceId || [
+                        track && track.label ? String(track.label) : "",
+                        track && track.language ? String(track.language) : "",
+                        String(i)
+                    ].join("|");
+                    const id = "web:audio:" + encodeURIComponent(stableKey);
                     try {
                         track.enabled = selectedId ? id === selectedId : i === 0;
                     } catch (_) {
@@ -276,7 +293,13 @@ private fun selectWebTextTrackById(
                 for (let i = 0; i < list.length; i += 1) {
                     const track = list[i];
                     const sourceId = track && track.id ? String(track.id) : "";
-                    const id = "web:text:" + i + ":" + sourceId;
+                    const stableKey = sourceId || [
+                        track && track.label ? String(track.label) : "",
+                        track && track.language ? String(track.language) : "",
+                        track && track.kind ? String(track.kind) : "",
+                        String(i)
+                    ].join("|");
+                    const id = "web:text:" + encodeURIComponent(stableKey);
                     try {
                         track.mode = selectedId && id === selectedId ? "showing" : "disabled";
                     } catch (_) {
@@ -297,10 +320,17 @@ private fun selectHlsAudioTrackById(
         {
             const hls = video.__composeMediaPlayerHls;
             if (hls && selectedId && selectedId.indexOf("${HLS_AUDIO_TRACK_ID_PREFIX}") === 0) {
-                const rest = selectedId.substring("${HLS_AUDIO_TRACK_ID_PREFIX}".length);
-                const index = Number(rest.split(":")[0]);
-                if (Number.isFinite(index)) {
-                    hls.audioTrack = index;
+                const list = hls.audioTracks || [];
+                for (let i = 0; i < list.length; i += 1) {
+                    const track = list[i] || {};
+                    const language = track.lang || track.language || "";
+                    const name = track.name || language || "";
+                    const stableKey = track.id || track.url || track.uri || [name, language, track.groupId || "", String(i)].join("|");
+                    const id = "${HLS_AUDIO_TRACK_ID_PREFIX}" + encodeURIComponent(stableKey);
+                    if (id === selectedId) {
+                        hls.audioTrack = i;
+                        return;
+                    }
                 }
             }
         }

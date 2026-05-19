@@ -16,6 +16,7 @@ import io.github.kdroidfilter.composemediaplayer.MAC_LIBVLC_AUDIO_TRACK_ID_PREFI
 import io.github.kdroidfilter.composemediaplayer.MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.MAC_VLC_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.MAC_VLC_SUBTITLE_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -133,6 +134,7 @@ class MacVideoPlayerState : VideoPlayerState {
     override var userDragging: Boolean by mutableStateOf(false)
     override var loop: Boolean by mutableStateOf(false)
     override var isLoading: Boolean by mutableStateOf(false)
+    override val isSeeking: Boolean get() = seekInProgress
     override var onPlaybackEnded: (() -> Unit)? = null
     override var onRestart: (() -> Unit)? = null
     override var error: VideoPlayerError? by mutableStateOf(null)
@@ -150,7 +152,15 @@ class MacVideoPlayerState : VideoPlayerState {
         ),
     )
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override var subtitleOffset: Duration by mutableStateOf(Duration.ZERO)
     override val metadata: VideoMetadata = VideoMetadata()
+    override val capabilities: PlayerCapabilities =
+        PlayerCapabilities(
+            supportsHls = true,
+            supportsMkv = true,
+            supportsExternalSubtitles = true,
+            supportsAudioTracks = true,
+        )
     override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo()
     override var isFullscreen: Boolean by mutableStateOf(false)
     internal var usesLibAssSubtitleOverlay: Boolean by mutableStateOf(false)
@@ -167,11 +177,7 @@ class MacVideoPlayerState : VideoPlayerState {
     private val _currentTime = mutableStateOf(Duration.ZERO)
     private val _duration = mutableStateOf(Duration.ZERO)
     override val currentTime: Duration get() = _currentTime.value
-    override val preciseCurrentTime: Duration
-        get() =
-            runBlocking {
-                if (hasMedia) getPositionSafely().secondsAsDuration() else _currentTime.value
-            }
+    override val preciseCurrentTime: Duration get() = _currentTime.value
     override val duration: Duration get() = _duration.value
 
     // Non-blocking aspect ratio property
@@ -1513,7 +1519,14 @@ class MacVideoPlayerState : VideoPlayerState {
                 }
             } else {
                 // Update slider position, batched with other UI updates to reduce main thread calls
-                val newSliderPos = if (duration > 0) (current / duration * 1000).toFloat().coerceIn(0f, 1000f) else 0f
+                val newSliderPos =
+                    if (duration > 0) {
+                        (current / duration * VideoPlayerState.SLIDER_SCALE)
+                            .toFloat()
+                            .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
+                    } else {
+                        0f
+                    }
                 withContext(Dispatchers.Main) {
                     sliderPos = newSliderPos
                 }
@@ -1644,17 +1657,62 @@ class MacVideoPlayerState : VideoPlayerState {
         }
     }
 
+    override fun seekTo(time: Duration) {
+        macLogger.d { "seekTo() - Seeking to time: $time" }
+        ioScope.launch {
+            delay(10.milliseconds) // Small delay to coalesce rapid seek events
+            seekToTimeAsync(time)
+        }
+    }
+
+    override fun seekToProgress(progress: Float) {
+        seekTo(progress.coerceIn(0f, 1f) * VideoPlayerState.SLIDER_SCALE)
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
         macLogger.d { "seekTo() - Seeking with slider value: $value" }
         ioScope.launch {
-            // Throttle rapid seek operations
             delay(10.milliseconds) // Small delay to coalesce rapid seek events
-            seekToAsync(value)
+            val duration = getDurationSafely()
+            if (duration <= 0) {
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                }
+                return@launch
+            }
+            seekToSecondsAsync(
+                ((value / VideoPlayerState.SLIDER_SCALE).toDouble() * duration).coerceIn(0.0, duration),
+            )
         }
     }
 
     /** Seeks to a position on a background thread. */
     private suspend fun seekToAsync(value: Float) {
+        val duration = getDurationSafely()
+        if (duration <= 0) {
+            withContext(Dispatchers.Main) {
+                isLoading = false
+            }
+            return
+        }
+        seekToSecondsAsync(
+            ((value / VideoPlayerState.SLIDER_SCALE).toDouble() * duration).coerceIn(0.0, duration),
+        )
+    }
+
+    private suspend fun seekToTimeAsync(time: Duration) {
+        val duration = getDurationSafely()
+        if (duration <= 0) {
+            withContext(Dispatchers.Main) {
+                isLoading = false
+            }
+            return
+        }
+        seekToSecondsAsync(time.toDouble(kotlin.time.DurationUnit.SECONDS).coerceIn(0.0, duration))
+    }
+
+    private suspend fun seekToSecondsAsync(seekTime: Double) {
         withContext(Dispatchers.Main) {
             isLoading = true
         }
@@ -1668,19 +1726,20 @@ class MacVideoPlayerState : VideoPlayerState {
                 return
             }
 
-            val seekTime = ((value / 1000f) * duration.toFloat()).coerceIn(0f, duration.toFloat())
-
             withContext(Dispatchers.Main) {
                 seekInProgress = true
-                targetSeekTime = seekTime.toDouble()
-                sliderPos = value
+                targetSeekTime = seekTime
+                sliderPos =
+                    (seekTime / duration * VideoPlayerState.SLIDER_SCALE)
+                        .toFloat()
+                        .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
             }
 
             lastFrameUpdateTime = System.currentTimeMillis()
 
             val ptr = playerPtr
             if (ptr == 0L) return
-            MacNativeBridge.nSeekTo(ptr, seekTime.toDouble())
+            MacNativeBridge.nSeekTo(ptr, seekTime)
 
             if (isPlaying) {
                 MacNativeBridge.nPlay(ptr)
@@ -1974,7 +2033,9 @@ class MacVideoPlayerState : VideoPlayerState {
         val durationSeconds = getDurationSafely()
         val restartSliderPos =
             if (durationSeconds > 0.0) {
-                (restartPositionSeconds / durationSeconds * 1000.0).toFloat().coerceIn(0f, 1000f)
+                (restartPositionSeconds / durationSeconds * VideoPlayerState.SLIDER_SCALE)
+                    .toFloat()
+                    .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
             } else {
                 sliderPos
             }
@@ -2233,7 +2294,9 @@ class MacVideoPlayerState : VideoPlayerState {
         val durationSeconds = getDurationSafely()
         val restartSliderPos =
             if (durationSeconds > 0.0) {
-                (restartPositionSeconds / durationSeconds * 1000.0).toFloat().coerceIn(0f, 1000f)
+                (restartPositionSeconds / durationSeconds * VideoPlayerState.SLIDER_SCALE)
+                    .toFloat()
+                    .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
             } else {
                 sliderPos
             }

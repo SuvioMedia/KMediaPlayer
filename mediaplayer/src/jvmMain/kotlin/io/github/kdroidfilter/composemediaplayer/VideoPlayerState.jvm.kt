@@ -8,6 +8,7 @@ import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.vinceglb.filekit.PlatformFile
+import kotlinx.coroutines.flow.SharedFlow
 import kotlin.time.Duration
 
 actual fun createVideoPlayerState(
@@ -47,8 +48,15 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         }
 
     override val hasMedia: Boolean get() = delegate.hasMedia
+    override val mediaSessionId: Long get() = delegate.mediaSessionId
     override val isPlaying: Boolean get() = delegate.isPlaying
     override val isLoading: Boolean get() = delegate.isLoading
+    override val isSeeking: Boolean get() = delegate.isSeeking
+    override val isBuffering: Boolean get() = delegate.isBuffering
+    override val loadingState: PlaybackLoadingState get() = delegate.loadingState
+    override val playbackEvents: SharedFlow<PlaybackEvent> get() = delegate.playbackEvents
+    override val diagnostics: PlaybackDiagnostics get() = delegate.diagnostics
+    override val capabilities: PlayerCapabilities get() = delegate.capabilities
     override val error: VideoPlayerError? get() = delegate.error
     override var volume: Float
         get() = delegate.volume
@@ -127,11 +135,26 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override val currentTime: Duration get() = delegate.currentTime
     override val preciseCurrentTime: Duration get() = delegate.preciseCurrentTime
     override val duration: Duration get() = delegate.duration
+    override val bufferedRanges: List<BufferedRange> get() = delegate.bufferedRanges
+    override val bufferedPercent: Float get() = delegate.bufferedPercent
+    override val availableHlsQualities: List<HlsQualityVariant> get() = delegate.availableHlsQualities
+    override val currentHlsQuality: HlsQualityVariant? get() = delegate.currentHlsQuality
+    override val hlsQualityMode: HlsQualityMode get() = delegate.hlsQualityMode
+    override var subtitleOffset: Duration
+        get() = delegate.subtitleOffset
+        set(value) {
+            delegate.subtitleOffset = value
+        }
 
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
     ) = delegate.openUri(uri, initializeplayerState)
+
+    override fun prepare(
+        uri: String,
+        initializeplayerState: InitialPlayerState,
+    ) = delegate.prepare(uri, initializeplayerState)
 
     override fun openFile(
         file: PlatformFile,
@@ -144,9 +167,25 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     override fun stop() = delegate.stop()
 
+    override fun seekTo(time: Duration) = delegate.seekTo(time)
+
+    override fun seekBy(delta: Duration) = delegate.seekBy(delta)
+
+    override fun seekToProgress(progress: Float) = delegate.seekToProgress(progress)
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) = delegate.seekTo(value)
 
     override fun toggleFullscreen() = delegate.toggleFullscreen()
+
+    override fun canPlaySource(
+        uri: String,
+        mimeType: String?,
+    ) = delegate.canPlaySource(uri, mimeType)
+
+    override fun selectHlsQuality(variantId: String?) = delegate.selectHlsQuality(variantId)
+
+    override fun releaseSource() = delegate.releaseSource()
 
     override fun dispose() = delegate.dispose()
 

@@ -54,8 +54,13 @@ class VideoPlayerErrorTest {
         val errors =
             listOf<VideoPlayerError>(
                 VideoPlayerError.CodecError("Codec error"),
+                VideoPlayerError.UnsupportedCodecError("Unsupported codec"),
                 VideoPlayerError.NetworkError("Network error"),
+                VideoPlayerError.CorsError("CORS error"),
                 VideoPlayerError.SourceError("Source error"),
+                VideoPlayerError.NoSourceError("No source"),
+                VideoPlayerError.TimeoutError("Timeout"),
+                VideoPlayerError.HlsError("HLS error", type = "networkError", details = "manifestLoadError"),
                 VideoPlayerError.UnknownError("Unknown error"),
             )
 

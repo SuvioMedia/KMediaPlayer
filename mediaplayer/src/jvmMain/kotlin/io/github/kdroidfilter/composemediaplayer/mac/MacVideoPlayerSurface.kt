@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
@@ -74,10 +75,11 @@ fun MacVideoPlayerSurface(
             ) {
                 val currentTime =
                     if (playerState.userDragging) {
-                        playerState.duration * (playerState.sliderPos / 1000.0).coerceIn(0.0, 1.0)
+                        playerState.duration *
+                            (playerState.sliderPos / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
                     } else {
-                        playerState.currentTime
-                    }
+                        playerState.preciseCurrentTime
+                    } + playerState.subtitleOffset
 
                 ComposeSubtitleLayer(
                     currentTime = currentTime,

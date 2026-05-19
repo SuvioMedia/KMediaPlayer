@@ -31,6 +31,7 @@ internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
     playerState: DefaultVideoPlayerState,
     sourceUri: String,
     scope: CoroutineScope,
+    mediaSessionId: Long,
 ) {
     destroyMkvSidecarTracks()
     if (!sourceUri.isLikelyMkvSource()) return
@@ -40,10 +41,12 @@ internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
         sourceUri = sourceUri,
         onTracksChanged = {
             scope.launch {
+                if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
                 playerState.syncWebMediaTracks(this@configureMkvSidecarTracks)
                 this@configureMkvSidecarTracks.applySelectedAudioTrack(playerState.currentAudioTrack)
                 if (hasMkvSubtitleTracks(this@configureMkvSidecarTracks)) {
                     scope.launch {
+                        if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
                         ensureMatroskaSubtitlesScriptLoaded()
                         ensureAssRendererScriptLoaded()
                     }

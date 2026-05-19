@@ -113,8 +113,13 @@ class VideoPlayerErrorTest {
         val errors =
             listOf(
                 VideoPlayerError.CodecError("Codec error"),
+                VideoPlayerError.UnsupportedCodecError("Unsupported codec"),
                 VideoPlayerError.NetworkError("Network error"),
+                VideoPlayerError.CorsError("CORS error"),
                 VideoPlayerError.SourceError("Source error"),
+                VideoPlayerError.NoSourceError("No source"),
+                VideoPlayerError.TimeoutError("Timeout"),
+                VideoPlayerError.HlsError("HLS error", type = "networkError", details = "manifestLoadError"),
                 VideoPlayerError.UnknownError("Unknown error"),
             )
 
@@ -122,15 +127,25 @@ class VideoPlayerErrorTest {
             val message =
                 when (error) {
                     is VideoPlayerError.CodecError -> "Codec: ${error.message}"
+                    is VideoPlayerError.UnsupportedCodecError -> "Codec: ${error.message}"
                     is VideoPlayerError.NetworkError -> "Network: ${error.message}"
+                    is VideoPlayerError.CorsError -> "CORS: ${error.message}"
                     is VideoPlayerError.SourceError -> "Source: ${error.message}"
+                    is VideoPlayerError.NoSourceError -> "Source: ${error.message}"
+                    is VideoPlayerError.TimeoutError -> "Timeout: ${error.message}"
+                    is VideoPlayerError.HlsError -> "HLS: ${error.message}"
                     is VideoPlayerError.UnknownError -> "Unknown: ${error.message}"
                 }
 
             when (error) {
                 is VideoPlayerError.CodecError -> assertEquals("Codec: Codec error", message)
+                is VideoPlayerError.UnsupportedCodecError -> assertEquals("Codec: Unsupported codec", message)
                 is VideoPlayerError.NetworkError -> assertEquals("Network: Network error", message)
+                is VideoPlayerError.CorsError -> assertEquals("CORS: CORS error", message)
                 is VideoPlayerError.SourceError -> assertEquals("Source: Source error", message)
+                is VideoPlayerError.NoSourceError -> assertEquals("Source: No source", message)
+                is VideoPlayerError.TimeoutError -> assertEquals("Timeout: Timeout", message)
+                is VideoPlayerError.HlsError -> assertEquals("HLS: HLS error", message)
                 is VideoPlayerError.UnknownError -> assertEquals("Unknown: Unknown error", message)
             }
         }

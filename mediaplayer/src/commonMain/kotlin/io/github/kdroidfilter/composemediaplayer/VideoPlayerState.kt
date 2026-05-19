@@ -8,6 +8,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.vinceglb.filekit.PlatformFile
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -25,6 +29,8 @@ import kotlin.time.Duration.Companion.seconds
 @Stable
 interface VideoPlayerState {
     // Properties related to media state
+    val mediaSessionId: Long
+        get() = 0L
     val hasMedia: Boolean
 
     /**
@@ -32,6 +38,34 @@ interface VideoPlayerState {
      */
     val isPlaying: Boolean
     val isLoading: Boolean
+    val isSeeking: Boolean
+        get() = false
+    val isBuffering: Boolean
+        get() = isLoading && !isSeeking
+    val loadingState: PlaybackLoadingState
+        get() =
+            when {
+                isSeeking -> PlaybackLoadingState.SEEKING
+                isBuffering -> PlaybackLoadingState.BUFFERING
+                isLoading -> PlaybackLoadingState.LOADING
+                else -> PlaybackLoadingState.IDLE
+            }
+    val playbackEvents: SharedFlow<PlaybackEvent>
+        get() = EmptyPlaybackEvents.events
+    val diagnostics: PlaybackDiagnostics
+        get() =
+            PlaybackDiagnostics(
+                currentHlsQuality = currentHlsQuality,
+                bufferedRanges = bufferedRanges,
+                notes = renderingInfo.notes,
+            )
+    val capabilities: PlayerCapabilities
+        get() =
+            PlayerCapabilities(
+                supportsExternalSubtitles = true,
+                supportsPiP = isPipSupported,
+                supportsPlaybackDiagnostics = diagnostics != PlaybackDiagnostics(),
+            )
 
     /**
      * Controls the playback volume. Valid values are within the range of 0.0 (muted) to 1.0 (maximum volume).
@@ -66,11 +100,6 @@ interface VideoPlayerState {
      */
     var onRestart: (() -> Unit)?
 
-    companion object {
-        const val MIN_PLAYBACK_SPEED = 0.25f
-        const val MAX_PLAYBACK_SPEED = 2.0f
-    }
-
     /**
      * Returns the current playback position as a formatted string with millisecond precision.
      */
@@ -101,6 +130,23 @@ interface VideoPlayerState {
      * Returns the total duration of the media.
      */
     val duration: Duration
+    val currentTimeMs: Long
+        get() = currentTime.inWholeMilliseconds
+    val preciseCurrentTimeMs: Long
+        get() = preciseCurrentTime.inWholeMilliseconds
+    val durationMs: Long
+        get() = duration.inWholeMilliseconds
+    val bufferedRanges: List<BufferedRange>
+        get() = emptyList()
+    val bufferedPercent: Float
+        get() {
+            val totalMs = duration.inWholeMilliseconds
+            if (totalMs <= 0L) return 0f
+            val maxBufferedMs = bufferedRanges.maxOfOrNull { it.end.inWholeMilliseconds } ?: 0L
+            return (maxBufferedMs.toDouble() / totalMs.toDouble() * PERCENT_SCALE)
+                .toFloat()
+                .coerceIn(0f, PERCENT_SCALE.toFloat())
+        }
     var isFullscreen: Boolean
     val aspectRatio: Float
 
@@ -113,6 +159,11 @@ interface VideoPlayerState {
     suspend fun enterPip(): PipResult = PipResult.NotSupported
 
     // Functions to control playback
+
+    fun canPlaySource(
+        uri: String,
+        mimeType: String? = null,
+    ): Boolean = capabilities.canPlaySource(uri = uri, mimeType = mimeType)
 
     /**
      * Starts or resumes video playback.
@@ -130,8 +181,37 @@ interface VideoPlayerState {
     fun stop()
 
     /**
-     * Seeks to a specific playback position. The [value] should be between 0.0 and 1000.0.
+     * Seeks to a specific playback time.
      */
+    fun seekTo(time: Duration) {
+        val totalMs = duration.inWholeMilliseconds
+        if (totalMs <= 0L) return
+        seekToProgress((time.inWholeMilliseconds.toDouble() / totalMs.toDouble()).toFloat())
+    }
+
+    /**
+     * Seeks by a signed time delta.
+     */
+    fun seekBy(delta: Duration) {
+        seekTo(preciseCurrentTime + delta)
+    }
+
+    /**
+     * Seeks to a normalized progress value in the 0.0..1.0 range.
+     */
+    @Suppress("DEPRECATION")
+    fun seekToProgress(progress: Float) {
+        seekTo(progress.coerceIn(0f, 1f) * SLIDER_SCALE)
+    }
+
+    /**
+     * Legacy slider-scale seek. The [value] should be between 0.0 and 1000.0.
+     * Prefer [seekTo] for time-based seeking or [seekToProgress] for normalized progress.
+     */
+    @Deprecated(
+        message = "Use seekTo(Duration) or seekToProgress(Float) instead.",
+        replaceWith = ReplaceWith("seekToProgress(value / VideoPlayerState.SLIDER_SCALE)"),
+    )
     fun seekTo(value: Float)
 
     /**
@@ -149,7 +229,7 @@ interface VideoPlayerState {
      * Performs the actual seek on the player and ends the dragging state.
      */
     fun seekFinished() {
-        seekTo(sliderPos)
+        seekToProgress(sliderPos / SLIDER_SCALE)
         userDragging = false
     }
 
@@ -158,7 +238,7 @@ interface VideoPlayerState {
      * including when playback has ended.
      */
     fun restart() {
-        seekTo(0f)
+        seekTo(Duration.ZERO)
         play()
     }
 
@@ -173,6 +253,13 @@ interface VideoPlayerState {
         uri: String,
         initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
     )
+
+    fun prepare(
+        uri: String,
+        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+    ) {
+        openUri(uri, initializeplayerState)
+    }
 
     fun openFile(
         file: PlatformFile,
@@ -203,11 +290,32 @@ interface VideoPlayerState {
     val renderingInfo: VideoRenderingInfo
         get() = VideoRenderingInfo()
 
+    fun playbackSnapshot(): PlaybackSnapshot =
+        PlaybackSnapshot(
+            position = preciseCurrentTime,
+            duration = duration,
+            isPlaying = isPlaying,
+            isLoading = isLoading,
+            isBuffering = isBuffering,
+            isSeeking = isSeeking,
+            playbackSpeed = playbackSpeed,
+            sampledAtMs = Clock.System.now().toEpochMilliseconds(),
+            bufferedRanges = bufferedRanges,
+            bufferedPercent = bufferedPercent,
+            loadingState = loadingState,
+            mediaSessionId = mediaSessionId,
+            diagnostics = diagnostics,
+        )
+
     // Audio track management
     var currentAudioTrack: AudioTrack?
     val availableAudioTracks: MutableList<AudioTrack>
 
     fun selectAudioTrack(track: AudioTrack?)
+
+    fun selectAudioTrack(trackId: String?) {
+        selectAudioTrack(trackId?.let { id -> availableAudioTracks.firstOrNull { it.id == id } })
+    }
 
     // Subtitle management
     var subtitlesEnabled: Boolean
@@ -215,10 +323,31 @@ interface VideoPlayerState {
     val availableSubtitleTracks: MutableList<SubtitleTrack>
     var subtitleTextStyle: TextStyle
     var subtitleBackgroundColor: Color
+    var subtitleOffset: Duration
+        get() = Duration.ZERO
+        set(value) {}
 
     fun selectSubtitleTrack(track: SubtitleTrack?)
 
+    fun selectSubtitleTrack(trackId: String?) {
+        selectSubtitleTrack(trackId?.let { id -> availableSubtitleTracks.firstOrNull { it.id == id } })
+    }
+
     fun disableSubtitles()
+
+    // HLS quality management
+    val availableHlsQualities: List<HlsQualityVariant>
+        get() = emptyList()
+    val currentHlsQuality: HlsQualityVariant?
+        get() = null
+    val hlsQualityMode: HlsQualityMode
+        get() = HlsQualityMode.AUTO
+
+    fun selectHlsQuality(variantId: String?) {}
+
+    fun selectAutoHlsQuality() {
+        selectHlsQuality(null)
+    }
 
     // Cache management
 
@@ -231,6 +360,14 @@ interface VideoPlayerState {
     fun clearCache() {}
 
     // Cleanup
+
+    /**
+     * Releases the current media source and invalidates callbacks tied to it.
+     * Unlike [dispose], the player state object can be reused after calling this method.
+     */
+    fun releaseSource() {
+        stop()
+    }
 
     /**
      * Releases all resources used by the video player (native players, coroutines, observers, etc.).
@@ -253,6 +390,22 @@ interface VideoPlayerState {
      * After calling [dispose], the state should not be reused.
      */
     fun dispose()
+
+    companion object {
+        const val MIN_PLAYBACK_SPEED = 0.25f
+        const val MAX_PLAYBACK_SPEED = 2.0f
+        const val SLIDER_SCALE = 1000f
+        private const val PERCENT_SCALE = 100.0
+    }
+}
+
+private object EmptyPlaybackEvents {
+    val events: SharedFlow<PlaybackEvent> =
+        MutableSharedFlow(
+            replay = 0,
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
 }
 
 /**
@@ -345,6 +498,7 @@ data class PreviewableVideoPlayerState(
 
     override fun stop() {}
 
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {}
 
     override fun toggleFullscreen() {}

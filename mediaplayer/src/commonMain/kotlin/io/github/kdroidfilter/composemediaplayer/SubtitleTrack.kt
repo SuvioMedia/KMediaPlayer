@@ -61,6 +61,9 @@ data class SubtitleTrack(
     val isEmbedded: Boolean = false,
     val kind: String = "subtitles",
 ) {
+    val isExternal: Boolean
+        get() = !isEmbedded
+
     fun resolvedFormat(): SubtitleFormat =
         if (format == SubtitleFormat.AUTO) {
             SubtitleFormat.fromSource(src = src, label = label)

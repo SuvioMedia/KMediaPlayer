@@ -10,6 +10,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
@@ -87,6 +88,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override var userDragging: Boolean by mutableStateOf(false)
     override var loop: Boolean by mutableStateOf(false)
     override var isLoading: Boolean by mutableStateOf(false)
+    override val isSeeking: Boolean get() = seekInProgress
     override var onPlaybackEnded: (() -> Unit)? = null
     override var onRestart: (() -> Unit)? = null
     override var error: VideoPlayerError? by mutableStateOf(null)
@@ -104,7 +106,15 @@ class LinuxVideoPlayerState : VideoPlayerState {
         ),
     )
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override var subtitleOffset: Duration by mutableStateOf(Duration.ZERO)
     override val metadata: VideoMetadata = VideoMetadata()
+    override val capabilities: PlayerCapabilities =
+        PlayerCapabilities(
+            supportsHls = true,
+            supportsMkv = true,
+            supportsExternalSubtitles = true,
+            supportsAudioTracks = true,
+        )
     override var isFullscreen: Boolean by mutableStateOf(false)
     private var lastUri: String? = null
 
@@ -117,11 +127,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private val _currentTime = mutableStateOf(Duration.ZERO)
     private val _duration = mutableStateOf(Duration.ZERO)
     override val currentTime: Duration get() = _currentTime.value
-    override val preciseCurrentTime: Duration
-        get() =
-            runBlocking {
-                if (hasMedia) getPositionSafely() else _currentTime.value
-            }
+    override val preciseCurrentTime: Duration get() = _currentTime.value
     override val duration: Duration get() = _duration.value
 
     private val _aspectRatio = mutableStateOf(16f / 9f)
@@ -572,9 +578,9 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 }
             } else {
                 val newSliderPos =
-                    (current.toSecondsDouble() / duration.toSecondsDouble() * 1000)
+                    (current.toSecondsDouble() / duration.toSecondsDouble() * VideoPlayerState.SLIDER_SCALE)
                         .toFloat()
-                        .coerceIn(0f, 1000f)
+                        .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
                 withContext(Dispatchers.Main) { sliderPos = newSliderPos }
             }
 
@@ -669,14 +675,42 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
+    override fun seekTo(time: Duration) {
+        ioScope.launch {
+            delay(10.milliseconds) // Coalesce rapid seek events
+            seekToTimeAsync(time)
+        }
+    }
+
+    override fun seekToProgress(progress: Float) {
+        seekTo(progress.coerceIn(0f, 1f) * VideoPlayerState.SLIDER_SCALE)
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
         ioScope.launch {
             delay(10.milliseconds) // Coalesce rapid seek events
-            seekToAsync(value)
+            val duration = getDurationSafely()
+            if (duration <= Duration.ZERO) {
+                withContext(Dispatchers.Main) { isLoading = false }
+                return@launch
+            }
+            val seekTime = duration * (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
+            seekToTimeAsync(seekTime)
         }
     }
 
     private suspend fun seekToAsync(value: Float) {
+        val duration = getDurationSafely()
+        if (duration <= Duration.ZERO) {
+            withContext(Dispatchers.Main) { isLoading = false }
+            return
+        }
+        val seekTime = duration * (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
+        seekToTimeAsync(seekTime)
+    }
+
+    private suspend fun seekToTimeAsync(time: Duration) {
         withContext(Dispatchers.Main) { isLoading = true }
 
         try {
@@ -686,12 +720,20 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 return
             }
 
-            val seekTime = duration * (value / 1000.0).coerceIn(0.0, 1.0)
+            val seekTime =
+                when {
+                    time < Duration.ZERO -> Duration.ZERO
+                    time > duration -> duration
+                    else -> time
+                }
 
             withContext(Dispatchers.Main) {
                 seekInProgress = true
                 targetSeekTime = seekTime
-                sliderPos = value
+                sliderPos =
+                    (seekTime.toSecondsDouble() / duration.toSecondsDouble() * VideoPlayerState.SLIDER_SCALE)
+                        .toFloat()
+                        .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
             }
 
             lastFrameUpdateTime = System.currentTimeMillis()

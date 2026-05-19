@@ -240,13 +240,14 @@ class VideoPlayerStateTest {
         val webPlayerState = playerState as DefaultVideoPlayerState
         val initialRequestId = webPlayerState.seekRequestId
 
-        playerState.seekTo(500f)
+        webPlayerState.updatePosition(0.seconds, 120.seconds, forceUpdate = true)
+        playerState.seekToProgress(0.5f)
 
         assertTrue(webPlayerState.seekRequestId > initialRequestId)
         assertTrue(webPlayerState.hasPendingSeekRequest())
-        assertTrue(webPlayerState.consumePendingSeekRequest())
+        assertEquals(60.seconds, webPlayerState.consumePendingSeekTime(120.seconds))
         assertFalse(webPlayerState.hasPendingSeekRequest())
-        assertFalse(webPlayerState.consumePendingSeekRequest())
+        assertEquals(null, webPlayerState.consumePendingSeekTime(120.seconds))
 
         playerState.dispose()
     }
@@ -256,7 +257,7 @@ class VideoPlayerStateTest {
         val playerState = createVideoPlayerState()
         val webPlayerState = playerState as DefaultVideoPlayerState
 
-        playerState.seekTo(500f)
+        playerState.seekToProgress(0.5f)
         playerState.stop()
 
         assertFalse(webPlayerState.hasPendingSeekRequest())
@@ -287,6 +288,38 @@ class VideoPlayerStateTest {
         playerState.openUri("file:///path/to/file")
 
         assertEquals(2f, playerState.playbackSpeed)
+    }
+
+    @Test
+    fun testMediaSessionIdInvalidatesPreviousSource() {
+        val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+
+        playerState.openUri("file:///first.mp4")
+        val firstSessionId = playerState.mediaSessionId
+
+        playerState.openUri("file:///second.mp4")
+        val secondSessionId = playerState.mediaSessionId
+
+        assertTrue(secondSessionId > firstSessionId)
+        assertFalse(playerState.isCurrentMediaSession(firstSessionId))
+        assertTrue(playerState.isCurrentMediaSession(secondSessionId))
+
+        playerState.stop()
+
+        assertFalse(playerState.isCurrentMediaSession(secondSessionId))
+        playerState.dispose()
+    }
+
+    @Test
+    fun testWebCapabilitiesClassifySources() {
+        val playerState = createVideoPlayerState()
+
+        assertFalse(playerState.canPlaySource(""))
+        assertTrue(playerState.canPlaySource("blob:https://example.test/video"))
+        assertTrue(playerState.canPlaySource("https://example.test/playlist.m3u8"))
+        assertEquals(playerState.capabilities.supportsMkv, playerState.canPlaySource("file:///movie.mkv"))
+
+        playerState.dispose()
     }
 }
 

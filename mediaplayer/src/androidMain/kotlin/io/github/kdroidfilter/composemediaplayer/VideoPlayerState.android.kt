@@ -94,6 +94,7 @@ open class DefaultVideoPlayerState(
         var activity: WeakReference<Activity> = WeakReference(null)
 
         private var currentPlayerState: WeakReference<DefaultVideoPlayerState>? = null
+        private const val PERCENT_SCALE = 100f
 
         /**
          * Call this from Activity.onPictureInPictureModeChanged()
@@ -130,9 +131,20 @@ open class DefaultVideoPlayerState(
 
     private var _isLoading by mutableStateOf(false)
     override val isLoading: Boolean get() = _isLoading
+    private var _isSeeking by mutableStateOf(false)
+    override val isSeeking: Boolean get() = _isSeeking
 
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     override val error: VideoPlayerError? get() = _error
+    override val capabilities: PlayerCapabilities
+        get() =
+            PlayerCapabilities(
+                supportsHls = true,
+                supportsMkv = true,
+                supportsExternalSubtitles = true,
+                supportsAudioTracks = true,
+                supportsPiP = isPipSupported,
+            )
 
     private var _metadata = VideoMetadata()
     override val metadata: VideoMetadata get() = _metadata
@@ -151,6 +163,7 @@ open class DefaultVideoPlayerState(
     )
 
     override var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override var subtitleOffset by mutableStateOf(Duration.ZERO)
 
     // Audio track state
     override var currentAudioTrack by mutableStateOf<AudioTrack?>(null)
@@ -274,7 +287,7 @@ open class DefaultVideoPlayerState(
     override var sliderPos: Float
         get() = _sliderPos
         set(value) {
-            _sliderPos = value.coerceIn(0f, 1000f)
+            _sliderPos = value.coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
         }
 
     // User interaction states
@@ -331,6 +344,15 @@ open class DefaultVideoPlayerState(
                 _currentTime
             }
     override val duration: Duration get() = _duration
+    override val bufferedRanges: List<BufferedRange>
+        get() {
+            val player = exoPlayer ?: return emptyList()
+            val bufferedPosition = player.bufferedPosition
+            if (bufferedPosition <= 0L) return emptyList()
+            return listOf(BufferedRange(Duration.ZERO, bufferedPosition.millisecondsAsDuration()))
+        }
+    override val bufferedPercent: Float
+        get() = exoPlayer?.bufferedPercentage?.toFloat()?.coerceIn(0f, PERCENT_SCALE) ?: 0f
 
     override val isPipSupported: Boolean
         get() {
@@ -514,6 +536,7 @@ open class DefaultVideoPlayerState(
 
                     Player.STATE_READY -> {
                         _isLoading = false
+                        _isSeeking = false
                         exoPlayer?.let { player ->
                             if (!isPlayerReleased) {
                                 _duration = player.duration.millisecondsAsDuration()
@@ -526,6 +549,7 @@ open class DefaultVideoPlayerState(
 
                     Player.STATE_ENDED -> {
                         _isLoading = false
+                        _isSeeking = false
                         stopPositionUpdates()
                         _isPlaying = false
                         onPlaybackEnded?.invoke()
@@ -533,6 +557,7 @@ open class DefaultVideoPlayerState(
 
                     Player.STATE_IDLE -> {
                         _isLoading = false
+                        _isSeeking = false
                     }
                 }
             }
@@ -555,6 +580,9 @@ open class DefaultVideoPlayerState(
             ) {
                 if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION && _loop) {
                     onRestart?.invoke()
+                }
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    _isSeeking = false
                 }
             }
 
@@ -619,6 +647,7 @@ open class DefaultVideoPlayerState(
                 }
                 _isPlaying = false
                 _isLoading = false
+                _isSeeking = false
             }
         }
 
@@ -677,7 +706,8 @@ open class DefaultVideoPlayerState(
                             _currentTime = player.currentPosition.millisecondsAsDuration()
                             if (!userDragging && _duration > Duration.ZERO) {
                                 _sliderPos =
-                                    (_currentTime.toSecondsDouble() / _duration.toSecondsDouble() * 1000)
+                                    (_currentTime.toSecondsDouble() / _duration.toSecondsDouble() *
+                                        VideoPlayerState.SLIDER_SCALE)
                                         .toFloat()
                             }
                         }
@@ -853,11 +883,35 @@ open class DefaultVideoPlayerState(
         }
     }
 
+    override fun seekTo(time: Duration) {
+        if (!isPlayerReleased) {
+            val targetTime =
+                when {
+                    time < Duration.ZERO -> Duration.ZERO
+                    _duration > Duration.ZERO && time > _duration -> _duration
+                    else -> time
+                }
+            _isSeeking = true
+            exoPlayer?.seekTo(targetTime.inWholeMilliseconds)
+            coroutineScope.launch {
+                delay(250.milliseconds)
+                _isSeeking = false
+            }
+        }
+    }
+
+    override fun seekToProgress(progress: Float) {
+        if (_duration > Duration.ZERO) {
+            seekTo(_duration * progress.coerceIn(0f, 1f).toDouble())
+        }
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
         if (_duration > Duration.ZERO && !isPlayerReleased) {
-            val fraction = (value / 1000.0).coerceIn(0.0, 1.0)
+            val fraction = (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
             val targetTime = _duration * fraction
-            exoPlayer?.seekTo(targetTime.inWholeMilliseconds)
+            seekTo(targetTime)
         }
     }
 
@@ -1063,6 +1117,7 @@ open class DefaultVideoPlayerState(
         _sliderPos = 0f
         _isPlaying = false
         _isLoading = false
+        _isSeeking = false
         _error = null
         _aspectRatio = 16f / 9f
         _playbackSpeed = 1.0f

@@ -65,6 +65,7 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
     playerState: DefaultVideoPlayerState,
     sourceUri: String,
     scope: CoroutineScope,
+    mediaSessionId: Long,
 ): Boolean {
     if (!sourceUri.isHlsSource()) return false
     if (!ensureHlsScriptLoaded()) return false
@@ -74,19 +75,40 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
         sourceUri = sourceUri,
         onTracksChanged = {
             scope.launch {
+                if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
                 playerState.syncWebMediaTracks(this@configureHlsSource)
+                playerState.syncHlsQualities(this@configureHlsSource)
                 this@configureHlsSource.applySelectedAudioTrack(playerState.currentAudioTrack)
                 this@configureHlsSource.applySelectedSubtitleTrack(
                     if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null,
                 )
+                this@configureHlsSource.applySelectedHlsQuality(
+                    if (playerState.hlsQualityMode == HlsQualityMode.AUTO) {
+                        null
+                    } else {
+                        playerState.currentHlsQuality?.id
+                    },
+                )
             }
         },
-        onError = { message ->
+        onError = { message, type, details, fatal ->
             scope.launch {
-                playerState.setError(VideoPlayerError.SourceError(message))
+                if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
+                playerState.setError(
+                    VideoPlayerError.HlsError(
+                        message = message,
+                        type = type,
+                        details = details,
+                        fatal = fatal,
+                    ),
+                )
             }
         },
     )
+    playerState.applyHlsQualityCallback = { variantId ->
+        applySelectedHlsQuality(variantId)
+        playerState.syncHlsQualities(this)
+    }
     return true
 }
 
@@ -95,14 +117,15 @@ private fun setupHlsSource(
     video: HTMLVideoElement,
     sourceUri: String,
     onTracksChanged: () -> Unit,
-    onError: (String) -> Unit,
+    onError: (String, String?, String?, Boolean) -> Unit,
 ): Unit =
     js(
         """
         {
-            const Hls = globalThis.Hls;
+                const Hls = globalThis.Hls;
             if (!Hls || typeof Hls.isSupported !== "function" || !Hls.isSupported()) {
                 video.src = sourceUri;
+                video.__composeMediaPlayerHlsSourceUri = sourceUri;
                 video.load();
                 onTracksChanged();
             } else {
@@ -112,9 +135,11 @@ private fun setupHlsSource(
 
                 const hls = new Hls({ renderTextTracksNatively: false });
                 video.__composeMediaPlayerHls = hls;
+                video.__composeMediaPlayerHlsSourceUri = sourceUri;
                 video.__composeMediaPlayerHlsSubtitleRows = "";
 
                 const sync = function() {
+                    if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;
                     try { onTracksChanged(); } catch (error) { console.error(error); }
                 };
 
@@ -148,7 +173,8 @@ private fun setupHlsSource(
                         const uri = new URL(attrs.URI, baseUrl).toString();
                         const label = attrs.NAME || attrs.LANGUAGE || ("Subtitle " + (rows.length + 1));
                         const language = attrs.LANGUAGE || "";
-                        const id = "${HLS_SUBTITLE_TRACK_ID_PREFIX}" + rows.length + ":" + encodeURIComponent(label);
+                        const stableKey = attrs.URI || attrs.NAME || attrs.LANGUAGE || String(rows.length);
+                        const id = "${HLS_SUBTITLE_TRACK_ID_PREFIX}" + encodeURIComponent(stableKey);
                         rows.push([
                             id,
                             label,
@@ -167,11 +193,18 @@ private fun setupHlsSource(
                     hls.loadSource(sourceUri);
                 });
                 hls.on(Hls.Events.MANIFEST_PARSED, sync);
+                hls.on(Hls.Events.LEVEL_SWITCHED, sync);
+                hls.on(Hls.Events.LEVEL_UPDATED, sync);
                 hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, sync);
                 hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, sync);
                 hls.on(Hls.Events.ERROR, function(_, data) {
                     if (data && data.fatal) {
-                        try { onError(String(data.details || data.type || "HLS playback error")); } catch (_) {}
+                        try {
+                            const type = data.type ? String(data.type) : null;
+                            const details = data.details ? String(data.details) : null;
+                            const message = details || type || "HLS playback error";
+                            onError(message, type, details, Boolean(data.fatal));
+                        } catch (_) {}
                     }
                 });
                 hls.attachMedia(video);
@@ -179,10 +212,12 @@ private fun setupHlsSource(
                 fetch(sourceUri)
                     .then(function(response) { return response.ok ? response.text() : ""; })
                     .then(function(text) {
+                        if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;
                         video.__composeMediaPlayerHlsSubtitleRows = parseSubtitleRows(text, sourceUri);
                         sync();
                     })
                     .catch(function() {
+                        if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;
                         video.__composeMediaPlayerHlsSubtitleRows = "";
                         sync();
                     });
@@ -205,6 +240,130 @@ private fun destroyHlsController(video: HTMLVideoElement): Unit =
                 video.__composeMediaPlayerHls = null;
             }
             video.__composeMediaPlayerHlsSubtitleRows = "";
+            video.__composeMediaPlayerHlsSourceUri = "";
         }
         """,
     )
+
+private data class HlsQualitySnapshot(
+    val variants: List<HlsQualityVariant>,
+    val selectedId: String?,
+    val autoMode: Boolean,
+)
+
+internal fun DefaultVideoPlayerState.syncHlsQualities(video: HTMLVideoElement) {
+    val snapshot = parseHlsQualityRows(readHlsQualityRows(video))
+    replaceHlsQualities(
+        variants = snapshot.variants,
+        selectedId = snapshot.selectedId,
+        autoMode = snapshot.autoMode,
+    )
+}
+
+internal fun HTMLVideoElement.applySelectedHlsQuality(variantId: String?) {
+    selectHlsQualityById(video = this, selectedId = variantId)
+}
+
+private fun parseHlsQualityRows(rows: String): HlsQualitySnapshot {
+    var selectedId: String? = null
+    var autoMode = true
+    val variants =
+        rows
+            .lineSequence()
+            .filter { it.isNotBlank() }
+            .mapNotNull { row ->
+                val columns = row.split('|').map(::decodeUriComponent)
+                if (columns.size < 8) return@mapNotNull null
+
+                val id = columns[0]
+                if (columns[6] == "1") selectedId = id
+                autoMode = columns[7] == "1"
+
+                HlsQualityVariant(
+                    id = id,
+                    label = columns[1],
+                    width = columns[2].toIntOrNull(),
+                    height = columns[3].toIntOrNull(),
+                    bitrate = columns[4].toIntOrNull(),
+                    codecs = columns[5].ifBlank { null },
+                )
+            }.toList()
+
+    return HlsQualitySnapshot(
+        variants = variants,
+        selectedId = selectedId,
+        autoMode = autoMode,
+    )
+}
+
+@Suppress("UNUSED_PARAMETER")
+private fun readHlsQualityRows(video: HTMLVideoElement): String =
+    js(
+        """
+        (function() {
+            const hls = video.__composeMediaPlayerHls;
+            const levels = hls && hls.levels;
+            if (!levels || typeof levels.length !== "number") return "";
+
+            const selectedIndex = typeof hls.currentLevel === "number" ? hls.currentLevel : -1;
+            const autoMode = hls.autoLevelEnabled || selectedIndex < 0;
+            const rows = [];
+            for (let i = 0; i < levels.length; i += 1) {
+                const level = levels[i] || {};
+                const width = Number(level.width || 0);
+                const height = Number(level.height || 0);
+                const bitrate = Number(level.bitrate || level.maxBitrate || 0);
+                const codecs = level.codecs || [level.videoCodec || "", level.audioCodec || ""].filter(Boolean).join(",");
+                const stableKey = [String(width), String(height), String(bitrate), codecs, String(i)].join("|");
+                const id = "hls:quality:" + encodeURIComponent(stableKey);
+                const label = height > 0 ? String(height) + "p" : (bitrate > 0 ? Math.round(bitrate / 1000) + " kbps" : "Level " + (i + 1));
+                rows.push([
+                    id,
+                    label,
+                    width > 0 ? String(width) : "",
+                    height > 0 ? String(height) : "",
+                    bitrate > 0 ? String(bitrate) : "",
+                    codecs || "",
+                    selectedIndex === i ? "1" : "0",
+                    autoMode ? "1" : "0"
+                ].map(encodeURIComponent).join("|"));
+            }
+            return rows.join("\n");
+        })()
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+private fun selectHlsQualityById(
+    video: HTMLVideoElement,
+    selectedId: String?,
+): Unit =
+    js(
+        """
+        {
+            const hls = video.__composeMediaPlayerHls;
+            if (!hls || !hls.levels) return;
+            if (!selectedId) {
+                hls.currentLevel = -1;
+                return;
+            }
+
+            for (let i = 0; i < hls.levels.length; i += 1) {
+                const level = hls.levels[i] || {};
+                const width = Number(level.width || 0);
+                const height = Number(level.height || 0);
+                const bitrate = Number(level.bitrate || level.maxBitrate || 0);
+                const codecs = level.codecs || [level.videoCodec || "", level.audioCodec || ""].filter(Boolean).join(",");
+                const stableKey = [String(width), String(height), String(bitrate), codecs, String(i)].join("|");
+                const id = "hls:quality:" + encodeURIComponent(stableKey);
+                if (id === selectedId) {
+                    hls.currentLevel = i;
+                    return;
+                }
+            }
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+private fun decodeUriComponent(value: String): String = js("decodeURIComponent(value)")
