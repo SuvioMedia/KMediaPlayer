@@ -706,9 +706,11 @@ open class DefaultVideoPlayerState(
                             _currentTime = player.currentPosition.millisecondsAsDuration()
                             if (!userDragging && _duration > Duration.ZERO) {
                                 _sliderPos =
-                                    (_currentTime.toSecondsDouble() / _duration.toSecondsDouble() *
-                                        VideoPlayerState.SLIDER_SCALE)
-                                        .toFloat()
+                                    (
+                                        _currentTime.toSecondsDouble() /
+                                            _duration.toSecondsDouble() *
+                                            VideoPlayerState.SLIDER_SCALE
+                                    ).toFloat()
                             }
                         }
                     }

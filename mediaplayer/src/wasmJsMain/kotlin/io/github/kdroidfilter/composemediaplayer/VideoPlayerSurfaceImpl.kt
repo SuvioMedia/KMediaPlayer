@@ -27,7 +27,6 @@ import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
 import kotlin.js.ExperimentalWasmJsInterop
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 internal val webVideoLogger = TaggedLogger("WebVideoPlayerSurface")

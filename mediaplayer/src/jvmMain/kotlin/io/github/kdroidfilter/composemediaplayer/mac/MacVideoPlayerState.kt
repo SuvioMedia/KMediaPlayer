@@ -514,7 +514,8 @@ class MacVideoPlayerState : VideoPlayerState {
                         MacVlcLocator.findVlc()
                             ?: throw UnsupportedOperationException(
                                 "Matroska/WebM fallback backend is set to VLC, but VLC.app was not found. " +
-                                    "Install VLC or set composemediaplayer.macos.vlc=/path/to/VLC or COMPOSE_MEDIA_PLAYER_VLC. " +
+                                    "Install VLC or set composemediaplayer.macos.vlc=/path/to/VLC " +
+                                    "or COMPOSE_MEDIA_PLAYER_VLC. " +
                                     "ComposeMediaPlayer does not bundle or link VLC.",
                             )
                     macLogger.d { "Using external VLC fallback for macOS unsupported container: $vlcPath" }
@@ -530,13 +531,16 @@ class MacVideoPlayerState : VideoPlayerState {
                         }
                             ?: throw UnsupportedOperationException(
                                 if (requiresSubtitleFilter) {
-                                    "Embedded subtitle rendering on macOS fallback requires an external ffmpeg build with libass " +
-                                        "and the subtitles filter enabled, or VLC fallback. Install ffmpeg-full/VLC or set " +
-                                        "composemediaplayer.macos.ffmpeg=/path/to/ffmpeg or COMPOSE_MEDIA_PLAYER_FFMPEG. " +
+                                    "Embedded subtitle rendering on macOS fallback requires an external ffmpeg build " +
+                                        "with libass and the subtitles filter enabled, or VLC fallback. " +
+                                        "Install ffmpeg-full/VLC or set " +
+                                        "composemediaplayer.macos.ffmpeg=/path/to/ffmpeg " +
+                                        "or COMPOSE_MEDIA_PLAYER_FFMPEG. " +
                                         "ComposeMediaPlayer does not bundle or link ffmpeg or VLC."
                                 } else {
                                     "Matroska/WebM is not supported by AVPlayer on macOS. Install ffmpeg or VLC, " +
-                                        "or set composemediaplayer.macos.ffmpeg=/path/to/ffmpeg or COMPOSE_MEDIA_PLAYER_FFMPEG. " +
+                                        "or set composemediaplayer.macos.ffmpeg=/path/to/ffmpeg " +
+                                        "or COMPOSE_MEDIA_PLAYER_FFMPEG. " +
                                         "ComposeMediaPlayer does not bundle or link ffmpeg or VLC."
                                 },
                             )
@@ -980,7 +984,8 @@ class MacVideoPlayerState : VideoPlayerState {
                 }
             "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-nsview" ->
                 throw UnsupportedOperationException(
-                    "The macOS libVLC native-view backend has been removed because it is unstable with Compose overlays. " +
+                    "The macOS libVLC native-view backend has been removed because it is unstable " +
+                        "with Compose overlays. " +
                         "Use fallbackBackend=libvlc for the Compose canvas backend.",
                 )
             "ffmpeg", "vlc" -> null

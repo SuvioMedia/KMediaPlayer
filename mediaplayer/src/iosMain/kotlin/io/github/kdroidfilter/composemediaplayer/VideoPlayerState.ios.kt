@@ -706,8 +706,9 @@ open class DefaultVideoPlayerState(
     override fun seekTo(value: Float) {
         val currentPlayer = player ?: return
         if (_duration > Duration.ZERO) {
-            val targetTime = (_duration * (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0))
-                .toSecondsDouble()
+            val targetTime =
+                (_duration * (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0))
+                    .toSecondsDouble()
             seekToSeconds(currentPlayer, targetTime)
         }
     }

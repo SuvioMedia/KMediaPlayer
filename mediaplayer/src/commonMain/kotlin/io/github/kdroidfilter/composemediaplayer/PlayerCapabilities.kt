@@ -31,7 +31,11 @@ data class PlayerCapabilities(
         val scheme = trimmedUri.substringBefore(':', missingDelimiterValue = "").lowercase()
         if (scheme.isNotEmpty() && scheme !in supportedUriSchemes) return false
 
-        val normalizedMimeType = source.mimeType?.substringBefore(';')?.trim()?.lowercase()
+        val normalizedMimeType =
+            source.mimeType
+                ?.substringBefore(';')
+                ?.trim()
+                ?.lowercase()
         if (normalizedMimeType.isHlsMimeType() || trimmedUri.isHlsUri()) return supportsHls
         if (normalizedMimeType.isMkvMimeType() || trimmedUri.isMkvUri()) return supportsMkv
 
@@ -49,8 +53,7 @@ private fun String?.isHlsMimeType(): Boolean =
         this == "audio/mpegurl" ||
         this == "audio/x-mpegurl"
 
-private fun String?.isMkvMimeType(): Boolean =
-    this == "video/x-matroska" || this == "video/matroska"
+private fun String?.isMkvMimeType(): Boolean = this == "video/x-matroska" || this == "video/matroska"
 
 private fun String.isHlsUri(): Boolean {
     val clean = substringBefore('?').substringBefore('#').lowercase()
