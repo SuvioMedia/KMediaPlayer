@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:IosVideoCache.kt:IosVideoCache$1024</ID>
+    <ID>MagicNumber:IosVideoCache.kt:IosVideoCache$10L</ID>
+    <ID>MagicNumber:VideoPlayerState.ios.kt:DefaultVideoPlayerState$16.0</ID>
+    <ID>MagicNumber:VideoPlayerState.ios.kt:DefaultVideoPlayerState$44100</ID>
+    <ID>MagicNumber:VideoPlayerState.ios.kt:DefaultVideoPlayerState$9.0</ID>
+    <ID>SwallowedException:SubtitleLoader.ios.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SubtitleLoader.ios.kt:e2: Exception</ID>
+    <ID>TooGenericExceptionCaught:SubtitleLoader.ios.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoPlayerState.ios.kt:DefaultVideoPlayerState$e: Exception</ID>
+    <ID>WildcardImport:VideoPlayerState.ios.kt:import platform.AVFoundation.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

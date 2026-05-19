@@ -19,8 +19,7 @@ private const val HLS_SUBTITLE_TRACK_ID_PREFIX = "hls:subtitle:"
 
 private var hlsScriptLoad: CompletableDeferred<Boolean>? = null
 
-internal fun String.isHlsSource(): Boolean =
-    substringBefore('?').substringBefore('#').lowercase().endsWith(".m3u8")
+internal fun String.isHlsSource(): Boolean = substringBefore('?').substringBefore('#').lowercase().endsWith(".m3u8")
 
 internal suspend fun ensureHlsScriptLoaded(): Boolean {
     if (isHlsLoaded()) return true
@@ -60,8 +59,7 @@ internal suspend fun ensureHlsScriptLoaded(): Boolean {
     return loaded && isHlsLoaded()
 }
 
-private fun isHlsLoaded(): Boolean =
-    js("typeof globalThis.Hls === 'function'")
+private fun isHlsLoaded(): Boolean = js("typeof globalThis.Hls === 'function'")
 
 internal suspend fun HTMLVideoElement.configureHlsSource(
     playerState: DefaultVideoPlayerState,

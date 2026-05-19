@@ -19,7 +19,8 @@ private data class SubtitleTrackSnapshot(
 internal fun DefaultVideoPlayerState.syncWebMediaTracks(video: HTMLVideoElement) {
     val hlsAudioRows = readHlsAudioTrackRows(video)
     val webAudioRows = readWebAudioTrackRows(video)
-    val audioSnapshot = parseAudioTrackRows(hlsAudioRows.ifBlank { webAudioRows.ifBlank { readMkvAudioTrackRows(video) } })
+    val audioSnapshot =
+        parseAudioTrackRows(hlsAudioRows.ifBlank { webAudioRows.ifBlank { readMkvAudioTrackRows(video) } })
     replaceAvailableAudioTracks(audioSnapshot.tracks)
     audioSnapshot.selectedId?.let { selectedId ->
         currentAudioTrack = audioSnapshot.tracks.firstOrNull { it.id == selectedId } ?: currentAudioTrack
@@ -124,8 +125,7 @@ private fun parseSubtitleTrackRows(rows: String): SubtitleTrackSnapshot {
     return SubtitleTrackSnapshot(tracks = tracks, selectedId = selectedId)
 }
 
-private fun decodeUriComponent(value: String): String =
-    js("decodeURIComponent(value)")
+private fun decodeUriComponent(value: String): String = js("decodeURIComponent(value)")
 
 private fun readWebAudioTrackRows(video: HTMLVideoElement): String =
     js(

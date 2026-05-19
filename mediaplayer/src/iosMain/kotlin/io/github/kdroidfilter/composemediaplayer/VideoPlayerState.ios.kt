@@ -4,6 +4,7 @@ package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
@@ -37,11 +38,11 @@ import platform.CoreMedia.CMTimeGetSeconds
 import platform.CoreMedia.CMTimeMake
 import platform.CoreMedia.CMTimeMakeWithSeconds
 import platform.Foundation.NSKeyValueChangeNewKey
-import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSKeyValueObservingOptionNew
 import platform.Foundation.NSKeyValueObservingOptions
 import platform.Foundation.NSKeyValueObservingProtocol
 import platform.Foundation.NSNotificationCenter
+import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSURL
 import platform.Foundation.addObserver
 import platform.Foundation.removeObserver
@@ -73,9 +74,7 @@ open class DefaultVideoPlayerState(
         set(value) {
             val clampedValue = value.coerceIn(0f, 1f)
             _volume.value = clampedValue
-            if (_isPlaying) {
-                player?.volume = clampedValue
-            }
+            player?.volume = clampedValue
         }
 
     override var onPlaybackEnded: (() -> Unit)? = null
@@ -195,7 +194,7 @@ open class DefaultVideoPlayerState(
     val videoAspectRatio: CGFloat
         get() = _videoAspectRatio
 
-    override val aspectRatio: Float = _videoAspectRatio.toFloat()
+    override val aspectRatio: Float get() = _videoAspectRatio.toFloat()
 
     // Video metadata
     private var _metadata = VideoMetadata(audioChannels = 2)
@@ -762,7 +761,7 @@ open class DefaultVideoPlayerState(
             _currentAudioTrack = value
         }
 
-    private val _availableAudioTracks = mutableListOf<AudioTrack>()
+    private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
     override val availableAudioTracks: MutableList<AudioTrack>
         get() = _availableAudioTracks
 
@@ -785,7 +784,7 @@ open class DefaultVideoPlayerState(
             _currentSubtitleTrack = value
         }
 
-    private val _availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
     override val availableSubtitleTracks: MutableList<SubtitleTrack>
         get() = _availableSubtitleTracks
 

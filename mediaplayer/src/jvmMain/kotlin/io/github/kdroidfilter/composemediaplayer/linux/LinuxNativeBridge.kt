@@ -46,7 +46,12 @@ internal object LinuxNativeBridge {
     @JvmStatic external fun nGetPlaybackSpeed(handle: Long): Float
 
     // Frame access
-    @JvmStatic external fun nGetLatestFrameAddress(handle: Long): Long
+    @JvmStatic external fun nLockFrame(
+        handle: Long,
+        outInfo: IntArray,
+    ): Long
+
+    @JvmStatic external fun nUnlockFrame(handle: Long)
 
     @JvmStatic external fun nWrapPointer(
         address: Long,

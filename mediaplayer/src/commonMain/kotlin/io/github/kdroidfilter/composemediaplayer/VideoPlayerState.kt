@@ -296,7 +296,7 @@ fun rememberVideoPlayerState(
     cacheConfig: CacheConfig = CacheConfig(),
 ): VideoPlayerState {
     val playerState = remember(audioMode, cacheConfig) { createVideoPlayerState(audioMode, cacheConfig) }
-    DisposableEffect(Unit) {
+    DisposableEffect(playerState) {
         onDispose {
             playerState.dispose()
         }

@@ -55,7 +55,11 @@ internal object MacAvFoundationContainerSupport {
 
             val headers = readRemoteHeaders(uri)
             if (headers != null) {
-                val contentType = headers.contentType?.substringBefore(";")?.trim()?.lowercase()
+                val contentType =
+                    headers.contentType
+                        ?.substringBefore(";")
+                        ?.trim()
+                        ?.lowercase()
                 if (contentType in unsupportedContentTypes) {
                     return@withContext true
                 }
@@ -223,11 +227,11 @@ internal object MacFfmpegLocator {
             System.getenv("FFMPEG_PATH"),
         ).firstOrNull { it.isNotBlank() }
 
-    private fun searchExecutable(name: String): String? =
-        executableCandidates(name).firstOrNull(::isExecutable)
+    private fun searchExecutable(name: String): String? = executableCandidates(name).firstOrNull(::isExecutable)
 
     private fun executableCandidates(name: String): List<String> =
-        System.getenv("PATH")
+        System
+            .getenv("PATH")
             ?.split(File.pathSeparator)
             ?.map { File(it, name).absolutePath }
             .orEmpty() +
@@ -365,7 +369,10 @@ internal class MacFfmpegHlsFallback(
         exchange: HttpExchange,
     ) {
         try {
-            val rawPath = exchange.requestURI.path.removePrefix("/").ifBlank { "stream.m3u8" }
+            val rawPath =
+                exchange.requestURI.path
+                    .removePrefix("/")
+                    .ifBlank { "stream.m3u8" }
             val decodedPath = URLDecoder.decode(rawPath, Charsets.UTF_8.name())
             val file = root.resolve(decodedPath).normalize()
             if (!file.startsWith(root) || !Files.isRegularFile(file)) {
@@ -405,78 +412,82 @@ internal class MacFfmpegHlsFallback(
         selectedSubtitleStream: FfmpegSubtitleStream?,
         startTimeSeconds: Double,
     ): List<String> {
-        val command = mutableListOf(
-            ffmpegPath,
-            "-hide_banner",
-            "-loglevel",
-            "warning",
-            "-nostdin",
-            "-y",
-            "-re",
-        )
+        val command =
+            mutableListOf(
+                ffmpegPath,
+                "-hide_banner",
+                "-loglevel",
+                "warning",
+                "-nostdin",
+                "-y",
+                "-re",
+            )
 
         if (startTimeSeconds > 0.0) {
             command += listOf("-ss", formatSeekTime(startTimeSeconds))
         }
 
-        command += listOf(
-            "-i",
-            uri,
-            "-map",
-            "0:v:0",
-            "-map",
-            selectedAudioStreamIndex?.let { "0:$it" } ?: "0:a:0?",
-            "-sn",
-            "-dn",
-        )
+        command +=
+            listOf(
+                "-i",
+                uri,
+                "-map",
+                "0:v:0",
+                "-map",
+                selectedAudioStreamIndex?.let { "0:$it" } ?: "0:a:0?",
+                "-sn",
+                "-dn",
+            )
 
         if (selectedSubtitleStream != null) {
-            command += listOf(
-                "-vf",
-                buildSubtitlesFilter(uri, selectedSubtitleStream.subtitleOrdinal),
-            )
+            command +=
+                listOf(
+                    "-vf",
+                    buildSubtitlesFilter(uri, selectedSubtitleStream.subtitleOrdinal),
+                )
         }
 
-        command += listOf(
-            "-c:v",
-            "h264_videotoolbox",
-            "-b:v",
-            "5000k",
-            "-maxrate",
-            "7000k",
-            "-bufsize",
-            "10000k",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "160k",
-            "-ac",
-            "2",
-        )
+        command +=
+            listOf(
+                "-c:v",
+                "h264_videotoolbox",
+                "-b:v",
+                "5000k",
+                "-maxrate",
+                "7000k",
+                "-bufsize",
+                "10000k",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "160k",
+                "-ac",
+                "2",
+            )
 
-        command += listOf(
-            "-f",
-            "hls",
-            "-hls_time",
-            "4",
-            "-hls_list_size",
-            "8",
-            "-hls_delete_threshold",
-            "4",
-            "-hls_flags",
-            "delete_segments+independent_segments",
-            "-hls_segment_filename",
-            segmentPattern,
-            playlist.absolutePathString(),
-        )
+        command +=
+            listOf(
+                "-f",
+                "hls",
+                "-hls_time",
+                "4",
+                "-hls_list_size",
+                "8",
+                "-hls_delete_threshold",
+                "4",
+                "-hls_flags",
+                "delete_segments+independent_segments",
+                "-hls_segment_filename",
+                segmentPattern,
+                playlist.absolutePathString(),
+            )
 
         return command
     }
 
-    private fun formatSeekTime(seconds: Double): String =
-        "%.3f".format(java.util.Locale.US, seconds.coerceAtLeast(0.0))
+    private fun formatSeekTime(seconds: Double): String = "%.3f".format(java.util.Locale.US, seconds.coerceAtLeast(0.0))
 
     private fun probeTrackInfo(uri: String): ProbeTrackInfo {
         val ffprobe = MacFfmpegLocator.findFfprobe(ffmpegPath) ?: return ProbeTrackInfo()
@@ -605,8 +616,7 @@ internal class MacFfmpegHlsFallback(
             .replace("\\\\", "\\")
     }
 
-    private fun String.toFinitePositiveDoubleOrNull(): Double? =
-        toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+    private fun String.toFinitePositiveDoubleOrNull(): Double? = toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
 
     private fun subtitleFormatForCodec(codecName: String?): SubtitleFormat? =
         when (codecName?.lowercase()) {
@@ -628,8 +638,7 @@ internal class MacFfmpegHlsFallback(
     private fun buildSubtitlesFilter(
         uri: String,
         subtitleOrdinal: Int,
-    ): String =
-        "subtitles=filename='${escapeFilterValue(uri)}':si=$subtitleOrdinal"
+    ): String = "subtitles=filename='${escapeFilterValue(uri)}':si=$subtitleOrdinal"
 
     private fun escapeFilterValue(value: String): String =
         buildString {
@@ -677,13 +686,17 @@ internal class MacFfmpegHlsFallback(
             }
 
             if (!startedProcess.isAlive) {
-                throw IllegalStateException("ffmpeg exited before producing a playable HLS playlist. ${lastLogMessage()}")
+                throw IllegalStateException(
+                    "ffmpeg exited before producing a playable HLS playlist. ${lastLogMessage()}",
+                )
             }
 
             delay(250.milliseconds)
         }
 
-        throw IllegalStateException("Timed out waiting for ffmpeg to produce a playable HLS playlist. ${lastLogMessage()}")
+        throw IllegalStateException(
+            "Timed out waiting for ffmpeg to produce a playable HLS playlist. ${lastLogMessage()}",
+        )
     }
 
     private fun lastLogMessage(): String =
@@ -697,7 +710,8 @@ internal class MacFfmpegHlsFallback(
         if (!path.exists()) return
         runCatching {
             Files.walk(path).use { stream ->
-                stream.sorted(Comparator.reverseOrder())
+                stream
+                    .sorted(Comparator.reverseOrder())
                     .forEach { Files.deleteIfExists(it) }
             }
         }

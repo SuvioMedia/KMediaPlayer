@@ -125,5 +125,24 @@ class SrtParserTest {
         val activeCuesAt6000ms = subtitles.getActiveCues(6000)
         assertEquals(1, activeCuesAt6000ms.size, "One subtitle should be active at 6000ms")
         assertEquals("Second subtitle", activeCuesAt6000ms[0].text)
+
+        val activeCuesAtFirstEnd = subtitles.getActiveCues(4000)
+        assertEquals(0, activeCuesAtFirstEnd.size, "Cue end times should be exclusive")
+    }
+
+    @Test
+    fun testIndexedActiveCuesWithUnsortedOverlappingCues() {
+        val subtitles =
+            SubtitleCueList(
+                listOf(
+                    SubtitleCue(startTime = 5_000, endTime = 6_000, text = "second"),
+                    SubtitleCue(startTime = 1_000, endTime = 10_000, text = "long"),
+                    SubtitleCue(startTime = 2_000, endTime = 3_000, text = "short"),
+                ),
+            )
+
+        val activeCues = subtitles.getActiveCues(5_500)
+        assertEquals(listOf("long", "second"), activeCues.map { it.text })
+        assertEquals(6_000, subtitles.nextBoundaryAfter(5_500))
     }
 }

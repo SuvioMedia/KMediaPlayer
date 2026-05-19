@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -87,10 +88,15 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 try {
                     Runtime.getRuntime().addShutdownHook(
                         Thread {
-                            try { WindowsNativeBridge.ShutdownMediaFoundation() } catch (_: Throwable) {}
-                        }
+                            try {
+                                WindowsNativeBridge.ShutdownMediaFoundation()
+                            } catch (_: Throwable) {
+                            }
+                        },
                     )
-                } catch (_: Throwable) { /* best effort */ }
+                } catch (_: Throwable) {
+                    // best effort
+                }
             }
         }
 
@@ -225,19 +231,20 @@ class WindowsVideoPlayerState : VideoPlayerState {
     // Metadata and UI state
     private var _metadata by mutableStateOf(VideoMetadata())
     override val metadata: VideoMetadata get() = _metadata
-    override var subtitlesEnabled = false
-    override var currentSubtitleTrack: SubtitleTrack? = null
-    override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
-    override var currentAudioTrack: AudioTrack? = null
-    override val availableAudioTracks = mutableListOf<AudioTrack>()
-    override var subtitleTextStyle: TextStyle =
+    override var subtitlesEnabled by mutableStateOf(false)
+    override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
+    override val availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
+    override var currentAudioTrack: AudioTrack? by mutableStateOf(null)
+    override val availableAudioTracks = mutableStateListOf<AudioTrack>()
+    override var subtitleTextStyle: TextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Normal,
             textAlign = TextAlign.Center,
-        )
-    override var subtitleBackgroundColor: Color = Color.Black.copy(alpha = 0.5f)
+        ),
+    )
+    override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
     override var isLoading by mutableStateOf(false)
         private set
     override val positionText: String get() = formatTime(_currentTime)
@@ -311,6 +318,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     // one currently bound to ImageBitmap and the one Compose just finished.
     private val skiaBitmaps = arrayOfNulls<Bitmap>(3)
     private var nextBitmapIndex: Int = 0
+
     @Volatile
     private var lastFrameHash: Int = Int.MIN_VALUE
     private var skiaBitmapWidth: Int = 0
@@ -320,7 +328,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
     // (HLS adaptive bitrate) the old double-buffer bitmaps may still be read by
     // Compose on the AWT thread via currentFrameState. We defer close() by a few
     // consumed frames so Compose has swapped to the new bitmap first.
-    private data class PendingCloseBitmap(val bitmap: Bitmap, var framesLeft: Int)
+    private data class PendingCloseBitmap(
+        val bitmap: Bitmap,
+        var framesLeft: Int,
+    )
+
     private val pendingCloseBitmaps = ArrayDeque<PendingCloseBitmap>()
     private val pendingCloseGraceFrames: Int = 4
 
@@ -392,7 +404,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 val deadlineNs = System.nanoTime() + 500_000_000L
                 if (java.awt.EventQueue.isDispatchThread()) {
                     while (jobToJoin.isActive && System.nanoTime() < deadlineNs) {
-                        try { Thread.sleep(10) } catch (_: InterruptedException) { break }
+                        try {
+                            Thread.sleep(10)
+                        } catch (_: InterruptedException) {
+                            break
+                        }
                     }
                 } else {
                     try {
@@ -401,7 +417,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
                                 jobToJoin.join()
                             }
                         }
-                    } catch (_: Exception) { /* ignore */ }
+                    } catch (_: Exception) {
+                        // ignore
+                    }
                 }
             }
 
@@ -768,7 +786,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 ProduceOutcome.SkipIteration -> yield()
                 is ProduceOutcome.Frame -> {
                     frameChannel.trySend(FrameData(produced.bitmap, produced.timestamp))
-                    delay(1.milliseconds)
+                    delay(frameIntervalMs.milliseconds)
                 }
                 null -> { /* exception already handled */ }
             }
@@ -797,95 +815,102 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private fun processOneFrame(instance: Long): ProduceOutcome {
         val hrArr = IntArray(1)
         val srcBuffer = player.ReadVideoFrame(instance, hrArr) ?: return ProduceOutcome.NotReady
-        if (hrArr[0] < 0) return ProduceOutcome.NotReady
+        var frameUnlocked = false
 
-        // HLS adaptive bitrate may change the decoded size mid-stream.
-        val sizeArr = IntArray(2)
-        player.GetVideoSize(instance, sizeArr)
-        if (sizeArr[0] > 0 &&
-            sizeArr[1] > 0 &&
-            (sizeArr[0] != videoWidth || sizeArr[1] != videoHeight)
-        ) {
-            videoWidth = sizeArr[0]
-            videoHeight = sizeArr[1]
+        fun unlockFrame() {
+            if (!frameUnlocked) {
+                player.UnlockVideoFrame(instance)
+                frameUnlocked = true
+            }
         }
 
-        val width = videoWidth
-        val height = videoHeight
-        if (width <= 0 || height <= 0) {
-            player.UnlockVideoFrame(instance)
-            return ProduceOutcome.SkipIteration
-        }
+        try {
+            if (hrArr[0] < 0) return ProduceOutcome.NotReady
 
-        srcBuffer.rewind()
-        val pixelCount = width * height
-        val newHash = calculateFrameHash(srcBuffer, pixelCount)
-        if (newHash == lastFrameHash) {
-            player.UnlockVideoFrame(instance)
-            return ProduceOutcome.SkipIteration
-        }
-        lastFrameHash = newHash
+            // HLS adaptive bitrate may change the decoded size mid-stream.
+            val sizeArr = IntArray(2)
+            player.GetVideoSize(instance, sizeArr)
+            if (sizeArr[0] > 0 &&
+                sizeArr[1] > 0 &&
+                (sizeArr[0] != videoWidth || sizeArr[1] != videoHeight)
+            ) {
+                videoWidth = sizeArr[0]
+                videoHeight = sizeArr[1]
+            }
 
-        if (skiaBitmaps[0] == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
-            bitmapLock.write {
-                // Queue previous bitmaps for deferred close instead of leaking them
-                // to the Skia managed cleaner: closing now would race with Compose
-                // still drawing the last frame on the AWT thread.
-                for (i in skiaBitmaps.indices) {
-                    skiaBitmaps[i]?.let {
-                        pendingCloseBitmaps.addLast(PendingCloseBitmap(it, pendingCloseGraceFrames))
+            val width = videoWidth
+            val height = videoHeight
+            if (width <= 0 || height <= 0) {
+                return ProduceOutcome.SkipIteration
+            }
+
+            srcBuffer.rewind()
+            val pixelCount = width * height
+            val newHash = calculateFrameHash(srcBuffer, pixelCount)
+            if (newHash == lastFrameHash) {
+                return ProduceOutcome.SkipIteration
+            }
+            lastFrameHash = newHash
+
+            if (skiaBitmaps[0] == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
+                bitmapLock.write {
+                    // Queue previous bitmaps for deferred close instead of leaking them
+                    // to the Skia managed cleaner: closing now would race with Compose
+                    // still drawing the last frame on the AWT thread.
+                    for (i in skiaBitmaps.indices) {
+                        skiaBitmaps[i]?.let {
+                            pendingCloseBitmaps.addLast(PendingCloseBitmap(it, pendingCloseGraceFrames))
+                        }
+                        skiaBitmaps[i] = null
                     }
-                    skiaBitmaps[i] = null
+                    val imageInfo = createVideoImageInfo()
+                    for (i in skiaBitmaps.indices) {
+                        skiaBitmaps[i] = Bitmap().apply { allocPixels(imageInfo) }
+                    }
+                    skiaBitmapWidth = width
+                    skiaBitmapHeight = height
+                    nextBitmapIndex = 0
                 }
-                val imageInfo = createVideoImageInfo()
-                for (i in skiaBitmaps.indices) {
-                    skiaBitmaps[i] = Bitmap().apply { allocPixels(imageInfo) }
-                }
-                skiaBitmapWidth = width
-                skiaBitmapHeight = height
-                nextBitmapIndex = 0
-            }
-        }
-
-        drainPendingCloseBitmaps()
-
-        val targetBitmap = skiaBitmaps[nextBitmapIndex]!!
-        nextBitmapIndex = (nextBitmapIndex + 1) % skiaBitmaps.size
-
-        val pixmap = targetBitmap.peekPixels()
-        if (pixmap == null) {
-            player.UnlockVideoFrame(instance)
-            windowsLogger.e { "Failed to get pixmap from bitmap" }
-            return ProduceOutcome.SkipIteration
-        }
-        val pixelsAddr = pixmap.addr
-        if (pixelsAddr == 0L) {
-            player.UnlockVideoFrame(instance)
-            windowsLogger.e { "Invalid pixel address" }
-            return ProduceOutcome.SkipIteration
-        }
-
-        val dstRowBytes = pixmap.rowBytes
-        val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
-        val dstBuffer = WindowsNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
-        if (dstBuffer == null) {
-            player.UnlockVideoFrame(instance)
-            return ProduceOutcome.SkipIteration
-        }
-
-        srcBuffer.rewind()
-        copyBgraFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
-        player.UnlockVideoFrame(instance)
-
-        val posArr = LongArray(1)
-        val frameTime =
-            if (player.GetMediaPosition(instance, posArr) >= 0) {
-                posArr[0].hundredNanosecondsAsDuration()
-            } else {
-                Duration.ZERO
             }
 
-        return ProduceOutcome.Frame(targetBitmap, frameTime)
+            drainPendingCloseBitmaps()
+
+            val targetBitmap = skiaBitmaps[nextBitmapIndex]!!
+            nextBitmapIndex = (nextBitmapIndex + 1) % skiaBitmaps.size
+
+            val pixmap = targetBitmap.peekPixels()
+            if (pixmap == null) {
+                windowsLogger.e { "Failed to get pixmap from bitmap" }
+                return ProduceOutcome.SkipIteration
+            }
+            val pixelsAddr = pixmap.addr
+            if (pixelsAddr == 0L) {
+                windowsLogger.e { "Invalid pixel address" }
+                return ProduceOutcome.SkipIteration
+            }
+
+            val dstRowBytes = pixmap.rowBytes
+            val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
+            val dstBuffer =
+                WindowsNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
+                    ?: return ProduceOutcome.SkipIteration
+
+            srcBuffer.rewind()
+            copyBgraFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
+            unlockFrame()
+
+            val posArr = LongArray(1)
+            val frameTime =
+                if (player.GetMediaPosition(instance, posArr) >= 0) {
+                    posArr[0].hundredNanosecondsAsDuration()
+                } else {
+                    Duration.ZERO
+                }
+
+            return ProduceOutcome.Frame(targetBitmap, frameTime)
+        } finally {
+            unlockFrame()
+        }
     }
 
     /**

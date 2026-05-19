@@ -47,10 +47,23 @@ static jfloat JNICALL jni_GetVolume(JNIEnv* env, jclass cls, jlong handle) {
     return handle ? nvp_get_volume(toCtx(handle)) : 0.0f;
 }
 
-static jlong JNICALL jni_GetLatestFrameAddress(JNIEnv* env, jclass cls, jlong handle) {
-    if (!handle) return 0L;
-    void* ptr = nvp_get_latest_frame_address(toCtx(handle));
-    return ptr ? (jlong)(uintptr_t)ptr : 0L;
+static jlong JNICALL jni_LockFrame(JNIEnv* env, jclass cls, jlong handle, jintArray outInfo) {
+    if (!handle || !outInfo) return 0L;
+    int32_t info[3] = {0, 0, 0};
+    VideoPlayer* p = toCtx(handle);
+    void* ptr = nvp_lock_latest_frame(p, info);
+    if (!ptr) return 0L;
+
+    (*env)->SetIntArrayRegion(env, outInfo, 0, 3, (jint*)info);
+    if ((*env)->ExceptionCheck(env)) {
+        nvp_unlock_latest_frame(p);
+        return 0L;
+    }
+    return (jlong)(uintptr_t)ptr;
+}
+
+static void JNICALL jni_UnlockFrame(JNIEnv* env, jclass cls, jlong handle) {
+    if (handle) nvp_unlock_latest_frame(toCtx(handle));
 }
 
 static jobject JNICALL jni_WrapPointer(JNIEnv* env, jclass cls, jlong address, jlong size) {
@@ -143,7 +156,8 @@ static const JNINativeMethod g_methods[] = {
     { "nPause",                  "(J)V",                        (void*)jni_Pause },
     { "nSetVolume",              "(JF)V",                       (void*)jni_SetVolume },
     { "nGetVolume",              "(J)F",                        (void*)jni_GetVolume },
-    { "nGetLatestFrameAddress",  "(J)J",                        (void*)jni_GetLatestFrameAddress },
+    { "nLockFrame",              "(J[I)J",                      (void*)jni_LockFrame },
+    { "nUnlockFrame",            "(J)V",                        (void*)jni_UnlockFrame },
     { "nWrapPointer",            "(JJ)Ljava/nio/ByteBuffer;",   (void*)jni_WrapPointer },
     { "nGetFrameWidth",          "(J)I",                        (void*)jni_GetFrameWidth },
     { "nGetFrameHeight",         "(J)I",                        (void*)jni_GetFrameHeight },

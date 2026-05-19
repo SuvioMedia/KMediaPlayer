@@ -41,7 +41,8 @@ object AssParser {
 
             if (trimmed.startsWith("Format:", ignoreCase = true)) {
                 eventFormat =
-                    trimmed.substringAfter(':')
+                    trimmed
+                        .substringAfter(':')
                         .split(',')
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
@@ -81,8 +82,7 @@ object AssParser {
         return payload.trimStart().split(',', limit = limit)
     }
 
-    private fun List<String>.indexOfField(name: String): Int =
-        indexOfFirst { it.equals(name, ignoreCase = true) }
+    private fun List<String>.indexOfField(name: String): Int = indexOfFirst { it.equals(name, ignoreCase = true) }
 
     private fun parseAssTime(value: String): Long? {
         val parts = value.trim().split(':')
@@ -93,7 +93,8 @@ object AssParser {
         val secondsPart = parts[2]
         val seconds = secondsPart.substringBefore('.').substringBefore(',').toLongOrNull() ?: return null
         val fraction =
-            secondsPart.substringAfter('.', secondsPart.substringAfter(',', ""))
+            secondsPart
+                .substringAfter('.', secondsPart.substringAfter(',', ""))
                 .takeIf { it.isNotBlank() }
                 .orEmpty()
         val millis = fraction.padEnd(3, '0').take(3).toLongOrNull() ?: 0L

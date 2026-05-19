@@ -13,6 +13,24 @@ plugins {
     alias(libs.plugins.vannitktech.maven.publish)
     alias(libs.plugins.dokka)
     alias(libs.plugins.kotlinCocoapods)
+    alias(libs.plugins.detekt)
+}
+
+detekt {
+    config.setFrom(files(rootProject.file("config/detekt/detekt.yml")))
+    // KMP detekt tasks derive baseline-<sourceSet>.xml from this base path.
+    baseline = rootProject.file("config/detekt/baseline.xml")
+    buildUponDefaultConfig = true
+}
+
+tasks.named("detekt") {
+    dependsOn(
+        "detektCommonMainSourceSet",
+        "detektAndroidMainSourceSet",
+        "detektJvmMainSourceSet",
+        "detektIosMainSourceSet",
+        "detektWasmJsMainSourceSet",
+    )
 }
 
 val ref = System.getenv("GITHUB_REF") ?: ""
@@ -101,7 +119,6 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.coroutines.test)
             api(libs.filekit.core)
             implementation(libs.kotlinx.datetime)
         }

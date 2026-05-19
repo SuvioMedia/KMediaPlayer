@@ -38,15 +38,15 @@ internal object MacVlcLocator {
         }
 
         val pathCandidates =
-            System.getenv("PATH")
+            System
+                .getenv("PATH")
                 ?.split(File.pathSeparator)
                 ?.flatMap { directory ->
                     listOf(
                         File(directory, "vlc").absolutePath,
                         File(directory, "cvlc").absolutePath,
                     )
-                }
-                .orEmpty()
+                }.orEmpty()
 
         val appCandidates =
             listOf(
@@ -89,7 +89,9 @@ internal object MacVlcLocator {
                         pluginPath = "/Applications/VLC.app/Contents/MacOS/plugins",
                     ),
                     MacLibVlcInstallation(
-                        libVlcPath = "${System.getProperty("user.home")}/Applications/VLC.app/Contents/MacOS/lib/libvlc.5.dylib",
+                        libVlcPath = "${System.getProperty(
+                            "user.home",
+                        )}/Applications/VLC.app/Contents/MacOS/lib/libvlc.5.dylib",
                         pluginPath = "${System.getProperty("user.home")}/Applications/VLC.app/Contents/MacOS/plugins",
                     ),
                 )
@@ -284,15 +286,14 @@ internal class MacVlcHlsFallback(
         command += "--sout"
         command +=
             "#transcode{${transcodeOptions.joinToString(",")}}:" +
-                "std{access=livehttp{seglen=4,delsegs=true,numsegs=8,index=${playlist.absolutePathString()}," +
-                "index-url=${SEGMENT_FILE_PATTERN}},mux=ts{use-key-frames},dst=$segmentPattern}"
+            "std{access=livehttp{seglen=4,delsegs=true,numsegs=8,index=${playlist.absolutePathString()}," +
+            "index-url=${SEGMENT_FILE_PATTERN}},mux=ts{use-key-frames},dst=$segmentPattern}"
         command += "vlc://quit"
 
         return command
     }
 
-    private fun formatSeekTime(seconds: Double): String =
-        "%.3f".format(java.util.Locale.US, seconds.coerceAtLeast(0.0))
+    private fun formatSeekTime(seconds: Double): String = "%.3f".format(java.util.Locale.US, seconds.coerceAtLeast(0.0))
 
     private fun startHttpServer(root: Path): HttpServer {
         val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
@@ -308,7 +309,10 @@ internal class MacVlcHlsFallback(
         exchange: HttpExchange,
     ) {
         try {
-            val rawPath = exchange.requestURI.path.removePrefix("/").ifBlank { "stream.m3u8" }
+            val rawPath =
+                exchange.requestURI.path
+                    .removePrefix("/")
+                    .ifBlank { "stream.m3u8" }
             val decodedPath = URLDecoder.decode(rawPath, Charsets.UTF_8.name())
             val file = root.resolve(decodedPath).normalize()
             if (!file.startsWith(root) || !Files.isRegularFile(file)) {
@@ -468,8 +472,7 @@ internal class MacVlcHlsFallback(
             .replace("\\\\", "\\")
     }
 
-    private fun String.toFinitePositiveDoubleOrNull(): Double? =
-        toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+    private fun String.toFinitePositiveDoubleOrNull(): Double? = toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
 
     private fun subtitleFormatForCodec(codecName: String?): SubtitleFormat? =
         when (codecName?.lowercase()) {
@@ -536,7 +539,8 @@ internal class MacVlcHlsFallback(
         if (!path.exists()) return
         runCatching {
             Files.walk(path).use { stream ->
-                stream.sorted(Comparator.reverseOrder())
+                stream
+                    .sorted(Comparator.reverseOrder())
                     .forEach { Files.deleteIfExists(it) }
             }
         }

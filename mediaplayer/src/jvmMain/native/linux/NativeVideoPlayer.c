@@ -396,9 +396,24 @@ float nvp_get_playback_speed(VideoPlayer* p) {
 // Frame access
 // ---------------------------------------------------------------------------
 
-void* nvp_get_latest_frame_address(VideoPlayer* p) {
-    if (!p) return NULL;
+void* nvp_lock_latest_frame(VideoPlayer* p, int32_t out_info[3]) {
+    if (!p || !out_info) return NULL;
+
+    pthread_mutex_lock(&p->frame_lock);
+    if (!p->frame_buffer || p->frame_width <= 0 || p->frame_height <= 0 || p->frame_size == 0) {
+        pthread_mutex_unlock(&p->frame_lock);
+        return NULL;
+    }
+
+    out_info[0] = p->frame_width;
+    out_info[1] = p->frame_height;
+    out_info[2] = p->frame_width * 4;
     return p->frame_buffer;
+}
+
+void nvp_unlock_latest_frame(VideoPlayer* p) {
+    if (!p) return;
+    pthread_mutex_unlock(&p->frame_lock);
 }
 
 int32_t nvp_get_frame_width(VideoPlayer* p) {

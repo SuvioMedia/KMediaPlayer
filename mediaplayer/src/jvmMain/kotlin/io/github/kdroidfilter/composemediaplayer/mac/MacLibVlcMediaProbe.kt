@@ -37,8 +37,7 @@ internal object MacLibVlcMediaProbe {
             ?: probeWithBuiltInMatroskaReader(uri)
     }
 
-    private fun MacLibVlcTrackInfo.hasTracks(): Boolean =
-        audioStreams.isNotEmpty() || subtitleStreams.isNotEmpty()
+    private fun MacLibVlcTrackInfo.hasTracks(): Boolean = audioStreams.isNotEmpty() || subtitleStreams.isNotEmpty()
 
     private fun probeWithBuiltInMatroskaReader(uri: String): MacLibVlcTrackInfo =
         runCatching {
@@ -197,8 +196,7 @@ internal object MacLibVlcMediaProbe {
             .replace("\\\\", "\\")
     }
 
-    private fun String.toFinitePositiveDoubleOrNull(): Double? =
-        toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+    private fun String.toFinitePositiveDoubleOrNull(): Double? = toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
 
     private fun subtitleFormatForCodec(codecName: String?): SubtitleFormat? =
         when (codecName?.lowercase()) {

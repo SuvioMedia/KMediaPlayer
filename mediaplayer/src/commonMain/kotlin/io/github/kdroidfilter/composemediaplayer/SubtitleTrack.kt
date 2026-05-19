@@ -28,8 +28,7 @@ enum class SubtitleFormat {
                         "ssa" -> SSA
                         else -> null
                     }
-                }
-                .firstOrNull() ?: AUTO
+                }.firstOrNull() ?: AUTO
 
         fun fromContent(content: String): SubtitleFormat {
             val trimmed = content.trimStart()

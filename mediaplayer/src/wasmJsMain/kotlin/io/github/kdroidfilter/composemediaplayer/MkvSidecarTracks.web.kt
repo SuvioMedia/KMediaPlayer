@@ -92,7 +92,9 @@ private suspend fun ensureMatroskaSubtitlesScriptLoaded(): Boolean {
 }
 
 private fun isMatroskaSubtitlesLoaded(): Boolean =
-    js("typeof globalThis.MatroskaSubtitles === 'object' && typeof globalThis.MatroskaSubtitles.SubtitleParser === 'function'")
+    js(
+        "typeof globalThis.MatroskaSubtitles === 'object' && typeof globalThis.MatroskaSubtitles.SubtitleParser === 'function'",
+    )
 
 @Suppress("UNUSED_PARAMETER")
 private fun hasMkvSubtitleTracks(video: HTMLVideoElement): Boolean =

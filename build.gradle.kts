@@ -13,11 +13,14 @@ plugins {
 // Code quality
 detekt {
     config.setFrom(files("config/detekt/detekt.yml"))
+    // KMP detekt tasks derive baseline-<sourceSet>.xml from this base path.
+    baseline = file("config/detekt/baseline.xml")
     buildUponDefaultConfig = true
 }
 
 ktlint {
-    ignoreFailures.set(true)
+    baseline.set(file("config/ktlint/baseline.xml"))
+    ignoreFailures.set(false)
 }
 
 subprojects {
@@ -29,7 +32,8 @@ subprojects {
         verbose.set(true)
         android.set(false)
         outputToConsole.set(true)
-        ignoreFailures.set(true)
+        baseline.set(rootProject.file("config/ktlint/baseline.xml"))
+        ignoreFailures.set(false)
         enableExperimentalRules.set(true)
         filter {
             exclude("**/generated/**")

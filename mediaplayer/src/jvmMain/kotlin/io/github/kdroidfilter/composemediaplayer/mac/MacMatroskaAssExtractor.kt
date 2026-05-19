@@ -98,8 +98,7 @@ internal object MacMatroskaAssExtractor {
     fun extract(
         uri: String,
         streamIndex: Int,
-    ): MacAssSubtitleData? =
-        scan(uri = uri, targetStreamIndex = streamIndex, stopAfterTracks = false)?.subtitleData
+    ): MacAssSubtitleData? = scan(uri = uri, targetStreamIndex = streamIndex, stopAfterTracks = false)?.subtitleData
 
     private fun scan(
         uri: String,
@@ -216,7 +215,9 @@ internal object MacMatroskaAssExtractor {
                 EBML_ID_PIXEL_WIDTH -> videoWidth = readUInt(bytes, payloadStart, payloadEnd).toInt()
                 EBML_ID_PIXEL_HEIGHT -> videoHeight = readUInt(bytes, payloadStart, payloadEnd).toInt()
                 EBML_ID_AUDIO_CHANNELS -> audioChannels = readUInt(bytes, payloadStart, payloadEnd).toInt()
-                EBML_ID_AUDIO_SAMPLING_FREQUENCY -> audioSampleRate = readFloat(bytes, payloadStart, payloadEnd).roundToLong().toInt()
+                EBML_ID_AUDIO_SAMPLING_FREQUENCY ->
+                    audioSampleRate =
+                        readFloat(bytes, payloadStart, payloadEnd).roundToLong().toInt()
             }
         }
 
@@ -297,7 +298,14 @@ internal object MacMatroskaAssExtractor {
             val track = currentTrack
             val cluster = currentCluster
             if (time != null && track != null && cluster != null) {
-                cues.add(MatroskaCue(timeMs = time, trackNumber = track, clusterPosition = cluster, relativePosition = currentRelative))
+                cues.add(
+                    MatroskaCue(
+                        timeMs = time,
+                        trackNumber = track,
+                        clusterPosition = cluster,
+                        relativePosition = currentRelative,
+                    ),
+                )
             }
         }
 
@@ -310,7 +318,15 @@ internal object MacMatroskaAssExtractor {
                     currentCluster = null
                     currentRelative = 0L
                 }
-                0xB3L -> currentTimeMs = (readUInt(bytes, payloadStart, payloadEnd) * timestampScale.toDouble() / 1_000_000.0).roundToLong()
+                0xB3L ->
+                    currentTimeMs =
+                        (
+                            readUInt(
+                                bytes,
+                                payloadStart,
+                                payloadEnd,
+                            ) * timestampScale.toDouble() / 1_000_000.0
+                        ).roundToLong()
                 0xB7L -> {
                     flushPosition()
                     currentTrack = null
@@ -821,7 +837,12 @@ internal object MacMatroskaAssExtractor {
     ): Double {
         if (start < 0 || end > data.size) return 0.0
         return when (end - start) {
-            4 -> ByteBuffer.wrap(data, start, 4).order(ByteOrder.BIG_ENDIAN).float.toDouble()
+            4 ->
+                ByteBuffer
+                    .wrap(data, start, 4)
+                    .order(ByteOrder.BIG_ENDIAN)
+                    .float
+                    .toDouble()
             8 -> ByteBuffer.wrap(data, start, 8).order(ByteOrder.BIG_ENDIAN).double
             else -> 0.0
         }
@@ -831,8 +852,7 @@ internal object MacMatroskaAssExtractor {
         data: ByteArray,
         start: Int,
         end: Int,
-    ): String =
-        data.copyOfRange(start, end.coerceAtMost(data.size)).decodeUtf8()
+    ): String = data.copyOfRange(start, end.coerceAtMost(data.size)).decodeUtf8()
 
     private fun findCuesStart(bytes: ByteArray): Int {
         for (index in 0 until bytes.size - 3) {
@@ -874,10 +894,13 @@ internal object MacMatroskaAssExtractor {
         data: ByteArray,
         offset: Int,
     ): Int =
-        ByteBuffer.wrap(data, offset, 2).order(ByteOrder.BIG_ENDIAN).short.toInt()
+        ByteBuffer
+            .wrap(data, offset, 2)
+            .order(ByteOrder.BIG_ENDIAN)
+            .short
+            .toInt()
 
-    private fun ByteArray.decodeUtf8(): String =
-        toString(Charsets.UTF_8).replace(Regex("\u0000+$"), "")
+    private fun ByteArray.decodeUtf8(): String = toString(Charsets.UTF_8).replace(Regex("\u0000+$"), "")
 
     private const val DEFAULT_ASS_HEADER =
         "[Script Info]\n" +
@@ -975,11 +998,9 @@ private data class MatroskaScanState(
     val dialogueLines = mutableListOf<String>()
     private val dialogueKeys = mutableSetOf<String>()
 
-    fun ticksToMs(ticks: Long): Long =
-        (ticks * timecodeScale.toDouble() / 1_000_000.0).roundToLong()
+    fun ticksToMs(ticks: Long): Long = (ticks * timecodeScale.toDouble() / 1_000_000.0).roundToLong()
 
-    fun durationSeconds(): Double? =
-        durationTicks?.let { it * timecodeScale.toDouble() / 1_000_000_000.0 }
+    fun durationSeconds(): Double? = durationTicks?.let { it * timecodeScale.toDouble() / 1_000_000_000.0 }
 
     fun addDialogueLine(line: String) {
         if (dialogueKeys.add(line)) dialogueLines.add(line)
@@ -1040,7 +1061,9 @@ private interface MatroskaRangeSource : Closeable {
     }
 }
 
-private class FileMatroskaRangeSource(file: File) : MatroskaRangeSource {
+private class FileMatroskaRangeSource(
+    file: File,
+) : MatroskaRangeSource {
     private val file = RandomAccessFile(file, "r")
     override val length: Long = file.length()
 
@@ -1063,7 +1086,9 @@ private class FileMatroskaRangeSource(file: File) : MatroskaRangeSource {
     }
 }
 
-private class HttpMatroskaRangeSource(private val uri: String) : MatroskaRangeSource {
+private class HttpMatroskaRangeSource(
+    private val uri: String,
+) : MatroskaRangeSource {
     override val length: Long? by lazy { readLength() }
 
     override fun readRange(
@@ -1120,7 +1145,9 @@ private class HttpMatroskaRangeSource(private val uri: String) : MatroskaRangeSo
     }
 }
 
-private class EbmlInput(input: InputStream) : AutoCloseable {
+private class EbmlInput(
+    input: InputStream,
+) : AutoCloseable {
     private val input = BufferedInputStream(input, 64 * 1024)
     var position: Long = 0L
         private set
@@ -1144,7 +1171,12 @@ private class EbmlInput(input: InputStream) : AutoCloseable {
     fun readFloatElement(element: EbmlElement): Double {
         val bytes = readBinaryElement(element, maxBytes = 8)
         return when (bytes.size) {
-            4 -> ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).float.toDouble()
+            4 ->
+                ByteBuffer
+                    .wrap(bytes)
+                    .order(ByteOrder.BIG_ENDIAN)
+                    .float
+                    .toDouble()
             8 -> ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).double
             else -> 0.0
         }
@@ -1193,8 +1225,7 @@ private class EbmlInput(input: InputStream) : AutoCloseable {
         return Vint(length = length, value = value)
     }
 
-    private fun unknownSizeValue(length: Int): Long =
-        (1L shl (7 * length)) - 1L
+    private fun unknownSizeValue(length: Int): Long = (1L shl (7 * length)) - 1L
 
     private fun readByteOrNull(): Int? {
         val value = input.read()

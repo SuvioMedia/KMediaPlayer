@@ -20,8 +20,8 @@ import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
-import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
 import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
@@ -44,7 +44,9 @@ import kotlin.time.Duration.Companion.milliseconds
 
 internal val macLogger = TaggedLogger("MacVideoPlayerState")
 
-private enum class MacHlsFallbackBackend(val displayName: String) {
+private enum class MacHlsFallbackBackend(
+    val displayName: String,
+) {
     FFMPEG("ffmpeg"),
     VLC("VLC"),
 }
@@ -162,19 +164,15 @@ class MacVideoPlayerState : VideoPlayerState {
     private val _durationText = mutableStateOf("00:00.000")
     override val durationText: String get() = _durationText.value
 
-    override val currentTime: Duration
+    private val _currentTime = mutableStateOf(Duration.ZERO)
+    private val _duration = mutableStateOf(Duration.ZERO)
+    override val currentTime: Duration get() = _currentTime.value
+    override val preciseCurrentTime: Duration
         get() =
             runBlocking {
-                if (hasMedia) getPositionSafely().secondsAsDuration() else Duration.ZERO
+                if (hasMedia) getPositionSafely().secondsAsDuration() else _currentTime.value
             }
-
-    override val preciseCurrentTime: Duration get() = currentTime
-
-    override val duration: Duration
-        get() =
-            runBlocking {
-                if (hasMedia) getDurationSafely().secondsAsDuration() else Duration.ZERO
-            }
+    override val duration: Duration get() = _duration.value
 
     // Non-blocking aspect ratio property
     private val _aspectRatio = mutableStateOf(16f / 9f)
@@ -635,7 +633,9 @@ class MacVideoPlayerState : VideoPlayerState {
             availableSubtitleTracks.addAll(trackInfo.subtitleStreams.map { it.track })
             val selectedSubtitle =
                 libVlcSelectedSubtitleStreamIndex
-                    ?.let { streamIndex -> trackInfo.subtitleStreams.firstOrNull { it.streamIndex == streamIndex }?.track }
+                    ?.let { streamIndex ->
+                        trackInfo.subtitleStreams.firstOrNull { it.streamIndex == streamIndex }?.track
+                    }
             if (selectedSubtitle != null) {
                 currentSubtitleTrack = selectedSubtitle
                 subtitlesEnabled = true
@@ -670,7 +670,10 @@ class MacVideoPlayerState : VideoPlayerState {
                                         track =
                                             AudioTrack(
                                                 id = "$MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX${description.ordinal}",
-                                                label = description.label.ifBlank { "Audio ${description.ordinal + 1}" },
+                                                label =
+                                                    description.label.ifBlank {
+                                                        "Audio ${description.ordinal + 1}"
+                                                    },
                                             ),
                                     )
                                 }
@@ -684,7 +687,10 @@ class MacVideoPlayerState : VideoPlayerState {
                                         track =
                                             SubtitleTrack(
                                                 id = "$MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX${description.ordinal}",
-                                                label = description.label.ifBlank { "Subtitle ${description.ordinal + 1}" },
+                                                label =
+                                                    description.label.ifBlank {
+                                                        "Subtitle ${description.ordinal + 1}"
+                                                    },
                                                 language = "",
                                                 src = "",
                                                 format = SubtitleFormat.AUTO,
@@ -733,8 +739,7 @@ class MacVideoPlayerState : VideoPlayerState {
         }
     }
 
-    private fun isCurrentLibAssSelection(selectionToken: Long): Boolean =
-        libAssSelectionToken.get() == selectionToken
+    private fun isCurrentLibAssSelection(selectionToken: Long): Boolean = libAssSelectionToken.get() == selectionToken
 
     private fun libAssSubtitleSourceLabel(
         track: SubtitleTrack,
@@ -812,7 +817,9 @@ class MacVideoPlayerState : VideoPlayerState {
                         uri = embeddedSourceUri,
                         streamIndex =
                             streamIndex
-                                ?: throw UnsupportedOperationException("No embedded subtitle stream index is available."),
+                                ?: throw UnsupportedOperationException(
+                                    "No embedded subtitle stream index is available.",
+                                ),
                         playbackTimeMs = playbackTimeMs,
                     )
                 } else {
@@ -822,7 +829,12 @@ class MacVideoPlayerState : VideoPlayerState {
 
         if (!isCurrentLibAssSelection(selectionToken)) return false
         val configured = installLibAssSubtitleData(track, streamIndex, subtitleData, selectionToken)
-        if (configured && subtitleData.isPartial && track.isEmbedded && streamIndex != null && embeddedSourceUri != null) {
+        if (configured &&
+            subtitleData.isPartial &&
+            track.isEmbedded &&
+            streamIndex != null &&
+            embeddedSourceUri != null
+        ) {
             startCompleteLibAssSubtitleExtraction(
                 track = track,
                 streamIndex = streamIndex,
@@ -926,10 +938,11 @@ class MacVideoPlayerState : VideoPlayerState {
             SubtitleFormat.ASS,
             SubtitleFormat.SSA,
             -> true
-            SubtitleFormat.AUTO -> track.label.endsWith(".ass", ignoreCase = true) ||
-                track.label.endsWith(".ssa", ignoreCase = true) ||
-                track.src.endsWith(".ass", ignoreCase = true) ||
-                track.src.endsWith(".ssa", ignoreCase = true)
+            SubtitleFormat.AUTO ->
+                track.label.endsWith(".ass", ignoreCase = true) ||
+                    track.label.endsWith(".ssa", ignoreCase = true) ||
+                    track.src.endsWith(".ass", ignoreCase = true) ||
+                    track.src.endsWith(".ssa", ignoreCase = true)
             else -> false
         }
 
@@ -947,12 +960,14 @@ class MacVideoPlayerState : VideoPlayerState {
 
         return when (configured) {
             "libvlc" ->
-                MacVlcLocator.findLibVlc()
+                MacVlcLocator
+                    .findLibVlc()
                     ?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
                     ?: throw missingLibVlcBackendException()
             "auto" ->
                 if (MacLibAssLocator.findLibAss() != null) {
-                    MacVlcLocator.findLibVlc()
+                    MacVlcLocator
+                        .findLibVlc()
                         ?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
                 } else {
                     null
@@ -1052,7 +1067,12 @@ class MacVideoPlayerState : VideoPlayerState {
             availableAudioTracks.addAll(hlsSource.audioTracks)
             currentAudioTrack =
                 hlsSource.selectedAudioStreamIndex
-                    ?.let { streamIndex -> hlsSource.audioTracks.firstOrNull { externalHlsTrackStreamIndex(it.id) == streamIndex } }
+                    ?.let { streamIndex ->
+                        hlsSource.audioTracks.firstOrNull {
+                            externalHlsTrackStreamIndex(it.id) ==
+                                streamIndex
+                        }
+                    }
                     ?: hlsSource.audioTracks.firstOrNull { it.isDefault }
                     ?: hlsSource.audioTracks.firstOrNull()
 
@@ -1060,7 +1080,12 @@ class MacVideoPlayerState : VideoPlayerState {
             availableSubtitleTracks.addAll(hlsSource.subtitleTracks)
             val selectedSubtitleTrack =
                 hlsSource.selectedSubtitleStreamIndex
-                    ?.let { streamIndex -> hlsSource.subtitleTracks.firstOrNull { externalHlsTrackStreamIndex(it.id) == streamIndex } }
+                    ?.let { streamIndex ->
+                        hlsSource.subtitleTracks.firstOrNull {
+                            externalHlsTrackStreamIndex(it.id) ==
+                                streamIndex
+                        }
+                    }
                     ?: previousSubtitleId
                         ?.takeIf(::isMacExternalHlsSubtitleTrackId)
                         ?.let { previousId -> hlsSource.subtitleTracks.firstOrNull { it.id == previousId } }
@@ -1081,11 +1106,9 @@ class MacVideoPlayerState : VideoPlayerState {
     private fun isMacExternalHlsSubtitleTrackId(id: String): Boolean =
         id.startsWith(MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX) || id.startsWith(MAC_VLC_SUBTITLE_TRACK_ID_PREFIX)
 
-    private fun isMacLibVlcAudioTrackId(id: String): Boolean =
-        id.startsWith(MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX)
+    private fun isMacLibVlcAudioTrackId(id: String): Boolean = id.startsWith(MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX)
 
-    private fun isMacLibVlcSubtitleTrackId(id: String): Boolean =
-        id.startsWith(MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX)
+    private fun isMacLibVlcSubtitleTrackId(id: String): Boolean = id.startsWith(MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX)
 
     private fun libVlcTrackStreamIndex(id: String): Int? =
         when {
@@ -1241,6 +1264,7 @@ class MacVideoPlayerState : VideoPlayerState {
             withContext(Dispatchers.Main) {
                 // Update metadata
                 metadata.duration = duration
+                _duration.value = duration
                 metadata.width = width
                 metadata.height = height
                 metadata.frameRate = frameRate
@@ -1403,10 +1427,17 @@ class MacVideoPlayerState : VideoPlayerState {
 
                         if (usesLibAssSubtitleOverlay && subtitlesEnabled) {
                             val subtitleTimeMs =
-                                ((MacNativeBridge.nGetCurrentTime(ptr) +
-                                    (ffmpegHlsPlaybackOffsetSeconds.takeIf { ffmpegHlsFallbackDurationSeconds != null }
-                                        ?: 0.0)) * 1000.0)
-                                    .toLong()
+                                (
+                                    (
+                                        MacNativeBridge.nGetCurrentTime(ptr) +
+                                            (
+                                                ffmpegHlsPlaybackOffsetSeconds.takeIf {
+                                                    ffmpegHlsFallbackDurationSeconds != null
+                                                }
+                                                    ?: 0.0
+                                            )
+                                    ) * 1000.0
+                                ).toLong()
                                     .coerceAtLeast(0L)
                             synchronized(libAssLock) {
                                 val assHandle = libAssRendererHandle
@@ -1459,11 +1490,15 @@ class MacVideoPlayerState : VideoPlayerState {
             if (duration <= 0) return
 
             val current = getPositionSafely()
+            val currentDuration = current.secondsAsDuration()
+            val totalDuration = duration.secondsAsDuration()
 
             // Update time text display on the main thread
             withContext(Dispatchers.Main) {
-                _positionText.value = formatTime(current.secondsAsDuration())
-                _durationText.value = formatTime(duration.secondsAsDuration())
+                _currentTime.value = currentDuration
+                _duration.value = totalDuration
+                _positionText.value = formatTime(currentDuration)
+                _durationText.value = formatTime(totalDuration)
             }
 
             // Handle seek in progress
@@ -1743,6 +1778,8 @@ class MacVideoPlayerState : VideoPlayerState {
             hasMedia = false
             isPlaying = false
             isLoading = false
+            _currentTime.value = Duration.ZERO
+            _duration.value = Duration.ZERO
             _positionText.value = "00:00.000"
             _durationText.value = "00:00.000"
             _aspectRatio.value = 16f / 9f

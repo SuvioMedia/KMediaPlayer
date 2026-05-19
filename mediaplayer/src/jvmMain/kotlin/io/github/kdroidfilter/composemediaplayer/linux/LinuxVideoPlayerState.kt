@@ -92,9 +92,9 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override var error: VideoPlayerError? by mutableStateOf(null)
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
-    override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableListOf()
+    override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableStateListOf()
     override var currentAudioTrack: AudioTrack? by mutableStateOf(null)
-    override val availableAudioTracks: MutableList<AudioTrack> = mutableListOf()
+    override val availableAudioTracks: MutableList<AudioTrack> = mutableStateListOf()
     override var subtitleTextStyle: TextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
@@ -114,19 +114,15 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private val _durationText = mutableStateOf("00:00.000")
     override val durationText: String get() = _durationText.value
 
-    override val currentTime: Duration
+    private val _currentTime = mutableStateOf(Duration.ZERO)
+    private val _duration = mutableStateOf(Duration.ZERO)
+    override val currentTime: Duration get() = _currentTime.value
+    override val preciseCurrentTime: Duration
         get() =
             runBlocking {
-                if (hasMedia) getPositionSafely() else Duration.ZERO
+                if (hasMedia) getPositionSafely() else _currentTime.value
             }
-
-    override val preciseCurrentTime: Duration get() = currentTime
-
-    override val duration: Duration
-        get() =
-            runBlocking {
-                if (hasMedia) getDurationSafely() else Duration.ZERO
-            }
+    override val duration: Duration get() = _duration.value
 
     private val _aspectRatio = mutableStateOf(16f / 9f)
     override val aspectRatio: Float get() = _aspectRatio.value
@@ -413,6 +409,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
             withContext(Dispatchers.Main) {
                 metadata.duration = duration
+                _duration.value = duration
                 metadata.width = width
                 metadata.height = height
                 metadata.frameRate = frameRate
@@ -483,53 +480,60 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 val ptr = playerPtr
                 if (ptr == 0L) return@withContext
 
-                val width = LinuxNativeBridge.nGetFrameWidth(ptr)
-                val height = LinuxNativeBridge.nGetFrameHeight(ptr)
-                if (width <= 0 || height <= 0) return@withContext
-
-                val frameAddress = LinuxNativeBridge.nGetLatestFrameAddress(ptr)
+                val outInfo = IntArray(3)
+                val frameAddress = LinuxNativeBridge.nLockFrame(ptr, outInfo)
                 if (frameAddress == 0L) return@withContext
 
-                val pixelCount = width * height
-                val frameSizeBytes = pixelCount.toLong() * 4L
                 var framePublished = false
+                try {
+                    val width = outInfo[0]
+                    val height = outInfo[1]
+                    val srcRowBytes = outInfo[2]
 
-                withContext(Dispatchers.Default) {
-                    val srcBuf =
-                        LinuxNativeBridge.nWrapPointer(frameAddress, frameSizeBytes)
-                            ?: return@withContext
-
-                    // Allocate/reuse double-buffered bitmaps
-                    if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
-                        skiaBitmapA?.close()
-                        skiaBitmapB?.close()
-
-                        val imageInfo = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
-                        skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
-                        skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
-                        skiaBitmapWidth = width
-                        skiaBitmapHeight = height
-                        nextSkiaBitmapA = true
+                    if (width <= 0 || height <= 0 || srcRowBytes < width * 4) {
+                        return@withContext
                     }
 
-                    val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
-                    nextSkiaBitmapA = !nextSkiaBitmapA
+                    withContext(Dispatchers.Default) {
+                        val frameSizeBytes = srcRowBytes.toLong() * height.toLong()
+                        val srcBuf =
+                            LinuxNativeBridge.nWrapPointer(frameAddress, frameSizeBytes)
+                                ?: return@withContext
 
-                    val pixmap = targetBitmap.peekPixels() ?: return@withContext
-                    val pixelsAddr = pixmap.addr
-                    if (pixelsAddr == 0L) return@withContext
+                        // Allocate/reuse double-buffered bitmaps
+                        if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
+                            skiaBitmapA?.close()
+                            skiaBitmapB?.close()
 
-                    // Native-to-native copy: frame buffer -> Skia bitmap pixels
-                    srcBuf.rewind()
-                    val destRowBytes = pixmap.rowBytes
-                    val destSizeBytes = destRowBytes.toLong() * height.toLong()
-                    val destBuf =
-                        LinuxNativeBridge.nWrapPointer(pixelsAddr, destSizeBytes)
-                            ?: return@withContext
-                    copyBgraFrame(srcBuf, destBuf, width, height, destRowBytes)
+                            val imageInfo = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+                            skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
+                            skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
+                            skiaBitmapWidth = width
+                            skiaBitmapHeight = height
+                            nextSkiaBitmapA = true
+                        }
 
-                    _currentFrameState.value = targetBitmap.asComposeImageBitmap()
-                    framePublished = true
+                        val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+                        nextSkiaBitmapA = !nextSkiaBitmapA
+
+                        val pixmap = targetBitmap.peekPixels() ?: return@withContext
+                        val pixelsAddr = pixmap.addr
+                        if (pixelsAddr == 0L) return@withContext
+
+                        // Native-to-native copy: frame buffer -> Skia bitmap pixels
+                        srcBuf.rewind()
+                        val destRowBytes = pixmap.rowBytes
+                        val destSizeBytes = destRowBytes.toLong() * height.toLong()
+                        val destBuf =
+                            LinuxNativeBridge.nWrapPointer(pixelsAddr, destSizeBytes)
+                                ?: return@withContext
+                        copyBgraFrame(srcBuf, destBuf, width, height, destRowBytes)
+
+                        _currentFrameState.value = targetBitmap.asComposeImageBitmap()
+                        framePublished = true
+                    }
+                } finally {
+                    LinuxNativeBridge.nUnlockFrame(ptr)
                 }
 
                 if (framePublished) {
@@ -554,6 +558,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
             val current = getPositionSafely()
 
             withContext(Dispatchers.Main) {
+                _currentTime.value = current
+                _duration.value = duration
                 _positionText.value = formatTime(current)
                 _durationText.value = formatTime(duration)
             }
@@ -854,6 +860,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
             hasMedia = false
             isPlaying = false
             isLoading = false
+            _currentTime.value = Duration.ZERO
+            _duration.value = Duration.ZERO
             _positionText.value = "00:00.000"
             _durationText.value = "00:00.000"
             _aspectRatio.value = 16f / 9f

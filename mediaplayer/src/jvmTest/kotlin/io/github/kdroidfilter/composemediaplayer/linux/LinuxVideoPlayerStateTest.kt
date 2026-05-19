@@ -3,7 +3,6 @@ package io.github.kdroidfilter.composemediaplayer.linux
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlin.time.Duration.Companion.milliseconds
 import org.junit.Assume
 import org.junit.Before
 import kotlin.test.Test
@@ -12,6 +11,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Tests for the Linux implementation of VideoPlayerState

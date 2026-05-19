@@ -1,0 +1,37 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:AssParser.kt:AssParser$fun parse: SubtitleCueList</ID>
+    <ID>EmptyFunctionBlock:VideoPlayerState.kt:PreviewableVideoPlayerState${}</ID>
+    <ID>LoopWithTooManyJumpStatements:AssParser.kt:AssParser$for</ID>
+    <ID>LoopWithTooManyJumpStatements:SrtParser.kt:SrtParser$while</ID>
+    <ID>MagicNumber:AssParser.kt:AssParser$1_000L</ID>
+    <ID>MagicNumber:AssParser.kt:AssParser$3</ID>
+    <ID>MagicNumber:AssParser.kt:AssParser$3_600_000L</ID>
+    <ID>MagicNumber:AssParser.kt:AssParser$60_000L</ID>
+    <ID>MagicNumber:CacheConfig.kt:CacheConfig$100L</ID>
+    <ID>MagicNumber:CacheConfig.kt:CacheConfig$1024L</ID>
+    <ID>MagicNumber:Logger.kt:1_000_000</ID>
+    <ID>MagicNumber:Logger.kt:3</ID>
+    <ID>MagicNumber:SrtParser.kt:SrtParser$1000</ID>
+    <ID>MagicNumber:SrtParser.kt:SrtParser$3600</ID>
+    <ID>MagicNumber:SrtParser.kt:SrtParser$60</ID>
+    <ID>MagicNumber:TimeUtils.kt:100L</ID>
+    <ID>MagicNumber:WebVttParser.kt:WebVttParser$1000</ID>
+    <ID>MagicNumber:WebVttParser.kt:WebVttParser$3600</ID>
+    <ID>MagicNumber:WebVttParser.kt:WebVttParser$60</ID>
+    <ID>MaxLineLength:WebVttParser.kt:WebVttParser$"(\\d{2}:\\d{2}:\\d{2}\\.\\d{3}|\\d{2}:\\d{2}\\.\\d{3}) --> (\\d{2}:\\d{2}:\\d{2}\\.\\d{3}|\\d{2}:\\d{2}\\.\\d{3})"</ID>
+    <ID>NestedBlockDepth:SrtParser.kt:SrtParser$fun parse: SubtitleCueList</ID>
+    <ID>SwallowedException:ComposeSubtitleLayer.kt:e: Exception</ID>
+    <ID>SwallowedException:SrtParser.kt:SrtParser$e: Exception</ID>
+    <ID>SwallowedException:WebVttParser.kt:WebVttParser$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ComposeSubtitleLayer.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SrtParser.kt:SrtParser$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:WebVttParser.kt:WebVttParser$e: Exception</ID>
+    <ID>TooManyFunctions:VideoPlayerState.kt:VideoPlayerState</ID>
+    <ID>UnusedParameter:ComposeSubtitleLayer.kt:duration: Duration</ID>
+    <ID>WildcardImport:ComposeSubtitleLayer.kt:import androidx.compose.runtime.*</ID>
+    <ID>WildcardImport:ContentScaleCanvasUtils.kt:import androidx.compose.foundation.layout.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

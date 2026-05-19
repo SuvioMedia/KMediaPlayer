@@ -25,6 +25,9 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
+private val MinSubtitleRefreshDelay = 16.milliseconds
+private val MaxSubtitleRefreshDelay = 250.milliseconds
+
 /**
  * A composable function that displays subtitles.
  *
@@ -107,12 +110,21 @@ fun AutoUpdatingSubtitleDisplay(
         displayTime = currentTime
     }
 
-    // Periodically update display time when playing
-    LaunchedEffect(isPlaying, currentTime) {
+    // Update on subtitle boundaries, with a bounded fallback for drift.
+    LaunchedEffect(isPlaying, currentTime, subtitles) {
         if (isPlaying) {
             var mark = TimeSource.Monotonic.markNow()
             while (true) {
-                delay(16.milliseconds) // ~60fps
+                val displayTimeMs = displayTime.inWholeMilliseconds
+                val nextBoundaryMs = subtitles.nextBoundaryAfter(displayTimeMs)
+                val refreshDelay =
+                    nextBoundaryMs
+                        ?.let { (it - displayTimeMs).coerceAtLeast(MinSubtitleRefreshDelay.inWholeMilliseconds) }
+                        ?.coerceAtMost(MaxSubtitleRefreshDelay.inWholeMilliseconds)
+                        ?.milliseconds
+                        ?: MaxSubtitleRefreshDelay
+
+                delay(refreshDelay)
                 val elapsed = mark.elapsedNow()
                 mark = TimeSource.Monotonic.markNow()
                 displayTime += elapsed

@@ -64,12 +64,13 @@ internal object MacEmbeddedAssExtractor {
             builtInExtractorFailure = e
         }
 
-        val ffmpeg = MacFfmpegLocator.findFfmpeg()
-            ?: throw UnsupportedOperationException(
-                "Embedded ASS subtitle extraction failed with the built-in Matroska extractor" +
-                    builtInExtractorFailure?.message?.let { ": $it" }.orEmpty() +
-                    ". Optional ffmpeg fallback was not found. ComposeMediaPlayer does not bundle or link ffmpeg.",
-            )
+        val ffmpeg =
+            MacFfmpegLocator.findFfmpeg()
+                ?: throw UnsupportedOperationException(
+                    "Embedded ASS subtitle extraction failed with the built-in Matroska extractor" +
+                        builtInExtractorFailure?.message?.let { ": $it" }.orEmpty() +
+                        ". Optional ffmpeg fallback was not found. ComposeMediaPlayer does not bundle or link ffmpeg.",
+                )
 
         val outputDirectory = Files.createTempDirectory("compose-media-player-ass-")
         val outputFile = outputDirectory.resolve("subtitles.ass")
@@ -98,7 +99,9 @@ internal object MacEmbeddedAssExtractor {
 
             if (!process.waitFor(300, TimeUnit.SECONDS)) {
                 process.destroyForcibly()
-                throw UnsupportedOperationException("Timed out while extracting embedded ASS subtitle track with ffmpeg.")
+                throw UnsupportedOperationException(
+                    "Timed out while extracting embedded ASS subtitle track with ffmpeg.",
+                )
             }
             val diagnostics = process.inputStream.bufferedReader().readText()
             if (process.exitValue() != 0) {
@@ -110,7 +113,9 @@ internal object MacEmbeddedAssExtractor {
 
             val text = Files.readString(outputFile)
             if (!text.contains("[Events]", ignoreCase = true)) {
-                throw UnsupportedOperationException("The selected embedded subtitle track did not produce ASS/SSA content.")
+                throw UnsupportedOperationException(
+                    "The selected embedded subtitle track did not produce ASS/SSA content.",
+                )
             }
             val data =
                 MacAssSubtitleData(
@@ -138,14 +143,12 @@ internal object MacEmbeddedAssExtractor {
                     .filter { path ->
                         val name = path.fileName.toString().lowercase()
                         name.endsWith(".ttf") || name.endsWith(".otf") || name.endsWith(".ttc")
-                    }
-                    .map { path ->
+                    }.map { path ->
                         MacAssFontAttachment(
                             name = path.fileName.toString(),
                             data = Files.readAllBytes(path),
                         )
-                    }
-                    .forEach(fonts::add)
+                    }.forEach(fonts::add)
             }
         return fonts
     }

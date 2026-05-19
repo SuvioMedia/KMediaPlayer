@@ -1,0 +1,140 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:MacVideoPlayerState.kt:MacVideoPlayerState$configured &amp;&amp; subtitleData.isPartial &amp;&amp; track.isEmbedded &amp;&amp; streamIndex != null &amp;&amp; embeddedSourceUri != null</ID>
+    <ID>CyclomaticComplexMethod:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$private suspend fun updateFrameAsync</ID>
+    <ID>CyclomaticComplexMethod:MacVideoPlayerState.kt:MacVideoPlayerState$private suspend fun updateFrameAsync</ID>
+    <ID>CyclomaticComplexMethod:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$private fun openUriInternal</ID>
+    <ID>CyclomaticComplexMethod:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$private fun processOneFrame: ProduceOutcome</ID>
+    <ID>CyclomaticComplexMethod:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$private suspend fun consumeFrames</ID>
+    <ID>CyclomaticComplexMethod:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$private suspend fun produceFrames</ID>
+    <ID>LargeClass:MacVideoPlayerState.kt:MacVideoPlayerState : VideoPlayerState</ID>
+    <ID>LargeClass:WindowsVideoPlayerState.kt:WindowsVideoPlayerState : VideoPlayerState</ID>
+    <ID>LoopWithTooManyJumpStatements:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback$for</ID>
+    <ID>LoopWithTooManyJumpStatements:MacLibVlcMediaProbe.kt:MacLibVlcMediaProbe$for</ID>
+    <ID>LoopWithTooManyJumpStatements:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$while</ID>
+    <ID>LoopWithTooManyJumpStatements:MacVlcHlsFallback.kt:MacVlcHlsFallback$for</ID>
+    <ID>LoopWithTooManyJumpStatements:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$while</ID>
+    <ID>MagicNumber:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$0.3</ID>
+    <ID>MagicNumber:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$1000.0f</ID>
+    <ID>MagicNumber:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$16f</ID>
+    <ID>MagicNumber:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$200L</ID>
+    <ID>MagicNumber:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$33L</ID>
+    <ID>MagicNumber:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$4</ID>
+    <ID>MagicNumber:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$500L</ID>
+    <ID>MagicNumber:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$9f</ID>
+    <ID>MagicNumber:MacFfmpegHlsFallback.kt:MacAvFoundationContainerSupport$4</ID>
+    <ID>MagicNumber:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback$12</ID>
+    <ID>MagicNumber:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback$1500</ID>
+    <ID>MagicNumber:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback$200</ID>
+    <ID>MagicNumber:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback$404</ID>
+    <ID>MagicNumber:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback$500</ID>
+    <ID>MagicNumber:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback$600</ID>
+    <ID>MagicNumber:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback.Companion$4</ID>
+    <ID>MagicNumber:MacFrameUtils.kt:31</ID>
+    <ID>MagicNumber:MacFrameUtils.kt:4</ID>
+    <ID>MagicNumber:MacLibAssSupport.kt:MacEmbeddedAssExtractor$300</ID>
+    <ID>MagicNumber:MacLibVlcMediaProbe.kt:MacLibVlcMediaProbe$12</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:0x1A45DFA3L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:0x1C53BB6BL</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:0xB7L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:0xBBL</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:EbmlInput$0xFF</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:EbmlInput$1024</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:EbmlInput$256L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:EbmlInput$4</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:EbmlInput$64</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:EbmlInput$7</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:EbmlInput$8</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:HttpMatroskaRangeSource$15_000</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:HttpMatroskaRangeSource$60_000</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$0xB3L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$0xB7L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$0xBBL</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$0xF0L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$0xF1L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$0xF7L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$0xFF</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$1_000_000.0</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$250L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$256L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$3</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$4</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$4L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$5</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$5_000L</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$6</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$7</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$8</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$9</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MatroskaScanState$1_000_000.0</ID>
+    <ID>MagicNumber:MacMatroskaAssExtractor.kt:MatroskaScanState$1_000_000_000.0</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$0.3</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$1000.0f</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$12</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$16f</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$200L</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$250L</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$33L</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$500L</ID>
+    <ID>MagicNumber:MacVideoPlayerState.kt:MacVideoPlayerState$9f</ID>
+    <ID>MagicNumber:MacVlcHlsFallback.kt:MacVlcHlsFallback$12</ID>
+    <ID>MagicNumber:MacVlcHlsFallback.kt:MacVlcHlsFallback$1500</ID>
+    <ID>MagicNumber:MacVlcHlsFallback.kt:MacVlcHlsFallback$200</ID>
+    <ID>MagicNumber:MacVlcHlsFallback.kt:MacVlcHlsFallback$404</ID>
+    <ID>MagicNumber:MacVlcHlsFallback.kt:MacVlcHlsFallback$500</ID>
+    <ID>MagicNumber:MacVlcHlsFallback.kt:MacVlcHlsFallback$800</ID>
+    <ID>MagicNumber:SubtitleLoader.jvm.kt:10000</ID>
+    <ID>MagicNumber:WindowsFrameUtils.kt:31</ID>
+    <ID>MagicNumber:WindowsFrameUtils.kt:4</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$10</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$1000.0</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$1000f</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$10_000</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$16</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$16L</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$16f</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$200</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$3</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$4</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$500</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$50L</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$8L</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$9f</ID>
+    <ID>MagicNumber:WindowsVideoPlayerState.kt:WindowsVideoPlayerState.Companion$16</ID>
+    <ID>MaxLineLength:MacLibVlcMediaProbe.kt:MacLibVlcMediaProbe$"stream=index,codec_type,codec_name,width,height,channels,sample_rate,bit_rate:stream_tags=language,title:"</ID>
+    <ID>MaxLineLength:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor$"Style: Default,Arial,24,&amp;H00FFFFFF,&amp;H000000FF,&amp;H00000000,&amp;H00000000,0,0,0,0,100,100,0,0,1,2,1,2,10,10,18,1\n\n"</ID>
+    <ID>MaxLineLength:MacVideoPlayerState.kt:MacVideoPlayerState$"Embedded subtitle rendering on macOS fallback requires an external ffmpeg build with libass "</ID>
+    <ID>MaxLineLength:MacVideoPlayerState.kt:MacVideoPlayerState$"Install VLC or set composemediaplayer.macos.vlc=/path/to/VLC or COMPOSE_MEDIA_PLAYER_VLC. "</ID>
+    <ID>MaxLineLength:MacVideoPlayerState.kt:MacVideoPlayerState$"The macOS libVLC native-view backend has been removed because it is unstable with Compose overlays. "</ID>
+    <ID>MaxLineLength:MacVideoPlayerState.kt:MacVideoPlayerState$"and the subtitles filter enabled, or VLC fallback. Install ffmpeg-full/VLC or set "</ID>
+    <ID>MaxLineLength:MacVideoPlayerState.kt:MacVideoPlayerState$"composemediaplayer.macos.ffmpeg=/path/to/ffmpeg or COMPOSE_MEDIA_PLAYER_FFMPEG. "</ID>
+    <ID>MaxLineLength:MacVideoPlayerState.kt:MacVideoPlayerState$"or set composemediaplayer.macos.ffmpeg=/path/to/ffmpeg or COMPOSE_MEDIA_PLAYER_FFMPEG. "</ID>
+    <ID>MaxLineLength:MacVideoPlayerState.kt:MacVideoPlayerState$"with libass and the subtitles filter enabled. No suitable external renderer was found."</ID>
+    <ID>NestedBlockDepth:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$override fun dispose</ID>
+    <ID>NestedBlockDepth:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$private suspend fun consumeFrames</ID>
+    <ID>RethrowCaughtException:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$throw e</ID>
+    <ID>ReturnCount:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$private fun processOneFrame: ProduceOutcome</ID>
+    <ID>SwallowedException:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$e: CancellationException</ID>
+    <ID>ThrowsCount:MacLibAssSupport.kt:MacEmbeddedAssExtractor$fun extractComplete: MacAssSubtitleData</ID>
+    <ID>ThrowsCount:MacVideoPlayerState.kt:MacVideoPlayerState$private suspend fun installLibAssSubtitleData: Boolean</ID>
+    <ID>ThrowsCount:MacVideoPlayerState.kt:MacVideoPlayerState$private suspend fun prepareUriForMacPlayback: String</ID>
+    <ID>TooGenericExceptionCaught:LinuxVideoPlayerState.kt:LinuxVideoPlayerState$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:MacFfmpegHlsFallback.kt:MacFfmpegHlsFallback$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:MacLibAssSupport.kt:MacEmbeddedAssExtractor$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:MacVideoPlayerState.kt:MacVideoPlayerState$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:MacVlcHlsFallback.kt:MacVlcHlsFallback$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SubtitleLoader.jvm.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:WindowsVideoPlayerState.kt:WindowsVideoPlayerState$e: Exception</ID>
+    <ID>TooManyFunctions:LinuxNativeBridge.kt:LinuxNativeBridge</ID>
+    <ID>TooManyFunctions:MacMatroskaAssExtractor.kt:MacMatroskaAssExtractor</ID>
+    <ID>TooManyFunctions:MacNativeBridge.kt:MacNativeBridge</ID>
+    <ID>TooManyFunctions:MacVideoPlayerState.kt:MacVideoPlayerState : VideoPlayerState</ID>
+    <ID>TooManyFunctions:WindowsNativeBridge.kt:WindowsNativeBridge</ID>
+    <ID>WildcardImport:LinuxVideoPlayerState.kt:import androidx.compose.runtime.*</ID>
+    <ID>WildcardImport:LinuxVideoPlayerState.kt:import kotlinx.coroutines.*</ID>
+    <ID>WildcardImport:MacVideoPlayerState.kt:import androidx.compose.runtime.*</ID>
+    <ID>WildcardImport:MacVideoPlayerState.kt:import kotlinx.coroutines.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

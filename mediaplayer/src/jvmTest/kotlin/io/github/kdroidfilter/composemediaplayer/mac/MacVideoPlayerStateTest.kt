@@ -3,13 +3,13 @@ package io.github.kdroidfilter.composemediaplayer.mac
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Tests for the Mac implementation of VideoPlayerState

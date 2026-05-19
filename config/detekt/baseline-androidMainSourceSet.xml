@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:VideoPlayerState.android.kt:DefaultVideoPlayerState$private fun syncAvailableMediaTracks</ID>
+    <ID>MagicNumber:SubtitleLoader.android.kt:10000</ID>
+    <ID>MagicNumber:VideoPlayerState.android.kt:DefaultVideoPlayerState$1000</ID>
+    <ID>MagicNumber:VideoPlayerState.android.kt:DefaultVideoPlayerState$1000f</ID>
+    <ID>MagicNumber:VideoPlayerState.android.kt:DefaultVideoPlayerState$16f</ID>
+    <ID>MagicNumber:VideoPlayerState.android.kt:DefaultVideoPlayerState$4</ID>
+    <ID>MagicNumber:VideoPlayerState.android.kt:DefaultVideoPlayerState$9f</ID>
+    <ID>NestedBlockDepth:VideoPlayerState.android.kt:DefaultVideoPlayerState$private fun extractFormatMetadata</ID>
+    <ID>NestedBlockDepth:VideoPlayerSurface.android.kt:@OptIn(UnstableApi::class) private fun createPlayerViewWithSurfaceType: PlayerView</ID>
+    <ID>SwallowedException:VideoPlayerState.android.kt:e: IllegalStateException</ID>
+    <ID>TooGenericExceptionCaught:SubtitleLoader.android.kt:e2: Exception</ID>
+    <ID>TooGenericExceptionCaught:SubtitleLoader.android.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoPlayerState.android.kt:DefaultVideoPlayerState$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoPlayerState.android.kt:DefaultVideoPlayerState.&lt;no name provided>$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoPlayerSurface.android.kt:e2: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoPlayerSurface.android.kt:e: Exception</ID>
+    <ID>WildcardImport:VideoPlayerState.android.kt:import androidx.media3.common.*</ID>
+    <ID>WildcardImport:VideoPlayerState.android.kt:import kotlinx.coroutines.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

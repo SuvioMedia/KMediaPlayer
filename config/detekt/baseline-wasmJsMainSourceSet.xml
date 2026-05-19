@@ -1,0 +1,32 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:VideoPlayerSurfaceImpl.kt:@Composable internal fun VideoPlayerEffects</ID>
+    <ID>CyclomaticComplexMethod:VideoPlayerSurfaceImpl.kt:internal fun setupVideoElement</ID>
+    <ID>FunctionOnlyReturningConstant:AssSubtitleRenderer.web.kt:internal suspend fun ensureAssRendererScriptLoaded: Boolean</ID>
+    <ID>LongMethod:MkvSidecarTracks.web.kt:@Suppress("UNUSED_PARAMETER") private fun startMkvSidecarProbe: Unit</ID>
+    <ID>LongMethod:MkvSidecarTracks.web.kt:@Suppress("UNUSED_PARAMETER") private fun startMkvSubtitleExtraction: Unit</ID>
+    <ID>LongMethod:VideoPlayerSurfaceImpl.kt:@Composable internal fun VideoPlayerEffects</ID>
+    <ID>MagicNumber:SubtitleLoader.web.kt:200</ID>
+    <ID>MagicNumber:SubtitleLoader.web.kt:299</ID>
+    <ID>MagicNumber:VideoPlayerState.web.kt:DefaultVideoPlayerState$16f</ID>
+    <ID>MagicNumber:VideoPlayerState.web.kt:DefaultVideoPlayerState$9f</ID>
+    <ID>MaxLineLength:MkvSidecarTracks.web.kt:"typeof globalThis.MatroskaSubtitles === 'object' &amp;&amp; typeof globalThis.MatroskaSubtitles.SubtitleParser === 'function'"</ID>
+    <ID>TooGenericExceptionCaught:SubtitleLoader.web.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoPlayerState.web.kt:DefaultVideoPlayerState$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoPlayerSurfaceImpl.kt:e: Exception</ID>
+    <ID>TooManyFunctions:VideoPlayerSurfaceImpl.kt:io.github.kdroidfilter.composemediaplayer.VideoPlayerSurfaceImpl.kt</ID>
+    <ID>TooManyFunctions:WebMediaTracks.web.kt:io.github.kdroidfilter.composemediaplayer.WebMediaTracks.web.kt</ID>
+    <ID>UnusedParameter:AssSubtitleRenderer.web.kt:canvas: HTMLCanvasElement</ID>
+    <ID>UnusedParameter:AssSubtitleRenderer.web.kt:instance: JsAny</ID>
+    <ID>UnusedParameter:AssSubtitleRenderer.web.kt:instance: JsAny?</ID>
+    <ID>UnusedParameter:WebMediaTracks.web.kt:onChange: () -> Unit</ID>
+    <ID>UnusedParameter:WebMediaTracks.web.kt:selectedId: String?</ID>
+    <ID>UnusedParameter:WebMediaTracks.web.kt:value: String</ID>
+    <ID>UnusedParameter:WebMediaTracks.web.kt:video: HTMLVideoElement</ID>
+    <ID>VariableNaming:VideoPlayerState.web.kt:DefaultVideoPlayerState$internal var _isLoading by mutableStateOf(false)</ID>
+    <ID>WildcardImport:VideoPlayerSurface.wasm.kt:import androidx.compose.runtime.*</ID>
+    <ID>WildcardImport:VideoPlayerSurfaceImpl.kt:import androidx.compose.runtime.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

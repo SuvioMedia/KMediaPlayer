@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/MacLibVlcMediaProbe.kt">
+        <error line="21" column="121" source="standard:max-line-length" />
+    </file>
+    <file name="src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/MacMatroskaAssExtractor.kt">
+        <error line="912" column="121" source="standard:max-line-length" />
+    </file>
+    <file name="src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerState.kt">
+        <error line="511" column="121" source="standard:max-line-length" />
+        <error line="527" column="121" source="standard:max-line-length" />
+        <error line="528" column="121" source="standard:max-line-length" />
+        <error line="529" column="121" source="standard:max-line-length" />
+        <error line="533" column="121" source="standard:max-line-length" />
+        <error line="977" column="121" source="standard:max-line-length" />
+    </file>
+</baseline>

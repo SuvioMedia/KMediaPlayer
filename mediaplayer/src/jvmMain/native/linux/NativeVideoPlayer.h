@@ -28,7 +28,8 @@ void nvp_set_playback_speed(VideoPlayer* p, float speed);
 float nvp_get_playback_speed(VideoPlayer* p);
 
 // Frame access
-void*   nvp_get_latest_frame_address(VideoPlayer* p);
+void*   nvp_lock_latest_frame(VideoPlayer* p, int32_t out_info[3]);
+void    nvp_unlock_latest_frame(VideoPlayer* p);
 int32_t nvp_get_frame_width(VideoPlayer* p);
 int32_t nvp_get_frame_height(VideoPlayer* p);
 int32_t nvp_set_output_size(VideoPlayer* p, int32_t width, int32_t height);
