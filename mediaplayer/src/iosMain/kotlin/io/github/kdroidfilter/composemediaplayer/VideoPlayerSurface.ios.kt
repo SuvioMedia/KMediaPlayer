@@ -13,7 +13,6 @@ import androidx.compose.ui.viewinterop.UIKitView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
-import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -141,19 +140,16 @@ fun VideoPlayerSurfaceImpl(
                 playerState.currentSubtitleTrack != null &&
                 playerState.currentSubtitleTrack?.isEmbedded != true
             ) {
-                // Calculate current time in milliseconds
-                val currentTimeMs =
-                    (
-                        playerState.sliderPos / 1000f *
-                            playerState.durationText.toTimeMs()
-                    ).toLong()
-
-                // Calculate duration in milliseconds
-                val durationMs = playerState.durationText.toTimeMs()
+                val currentTime =
+                    if (playerState.userDragging) {
+                        playerState.duration * (playerState.sliderPos / 1000.0).coerceIn(0.0, 1.0)
+                    } else {
+                        playerState.currentTime
+                    }
 
                 ComposeSubtitleLayer(
-                    currentTimeMs = currentTimeMs,
-                    durationMs = durationMs,
+                    currentTime = currentTime,
+                    duration = playerState.duration,
                     isPlaying = playerState.isPlaying,
                     subtitleTrack = playerState.currentSubtitleTrack,
                     subtitlesEnabled = playerState.subtitlesEnabled,

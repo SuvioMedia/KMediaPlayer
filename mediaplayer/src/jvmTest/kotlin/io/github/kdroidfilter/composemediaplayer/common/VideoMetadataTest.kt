@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Tests for the VideoMetadata class
@@ -38,7 +39,7 @@ class VideoMetadataTest {
         val metadata =
             VideoMetadata(
                 title = "Test Title",
-                duration = 120000L,
+                duration = 120.seconds,
                 width = 1920,
                 height = 1080,
                 bitrate = 5000000L,
@@ -50,7 +51,7 @@ class VideoMetadataTest {
 
         // Verify the metadata properties
         assertEquals("Test Title", metadata.title)
-        assertEquals(120000L, metadata.duration)
+        assertEquals(120.seconds, metadata.duration)
         assertEquals(1920, metadata.width)
         assertEquals(1080, metadata.height)
         assertEquals(5000000L, metadata.bitrate)
@@ -69,7 +70,7 @@ class VideoMetadataTest {
 
         // Set metadata properties
         metadata.title = "Test Title"
-        metadata.duration = 120000L
+        metadata.duration = 120.seconds
         metadata.width = 1920
         metadata.height = 1080
         metadata.bitrate = 5000000L
@@ -80,7 +81,7 @@ class VideoMetadataTest {
 
         // Verify the metadata properties
         assertEquals("Test Title", metadata.title)
-        assertEquals(120000L, metadata.duration)
+        assertEquals(120.seconds, metadata.duration)
         assertEquals(1920, metadata.width)
         assertEquals(1080, metadata.height)
         assertEquals(5000000L, metadata.bitrate)
@@ -98,22 +99,22 @@ class VideoMetadataTest {
         val metadata =
             VideoMetadata(
                 title = "Original Title",
-                duration = 60000L,
+                duration = 60.seconds,
             )
 
         // Create a copy with some modified properties
         val copy =
             metadata.copy(
                 title = "New Title",
-                duration = 90000L,
+                duration = 90.seconds,
             )
 
         // Verify the original metadata is unchanged
         assertEquals("Original Title", metadata.title)
-        assertEquals(60000L, metadata.duration)
+        assertEquals(60.seconds, metadata.duration)
 
         // Verify the copy has the expected properties
         assertEquals("New Title", copy.title)
-        assertEquals(90000L, copy.duration)
+        assertEquals(90.seconds, copy.duration)
     }
 }

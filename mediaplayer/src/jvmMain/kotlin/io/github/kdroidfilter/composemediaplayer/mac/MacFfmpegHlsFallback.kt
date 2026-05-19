@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.exists
 import kotlin.io.path.name
+import kotlin.time.Duration.Companion.milliseconds
 
 internal object MacAvFoundationContainerSupport {
     private val unsupportedExtensions = setOf("mkv", "mk3d", "mka", "mks", "webm")
@@ -679,7 +680,7 @@ internal class MacFfmpegHlsFallback(
                 throw IllegalStateException("ffmpeg exited before producing a playable HLS playlist. ${lastLogMessage()}")
             }
 
-            delay(250)
+            delay(250.milliseconds)
         }
 
         throw IllegalStateException("Timed out waiting for ffmpeg to produce a playable HLS playlist. ${lastLogMessage()}")

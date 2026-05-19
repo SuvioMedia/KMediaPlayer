@@ -7,6 +7,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Tests for the WebAssembly implementation of VideoPlayerState
@@ -27,8 +29,8 @@ class VideoPlayerStateTest {
         assertEquals(1f, playerState.volume)
         assertEquals(1f, playerState.playbackSpeed)
         assertFalse(playerState.loop)
-        assertEquals("00:00", playerState.positionText)
-        assertEquals("00:00", playerState.durationText)
+        assertEquals("00:00.000", playerState.positionText)
+        assertEquals("00:00.000", playerState.durationText)
         assertFalse(playerState.isFullscreen)
 
         // Clean up
@@ -202,17 +204,48 @@ class VideoPlayerStateTest {
 
         // Test initial position
         assertEquals(0f, playerState.sliderPos)
-        assertEquals("00:00", playerState.positionText)
-        assertEquals("00:00", playerState.durationText)
+        assertEquals("00:00.000", playerState.positionText)
+        assertEquals("00:00.000", playerState.durationText)
 
         // Test updating position manually with forceUpdate to bypass rate limiting
-        webPlayerState.updatePosition(30f, 120f, forceUpdate = true)
+        webPlayerState.updatePosition(30.seconds, 120.seconds, forceUpdate = true)
 
         // Verify position was updated
-        assertEquals("00:30", playerState.positionText)
-        assertEquals("02:00", playerState.durationText)
+        assertEquals("00:30.000", playerState.positionText)
+        assertEquals("02:00.000", playerState.durationText)
 
         // Clean up
+        playerState.dispose()
+    }
+
+    @Test
+    fun testCurrentTimeUpdatesBypassDisplayRateLimit() {
+        val playerState = createVideoPlayerState()
+        val webPlayerState = playerState as DefaultVideoPlayerState
+
+        webPlayerState.updatePosition(30.seconds, 120.seconds, forceUpdate = true)
+        webPlayerState.updatePosition(30.seconds + 123.milliseconds, 120.seconds + 456.milliseconds)
+
+        assertEquals(30.seconds + 123.milliseconds, playerState.currentTime)
+        assertEquals(120.seconds + 456.milliseconds, playerState.duration)
+        assertEquals("00:30.000", playerState.positionText)
+        assertEquals("02:00.000", playerState.durationText)
+
+        playerState.dispose()
+    }
+
+    @Test
+    fun testPreciseCurrentTimeCanReadDirectProviderValue() {
+        val playerState = createVideoPlayerState()
+        val webPlayerState = playerState as DefaultVideoPlayerState
+
+        webPlayerState.preciseCurrentTimeProvider = { 42.seconds + 789.milliseconds }
+        webPlayerState.durationProvider = { 120.seconds + 987.milliseconds }
+
+        assertEquals(0.seconds, playerState.currentTime)
+        assertEquals(42.seconds + 789.milliseconds, playerState.preciseCurrentTime)
+        assertEquals(120.seconds + 987.milliseconds, playerState.duration)
+
         playerState.dispose()
     }
 

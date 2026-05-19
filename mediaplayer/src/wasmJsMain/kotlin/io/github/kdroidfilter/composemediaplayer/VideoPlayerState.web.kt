@@ -12,6 +12,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.getUri
+import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.io.IOException
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
@@ -133,18 +135,22 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override var isFullscreen by mutableStateOf(false)
 
     // Time display properties
-    private var _positionText by mutableStateOf("00:00")
-    private var _durationText by mutableStateOf("00:00")
+    private var _positionText by mutableStateOf("00:00.000")
+    private var _durationText by mutableStateOf("00:00.000")
     override val positionText: String get() = _positionText
     override val durationText: String get() = _durationText
 
-    // Current duration of the media
-    private var _currentDuration: Float = 0f
-
-    // Current time of the media in seconds
-    private var _currentTime: Double = 0.0
-    override val currentTime: Double get() = _currentTime
-    override val duration: Double get() = _currentDuration.toDouble()
+    private var _currentDuration by mutableStateOf(Duration.ZERO)
+    private var _currentTime by mutableStateOf(Duration.ZERO)
+    internal var preciseCurrentTimeProvider: (() -> Duration)? = null
+    internal var durationProvider: (() -> Duration)? = null
+    override val currentTime: Duration get() = _currentTime
+    override val preciseCurrentTime: Duration get() = preciseCurrentTimeProvider?.invoke() ?: _currentTime
+    override val duration: Duration
+        get() {
+            val observedDuration = _currentDuration
+            return durationProvider?.invoke() ?: observedDuration
+        }
 
     // Job for handling seek operations
     internal var seekJob: Job? = null
@@ -187,7 +193,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             // If changes are coming too rapidly, schedule them with a delay
             pendingVolumeChange =
                 playerScope.launch {
-                    delay(100.milliseconds.minus(timeSinceLastChange).inWholeMilliseconds)
+                    delay(100.milliseconds - timeSinceLastChange)
                     applyVolumeCallback?.invoke(value)
                     lastVolumeChangeTime = TimeSource.Monotonic.markNow()
                 }
@@ -212,7 +218,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             // If changes are coming too rapidly, schedule them with a delay
             pendingSpeedChange =
                 playerScope.launch {
-                    delay(100.milliseconds.minus(timeSinceLastChange).inWholeMilliseconds)
+                    delay(100.milliseconds - timeSinceLastChange)
                     applyPlaybackSpeedCallback?.invoke(value)
                     lastSpeedChangeTime = TimeSource.Monotonic.markNow()
                 }
@@ -374,9 +380,10 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _hasMedia = false
         _isLoading = false
         sliderPos = 0.0f
-        _positionText = "00:00"
-        _durationText = "00:00"
-        _currentTime = 0.0
+        _positionText = "00:00.000"
+        _durationText = "00:00.000"
+        _currentTime = Duration.ZERO
+        _currentDuration = Duration.ZERO
         // Note: We don't clear lastUri, so it can be used to replay the video
     }
 
@@ -416,28 +423,30 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     }
 
     /**
-     * Updates the position and duration display.
+     * Updates current media time immediately and throttles only display-related state.
      *
-     * @param currentTime The current playback position in seconds
-     * @param duration The total duration of the media in seconds
-     * @param forceUpdate If true, bypasses the rate limiting check (useful for tests)
+     * @param currentTime The current playback position.
+     * @param duration The total duration of the media.
+     * @param forceUpdate If true, bypasses the display rate limiting check (useful for tests)
      */
     fun updatePosition(
-        currentTime: Float,
-        duration: Float,
+        currentTime: Duration,
+        duration: Duration,
         forceUpdate: Boolean = false,
     ) {
+        _currentTime = currentTime
+        _currentDuration = duration
+
         val now = TimeSource.Monotonic.markNow()
         if (forceUpdate || now - lastUpdateTime >= 250.milliseconds) {
-            _positionText = if (currentTime.isNaN()) "00:00" else formatTime(currentTime)
-            _durationText = if (duration.isNaN()) "00:00" else formatTime(duration)
+            _positionText = formatTime(currentTime)
+            _durationText = formatTime(duration)
 
-            _currentTime = currentTime.toDouble()
-
-            if (!userDragging && duration > 0f && !duration.isNaN() && !_isLoading) {
-                sliderPos = (currentTime / duration) * PERCENTAGE_MULTIPLIER
+            if (!userDragging && duration > Duration.ZERO && !_isLoading) {
+                sliderPos =
+                    (currentTime.toSecondsDouble() / duration.toSecondsDouble() * PERCENTAGE_MULTIPLIER)
+                        .toFloat()
             }
-            _currentDuration = duration
             lastUpdateTime = now
         }
     }
@@ -445,13 +454,13 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     /**
      * Callback for time update events from the media player.
      *
-     * @param currentTime The current playback position in seconds
-     * @param duration The total duration of the media in seconds
-     * @param forceUpdate If true, bypasses the rate limiting check (useful for tests)
+     * @param currentTime The current playback position.
+     * @param duration The total duration of the media.
+     * @param forceUpdate If true, bypasses the display rate limiting check (useful for tests)
      */
     fun onTimeUpdate(
-        currentTime: Float,
-        duration: Float,
+        currentTime: Duration,
+        duration: Duration,
         forceUpdate: Boolean = false,
     ) {
         updatePosition(currentTime, duration, forceUpdate)
@@ -461,6 +470,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
      * Disposes of resources used by the player.
      */
     override fun dispose() {
+        preciseCurrentTimeProvider = null
+        durationProvider = null
         pendingVolumeChange?.cancel()
         pendingSpeedChange?.cancel()
         playerScope.cancel()

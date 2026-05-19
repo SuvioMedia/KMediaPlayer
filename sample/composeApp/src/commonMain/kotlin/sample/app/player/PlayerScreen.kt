@@ -70,6 +70,7 @@ import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.name
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -528,7 +529,7 @@ private fun FullscreenOverlay(playerState: VideoPlayerState) {
 
     LaunchedEffect(visible) {
         if (visible) {
-            delay(3000)
+            delay(3.seconds)
             visible = false
         }
     }

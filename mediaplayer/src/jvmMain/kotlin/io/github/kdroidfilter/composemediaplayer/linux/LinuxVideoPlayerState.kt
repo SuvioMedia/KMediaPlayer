@@ -16,6 +16,8 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
+import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +30,8 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 internal val linuxLogger = TaggedLogger("LinuxVideoPlayerState")
 
@@ -71,7 +75,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     // State tracking
     private var lastFrameUpdateTime: Long = 0
     private var seekInProgress = false
-    private var targetSeekTime: Double? = null
+    private var targetSeekTime: Duration? = null
 
     // Frame rate from native layer
     private var captureFrameRate: Float = 0.0f
@@ -104,22 +108,24 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override var isFullscreen: Boolean by mutableStateOf(false)
     private var lastUri: String? = null
 
-    private val _positionText = mutableStateOf("00:00")
+    private val _positionText = mutableStateOf("00:00.000")
     override val positionText: String get() = _positionText.value
 
-    private val _durationText = mutableStateOf("00:00")
+    private val _durationText = mutableStateOf("00:00.000")
     override val durationText: String get() = _durationText.value
 
-    override val currentTime: Double
+    override val currentTime: Duration
         get() =
             runBlocking {
-                if (hasMedia) getPositionSafely() else 0.0
+                if (hasMedia) getPositionSafely() else Duration.ZERO
             }
 
-    override val duration: Double
+    override val preciseCurrentTime: Duration get() = currentTime
+
+    override val duration: Duration
         get() =
             runBlocking {
-                if (hasMedia) getDurationSafely() else 0.0
+                if (hasMedia) getDurationSafely() else Duration.ZERO
             }
 
     private val _aspectRatio = mutableStateOf(16f / 9f)
@@ -366,7 +372,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 return
             }
             linuxLogger.d { "Dimensions not ready yet (attempt $attempt/$maxAttempts)" }
-            delay(250)
+            delay(250.milliseconds)
         }
         linuxLogger.e { "Unable to retrieve valid dimensions after $maxAttempts attempts" }
     }
@@ -390,7 +396,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         try {
             val width = LinuxNativeBridge.nGetFrameWidth(ptr)
             val height = LinuxNativeBridge.nGetFrameHeight(ptr)
-            val duration = (LinuxNativeBridge.nGetVideoDuration(ptr) * 1000).toLong()
+            val duration = LinuxNativeBridge.nGetVideoDuration(ptr).secondsAsDuration()
             val frameRate = LinuxNativeBridge.nGetFrameRate(ptr)
             val newAspectRatio =
                 if (width > 0 && height > 0) {
@@ -543,7 +549,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         if (!hasMedia || userDragging) return
         try {
             val duration = getDurationSafely()
-            if (duration <= 0) return
+            if (duration <= Duration.ZERO) return
 
             val current = getPositionSafely()
 
@@ -553,13 +559,16 @@ class LinuxVideoPlayerState : VideoPlayerState {
             }
 
             if (seekInProgress && targetSeekTime != null) {
-                if (abs(current - targetSeekTime!!) < 0.3) {
+                if (abs(current.toSecondsDouble() - targetSeekTime!!.toSecondsDouble()) < 0.3) {
                     seekInProgress = false
                     targetSeekTime = null
                     withContext(Dispatchers.Main) { isLoading = false }
                 }
             } else {
-                val newSliderPos = (current / duration * 1000).toFloat().coerceIn(0f, 1000f)
+                val newSliderPos =
+                    (current.toSecondsDouble() / duration.toSecondsDouble() * 1000)
+                        .toFloat()
+                        .coerceIn(0f, 1000f)
                 withContext(Dispatchers.Main) { sliderPos = newSliderPos }
             }
 
@@ -571,12 +580,12 @@ class LinuxVideoPlayerState : VideoPlayerState {
     }
 
     private suspend fun checkLoopingAsync(
-        current: Double,
-        duration: Double,
+        current: Duration,
+        duration: Duration,
     ) {
         val ptr = playerPtr
         val ended = ptr != 0L && LinuxNativeBridge.nConsumeDidPlayToEnd(ptr)
-        if (!ended && (duration <= 0 || current < duration - 0.5)) return
+        if (!ended && (duration <= Duration.ZERO || current < duration - 500.milliseconds)) return
 
         if (loop) {
             seekToAsync(0f)
@@ -656,7 +665,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     override fun seekTo(value: Float) {
         ioScope.launch {
-            delay(10) // Coalesce rapid seek events
+            delay(10.milliseconds) // Coalesce rapid seek events
             seekToAsync(value)
         }
     }
@@ -666,16 +675,16 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
         try {
             val duration = getDurationSafely()
-            if (duration <= 0) {
+            if (duration <= Duration.ZERO) {
                 withContext(Dispatchers.Main) { isLoading = false }
                 return
             }
 
-            val seekTime = ((value / 1000f) * duration.toFloat()).coerceIn(0f, duration.toFloat())
+            val seekTime = duration * (value / 1000.0).coerceIn(0.0, 1.0)
 
             withContext(Dispatchers.Main) {
                 seekInProgress = true
-                targetSeekTime = seekTime.toDouble()
+                targetSeekTime = seekTime
                 sliderPos = value
             }
 
@@ -683,14 +692,14 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
             val ptr = playerPtr
             if (ptr == 0L) return
-            LinuxNativeBridge.nSeekTo(ptr, seekTime.toDouble())
+            LinuxNativeBridge.nSeekTo(ptr, seekTime.toSecondsDouble())
 
             if (isPlaying) {
                 LinuxNativeBridge.nPlay(ptr)
-                delay(10)
+                delay(10.milliseconds)
                 updateFrameAsync()
                 ioScope.launch {
-                    delay(300)
+                    delay(300.milliseconds)
                     if (seekInProgress) {
                         seekInProgress = false
                         targetSeekTime = null
@@ -698,7 +707,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     }
                 }
             } else {
-                delay(50)
+                delay(50.milliseconds)
                 updateFrameAsync()
                 seekInProgress = false
                 targetSeekTime = null
@@ -804,7 +813,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         resizeJob?.cancel()
         resizeJob =
             ioScope.launch {
-                delay(120)
+                delay(120.milliseconds)
                 try {
                     applyOutputScaling()
                 } finally {
@@ -845,8 +854,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
             hasMedia = false
             isPlaying = false
             isLoading = false
-            _positionText.value = "00:00"
-            _durationText.value = "00:00"
+            _positionText.value = "00:00.000"
+            _durationText.value = "00:00.000"
             _aspectRatio.value = 16f / 9f
             error = null
         }
@@ -869,25 +878,25 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
-    private suspend fun getPositionSafely(): Double {
+    private suspend fun getPositionSafely(): Duration {
         val ptr = playerPtr
-        if (ptr == 0L) return 0.0
+        if (ptr == 0L) return Duration.ZERO
         return try {
-            LinuxNativeBridge.nGetCurrentTime(ptr)
+            LinuxNativeBridge.nGetCurrentTime(ptr).secondsAsDuration()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            0.0
+            Duration.ZERO
         }
     }
 
-    private suspend fun getDurationSafely(): Double {
+    private suspend fun getDurationSafely(): Duration {
         val ptr = playerPtr
-        if (ptr == 0L) return 0.0
+        if (ptr == 0L) return Duration.ZERO
         return try {
-            LinuxNativeBridge.nGetVideoDuration(ptr)
+            LinuxNativeBridge.nGetVideoDuration(ptr).secondsAsDuration()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            0.0
+            Duration.ZERO
         }
     }
 

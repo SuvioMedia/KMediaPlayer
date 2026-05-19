@@ -1,61 +1,58 @@
 package io.github.kdroidfilter.composemediaplayer.util
 
+import kotlin.time.Duration
+import kotlin.time.DurationUnit
+import kotlin.time.toDuration
+
 /**
- * Formats a given time into either "HH:MM:SS" (if hours > 0) or "MM:SS".
- *
- * @param value The time value (if interpreting seconds, pass as Double;
- *              if interpreting nanoseconds, pass as Long).
- * @param isNanoseconds Set to true when you're passing nanoseconds (Long) for [value].
+ * Formats a given time into either "HH:MM:SS.mmm" (if hours > 0) or "MM:SS.mmm".
  */
-internal fun formatTime(
-    value: Number,
-    isNanoseconds: Boolean = false,
-): String {
-    // Convert the input to seconds (Double) if it's nanoseconds
-    val totalSeconds =
-        if (isNanoseconds) {
-            value.toLong() / 1_000_000_000.0
+internal fun formatTime(value: Duration): String {
+    val duration = if (value < Duration.ZERO) Duration.ZERO else value
+
+    return duration.toComponents { hours, minutes, seconds, nanoseconds ->
+        val paddedMinutes = minutes.toString().padStart(2, '0')
+        val paddedSeconds = seconds.toString().padStart(2, '0')
+        val paddedMilliseconds = (nanoseconds / 1_000_000).toString().padStart(3, '0')
+
+        if (hours > 0) {
+            "${hours.toString().padStart(2, '0')}:$paddedMinutes:$paddedSeconds.$paddedMilliseconds"
         } else {
-            value.toDouble()
+            "$paddedMinutes:$paddedSeconds.$paddedMilliseconds"
         }
+    }
+}
 
-    // Calculate hours, minutes, and seconds directly from total seconds
-    // This handles large time values correctly without date-time wrapping
-    val totalSecondsInt = totalSeconds.toLong()
-    val hours = totalSecondsInt / 3600
-    val minutes = (totalSecondsInt % 3600) / 60
-    val seconds = totalSecondsInt % 60
-
-    // Build the final string
-    return if (hours > 0) {
-        "${hours.toString().padStart(
-            2,
-            '0',
-        )}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+internal fun Double.secondsAsDuration(): Duration =
+    if (isFinite() && this > 0.0) {
+        toDuration(DurationUnit.SECONDS)
     } else {
-        "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+        Duration.ZERO
     }
-}
 
-/**
- * Converts a time string in the format "mm:ss" or "hh:mm:ss" to milliseconds.
- */
-internal fun String.toTimeMs(): Long {
-    val parts = this.split(":")
-    return when (parts.size) {
-        2 -> {
-            // Format: "mm:ss"
-            val minutes = parts[0].toLongOrNull() ?: 0
-            val seconds = parts[1].toLongOrNull() ?: 0
-            (minutes * 60 + seconds) * 1000
-        }
-        3 -> {
-            // Format: "hh:mm:ss"
-            val hours = parts[0].toLongOrNull() ?: 0
-            val minutes = parts[1].toLongOrNull() ?: 0
-            val seconds = parts[2].toLongOrNull() ?: 0
-            (hours * 3600 + minutes * 60 + seconds) * 1000
-        }
-        else -> 0
+internal fun Float.secondsAsDuration(): Duration = toDouble().secondsAsDuration()
+
+internal fun Long.millisecondsAsDuration(): Duration =
+    if (this > 0L) {
+        toDuration(DurationUnit.MILLISECONDS)
+    } else {
+        Duration.ZERO
     }
-}
+
+internal fun Long.nanosecondsAsDuration(): Duration =
+    if (this > 0L) {
+        toDuration(DurationUnit.NANOSECONDS)
+    } else {
+        Duration.ZERO
+    }
+
+internal fun Long.hundredNanosecondsAsDuration(): Duration =
+    if (this > 0L) {
+        (this * 100L).toDuration(DurationUnit.NANOSECONDS)
+    } else {
+        Duration.ZERO
+    }
+
+internal fun Duration.inWhole100NanosecondTicks(): Long = inWholeNanoseconds / 100L
+
+internal fun Duration.toSecondsDouble(): Double = toDouble(DurationUnit.SECONDS)

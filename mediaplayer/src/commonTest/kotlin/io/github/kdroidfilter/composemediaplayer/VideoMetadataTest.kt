@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
 
 class VideoMetadataTest {
     @Test
@@ -17,14 +18,14 @@ class VideoMetadataTest {
         val metadata =
             VideoMetadata(
                 title = "Test Video",
-                duration = 60000L, // 1 minute
+                duration = 1.minutes,
                 width = 1920,
                 height = 1080,
             )
 
         assertFalse(metadata.isAllNull(), "Metadata with some properties set should not be all null")
         assertEquals("Test Video", metadata.title)
-        assertEquals(60000L, metadata.duration)
+        assertEquals(1.minutes, metadata.duration)
         assertEquals(1920, metadata.width)
         assertEquals(1080, metadata.height)
         assertEquals(null, metadata.bitrate)
@@ -39,7 +40,7 @@ class VideoMetadataTest {
         val metadata =
             VideoMetadata(
                 title = "Complete Test Video",
-                duration = 120000L, // 2 minutes
+                duration = 2.minutes,
                 width = 3840,
                 height = 2160,
                 bitrate = 5000000L, // 5 Mbps
@@ -51,7 +52,7 @@ class VideoMetadataTest {
 
         assertFalse(metadata.isAllNull(), "Fully populated metadata should not be all null")
         assertEquals("Complete Test Video", metadata.title)
-        assertEquals(120000L, metadata.duration)
+        assertEquals(2.minutes, metadata.duration)
         assertEquals(3840, metadata.width)
         assertEquals(2160, metadata.height)
         assertEquals(5000000L, metadata.bitrate)
@@ -66,7 +67,7 @@ class VideoMetadataTest {
         val metadata1 =
             VideoMetadata(
                 title = "Equality Test",
-                duration = 300000L, // 5 minutes
+                duration = 5.minutes,
                 width = 1280,
                 height = 720,
             )
@@ -74,7 +75,7 @@ class VideoMetadataTest {
         val metadata2 =
             VideoMetadata(
                 title = "Equality Test",
-                duration = 300000L,
+                duration = 5.minutes,
                 width = 1280,
                 height = 720,
             )
@@ -82,7 +83,7 @@ class VideoMetadataTest {
         val metadata3 =
             VideoMetadata(
                 title = "Different Title",
-                duration = 300000L,
+                duration = 5.minutes,
                 width = 1280,
                 height = 720,
             )
@@ -96,7 +97,7 @@ class VideoMetadataTest {
         val original =
             VideoMetadata(
                 title = "Original Video",
-                duration = 180000L, // 3 minutes
+                duration = 3.minutes,
                 width = 1920,
                 height = 1080,
             )

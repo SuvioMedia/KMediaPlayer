@@ -8,6 +8,7 @@ import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.vinceglb.filekit.PlatformFile
+import kotlin.time.Duration
 
 actual fun createVideoPlayerState(
     audioMode: AudioMode,
@@ -123,8 +124,9 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     override val positionText: String get() = delegate.positionText
     override val durationText: String get() = delegate.durationText
-    override val currentTime: Double get() = delegate.currentTime
-    override val duration: Double get() = delegate.duration
+    override val currentTime: Duration get() = delegate.currentTime
+    override val preciseCurrentTime: Duration get() = delegate.preciseCurrentTime
+    override val duration: Duration get() = delegate.duration
 
     override fun openUri(
         uri: String,

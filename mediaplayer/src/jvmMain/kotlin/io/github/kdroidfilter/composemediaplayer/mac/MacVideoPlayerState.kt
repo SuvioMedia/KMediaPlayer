@@ -25,6 +25,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +39,8 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 internal val macLogger = TaggedLogger("MacVideoPlayerState")
 
@@ -153,22 +156,24 @@ class MacVideoPlayerState : VideoPlayerState {
     private var lastUri: String? = null
 
     // Non-blocking text properties
-    private val _positionText = mutableStateOf("00:00")
+    private val _positionText = mutableStateOf("00:00.000")
     override val positionText: String get() = _positionText.value
 
-    private val _durationText = mutableStateOf("00:00")
+    private val _durationText = mutableStateOf("00:00.000")
     override val durationText: String get() = _durationText.value
 
-    override val currentTime: Double
+    override val currentTime: Duration
         get() =
             runBlocking {
-                if (hasMedia) getPositionSafely() else 0.0
+                if (hasMedia) getPositionSafely().secondsAsDuration() else Duration.ZERO
             }
 
-    override val duration: Double
+    override val preciseCurrentTime: Duration get() = currentTime
+
+    override val duration: Duration
         get() =
             runBlocking {
-                if (hasMedia) getDurationSafely() else 0.0
+                if (hasMedia) getDurationSafely().secondsAsDuration() else Duration.ZERO
             }
 
     // Non-blocking aspect ratio property
@@ -694,7 +699,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 return
             }
 
-            delay(250)
+            delay(250.milliseconds)
         }
     }
 
@@ -793,7 +798,7 @@ class MacVideoPlayerState : VideoPlayerState {
             }
         val playbackTimeMs =
             if (track.isEmbedded) {
-                (getPositionSafely() * 1000.0).toLong().coerceAtLeast(0L)
+                getPositionSafely().secondsAsDuration().inWholeMilliseconds
             } else {
                 0L
             }
@@ -1193,7 +1198,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 return
             }
             macLogger.d { "Dimensions not ready yet (attempt $attempt/$maxAttempts), waiting..." }
-            delay(250)
+            delay(250.milliseconds)
         }
         macLogger.e { "Unable to retrieve valid dimensions after $maxAttempts attempts" }
     }
@@ -1213,7 +1218,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 ffmpegHlsFallbackDurationSeconds
                     ?: libVlcTrackInfo?.durationSeconds
                     ?: MacNativeBridge.nGetVideoDuration(ptr)
-            val duration = (durationSeconds * 1000).toLong()
+            val duration = durationSeconds.secondsAsDuration()
             val frameRate = MacNativeBridge.nGetVideoFrameRate(ptr)
 
             // Calculate aspect ratio
@@ -1457,8 +1462,8 @@ class MacVideoPlayerState : VideoPlayerState {
 
             // Update time text display on the main thread
             withContext(Dispatchers.Main) {
-                _positionText.value = formatTime(current)
-                _durationText.value = formatTime(duration)
+                _positionText.value = formatTime(current.secondsAsDuration())
+                _durationText.value = formatTime(duration.secondsAsDuration())
             }
 
             // Handle seek in progress
@@ -1608,7 +1613,7 @@ class MacVideoPlayerState : VideoPlayerState {
         macLogger.d { "seekTo() - Seeking with slider value: $value" }
         ioScope.launch {
             // Throttle rapid seek operations
-            delay(10) // Small delay to coalesce rapid seek events
+            delay(10.milliseconds) // Small delay to coalesce rapid seek events
             seekToAsync(value)
         }
     }
@@ -1645,11 +1650,11 @@ class MacVideoPlayerState : VideoPlayerState {
             if (isPlaying) {
                 MacNativeBridge.nPlay(ptr)
                 // Reduce delay to update frame faster for local videos
-                delay(10)
+                delay(10.milliseconds)
                 updateFrameAsync()
                 // Reduced timeout delay from 2000ms to 300ms
                 ioScope.launch {
-                    delay(300)
+                    delay(300.milliseconds)
                     if (seekInProgress) {
                         macLogger.d { "seekToAsync() - Forcing end of seek after timeout" }
                         seekInProgress = false
@@ -1738,8 +1743,8 @@ class MacVideoPlayerState : VideoPlayerState {
             hasMedia = false
             isPlaying = false
             isLoading = false
-            _positionText.value = "00:00"
-            _durationText.value = "00:00"
+            _positionText.value = "00:00.000"
+            _durationText.value = "00:00.000"
             _aspectRatio.value = 16f / 9f
             error = null
         }
@@ -1942,7 +1947,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 error = null
                 currentAudioTrack = track
                 sliderPos = restartSliderPos
-                _positionText.value = formatTime(restartPositionSeconds)
+                _positionText.value = formatTime(restartPositionSeconds.secondsAsDuration())
             }
 
             cleanupCurrentPlayback()
@@ -2224,7 +2229,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
                 sliderPos = restartSliderPos
-                _positionText.value = formatTime(restartPositionSeconds)
+                _positionText.value = formatTime(restartPositionSeconds.secondsAsDuration())
             }
 
             cleanupCurrentPlayback()
@@ -2368,7 +2373,7 @@ class MacVideoPlayerState : VideoPlayerState {
         resizeJob?.cancel()
         resizeJob =
             ioScope.launch {
-                delay(120)
+                delay(120.milliseconds)
                 try {
                     applyOutputScaling()
                 } finally {

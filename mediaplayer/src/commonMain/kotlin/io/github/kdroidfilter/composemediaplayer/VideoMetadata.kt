@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlin.time.Duration
 
 /**
  * Represents metadata information of a video file.
@@ -13,7 +14,7 @@ import androidx.compose.runtime.setValue
  * resolution changes) while the metadata instance is read from a composable.
  *
  * @property title The title of the video, if available.
- * @property duration The length of the video in milliseconds, if known.
+ * @property duration The length of the video, if known.
  * @property width The width of the video in pixels, if available.
  * @property height The height of the video in pixels, if available.
  * @property bitrate The average data rate of the video in bits per second, if known.
@@ -25,7 +26,7 @@ import androidx.compose.runtime.setValue
 @Stable
 class VideoMetadata(
     title: String? = null,
-    duration: Long? = null,
+    duration: Duration? = null,
     width: Int? = null,
     height: Int? = null,
     bitrate: Long? = null,
@@ -35,7 +36,7 @@ class VideoMetadata(
     audioSampleRate: Int? = null,
 ) {
     var title: String? by mutableStateOf(title)
-    var duration: Long? by mutableStateOf(duration)
+    var duration: Duration? by mutableStateOf(duration)
     var width: Int? by mutableStateOf(width)
     var height: Int? by mutableStateOf(height)
     var bitrate: Long? by mutableStateOf(bitrate)
@@ -60,7 +61,7 @@ class VideoMetadata(
 
     fun copy(
         title: String? = this.title,
-        duration: Long? = this.duration,
+        duration: Duration? = this.duration,
         width: Int? = this.width,
         height: Int? = this.height,
         bitrate: Long? = this.bitrate,

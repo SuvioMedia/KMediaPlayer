@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.exists
 import kotlin.io.path.name
+import kotlin.time.Duration.Companion.milliseconds
 
 internal object MacVlcLocator {
     fun findVlc(): String? {
@@ -518,7 +519,7 @@ internal class MacVlcHlsFallback(
                 throw IllegalStateException("VLC exited before producing a playable HLS playlist. ${lastLogMessage()}")
             }
 
-            delay(250)
+            delay(250.milliseconds)
         }
 
         throw IllegalStateException("Timed out waiting for VLC to produce a playable HLS playlist. ${lastLogMessage()}")

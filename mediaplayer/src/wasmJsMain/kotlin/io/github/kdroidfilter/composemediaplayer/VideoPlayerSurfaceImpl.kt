@@ -18,7 +18,8 @@ import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
-import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
+import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
+import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -28,6 +29,8 @@ import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.math.abs
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 internal val webVideoLogger = TaggedLogger("WebVideoPlayerSurface")
 
@@ -233,19 +236,16 @@ internal fun SubtitleOverlay(playerState: VideoPlayerState) {
         return
     }
 
-    val durationMs =
-        remember(playerState.durationText) {
-            playerState.durationText.toTimeMs()
-        }
-
-    val currentTimeMs =
-        remember(playerState.sliderPos, durationMs) {
-            ((playerState.sliderPos / 1000f) * durationMs).toLong()
+    val currentTime =
+        if (playerState.userDragging) {
+            playerState.duration * (playerState.sliderPos / 1000.0).coerceIn(0.0, 1.0)
+        } else {
+            playerState.currentTime
         }
 
     ComposeSubtitleLayer(
-        currentTimeMs = currentTimeMs,
-        durationMs = durationMs,
+        currentTime = currentTime,
+        duration = playerState.duration,
         isPlaying = playerState.isPlaying,
         subtitleTrack = subtitleTrack,
         subtitlesEnabled = true,
@@ -596,7 +596,7 @@ internal fun setupVideoElement(
                     playerState.clearError()
                 } else {
                     if (playerState is DefaultVideoPlayerState) {
-                        delay(500)
+                        delay(500.milliseconds)
                         if (mediaLoaded || video.readyState > 0 || video.duration > 0.0) {
                             playerState.clearError()
                         } else {
@@ -623,7 +623,7 @@ internal fun setupVideoElement(
 
 internal fun DefaultVideoPlayerState.onTimeUpdateEvent(event: Event) {
     (event.target as? HTMLVideoElement)?.let {
-        onTimeUpdate(it.currentTime.toFloat(), it.duration.toFloat())
+        onTimeUpdate(it.currentTime.secondsAsDuration(), it.duration.secondsAsDuration())
     }
 }
 
@@ -640,7 +640,7 @@ internal fun HTMLVideoElement.setupMetadataListener(
             with(playerState.metadata) {
                 this.width = width
                 this.height = height
-                duration = (this@setupMetadataListener.duration * 1000).toLong()
+                duration = this@setupMetadataListener.duration.secondsAsDuration()
 
                 val src = this@setupMetadataListener.src
                 if (src.isNotEmpty()) {
@@ -775,6 +775,23 @@ internal fun VideoPlayerEffects(
         }
     }
 
+    DisposableEffect(videoElement, playerState) {
+        val webPlayerState = playerState as? DefaultVideoPlayerState
+        val video = videoElement
+
+        if (webPlayerState != null && video != null) {
+            webPlayerState.preciseCurrentTimeProvider = { video.currentTime.secondsAsDuration() }
+            webPlayerState.durationProvider = { video.duration.secondsAsDuration() }
+        }
+
+        onDispose {
+            if (webPlayerState != null) {
+                webPlayerState.preciseCurrentTimeProvider = null
+                webPlayerState.durationProvider = null
+            }
+        }
+    }
+
     // Loop is handled manually via the "ended" event to support the onRestart callback
 
     // Store state before video element recreation
@@ -828,15 +845,17 @@ internal fun VideoPlayerEffects(
             playerState.seekJob?.cancel()
 
             videoElement?.let { video ->
-                val duration = video.duration.toFloat()
-                if (duration > 0f) {
-                    val newTime = (playerState.sliderPos / DefaultVideoPlayerState.PERCENTAGE_MULTIPLIER) * duration
+                val duration = video.duration.secondsAsDuration()
+                if (duration > Duration.ZERO) {
+                    val newTime =
+                        (duration * (playerState.sliderPos / DefaultVideoPlayerState.PERCENTAGE_MULTIPLIER).toDouble())
+                            .toSecondsDouble()
                     val currentTime = video.currentTime
 
                     if (abs(currentTime - newTime) > 0.5) {
                         playerState.seekJob =
                             scope.launch {
-                                video.safeSetCurrentTime(newTime.toDouble())
+                                video.safeSetCurrentTime(newTime)
                             }
                     }
                 }
@@ -873,10 +892,8 @@ internal fun VideoVolumeAndSpeedEffects(
 ) {
     if (playerState !is DefaultVideoPlayerState) {
         webVideoLogger.e {
-            """
-                Expected ${DefaultVideoPlayerState::class} but found ${playerState::class}.
-                Volume and speed settings won't work.
-            """.trimIndent()
+            "Expected ${DefaultVideoPlayerState::class} but found ${playerState::class}. " +
+                "Volume and speed settings won't work."
         }
         return
     }

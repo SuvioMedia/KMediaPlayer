@@ -4,6 +4,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -38,8 +39,8 @@ class WindowsVideoPlayerStateTest {
         assertEquals(0f, playerState.sliderPos)
         assertEquals(1f, playerState.volume)
         assertFalse(playerState.loop)
-        assertEquals("00:00", playerState.positionText)
-        assertEquals("00:00", playerState.durationText)
+        assertEquals("00:00.000", playerState.positionText)
+        assertEquals("00:00.000", playerState.durationText)
         assertFalse(playerState.isFullscreen)
         assertNull(playerState.error)
 
@@ -151,7 +152,7 @@ class WindowsVideoPlayerStateTest {
         // Test opening a non-existent file (should cause an error)
         runBlocking {
             playerState.openUri("non_existent_file.mp4")
-            delay(500) // Give some time for the error to be set
+            delay(500.milliseconds) // Give some time for the error to be set
         }
 
         // There should be an error now

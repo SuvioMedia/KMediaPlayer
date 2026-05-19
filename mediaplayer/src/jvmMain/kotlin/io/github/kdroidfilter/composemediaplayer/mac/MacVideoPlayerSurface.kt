@@ -14,7 +14,6 @@ import androidx.compose.ui.unit.IntSize
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
-import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 
 /**
  * A Composable function that renders a video player surface for MacOS.
@@ -73,19 +72,16 @@ fun MacVideoPlayerSurface(
                 playerState.currentSubtitleTrack?.isEmbedded != true &&
                 !playerState.usesLibAssSubtitleOverlay
             ) {
-                // Calculate current time in milliseconds
-                val currentTimeMs =
-                    (
-                        playerState.sliderPos / 1000f *
-                            playerState.durationText.toTimeMs()
-                    ).toLong()
-
-                // Calculate duration in milliseconds
-                val durationMs = playerState.durationText.toTimeMs()
+                val currentTime =
+                    if (playerState.userDragging) {
+                        playerState.duration * (playerState.sliderPos / 1000.0).coerceIn(0.0, 1.0)
+                    } else {
+                        playerState.currentTime
+                    }
 
                 ComposeSubtitleLayer(
-                    currentTimeMs = currentTimeMs,
-                    durationMs = durationMs,
+                    currentTime = currentTime,
+                    duration = playerState.duration,
                     isPlaying = playerState.isPlaying,
                     subtitleTrack = playerState.currentSubtitleTrack,
                     subtitlesEnabled = playerState.subtitlesEnabled,

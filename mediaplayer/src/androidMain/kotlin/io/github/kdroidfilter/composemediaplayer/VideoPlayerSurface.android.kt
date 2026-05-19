@@ -14,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MonotonicFrameClock
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,10 +32,10 @@ import androidx.media3.ui.PlayerView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
-import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 @UnstableApi
 @Composable
@@ -97,7 +96,7 @@ private fun VideoPlayerSurfaceInternal(
     LaunchedEffect(playerState.isPipActive) {
         (playerState as? DefaultVideoPlayerState)?.let { playerState ->
             if (!playerState.isPipActive && playerState.isPipFullScreen) {
-                delay(300)
+                delay(300.milliseconds)
                 playerState.togglePipFullScreen()
             }
         }
@@ -246,21 +245,16 @@ private fun VideoPlayerContent(
                 playerState.currentSubtitleTrack != null &&
                 playerState.currentSubtitleTrack?.isEmbedded != true
             ) {
-                // Calculate the current time in milliseconds
-                val currentTimeMs =
-                    remember(playerState.sliderPos, playerState.durationText) {
-                        (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
-                    }
-
-                // Calculate the duration in milliseconds
-                val durationMs =
-                    remember(playerState.durationText) {
-                        playerState.durationText.toTimeMs()
+                val currentTime =
+                    if (playerState.userDragging) {
+                        playerState.duration * (playerState.sliderPos / 1000.0).coerceIn(0.0, 1.0)
+                    } else {
+                        playerState.currentTime
                     }
 
                 ComposeSubtitleLayer(
-                    currentTimeMs = currentTimeMs,
-                    durationMs = durationMs,
+                    currentTime = currentTime,
+                    duration = playerState.duration,
                     isPlaying = playerState.isPlaying,
                     subtitleTrack = playerState.currentSubtitleTrack,
                     subtitlesEnabled = playerState.subtitlesEnabled,

@@ -8,6 +8,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.vinceglb.filekit.PlatformFile
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Represents the state and controls for a video player. This class provides properties
@@ -70,20 +72,35 @@ interface VideoPlayerState {
     }
 
     /**
-     * Returns the current playback position as a formatted string.
+     * Returns the current playback position as a formatted string with millisecond precision.
      */
     val positionText: String
 
     /**
-     * Returns the total duration of the video as a formatted string.
+     * Returns the total duration of the video as a formatted string with millisecond precision.
      */
     val durationText: String
-    val currentTime: Double
 
     /**
-     * Returns the total duration of the media in seconds.
+     * Returns the last observed playback position.
+     *
+     * This value is intended for UI state and may be updated at the platform display/update cadence.
+     * Use [preciseCurrentTime] for external actions that need the freshest available player position.
      */
-    val duration: Double
+    val currentTime: Duration
+
+    /**
+     * Returns the freshest playback position available from the platform backend.
+     *
+     * Prefer this for external synchronization or millisecond-level actions. It is an on-demand value and should not
+     * be used as a high-frequency Compose state source.
+     */
+    val preciseCurrentTime: Duration
+
+    /**
+     * Returns the total duration of the media.
+     */
+    val duration: Duration
     var isFullscreen: Boolean
     val aspectRatio: Float
 
@@ -299,10 +316,11 @@ data class PreviewableVideoPlayerState(
     override var userDragging: Boolean = false,
     override var loop: Boolean = true,
     override var playbackSpeed: Float = 1f,
-    override val positionText: String = "00:05",
-    override val durationText: String = "00:10",
-    override val currentTime: Double = 5000.0,
-    override val duration: Double = 10.0,
+    override val positionText: String = "00:05.000",
+    override val durationText: String = "00:10.000",
+    override val currentTime: Duration = 5.seconds,
+    override val preciseCurrentTime: Duration = currentTime,
+    override val duration: Duration = 10.seconds,
     override var isFullscreen: Boolean = false,
     override val aspectRatio: Float = 1.7f,
     override val error: VideoPlayerError? = null,

@@ -13,7 +13,6 @@ import android.util.Rational
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,10 +37,14 @@ import com.kdroid.androidcontextprovider.ContextProvider
 import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.kdroidfilter.composemediaplayer.util.millisecondsAsDuration
+import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import io.github.vinceglb.filekit.AndroidFile
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import java.lang.ref.WeakReference
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(UnstableApi::class)
 actual fun createVideoPlayerState(
@@ -60,10 +63,10 @@ actual fun createVideoPlayerState(
             userDragging = false,
             loop = false,
             playbackSpeed = 1f,
-            positionText = "00:00",
-            durationText = "00:00",
-            currentTime = 0.0,
-            duration = 0.0,
+            positionText = "00:00.000",
+            durationText = "00:00.000",
+            currentTime = Duration.ZERO,
+            duration = Duration.ZERO,
             isFullscreen = false,
             aspectRatio = 16f / 9f,
             error =
@@ -315,12 +318,19 @@ open class DefaultVideoPlayerState(
     var isPipFullScreen by mutableStateOf(false)
 
     // Time tracking
-    private var _currentTime by mutableDoubleStateOf(0.0)
-    private var _duration by mutableDoubleStateOf(0.0)
+    private var _currentTime by mutableStateOf(Duration.ZERO)
+    private var _duration by mutableStateOf(Duration.ZERO)
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
-    override val currentTime: Double get() = _currentTime
-    override val duration: Double get() = _duration
+    override val currentTime: Duration get() = _currentTime
+    override val preciseCurrentTime: Duration
+        get() =
+            if (!isPlayerReleased) {
+                exoPlayer?.currentPosition?.millisecondsAsDuration() ?: _currentTime
+            } else {
+                _currentTime
+            }
+    override val duration: Duration get() = _duration
 
     override val isPipSupported: Boolean
         get() {
@@ -391,7 +401,7 @@ open class DefaultVideoPlayerState(
                                     try {
                                         // Add a small delay to ensure the system is ready
                                         coroutineScope.launch {
-                                            delay(200)
+                                            delay(200.milliseconds)
                                             if (!isPlayerReleased) {
                                                 androidVideoLogger.d { "Resuming playback after screen unlock" }
                                                 exoPlayer?.play()
@@ -506,7 +516,7 @@ open class DefaultVideoPlayerState(
                         _isLoading = false
                         exoPlayer?.let { player ->
                             if (!isPlayerReleased) {
-                                _duration = player.duration.toDouble() / 1000.0
+                                _duration = player.duration.millisecondsAsDuration()
                                 _isPlaying = player.isPlaying
                                 if (player.isPlaying) startPositionUpdates()
                                 extractFormatMetadata(player)
@@ -614,7 +624,7 @@ open class DefaultVideoPlayerState(
 
     private fun attemptPlayerRecovery() {
         coroutineScope.launch {
-            delay(100) // Small delay to let the system clean up
+            delay(100.milliseconds) // Small delay to let the system clean up
 
             synchronized(playerInitializationLock) {
                 if (!isPlayerReleased) {
@@ -664,13 +674,15 @@ open class DefaultVideoPlayerState(
                 while (isActive) {
                     exoPlayer?.let { player ->
                         if (player.playbackState == Player.STATE_READY && !isPlayerReleased) {
-                            _currentTime = player.currentPosition.toDouble() / 1000.0
-                            if (!userDragging && _duration > 0) {
-                                _sliderPos = (_currentTime / _duration * 1000).toFloat()
+                            _currentTime = player.currentPosition.millisecondsAsDuration()
+                            if (!userDragging && _duration > Duration.ZERO) {
+                                _sliderPos =
+                                    (_currentTime.toSecondsDouble() / _duration.toSecondsDouble() * 1000)
+                                        .toFloat()
                             }
                         }
                     }
-                    delay(16) // ~60fps update rate
+                    delay(16.milliseconds) // ~60fps update rate
                 }
             }
     }
@@ -842,9 +854,10 @@ open class DefaultVideoPlayerState(
     }
 
     override fun seekTo(value: Float) {
-        if (_duration > 0 && !isPlayerReleased) {
-            val targetTime = (value / 1000.0) * _duration
-            exoPlayer?.seekTo((targetTime * 1000).toLong())
+        if (_duration > Duration.ZERO && !isPlayerReleased) {
+            val fraction = (value / 1000.0).coerceIn(0.0, 1.0)
+            val targetTime = _duration * fraction
+            exoPlayer?.seekTo(targetTime.inWholeMilliseconds)
         }
     }
 
@@ -865,7 +878,7 @@ open class DefaultVideoPlayerState(
     private fun extractFormatMetadata(player: Player) {
         try {
             if (player.duration > 0 && player.duration != C.TIME_UNSET) {
-                _metadata.duration = player.duration
+                _metadata.duration = player.duration.millisecondsAsDuration()
             }
 
             syncAvailableMediaTracks(player)
@@ -946,7 +959,8 @@ open class DefaultVideoPlayerState(
                         if (group.isTrackSelected(trackIndex)) selectedSubtitleTrackId = id
                         embeddedSubtitleTracks.add(
                             SubtitleTrack(
-                                label = format.label ?: format.language ?: "Subtitle ${embeddedSubtitleTracks.size + 1}",
+                                label =
+                                    format.label ?: format.language ?: "Subtitle ${embeddedSubtitleTracks.size + 1}",
                                 language = format.language.orEmpty(),
                                 src = "",
                                 format = SubtitleFormat.AUTO,
@@ -1044,8 +1058,8 @@ open class DefaultVideoPlayerState(
     }
 
     private fun resetStates(keepMedia: Boolean = false) {
-        _currentTime = 0.0
-        _duration = 0.0
+        _currentTime = Duration.ZERO
+        _duration = Duration.ZERO
         _sliderPos = 0f
         _isPlaying = false
         _isLoading = false

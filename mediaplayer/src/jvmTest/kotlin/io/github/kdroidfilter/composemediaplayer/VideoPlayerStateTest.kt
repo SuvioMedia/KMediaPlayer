@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -44,8 +45,8 @@ class VideoPlayerStateTest {
         assertEquals(0f, playerState.sliderPos)
         assertEquals(1f, playerState.volume)
         assertFalse(playerState.loop)
-        assertEquals("00:00", playerState.positionText)
-        assertEquals("00:00", playerState.durationText)
+        assertEquals("00:00.000", playerState.positionText)
+        assertEquals("00:00.000", playerState.durationText)
         assertFalse(playerState.isFullscreen)
 
         playerState.dispose()
@@ -163,7 +164,7 @@ class VideoPlayerStateTest {
 
         runBlocking {
             playerState.openUri("non_existent_file.mp4")
-            delay(500)
+            delay(500.milliseconds)
         }
 
         assertNotNull(playerState.error)

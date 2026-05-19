@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer.windows
 
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
+import io.github.kdroidfilter.composemediaplayer.util.hundredNanosecondsAsDuration
 import java.nio.ByteBuffer
 
 internal object WindowsNativeBridge {
@@ -39,7 +40,7 @@ internal object WindowsNativeBridge {
 
         return VideoMetadata(
             title = if (hasFlags[0]) String(title).trim { it <= ' ' || it == '\u0000' } else null,
-            duration = if (hasFlags[1]) longVals[0] / 10000 else null,
+            duration = if (hasFlags[1]) longVals[0].hundredNanosecondsAsDuration() else null,
             width = if (hasFlags[2]) intVals[0] else null,
             height = if (hasFlags[3]) intVals[1] else null,
             bitrate = if (hasFlags[4]) longVals[1] else null,

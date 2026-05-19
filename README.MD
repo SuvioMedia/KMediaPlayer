@@ -702,7 +702,7 @@ playerState.clearCache()
 
 The player can extract the following metadata:
 - Title
-- Duration (in milliseconds)
+- Duration (`kotlin.time.Duration`)
 - Video resolution (width and height)
 - Bitrate (in bits per second)
 - Frame rate
@@ -725,7 +725,7 @@ val metadata = playerState.metadata
 
 println("Video Metadata:")
 metadata.title?.let { println("Title: $it") }
-metadata.duration?.let { println("Duration: ${it}ms") }
+metadata.duration?.let { println("Duration: $it") }
 metadata.width?.let { width ->
     metadata.height?.let { height ->
         println("Resolution: ${width}x${height}")
@@ -739,6 +739,14 @@ metadata.audioSampleRate?.let { println("Audio Sample Rate: ${it}Hz") }
 
 ```
 
+### Playback timing precision
+
+`VideoPlayerState.currentTime` is the observed playback position intended for UI state. If you need the freshest
+available playback position for external synchronization or millisecond-level actions, use:
+
+```kotlin
+val currentTimeMs = playerState.preciseCurrentTime.inWholeMilliseconds
+```
 
 ### 📋 Basic Example
 

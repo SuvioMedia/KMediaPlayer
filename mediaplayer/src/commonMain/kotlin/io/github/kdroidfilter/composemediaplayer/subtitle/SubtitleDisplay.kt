@@ -21,13 +21,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
 /**
  * A composable function that displays subtitles.
  *
  * @param subtitles The subtitle cue list to display
- * @param currentTimeMs The current playback time in milliseconds
+ * @param currentTime The current playback time
  * @param modifier The modifier to be applied to the layout
  * @param textStyle The text style to be applied to the subtitle text
  * @param backgroundColor The background color of the subtitle box
@@ -35,7 +37,7 @@ import kotlin.time.TimeSource
 @Composable
 fun SubtitleDisplay(
     subtitles: SubtitleCueList,
-    currentTimeMs: Long,
+    currentTime: Duration,
     modifier: Modifier = Modifier,
     textStyle: TextStyle =
         TextStyle(
@@ -47,7 +49,7 @@ fun SubtitleDisplay(
     backgroundColor: Color = Color.Black.copy(alpha = 0.5f),
 ) {
     // Get active cues at the current time
-    val activeCues = subtitles.getActiveCues(currentTimeMs)
+    val activeCues = subtitles.getActiveCues(currentTime.inWholeMilliseconds)
 
     if (activeCues.isNotEmpty()) {
         Box(
@@ -77,7 +79,7 @@ fun SubtitleDisplay(
  * This version automatically updates the display based on the current playback time.
  *
  * @param subtitles The subtitle cue list to display
- * @param currentTimeMs The current playback time in milliseconds
+ * @param currentTime The current playback time
  * @param isPlaying Whether the video is currently playing
  * @param modifier The modifier to be applied to the layout
  * @param textStyle The text style to be applied to the subtitle text
@@ -86,7 +88,7 @@ fun SubtitleDisplay(
 @Composable
 fun AutoUpdatingSubtitleDisplay(
     subtitles: SubtitleCueList,
-    currentTimeMs: Long,
+    currentTime: Duration,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
     textStyle: TextStyle =
@@ -98,29 +100,29 @@ fun AutoUpdatingSubtitleDisplay(
         ),
     backgroundColor: Color = Color.Black.copy(alpha = 0.5f),
 ) {
-    var displayTimeMs by remember { mutableStateOf(currentTimeMs) }
+    var displayTime by remember { mutableStateOf(currentTime) }
 
-    // Update display time when currentTimeMs changes
-    LaunchedEffect(currentTimeMs) {
-        displayTimeMs = currentTimeMs
+    // Update display time when currentTime changes
+    LaunchedEffect(currentTime) {
+        displayTime = currentTime
     }
 
     // Periodically update display time when playing
-    LaunchedEffect(isPlaying, currentTimeMs) {
+    LaunchedEffect(isPlaying, currentTime) {
         if (isPlaying) {
             var mark = TimeSource.Monotonic.markNow()
             while (true) {
-                delay(16) // ~60fps
-                val elapsed = mark.elapsedNow().inWholeMilliseconds
+                delay(16.milliseconds) // ~60fps
+                val elapsed = mark.elapsedNow()
                 mark = TimeSource.Monotonic.markNow()
-                displayTimeMs += elapsed
+                displayTime += elapsed
             }
         }
     }
 
     SubtitleDisplay(
         subtitles = subtitles,
-        currentTimeMs = displayTimeMs,
+        currentTime = displayTime,
         modifier = modifier,
         textStyle = textStyle,
         backgroundColor = backgroundColor,

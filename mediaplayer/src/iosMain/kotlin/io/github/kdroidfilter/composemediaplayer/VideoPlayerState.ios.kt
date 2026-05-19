@@ -11,10 +11,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.kdroidfilter.composemediaplayer.util.getUri
+import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
+import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -50,6 +52,7 @@ import platform.darwin.NSEC_PER_SEC
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
+import kotlin.time.Duration
 
 actual fun createVideoPlayerState(
     audioMode: AudioMode,
@@ -106,9 +109,9 @@ open class DefaultVideoPlayerState(
     private var _isPlaying by mutableStateOf(false)
 
     // Displayed texts for position and duration
-    private var _positionText: String by mutableStateOf("00:00")
+    private var _positionText: String by mutableStateOf("00:00.000")
     override val positionText: String get() = _positionText
-    private var _durationText: String by mutableStateOf("00:00")
+    private var _durationText: String by mutableStateOf("00:00.000")
     override val durationText: String get() = _durationText
 
     // Loading state
@@ -170,18 +173,22 @@ open class DefaultVideoPlayerState(
     // Flag to track if the state has been disposed
     private var isDisposed = false
 
-
     init {
         if (cacheConfig.enabled) {
             IosVideoCache.configure(cacheConfig.maxCacheSizeBytes)
         }
     }
 
-    // Internal time values (in seconds)
-    private var _currentTime: Double = 0.0
-    private var _duration: Double = 0.0
-    override val currentTime: Double get() = _currentTime
-    override val duration: Double get() = _duration
+    private var _currentTime by mutableStateOf(Duration.ZERO)
+    private var _duration by mutableStateOf(Duration.ZERO)
+    override val currentTime: Duration get() = _currentTime
+    override val preciseCurrentTime: Duration
+        get() {
+            val item = player?.currentItem ?: return _currentTime
+            if (item.status != AVPlayerItemStatusReadyToPlay) return _currentTime
+            return CMTimeGetSeconds(item.currentTime()).secondsAsDuration()
+        }
+    override val duration: Duration get() = _duration
 
     // Observable video aspect ratio (default to 16:9)
     private var _videoAspectRatio by mutableStateOf(16.0 / 9.0)
@@ -232,7 +239,7 @@ open class DefaultVideoPlayerState(
     }
 
     private fun startPositionUpdates(player: AVPlayer) {
-        val interval = CMTimeMakeWithSeconds(1.0 / 15.0, NSEC_PER_SEC.toInt()) // ~15 fps
+        val interval = CMTimeMakeWithSeconds(1.0 / 60.0, NSEC_PER_SEC.toInt()) // ~60 fps
         timeObserverToken =
             player.addPeriodicTimeObserverForInterval(
                 interval = interval,
@@ -246,22 +253,23 @@ open class DefaultVideoPlayerState(
 
                     val currentSeconds = CMTimeGetSeconds(time)
                     val durationSeconds = CMTimeGetSeconds(item.duration)
-                    _currentTime = currentSeconds
-                    _duration = durationSeconds
+                    val currentTime = currentSeconds.secondsAsDuration()
+                    val duration = durationSeconds.secondsAsDuration()
+                    _currentTime = currentTime
+                    _duration = duration
 
-                    if (durationSeconds > 0 && !durationSeconds.isNaN()) {
-                        _metadata.duration = (durationSeconds * 1000).toLong()
+                    if (duration > Duration.ZERO) {
+                        _metadata.duration = duration
                     }
 
                     if (!(userDragging || isLoading) &&
-                        durationSeconds > 0 &&
-                        !currentSeconds.isNaN() &&
-                        !durationSeconds.isNaN()
+                        duration > Duration.ZERO &&
+                        currentTime >= Duration.ZERO
                     ) {
-                        sliderPos = ((currentSeconds / durationSeconds) * 1000).toFloat()
+                        sliderPos = ((currentTime.toSecondsDouble() / duration.toSecondsDouble()) * 1000).toFloat()
                     }
-                    _positionText = if (currentSeconds.isNaN()) "00:00" else formatTime(currentSeconds.toFloat())
-                    _durationText = if (durationSeconds.isNaN()) "00:00" else formatTime(durationSeconds.toFloat())
+                    _positionText = formatTime(currentTime)
+                    _durationText = formatTime(duration)
 
                     item.presentationSize.useContents {
                         if (width > 0 && height > 0) {
@@ -440,8 +448,9 @@ open class DefaultVideoPlayerState(
     private fun extractMetadata(item: AVPlayerItem) {
         val asset = item.asset
         val durationSeconds = CMTimeGetSeconds(item.duration)
-        if (durationSeconds > 0 && !durationSeconds.isNaN()) {
-            _metadata.duration = (durationSeconds * 1000).toLong()
+        val duration = durationSeconds.secondsAsDuration()
+        if (duration > Duration.ZERO) {
+            _metadata.duration = duration
         }
 
         val videoTracks = asset.tracksWithMediaType(AVMediaTypeVideo)
@@ -517,7 +526,6 @@ open class DefaultVideoPlayerState(
         player?.pause()
         player?.replaceCurrentItemWithPlayerItem(null)
         player = null
-
     }
 
     /**
@@ -588,10 +596,11 @@ open class DefaultVideoPlayerState(
 
     override fun play() {
         iosLogger.d { "play called" }
-        val currentPlayer = player ?: run {
-            iosLogger.d { "play: player is null" }
-            return
-        }
+        val currentPlayer =
+            player ?: run {
+                iosLogger.d { "play: player is null" }
+                return
+            }
         configureAudioSession()
 
         // Only access item timing properties when ready — ObjC throws on failed items
@@ -649,6 +658,10 @@ open class DefaultVideoPlayerState(
         _isPlaying = false
         _isLoading = false
         _hasMedia = false
+        _currentTime = Duration.ZERO
+        _duration = Duration.ZERO
+        _positionText = "00:00.000"
+        _durationText = "00:00.000"
 
         // Reset metadata
         _metadata = VideoMetadata(audioChannels = 2)
@@ -656,11 +669,11 @@ open class DefaultVideoPlayerState(
 
     override fun seekTo(value: Float) {
         val currentPlayer = player ?: return
-        if (_duration > 0) {
+        if (_duration > Duration.ZERO) {
             // Set loading state to true to indicate seeking is happening
             _isLoading = true
 
-            val targetTime = _duration * (value / 1000.0)
+            val targetTime = (_duration * (value / 1000.0).coerceIn(0.0, 1.0)).toSecondsDouble()
             val seekTime = CMTimeMakeWithSeconds(targetTime, NSEC_PER_SEC.toInt())
             val wasPlaying = _isPlaying
 

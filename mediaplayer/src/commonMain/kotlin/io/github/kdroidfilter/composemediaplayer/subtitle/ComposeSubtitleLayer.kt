@@ -16,14 +16,16 @@ import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * A composable function that displays subtitles over a video player.
  * This component handles loading and parsing subtitle files, and displaying
  * the active subtitles at the current playback time.
  *
- * @param currentTimeMs The current playback time in milliseconds
- * @param durationMs The total duration of the media in milliseconds
+ * @param currentTime The current playback time
+ * @param duration The total duration of the media
  * @param isPlaying Whether the video is currently playing
  * @param subtitleTrack The current subtitle track, or null if no subtitle is selected
  * @param subtitlesEnabled Whether subtitles are enabled
@@ -33,8 +35,8 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 fun ComposeSubtitleLayer(
-    currentTimeMs: Long,
-    durationMs: Long,
+    currentTime: Duration,
+    duration: Duration,
     isPlaying: Boolean,
     subtitleTrack: SubtitleTrack?,
     subtitlesEnabled: Boolean,
@@ -62,7 +64,7 @@ fun ComposeSubtitleLayer(
         do {
             subtitles = loadAndParseSubtitles(subtitleTrack)
             if (shouldRefreshLiveSidecar) {
-                delay(2_000)
+                delay(2_000.milliseconds)
             }
         } while (shouldRefreshLiveSidecar)
     }
@@ -76,7 +78,7 @@ fun ComposeSubtitleLayer(
             if (subtitlesEnabled) {
                 AutoUpdatingSubtitleDisplay(
                     subtitles = cueList,
-                    currentTimeMs = currentTimeMs,
+                    currentTime = currentTime,
                     isPlaying = isPlaying,
                     textStyle = textStyle,
                     backgroundColor = backgroundColor,

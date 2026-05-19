@@ -19,6 +19,9 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.kdroidfilter.composemediaplayer.util.hundredNanosecondsAsDuration
+import io.github.kdroidfilter.composemediaplayer.util.inWhole100NanosecondTicks
+import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -51,6 +54,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.write
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
 
@@ -151,8 +156,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
             }
         }
 
-    private var _currentTime by mutableStateOf(0.0)
-    private var _duration by mutableStateOf(0.0)
+    private var _currentTime by mutableStateOf(Duration.ZERO)
+    private var _duration by mutableStateOf(Duration.ZERO)
     private var _progress by mutableStateOf(0f)
     override var sliderPos: Float
         get() = _progress * 1000f
@@ -237,8 +242,20 @@ class WindowsVideoPlayerState : VideoPlayerState {
         private set
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
-    override val currentTime: Double get() = _currentTime
-    override val duration: Double get() = _duration
+    override val currentTime: Duration get() = _currentTime
+    override val preciseCurrentTime: Duration
+        get() {
+            val instance = videoPlayerInstance
+            if (instance == 0L) return _currentTime
+
+            val position = LongArray(1)
+            return if (player.GetMediaPosition(instance, position) >= 0) {
+                position[0].hundredNanosecondsAsDuration()
+            } else {
+                _currentTime
+            }
+        }
+    override val duration: Duration get() = _duration
     private var errorMessage: String? by mutableStateOf(null)
 
     // Fullscreen state
@@ -284,7 +301,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     // Data structure for a frame
     private data class FrameData(
         val bitmap: Bitmap,
-        val timestamp: Double,
+        val timestamp: Duration,
     )
 
     // Triple-buffering for zero-copy frame rendering: the consumer may still
@@ -513,16 +530,16 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     if (wasPlaying) {
                         player.SetPlaybackState(instance, false, false)
                         _isPlaying = false
-                        delay(50)
+                        delay(50.milliseconds)
                     }
 
                     videoJob?.cancelAndJoin()
                     releaseAllResources()
                     player.CloseMedia(instance)
 
-                    _currentTime = 0.0
+                    _currentTime = Duration.ZERO
                     _progress = 0f
-                    _duration = 0.0
+                    _duration = Duration.ZERO
                     _metadata = VideoMetadata()
                     _hasMedia = false
                     userPaused = false
@@ -581,7 +598,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                             return@withLock
                         }
                     }
-                    _duration = durArr[0] / 10000000.0
+                    _duration = durArr[0].hundredNanosecondsAsDuration()
 
                     // Retrieve metadata using the native function
                     val retrievedMetadata = WindowsNativeBridge.getVideoMetadata(instance)
@@ -593,7 +610,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                             VideoMetadata(
                                 width = videoWidth,
                                 height = videoHeight,
-                                duration = (_duration * 1000).toLong(), // Convert to milliseconds
+                                duration = _duration,
                             )
                     }
 
@@ -658,10 +675,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * Launches the producer/consumer coroutine pair that reads frames from
      * the native side and pushes them to Compose.
      */
-    private fun startVideoPipeline(): Job = scope.launch {
-        launch { produceFrames() }
-        launch { consumeFrames() }
-    }
+    private fun startVideoPipeline(): Job =
+        scope.launch {
+            launch { produceFrames() }
+            launch { consumeFrames() }
+        }
 
     /**
      * Zero-copy optimized frame producer using double-buffering and direct memory access.
@@ -678,10 +696,10 @@ class WindowsVideoPlayerState : VideoPlayerState {
             if (instance == 0L) break
 
             if (player.IsEOF(instance)) {
-                if (_duration <= 0.0) {
+                if (_duration <= Duration.ZERO) {
                     // Live HLS stream — EOF means the live window ended,
                     // wait and continue (new segments may become available)
-                    delay(1000)
+                    delay(1000.milliseconds)
                     continue
                 } else if (loop) {
                     try {
@@ -698,7 +716,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     // The last decoded frame's timestamp is always slightly before the
                     // total duration (duration = last_frame_pts + frame_duration), so
                     // snap currentTime/progress to the end when playback completes.
-                    if (_duration > 0.0) {
+                    if (_duration > Duration.ZERO) {
                         _currentTime = _duration
                         _progress = 1f
                     }
@@ -712,7 +730,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // Wait for playback state, allowing initial frame when paused
                 // If the return value is false, we should wait and not process frames
                 if (!waitForPlaybackState(allowInitialFrame = true)) {
-                    delay(100) // Add a small delay to prevent busy waiting
+                    delay(100.milliseconds) // Add a small delay to prevent busy waiting
                     continue
                 }
             } catch (e: CancellationException) {
@@ -726,30 +744,31 @@ class WindowsVideoPlayerState : VideoPlayerState {
             // Short-circuit while a seek is in progress — avoids contending
             // on videoReaderMutex which the seek flow is holding.
             if (isSeeking.get()) {
-                delay(5)
+                delay(5.milliseconds)
                 continue
             }
 
-            val produced = try {
-                videoReaderMutex.withLock {
-                    processOneFrame(instance)
+            val produced =
+                try {
+                    videoReaderMutex.withLock {
+                        processOneFrame(instance)
+                    }
+                } catch (e: CancellationException) {
+                    break
+                } catch (e: Exception) {
+                    if (scope.isActive && _hasMedia && !isDisposing.get()) {
+                        setError("Error while reading a frame: ${e.message}")
+                    }
+                    delay(100.milliseconds)
+                    null
                 }
-            } catch (e: CancellationException) {
-                break
-            } catch (e: Exception) {
-                if (scope.isActive && _hasMedia && !isDisposing.get()) {
-                    setError("Error while reading a frame: ${e.message}")
-                }
-                delay(100)
-                null
-            }
 
             when (produced) {
-                ProduceOutcome.NotReady -> delay(2)
+                ProduceOutcome.NotReady -> delay(2.milliseconds)
                 ProduceOutcome.SkipIteration -> yield()
                 is ProduceOutcome.Frame -> {
                     frameChannel.trySend(FrameData(produced.bitmap, produced.timestamp))
-                    delay(1)
+                    delay(1.milliseconds)
                 }
                 null -> { /* exception already handled */ }
             }
@@ -760,9 +779,14 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * Outcome of a single frame-read pass, consumed by the produceFrames loop.
      */
     private sealed interface ProduceOutcome {
-        data object NotReady : ProduceOutcome               // native says "retry later"
-        data object SkipIteration : ProduceOutcome          // frame dropped / duplicate
-        data class  Frame(val bitmap: Bitmap, val timestamp: Double) : ProduceOutcome
+        data object NotReady : ProduceOutcome
+
+        data object SkipIteration : ProduceOutcome
+
+        data class Frame(
+            val bitmap: Bitmap,
+            val timestamp: Duration,
+        ) : ProduceOutcome
     }
 
     /**
@@ -778,7 +802,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
         // HLS adaptive bitrate may change the decoded size mid-stream.
         val sizeArr = IntArray(2)
         player.GetVideoSize(instance, sizeArr)
-        if (sizeArr[0] > 0 && sizeArr[1] > 0 &&
+        if (sizeArr[0] > 0 &&
+            sizeArr[1] > 0 &&
             (sizeArr[0] != videoWidth || sizeArr[1] != videoHeight)
         ) {
             videoWidth = sizeArr[0]
@@ -854,8 +879,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
         val posArr = LongArray(1)
         val frameTime =
-            if (player.GetMediaPosition(instance, posArr) >= 0) posArr[0] / 10000000.0
-            else 0.0
+            if (player.GetMediaPosition(instance, posArr) >= 0) {
+                posArr[0].hundredNanosecondsAsDuration()
+            } else {
+                Duration.ZERO
+            }
 
         return ProduceOutcome.Frame(targetBitmap, frameTime)
     }
@@ -883,7 +911,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                                 loadingTimeout = 0
                             }
                         }
-                        delay(16)
+                        delay(16.milliseconds)
                         return@run null
                     } ?: continue
 
@@ -904,22 +932,24 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // released.
                 if (!_userDragging) {
                     _progress =
-                        if (_duration > 0.0) {
-                            (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
+                        if (_duration > Duration.ZERO) {
+                            (_currentTime.toSecondsDouble() / _duration.toSecondsDouble())
+                                .toFloat()
+                                .coerceIn(0f, 1f)
                         } else {
                             0f // Live stream — no meaningful progress
                         }
                 }
                 isLoading = false
 
-                delay(1)
+                delay(1.milliseconds)
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
                 if (scope.isActive && _hasMedia && !isDisposing.get()) {
                     setError("Error while processing a frame: ${e.message}")
                 }
-                delay(100)
+                delay(100.milliseconds)
             }
         }
     }
@@ -1011,13 +1041,13 @@ class WindowsVideoPlayerState : VideoPlayerState {
             operation = "stop",
         ) {
             setPlaybackState(false, "Error while stopping playback", true)
-            delay(50)
+            delay(50.milliseconds)
             videoJob?.cancelAndJoin()
             releaseAllResources()
             _hasMedia = false
             _progress = 0f
-            _currentTime = 0.0
-            _duration = 0.0
+            _currentTime = Duration.ZERO
+            _duration = Duration.ZERO
             isLoading = false
             errorMessage = null
             _error = null
@@ -1034,10 +1064,10 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
     override fun seekTo(value: Float) {
         if (isDisposing.get()) return
-        if (_duration <= 0.0) return // Live stream — seeking not supported
+        if (_duration <= Duration.ZERO) return // Live stream — seeking not supported
 
         val clamped = value.coerceIn(0f, 1000f)
-        val targetPos = (_duration * (clamped / 1000f) * 10000000).toLong()
+        val targetPos = (_duration * (clamped / 1000.0)).inWhole100NanosecondTicks()
 
         // Latch the newest target; whoever is running the seek loop will see it.
         pendingSeekTarget.set(targetPos)
@@ -1045,7 +1075,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
         // Optimistic UI so the slider tracks the drag smoothly even while the
         // native seek is still settling.
         _progress = (clamped / 1000f).coerceIn(0f, 1f)
-        _currentTime = _duration * _progress
+        _currentTime = _duration * _progress.toDouble()
 
         scheduleSeek()
     }
@@ -1084,10 +1114,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * leaving audio but no video).
      */
     private suspend fun performSeek(targetPos: Long) {
-        val loadingTrigger = scope.launch {
-            delay(200)
-            if (!isDisposing.get()) isLoading = true
-        }
+        val loadingTrigger =
+            scope.launch {
+                delay(200.milliseconds)
+                if (!isDisposing.get()) isLoading = true
+            }
 
         try {
             mediaOperationMutex.withLock {
@@ -1105,7 +1136,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
                         var hr = player.SeekMedia(instance, targetPos)
                         if (hr < 0) {
-                            delay(30)
+                            delay(30.milliseconds)
                             hr = player.SeekMedia(instance, targetPos)
                         }
                         if (hr < 0) {
@@ -1115,11 +1146,15 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
                         val posArr = LongArray(1)
                         if (player.GetMediaPosition(instance, posArr) >= 0) {
-                            _currentTime = posArr[0] / 10000000.0
+                            _currentTime = posArr[0].hundredNanosecondsAsDuration()
                             _progress =
-                                if (_duration > 0.0)
-                                    (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
-                                else 0f
+                                if (_duration > Duration.ZERO) {
+                                    (_currentTime.toSecondsDouble() / _duration.toSecondsDouble())
+                                        .toFloat()
+                                        .coerceIn(0f, 1f)
+                                } else {
+                                    0f
+                                }
                         }
                     }
                 } finally {
@@ -1161,7 +1196,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
         resizeJob?.cancel()
         resizeJob =
             scope.launch {
-                delay(120)
+                delay(120.milliseconds)
                 try {
                     applyOutputScaling()
                 } finally {
@@ -1301,7 +1336,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
             if (_isPlaying) return true
             if (userPaused && allowInitialFrame && !initialFrameRead.getAndSet(true)) return true
             try {
-                delay(40)
+                delay(40.milliseconds)
             } catch (e: CancellationException) {
                 throw e
             }
@@ -1331,7 +1366,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
             }
             try {
                 yield()
-                delay(8)
+                delay(8.milliseconds)
             } catch (e: CancellationException) {
                 throw e
             }
