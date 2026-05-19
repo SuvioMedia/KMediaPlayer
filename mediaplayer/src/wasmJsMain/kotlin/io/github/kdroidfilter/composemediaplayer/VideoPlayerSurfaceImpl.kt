@@ -28,7 +28,6 @@ import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
 import kotlin.js.ExperimentalWasmJsInterop
-import kotlin.math.abs
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -839,9 +838,18 @@ internal fun VideoPlayerEffects(
         }
     }
 
-    // Handle seeking — react to both sliderPos changes and drag end (userDragging → false)
-    LaunchedEffect(playerState.sliderPos, playerState.userDragging) {
-        if (playerState is DefaultVideoPlayerState && !playerState.userDragging && playerState.hasMedia) {
+    // Handle seeking only for explicit seek requests. Passive slider updates must never seek the video element.
+    LaunchedEffect(
+        videoElement,
+        playerState.hasMedia,
+        (playerState as? DefaultVideoPlayerState)?.seekRequestId,
+        playerState.userDragging,
+    ) {
+        if (playerState is DefaultVideoPlayerState &&
+            playerState.hasPendingSeekRequest() &&
+            !playerState.userDragging &&
+            playerState.hasMedia
+        ) {
             playerState.seekJob?.cancel()
 
             videoElement?.let { video ->
@@ -850,14 +858,12 @@ internal fun VideoPlayerEffects(
                     val newTime =
                         (duration * (playerState.sliderPos / DefaultVideoPlayerState.PERCENTAGE_MULTIPLIER).toDouble())
                             .toSecondsDouble()
-                    val currentTime = video.currentTime
+                    playerState.consumePendingSeekRequest()
 
-                    if (abs(currentTime - newTime) > 0.5) {
-                        playerState.seekJob =
-                            scope.launch {
-                                video.safeSetCurrentTime(newTime)
-                            }
-                    }
+                    playerState.seekJob =
+                        scope.launch {
+                            video.safeSetCurrentTime(newTime)
+                        }
                 }
             }
         }

@@ -235,6 +235,36 @@ class VideoPlayerStateTest {
     }
 
     @Test
+    fun testSeekToMarksExplicitSeekRequest() {
+        val playerState = createVideoPlayerState()
+        val webPlayerState = playerState as DefaultVideoPlayerState
+        val initialRequestId = webPlayerState.seekRequestId
+
+        playerState.seekTo(500f)
+
+        assertTrue(webPlayerState.seekRequestId > initialRequestId)
+        assertTrue(webPlayerState.hasPendingSeekRequest())
+        assertTrue(webPlayerState.consumePendingSeekRequest())
+        assertFalse(webPlayerState.hasPendingSeekRequest())
+        assertFalse(webPlayerState.consumePendingSeekRequest())
+
+        playerState.dispose()
+    }
+
+    @Test
+    fun testStopClearsExplicitSeekRequest() {
+        val playerState = createVideoPlayerState()
+        val webPlayerState = playerState as DefaultVideoPlayerState
+
+        playerState.seekTo(500f)
+        playerState.stop()
+
+        assertFalse(webPlayerState.hasPendingSeekRequest())
+
+        playerState.dispose()
+    }
+
+    @Test
     fun testPreciseCurrentTimeCanReadDirectProviderValue() {
         val playerState = createVideoPlayerState()
         val webPlayerState = playerState as DefaultVideoPlayerState

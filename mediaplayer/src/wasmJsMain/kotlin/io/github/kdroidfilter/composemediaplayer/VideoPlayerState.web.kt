@@ -154,6 +154,9 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     // Job for handling seek operations
     internal var seekJob: Job? = null
+    internal var seekRequestId by mutableStateOf(0)
+        private set
+    private var pendingSeekRequest = false
 
     /**
      * Callback function to force recalculation of the HTML view position.
@@ -384,6 +387,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _durationText = "00:00.000"
         _currentTime = Duration.ZERO
         _currentDuration = Duration.ZERO
+        clearPendingSeekRequest()
         // Note: We don't clear lastUri, so it can be used to replay the video
     }
 
@@ -393,8 +397,24 @@ open class DefaultVideoPlayerState : VideoPlayerState {
      * @param value The position to seek to, as a percentage (0-1000)
      */
     override fun seekTo(value: Float) {
+        pendingSeekRequest = true
+        seekRequestId++
         sliderPos = value
         seekJob?.cancel()
+    }
+
+    internal fun consumePendingSeekRequest(): Boolean {
+        val hasRequest = pendingSeekRequest
+        pendingSeekRequest = false
+        return hasRequest
+    }
+
+    internal fun hasPendingSeekRequest(): Boolean = pendingSeekRequest
+
+    private fun clearPendingSeekRequest() {
+        pendingSeekRequest = false
+        seekJob?.cancel()
+        seekJob = null
     }
 
     /**
@@ -472,6 +492,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override fun dispose() {
         preciseCurrentTimeProvider = null
         durationProvider = null
+        clearPendingSeekRequest()
         pendingVolumeChange?.cancel()
         pendingSpeedChange?.cancel()
         playerScope.cancel()
