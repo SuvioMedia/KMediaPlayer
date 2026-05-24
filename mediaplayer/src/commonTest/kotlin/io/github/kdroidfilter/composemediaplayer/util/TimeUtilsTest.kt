@@ -9,38 +9,38 @@ import kotlin.time.Duration.Companion.seconds
 class TimeUtilsTest {
     @Test
     fun testFormatTimeWithSeconds() {
-        assertEquals("00:00.000", formatTime(0.seconds))
-        assertEquals("00:01.000", formatTime(1.seconds))
-        assertEquals("00:59.000", formatTime(59.seconds))
-        assertEquals("01:00.000", formatTime(60.seconds))
-        assertEquals("01:01.000", formatTime(61.seconds))
-        assertEquals("59:59.000", formatTime(3599.seconds))
-        assertEquals("01:00:00.000", formatTime(3600.seconds))
-        assertEquals("01:00:01.000", formatTime(3601.seconds))
-        assertEquals("01:01:01.000", formatTime(3661.seconds))
-        assertEquals("99:59:59.000", formatTime(359999.seconds))
+        assertEquals("00:00", formatTime(0.seconds))
+        assertEquals("00:01", formatTime(1.seconds))
+        assertEquals("00:59", formatTime(59.seconds))
+        assertEquals("01:00", formatTime(60.seconds))
+        assertEquals("01:01", formatTime(61.seconds))
+        assertEquals("59:59", formatTime(3599.seconds))
+        assertEquals("01:00:00", formatTime(3600.seconds))
+        assertEquals("01:00:01", formatTime(3601.seconds))
+        assertEquals("01:01:01", formatTime(3661.seconds))
+        assertEquals("99:59:59", formatTime(359999.seconds))
     }
 
     @Test
     fun testFormatTimeWithMilliseconds() {
-        assertEquals("00:00.001", formatTime(1.milliseconds))
-        assertEquals("00:01.234", formatTime(1234.milliseconds))
-        assertEquals("01:01.234", formatTime(61_234.milliseconds))
-        assertEquals("01:00:01.234", formatTime(3_601_234.milliseconds))
+        assertEquals("00:00", formatTime(1.milliseconds))
+        assertEquals("00:01", formatTime(1234.milliseconds))
+        assertEquals("01:01", formatTime(61_234.milliseconds))
+        assertEquals("01:00:01", formatTime(3_601_234.milliseconds))
     }
 
     @Test
     fun testFormatTimeWithNanoseconds() {
-        assertEquals("00:00.000", formatTime(0.nanoseconds))
-        assertEquals("00:01.000", formatTime(1_000_000_000.nanoseconds))
-        assertEquals("00:01.234", formatTime(1_234_567_890.nanoseconds))
-        assertEquals("00:59.000", formatTime(59_000_000_000.nanoseconds))
-        assertEquals("01:00.000", formatTime(60_000_000_000.nanoseconds))
-        assertEquals("01:01.000", formatTime(61_000_000_000.nanoseconds))
-        assertEquals("59:59.000", formatTime(3599_000_000_000.nanoseconds))
-        assertEquals("01:00:00.000", formatTime(3600_000_000_000.nanoseconds))
-        assertEquals("01:00:01.000", formatTime(3601_000_000_000.nanoseconds))
-        assertEquals("01:01:01.000", formatTime(3661_000_000_000.nanoseconds))
+        assertEquals("00:00", formatTime(0.nanoseconds))
+        assertEquals("00:01", formatTime(1_000_000_000.nanoseconds))
+        assertEquals("00:01", formatTime(1_234_567_890.nanoseconds))
+        assertEquals("00:59", formatTime(59_000_000_000.nanoseconds))
+        assertEquals("01:00", formatTime(60_000_000_000.nanoseconds))
+        assertEquals("01:01", formatTime(61_000_000_000.nanoseconds))
+        assertEquals("59:59", formatTime(3599_000_000_000.nanoseconds))
+        assertEquals("01:00:00", formatTime(3600_000_000_000.nanoseconds))
+        assertEquals("01:00:01", formatTime(3601_000_000_000.nanoseconds))
+        assertEquals("01:01:01", formatTime(3661_000_000_000.nanoseconds))
     }
 
     @Test

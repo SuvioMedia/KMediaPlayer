@@ -101,12 +101,12 @@ interface VideoPlayerState {
     var onRestart: (() -> Unit)?
 
     /**
-     * Returns the current playback position as a formatted string with millisecond precision.
+     * Returns the current playback position as a formatted string.
      */
     val positionText: String
 
     /**
-     * Returns the total duration of the video as a formatted string with millisecond precision.
+     * Returns the total duration of the video as a formatted string.
      */
     val durationText: String
 
@@ -471,8 +471,8 @@ data class PreviewableVideoPlayerState(
     override var userDragging: Boolean = false,
     override var loop: Boolean = true,
     override var playbackSpeed: Float = 1f,
-    override val positionText: String = "00:05.000",
-    override val durationText: String = "00:10.000",
+    override val positionText: String = "00:05",
+    override val durationText: String = "00:10",
     override val currentTime: Duration = 5.seconds,
     override val preciseCurrentTime: Duration = currentTime,
     override val duration: Duration = 10.seconds,

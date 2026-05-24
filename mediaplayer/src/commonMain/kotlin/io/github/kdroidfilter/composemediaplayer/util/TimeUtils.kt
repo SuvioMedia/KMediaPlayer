@@ -5,20 +5,19 @@ import kotlin.time.DurationUnit
 import kotlin.time.toDuration
 
 /**
- * Formats a given time into either "HH:MM:SS.mmm" (if hours > 0) or "MM:SS.mmm".
+ * Formats a given time into either "HH:MM:SS" (if hours > 0) or "MM:SS".
  */
 internal fun formatTime(value: Duration): String {
     val duration = if (value < Duration.ZERO) Duration.ZERO else value
 
-    return duration.toComponents { hours, minutes, seconds, nanoseconds ->
+    return duration.toComponents { hours, minutes, seconds, _ ->
         val paddedMinutes = minutes.toString().padStart(2, '0')
         val paddedSeconds = seconds.toString().padStart(2, '0')
-        val paddedMilliseconds = (nanoseconds / 1_000_000).toString().padStart(3, '0')
 
         if (hours > 0) {
-            "${hours.toString().padStart(2, '0')}:$paddedMinutes:$paddedSeconds.$paddedMilliseconds"
+            "${hours.toString().padStart(2, '0')}:$paddedMinutes:$paddedSeconds"
         } else {
-            "$paddedMinutes:$paddedSeconds.$paddedMilliseconds"
+            "$paddedMinutes:$paddedSeconds"
         }
     }
 }

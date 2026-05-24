@@ -182,8 +182,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override var isFullscreen by mutableStateOf(false)
 
     // Time display properties
-    private var _positionText by mutableStateOf("00:00.000")
-    private var _durationText by mutableStateOf("00:00.000")
+    private var _positionText by mutableStateOf("00:00")
+    private var _durationText by mutableStateOf("00:00")
     override val positionText: String get() = _positionText
     override val durationText: String get() = _durationText
 
@@ -531,8 +531,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _hasMedia = false
         _isLoading = false
         sliderPos = 0.0f
-        _positionText = "00:00.000"
-        _durationText = "00:00.000"
+        _positionText = "00:00"
+        _durationText = "00:00"
         _currentTime = Duration.ZERO
         _currentDuration = Duration.ZERO
         _bufferedRanges.clear()

@@ -51,8 +51,8 @@ class LinuxVideoPlayerStateTest {
         assertEquals(0f, playerState.sliderPos)
         assertEquals(1f, playerState.volume)
         assertFalse(playerState.loop)
-        assertEquals("00:00.000", playerState.positionText)
-        assertEquals("00:00.000", playerState.durationText)
+        assertEquals("00:00", playerState.positionText)
+        assertEquals("00:00", playerState.durationText)
         assertFalse(playerState.isFullscreen)
         assertNull(playerState.error)
 

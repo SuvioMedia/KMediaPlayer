@@ -108,9 +108,9 @@ open class DefaultVideoPlayerState(
     private var _isPlaying by mutableStateOf(false)
 
     // Displayed texts for position and duration
-    private var _positionText: String by mutableStateOf("00:00.000")
+    private var _positionText: String by mutableStateOf("00:00")
     override val positionText: String get() = _positionText
-    private var _durationText: String by mutableStateOf("00:00.000")
+    private var _durationText: String by mutableStateOf("00:00")
     override val durationText: String get() = _durationText
 
     // Loading state
@@ -676,8 +676,8 @@ open class DefaultVideoPlayerState(
         _hasMedia = false
         _currentTime = Duration.ZERO
         _duration = Duration.ZERO
-        _positionText = "00:00.000"
-        _durationText = "00:00.000"
+        _positionText = "00:00"
+        _durationText = "00:00"
 
         // Reset metadata
         _metadata = VideoMetadata(audioChannels = 2)

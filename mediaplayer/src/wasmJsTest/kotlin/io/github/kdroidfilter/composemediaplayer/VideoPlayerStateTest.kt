@@ -29,8 +29,8 @@ class VideoPlayerStateTest {
         assertEquals(1f, playerState.volume)
         assertEquals(1f, playerState.playbackSpeed)
         assertFalse(playerState.loop)
-        assertEquals("00:00.000", playerState.positionText)
-        assertEquals("00:00.000", playerState.durationText)
+        assertEquals("00:00", playerState.positionText)
+        assertEquals("00:00", playerState.durationText)
         assertFalse(playerState.isFullscreen)
 
         // Clean up
@@ -204,15 +204,15 @@ class VideoPlayerStateTest {
 
         // Test initial position
         assertEquals(0f, playerState.sliderPos)
-        assertEquals("00:00.000", playerState.positionText)
-        assertEquals("00:00.000", playerState.durationText)
+        assertEquals("00:00", playerState.positionText)
+        assertEquals("00:00", playerState.durationText)
 
         // Test updating position manually with forceUpdate to bypass rate limiting
         webPlayerState.updatePosition(30.seconds, 120.seconds, forceUpdate = true)
 
         // Verify position was updated
-        assertEquals("00:30.000", playerState.positionText)
-        assertEquals("02:00.000", playerState.durationText)
+        assertEquals("00:30", playerState.positionText)
+        assertEquals("02:00", playerState.durationText)
 
         // Clean up
         playerState.dispose()
@@ -228,8 +228,8 @@ class VideoPlayerStateTest {
 
         assertEquals(30.seconds + 123.milliseconds, playerState.currentTime)
         assertEquals(120.seconds + 456.milliseconds, playerState.duration)
-        assertEquals("00:30.000", playerState.positionText)
-        assertEquals("02:00.000", playerState.durationText)
+        assertEquals("00:30", playerState.positionText)
+        assertEquals("02:00", playerState.durationText)
 
         playerState.dispose()
     }

@@ -169,10 +169,10 @@ class MacVideoPlayerState : VideoPlayerState {
     private var lastRequestHeaders: Map<String, String> = emptyMap()
 
     // Non-blocking text properties
-    private val _positionText = mutableStateOf("00:00.000")
+    private val _positionText = mutableStateOf("00:00")
     override val positionText: String get() = _positionText.value
 
-    private val _durationText = mutableStateOf("00:00.000")
+    private val _durationText = mutableStateOf("00:00")
     override val durationText: String get() = _durationText.value
 
     private val _currentTime = mutableStateOf(Duration.ZERO)
@@ -1867,8 +1867,8 @@ class MacVideoPlayerState : VideoPlayerState {
             isLoading = false
             _currentTime.value = Duration.ZERO
             _duration.value = Duration.ZERO
-            _positionText.value = "00:00.000"
-            _durationText.value = "00:00.000"
+            _positionText.value = "00:00"
+            _durationText.value = "00:00"
             _aspectRatio.value = 16f / 9f
             error = null
         }
