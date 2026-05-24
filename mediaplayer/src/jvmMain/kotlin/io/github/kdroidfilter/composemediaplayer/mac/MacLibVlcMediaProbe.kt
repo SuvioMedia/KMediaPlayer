@@ -5,43 +5,61 @@ import io.github.kdroidfilter.composemediaplayer.MAC_LIBVLC_AUDIO_TRACK_ID_PREFI
 import io.github.kdroidfilter.composemediaplayer.MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
+import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import java.util.concurrent.TimeUnit
 
 internal object MacLibVlcMediaProbe {
-    fun probe(uri: String): MacLibVlcTrackInfo {
-        probeWithBuiltInMatroskaReader(uri).takeIf { it.hasTracks() }?.let { return it }
+    fun probe(
+        uri: String,
+        requestHeaders: Map<String, String> = emptyMap(),
+    ): MacLibVlcTrackInfo {
+        val headers = requestHeaders.sanitizedRequestHeaders()
+        probeWithBuiltInMatroskaReader(uri, headers).takeIf { it.hasTracks() }?.let { return it }
 
-        val ffprobe = MacFfmpegLocator.findFfprobe() ?: return probeWithBuiltInMatroskaReader(uri)
-        val process =
-            ProcessBuilder(
+        val ffprobe = MacFfmpegLocator.findFfprobe() ?: return probeWithBuiltInMatroskaReader(uri, headers)
+        val command =
+            mutableListOf(
                 ffprobe,
                 "-v",
                 "error",
+            )
+        headers.requestHeadersLineString().takeIf { it.isNotBlank() }?.let { headerLines ->
+            command += listOf("-headers", headerLines)
+        }
+        command +=
+            listOf(
                 "-show_entries",
                 "stream=index,codec_type,codec_name,width,height,channels,sample_rate,bit_rate:stream_tags=language,title:" +
                     "stream_disposition=default:format=duration",
                 "-of",
                 "flat",
                 uri,
-            ).redirectErrorStream(true)
+            )
+        val process =
+            ProcessBuilder(command)
+                .redirectErrorStream(true)
                 .start()
 
         if (!process.waitFor(12, TimeUnit.SECONDS)) {
             process.destroyForcibly()
-            return probeWithBuiltInMatroskaReader(uri)
+            return probeWithBuiltInMatroskaReader(uri, headers)
         }
 
-        if (process.exitValue() != 0) return probeWithBuiltInMatroskaReader(uri)
+        if (process.exitValue() != 0) return probeWithBuiltInMatroskaReader(uri, headers)
         return parse(process.inputStream.bufferedReader().readText())
             .takeIf { it.audioStreams.isNotEmpty() || it.subtitleStreams.isNotEmpty() }
-            ?: probeWithBuiltInMatroskaReader(uri)
+            ?: probeWithBuiltInMatroskaReader(uri, headers)
     }
 
     private fun MacLibVlcTrackInfo.hasTracks(): Boolean = audioStreams.isNotEmpty() || subtitleStreams.isNotEmpty()
 
-    private fun probeWithBuiltInMatroskaReader(uri: String): MacLibVlcTrackInfo =
+    private fun probeWithBuiltInMatroskaReader(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): MacLibVlcTrackInfo =
         runCatching {
-            MacMatroskaAssExtractor.probe(uri)?.toLibVlcTrackInfo()
+            MacMatroskaAssExtractor.probe(uri, requestHeaders)?.toLibVlcTrackInfo()
         }.getOrNull() ?: MacLibVlcTrackInfo()
 
     private fun MacMatroskaProbeInfo.toLibVlcTrackInfo(): MacLibVlcTrackInfo {

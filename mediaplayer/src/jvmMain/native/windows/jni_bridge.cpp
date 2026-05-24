@@ -46,6 +46,41 @@ static jint JNICALL jni_OpenMedia(JNIEnv* env, jclass, jlong handle, jstring url
     return hr;
 }
 
+static jint JNICALL jni_OpenMediaWithHeaders(
+    JNIEnv* env,
+    jclass,
+    jlong handle,
+    jstring url,
+    jstring requestHeaders,
+    jboolean startPlayback
+) {
+    if (!handle || !url) return OP_E_INVALID_PARAMETER;
+    const jchar* chars = env->GetStringChars(url, nullptr);
+    if (!chars) return E_OUTOFMEMORY;
+
+    const jchar* headerChars = nullptr;
+    if (requestHeaders) {
+        headerChars = env->GetStringChars(requestHeaders, nullptr);
+        if (!headerChars) {
+            env->ReleaseStringChars(url, chars);
+            return E_OUTOFMEMORY;
+        }
+    }
+
+    HRESULT hr = OpenMediaWithHeaders(
+        toInstance(handle),
+        reinterpret_cast<const wchar_t*>(chars),
+        headerChars ? reinterpret_cast<const wchar_t*>(headerChars) : nullptr,
+        startPlayback ? TRUE : FALSE
+    );
+
+    if (headerChars) {
+        env->ReleaseStringChars(requestHeaders, headerChars);
+    }
+    env->ReleaseStringChars(url, chars);
+    return hr;
+}
+
 // Returns a direct ByteBuffer wrapping the locked frame, or null.
 // outResult[0] receives the HRESULT.
 static jobject JNICALL jni_ReadVideoFrame(JNIEnv* env, jclass, jlong handle, jintArray outResult) {
@@ -208,6 +243,7 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nCreateInstance"),      const_cast<char*>("()J"),                          (void*)jni_CreateInstance },
     { const_cast<char*>("nDestroyInstance"),     const_cast<char*>("(J)V"),                         (void*)jni_DestroyInstance },
     { const_cast<char*>("nOpenMedia"),           const_cast<char*>("(JLjava/lang/String;Z)I"),      (void*)jni_OpenMedia },
+    { const_cast<char*>("nOpenMediaWithHeaders"), const_cast<char*>("(JLjava/lang/String;Ljava/lang/String;Z)I"), (void*)jni_OpenMediaWithHeaders },
     { const_cast<char*>("nReadVideoFrame"),      const_cast<char*>("(J[I)Ljava/nio/ByteBuffer;"),   (void*)jni_ReadVideoFrame },
     { const_cast<char*>("nUnlockVideoFrame"),    const_cast<char*>("(J)I"),                         (void*)jni_UnlockVideoFrame },
     { const_cast<char*>("nCloseMedia"),          const_cast<char*>("(J)V"),                         (void*)jni_CloseMedia },

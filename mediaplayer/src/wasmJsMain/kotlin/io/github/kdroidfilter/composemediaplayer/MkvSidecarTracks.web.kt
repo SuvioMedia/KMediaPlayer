@@ -30,6 +30,8 @@ internal fun String.isLikelyMkvSource(): Boolean {
 internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
     playerState: DefaultVideoPlayerState,
     sourceUri: String,
+    requestHeadersJson: String,
+    useCredentials: Boolean,
     scope: CoroutineScope,
     mediaSessionId: Long,
 ) {
@@ -39,6 +41,8 @@ internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
     startMkvSidecarProbe(
         video = this,
         sourceUri = sourceUri,
+        requestHeadersJson = requestHeadersJson,
+        useCredentials = useCredentials,
         onTracksChanged = {
             scope.launch {
                 if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
@@ -112,6 +116,8 @@ private fun hasMkvSubtitleTracks(video: HTMLVideoElement): Boolean =
 private fun startMkvSidecarProbe(
     video: HTMLVideoElement,
     sourceUri: String,
+    requestHeadersJson: String,
+    useCredentials: Boolean,
     onTracksChanged: () -> Unit,
 ): Unit =
     js(
@@ -119,6 +125,24 @@ private fun startMkvSidecarProbe(
         {
             const notify = function() {
                 try { onTracksChanged(); } catch (error) { console.error(error); }
+            };
+            const requestHeaders = (function() {
+                try { return JSON.parse(requestHeadersJson || "{}") || {}; } catch (_) { return {}; }
+            })();
+            const fetchOptions = function(headers, signal, method) {
+                const mergedHeaders = {};
+                Object.keys(requestHeaders).forEach(function(name) {
+                    mergedHeaders[name] = requestHeaders[name];
+                });
+                Object.keys(headers || {}).forEach(function(name) {
+                    mergedHeaders[name] = headers[name];
+                });
+                const options = {};
+                if (Object.keys(mergedHeaders).length > 0) options.headers = mergedHeaders;
+                if (signal) options.signal = signal;
+                if (method) options.method = method;
+                if (useCredentials) options.credentials = "include";
+                return options;
             };
 
             if (video.__composeMediaPlayerMkvAbort) {
@@ -271,7 +295,7 @@ private fun startMkvSidecarProbe(
                 if (Number.isFinite(video.__composeMediaPlayerMkvFileSize)) {
                     return Promise.resolve(video.__composeMediaPlayerMkvFileSize);
                 }
-                return fetch(sourceUri, { method: "HEAD", signal: abort.signal }).then(function(response) {
+                return fetch(sourceUri, fetchOptions(null, abort.signal, "HEAD")).then(function(response) {
                     const fileSize = Number(response.headers.get("Content-Length") || "0");
                     video.__composeMediaPlayerMkvFileSize = Number.isFinite(fileSize) && fileSize > 0 ? fileSize : null;
                     return video.__composeMediaPlayerMkvFileSize;
@@ -297,10 +321,10 @@ private fun startMkvSidecarProbe(
                 if (!Number.isFinite(fileSize) || fileSize <= 0) return Promise.resolve([]);
                 const size = Math.min(fileSize, rangeSize || 2097152);
                 const start = Math.max(0, fileSize - size);
-                return fetch(sourceUri, {
-                    headers: { Range: "bytes=" + start + "-" + (fileSize - 1) },
-                    signal: abort.signal
-                }).then(function(response) {
+                return fetch(
+                    sourceUri,
+                    fetchOptions({ Range: "bytes=" + start + "-" + (fileSize - 1) }, abort.signal)
+                ).then(function(response) {
                     return response.arrayBuffer();
                 }).then(function(buffer) {
                     const bytes = new Uint8Array(buffer);
@@ -328,10 +352,10 @@ private fun startMkvSidecarProbe(
             };
 
             const probeContainerTracks = function() {
-                return fetch(sourceUri, {
-                    headers: { Range: "${MKV_TRACK_PROBE_RANGE_HEADER}" },
-                    signal: abort.signal
-                }).then(function(response) {
+                return fetch(
+                    sourceUri,
+                    fetchOptions({ Range: "${MKV_TRACK_PROBE_RANGE_HEADER}" }, abort.signal)
+                ).then(function(response) {
                     return response.arrayBuffer();
                 }).then(function(buffer) {
                     const bytes = new Uint8Array(buffer);
@@ -715,10 +739,10 @@ private fun startMkvSubtitleExtraction(
                                         Number.isFinite(fileSize) ? fileSize - 1 : rangeStart + 4194303,
                                         rangeStart + 4194303
                                     );
-                            return fetch(sourceUri, {
-                                headers: { Range: "bytes=" + rangeStart + "-" + rangeEnd },
-                                signal: extractAbort.signal
-                            }).then(function(response) {
+                            return fetch(
+                                sourceUri,
+                                fetchOptions({ Range: "bytes=" + rangeStart + "-" + rangeEnd }, extractAbort.signal)
+                            ).then(function(response) {
                                 return response.arrayBuffer();
                             }).then(function(buffer) {
                                 if (extractAbort.signal.aborted) return;
@@ -797,10 +821,10 @@ private fun startMkvSubtitleExtraction(
                 console.warn("[compose-media-player] MKV selected subtitle parser", error);
             });
 
-            fetch(sourceUri, {
-                headers: { Range: "bytes=0-" },
-                signal: extractAbort.signal
-            }).then(function(response) {
+            fetch(
+                sourceUri,
+                fetchOptions({ Range: "bytes=0-" }, extractAbort.signal)
+            ).then(function(response) {
                 if (!response.body) {
                     return response.arrayBuffer().then(function(buffer) {
                         parser.write(new Uint8Array(buffer));

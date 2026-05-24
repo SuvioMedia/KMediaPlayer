@@ -15,6 +15,8 @@ import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
+import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
@@ -42,6 +44,7 @@ internal val linuxLogger = TaggedLogger("LinuxVideoPlayerState")
  * Architecture mirrors MacVideoPlayerState: coroutine-driven polling of the native
  * layer for frames, position, audio levels, and end-of-playback detection.
  */
+@Suppress("LargeClass")
 @Stable
 class LinuxVideoPlayerState : VideoPlayerState {
     // Native player pointer (AtomicLong for lock-free reads from the frame hot path)
@@ -110,13 +113,11 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override val metadata: VideoMetadata = VideoMetadata()
     override val capabilities: PlayerCapabilities =
         PlayerCapabilities(
-            supportsHls = true,
             supportsMkv = true,
-            supportsExternalSubtitles = true,
-            supportsAudioTracks = true,
         )
     override var isFullscreen: Boolean by mutableStateOf(false)
     private var lastUri: String? = null
+    private var lastRequestHeaders: Map<String, String> = emptyMap()
 
     private val _positionText = mutableStateOf("00:00.000")
     override val positionText: String get() = _positionText.value
@@ -231,9 +232,12 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
     ) {
         linuxLogger.d { "openUri() - Opening URI: $uri" }
+        val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
         lastUri = uri
+        lastRequestHeaders = sanitizedHeaders
 
         if (!checkExistsIfLocalFile(uri)) {
             linuxLogger.e { "File does not exist: $uri" }
@@ -255,7 +259,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
                 ensurePlayerInitialized()
 
-                val result = openMediaUri(uri)
+                val result = openMediaUri(uri, sanitizedHeaders)
 
                 if (result) {
                     // Update frame rate from native layer
@@ -341,7 +345,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
-    private suspend fun openMediaUri(uri: String): Boolean {
+    private suspend fun openMediaUri(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): Boolean {
         val ptr = playerPtr
         if (ptr == 0L) return false
 
@@ -351,7 +358,12 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
 
         return try {
-            LinuxNativeBridge.nOpenUri(ptr, uri)
+            val headerLines = requestHeaders.requestHeadersLineString()
+            if (headerLines.isBlank()) {
+                LinuxNativeBridge.nOpenUri(ptr, uri)
+            } else {
+                LinuxNativeBridge.nOpenUriWithHeaders(ptr, uri, headerLines)
+            }
             pollDimensionsUntilReady(ptr)
             updateMetadata()
             true
@@ -614,7 +626,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override fun play() {
         ioScope.launch {
             if (!hasMedia && lastUri != null) {
-                openUri(lastUri!!)
+                openUri(lastUri!!, requestHeaders = lastRequestHeaders)
             } else if (hasMedia) {
                 playInBackground()
             } else {

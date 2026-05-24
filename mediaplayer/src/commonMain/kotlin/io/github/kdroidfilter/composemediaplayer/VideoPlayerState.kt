@@ -60,12 +60,12 @@ interface VideoPlayerState {
                 notes = renderingInfo.notes,
             )
     val capabilities: PlayerCapabilities
-        get() =
-            PlayerCapabilities(
-                supportsExternalSubtitles = true,
+        get() {
+            val platformCapabilities = platformPlayerCapabilities()
+            return platformCapabilities.copy(
                 supportsPiP = isPipSupported,
-                supportsPlaybackDiagnostics = diagnostics != PlaybackDiagnostics(),
             )
+        }
 
     /**
      * Controls the playback volume. Valid values are within the range of 0.0 (muted) to 1.0 (maximum volume).
@@ -252,13 +252,15 @@ interface VideoPlayerState {
     fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+        requestHeaders: Map<String, String> = emptyMap(),
     )
 
     fun prepare(
         uri: String,
         initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+        requestHeaders: Map<String, String> = emptyMap(),
     ) {
-        openUri(uri, initializeplayerState)
+        openUri(uri, initializeplayerState, requestHeaders)
     }
 
     fun openFile(
@@ -506,6 +508,7 @@ data class PreviewableVideoPlayerState(
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
     ) {}
 
     override fun openFile(
@@ -523,3 +526,83 @@ data class PreviewableVideoPlayerState(
 
     override fun dispose() {}
 }
+
+internal fun Map<String, String>.sanitizedRequestHeaders(): Map<String, String> =
+    mapNotNull { (name, value) ->
+        val headerName = name.trim()
+        val headerValue = value.trim()
+        when {
+            headerName.isEmpty() || headerValue.contains('\r') || headerValue.contains('\n') -> null
+            !headerName.isValidHeaderName() -> null
+            headerName.isForbiddenRequestHeaderName() -> null
+            else -> headerName to headerValue
+        }
+    }.toMap()
+
+internal fun Map<String, String>.requestHeadersLineString(lineSeparator: String = "\r\n"): String =
+    sanitizedRequestHeaders()
+        .entries
+        .joinToString(lineSeparator) { (name, value) -> "$name: $value" }
+
+internal fun Map<String, String>.requestHeadersJsonObjectString(): String =
+    sanitizedRequestHeaders()
+        .entries
+        .joinToString(prefix = "{", postfix = "}") { (name, value) ->
+            "\"${name.jsonEscaped()}\":\"${value.jsonEscaped()}\""
+        }
+
+private fun String.jsonEscaped(): String =
+    buildString(length + JSON_ESCAPE_EXTRA_CAPACITY) {
+        for (char in this@jsonEscaped) {
+            when (char) {
+                '\\' -> append("\\\\")
+                '"' -> append("\\\"")
+                '\b' -> append("\\b")
+                '\u000C' -> append("\\f")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> {
+                    if (char.code < JSON_CONTROL_CHAR_LIMIT) {
+                        append("\\u")
+                        append(
+                            char.code
+                                .toString(JSON_HEX_RADIX)
+                                .padStart(JSON_UNICODE_ESCAPE_LENGTH, '0'),
+                        )
+                    } else {
+                        append(char)
+                    }
+                }
+            }
+        }
+    }
+
+private fun String.isValidHeaderName(): Boolean =
+    all { char ->
+        char.code in HEADER_NAME_MIN_CHAR_CODE..HEADER_NAME_MAX_CHAR_CODE && char !in HEADER_NAME_SEPARATORS
+    }
+
+private fun String.isForbiddenRequestHeaderName(): Boolean {
+    val normalized = lowercase()
+    return normalized in FORBIDDEN_REQUEST_HEADER_NAMES || normalized.startsWith("proxy-")
+}
+
+private const val JSON_ESCAPE_EXTRA_CAPACITY = 8
+private const val JSON_CONTROL_CHAR_LIMIT = 0x20
+private const val JSON_HEX_RADIX = 16
+private const val JSON_UNICODE_ESCAPE_LENGTH = 4
+private const val HEADER_NAME_MIN_CHAR_CODE = 33
+private const val HEADER_NAME_MAX_CHAR_CODE = 126
+private const val HEADER_NAME_SEPARATORS = "()<>@,;:\\\"/[]?={} \t"
+
+private val FORBIDDEN_REQUEST_HEADER_NAMES = setOf(
+    "connection",
+    "content-length",
+    "host",
+    "keep-alive",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+)

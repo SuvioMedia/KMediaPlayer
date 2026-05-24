@@ -961,6 +961,13 @@ internal fun VideoPlayerEffects(
                 val mediaSessionId = playerState.mediaSessionId
                 if (sourceUri.isNotEmpty()) {
                     val sourceKind = sourceUri.toWebMediaSourceKind()
+                    val requestHeaders = playerState.requestHeaders
+                    val useCredentials = requestHeaders.usesBrowserCredentials()
+                    if (useCredentials) {
+                        video.crossOrigin = "use-credentials"
+                    } else {
+                        video.removeAttribute("crossorigin")
+                    }
                     video.markMediaSession(mediaSessionId, sourceUri)
                     playerState.clearError()
                     if (sourceKind.allowsHlsController) {
@@ -969,6 +976,8 @@ internal fun VideoPlayerEffects(
                             video.configureHlsSource(
                                 playerState = playerState,
                                 sourceUri = sourceUri,
+                                requestHeadersJson = requestHeaders.browserRequestHeadersJsonObjectString(),
+                                useCredentials = useCredentials,
                                 scope = scope,
                                 mediaSessionId = mediaSessionId,
                             )
@@ -988,6 +997,8 @@ internal fun VideoPlayerEffects(
                         video.configureMkvSidecarTracks(
                             playerState = playerState,
                             sourceUri = sourceUri,
+                            requestHeadersJson = requestHeaders.browserRequestHeadersJsonObjectString(),
+                            useCredentials = useCredentials,
                             scope = scope,
                             mediaSessionId = mediaSessionId,
                         )

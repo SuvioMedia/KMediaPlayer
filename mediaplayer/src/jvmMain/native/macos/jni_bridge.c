@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 // ---------------------------------------------------------------------------
 // Forward declarations of Swift C exports
@@ -16,6 +17,7 @@
 
 extern void*  createVideoPlayer(void);
 extern void   openUri(void* ctx, const char* uri);
+extern void   openUriWithHeaders(void* ctx, const char* uri, const char* headersJson);
 extern void   playVideo(void* ctx);
 extern void   pauseVideo(void* ctx);
 extern void   setVolume(void* ctx, float volume);
@@ -88,6 +90,7 @@ typedef struct {
     void (*release_instance)(libvlc_instance_t*);
     libvlc_media_t* (*media_new_location)(libvlc_instance_t*, const char*);
     libvlc_media_t* (*media_new_path)(libvlc_instance_t*, const char*);
+    void (*media_add_option)(libvlc_media_t*, const char*);
     void (*media_release)(libvlc_media_t*);
     libvlc_media_player_t* (*media_player_new_from_media)(libvlc_media_t*);
     void (*media_player_release)(libvlc_media_player_t*);
@@ -175,6 +178,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     api->release_instance = (void (*)(libvlc_instance_t*))vlc_sym(dylib, "libvlc_release");
     api->media_new_location = (libvlc_media_t* (*)(libvlc_instance_t*, const char*))vlc_sym(dylib, "libvlc_media_new_location");
     api->media_new_path = (libvlc_media_t* (*)(libvlc_instance_t*, const char*))vlc_sym(dylib, "libvlc_media_new_path");
+    api->media_add_option = (void (*)(libvlc_media_t*, const char*))vlc_sym(dylib, "libvlc_media_add_option");
     api->media_release = (void (*)(libvlc_media_t*))vlc_sym(dylib, "libvlc_media_release");
     api->media_player_new_from_media = (libvlc_media_player_t* (*)(libvlc_media_t*))vlc_sym(dylib, "libvlc_media_player_new_from_media");
     api->media_player_release = (void (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_media_player_release");
@@ -197,7 +201,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     api->track_description_list_release = (void (*)(libvlc_track_description_t*))vlc_sym(dylib, "libvlc_track_description_list_release");
 
     if (!api->new_instance || !api->release_instance || !api->media_new_location ||
-        !api->media_new_path || !api->media_release || !api->media_player_new_from_media ||
+        !api->media_new_path || !api->media_add_option || !api->media_release || !api->media_player_new_from_media ||
         !api->media_player_release || !api->media_player_play || !api->media_player_pause ||
         !api->media_player_stop || !api->media_player_get_time || !api->media_player_set_time ||
         !api->media_player_get_length || !api->audio_set_volume || !api->audio_get_volume ||
@@ -537,7 +541,62 @@ static void dispose_libvlc_player(LibVlcPlayer* player) {
     free(player);
 }
 
-static void libvlc_open_uri(LibVlcPlayer* player, const char* uri) {
+static void libvlc_add_header_options(libvlc_media_t* media, LibVlcPlayer* player, const char* request_headers) {
+    if (!media || !player || !request_headers || !request_headers[0]) return;
+
+    char* copy = strdup(request_headers);
+    if (!copy) return;
+
+    char* save = NULL;
+    for (char* line = strtok_r(copy, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        while (*line == ' ' || *line == '\t' || *line == '\r') line++;
+        char* end = line + strlen(line);
+        while (end > line && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r')) {
+            *--end = '\0';
+        }
+        if (!line[0]) continue;
+
+        char* separator = strchr(line, ':');
+        if (!separator) continue;
+        *separator = '\0';
+
+        char* name = line;
+        char* value = separator + 1;
+        while (*value == ' ' || *value == '\t') value++;
+        if (!name[0] || !value[0]) continue;
+
+        const char* option_name = NULL;
+        if (strcasecmp(name, "User-Agent") == 0) {
+            option_name = ":http-user-agent=";
+        } else if (strcasecmp(name, "Referer") == 0 || strcasecmp(name, "Referrer") == 0) {
+            option_name = ":http-referrer=";
+        } else if (strcasecmp(name, "Cookie") == 0) {
+            option_name = ":http-cookie=";
+        }
+
+        if (option_name) {
+            size_t option_len = strlen(option_name) + strlen(value) + 1;
+            char* option = (char*)malloc(option_len);
+            if (option) {
+                snprintf(option, option_len, "%s%s", option_name, value);
+                player->api.media_add_option(media, option);
+                free(option);
+            }
+        }
+
+        size_t custom_len = strlen(":http-custom-header=") + strlen(name) + strlen(value) + 3;
+        char* custom = (char*)malloc(custom_len);
+        if (custom) {
+            snprintf(custom, custom_len, ":http-custom-header=%s: %s", name, value);
+            player->api.media_add_option(media, custom);
+            free(custom);
+        }
+    }
+
+    free(copy);
+}
+
+static void libvlc_open_uri_with_headers(LibVlcPlayer* player, const char* uri, const char* request_headers) {
     if (!player || !player->instance || !uri) return;
     if (player->player) {
         player->api.media_player_stop(player->player);
@@ -550,6 +609,8 @@ static void libvlc_open_uri(LibVlcPlayer* player, const char* uri) {
         : player->api.media_new_path(player->instance, uri);
     if (!media) return;
 
+    libvlc_add_header_options(media, player, request_headers);
+
     player->player = player->api.media_player_new_from_media(media);
     player->api.media_release(media);
     if (!player->player) return;
@@ -561,6 +622,10 @@ static void libvlc_open_uri(LibVlcPlayer* player, const char* uri) {
 
     player->api.media_player_play(player->player);
     vlc_apply_pending_tracks(player);
+}
+
+static void libvlc_open_uri(LibVlcPlayer* player, const char* uri) {
+    libvlc_open_uri_with_headers(player, uri, NULL);
 }
 
 static inline LibVlcPlayer* vlcCtx(NativePlayerHandle* handle) {
@@ -906,6 +971,58 @@ static void JNICALL jni_OpenUri(JNIEnv* env, jclass cls, jlong handle, jstring u
     (*env)->ReleaseStringUTFChars(env, uri, cUri);
 }
 
+static void JNICALL jni_OpenUriWithHeaders(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jstring uri,
+    jstring requestHeadersJson
+) {
+    if (!handle || !uri) return;
+    const char* cUri = (*env)->GetStringUTFChars(env, uri, NULL);
+    if (!cUri) return;
+    const char* cHeaders = requestHeadersJson
+        ? (*env)->GetStringUTFChars(env, requestHeadersJson, NULL)
+        : NULL;
+    NativePlayerHandle* native = toHandle(handle);
+    if (native && native->kind == PLAYER_KIND_LIBVLC) {
+        libvlc_open_uri((LibVlcPlayer*)native->ctx, cUri);
+    } else {
+        void* ctx = avCtx(native);
+        if (ctx) openUriWithHeaders(ctx, cUri, cHeaders ? cHeaders : "{}");
+    }
+    if (cHeaders) {
+        (*env)->ReleaseStringUTFChars(env, requestHeadersJson, cHeaders);
+    }
+    (*env)->ReleaseStringUTFChars(env, uri, cUri);
+}
+
+static void JNICALL jni_OpenUriWithHeaderLines(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jstring uri,
+    jstring requestHeaders
+) {
+    if (!handle || !uri) return;
+    const char* cUri = (*env)->GetStringUTFChars(env, uri, NULL);
+    if (!cUri) return;
+    const char* cHeaders = requestHeaders
+        ? (*env)->GetStringUTFChars(env, requestHeaders, NULL)
+        : NULL;
+    NativePlayerHandle* native = toHandle(handle);
+    if (native && native->kind == PLAYER_KIND_LIBVLC) {
+        libvlc_open_uri_with_headers((LibVlcPlayer*)native->ctx, cUri, cHeaders);
+    } else {
+        void* ctx = avCtx(native);
+        if (ctx) openUri(ctx, cUri);
+    }
+    if (cHeaders) {
+        (*env)->ReleaseStringUTFChars(env, requestHeaders, cHeaders);
+    }
+    (*env)->ReleaseStringUTFChars(env, uri, cUri);
+}
+
 static void JNICALL jni_Play(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     LibVlcPlayer* vlc = vlcCtx(native);
@@ -1216,6 +1333,8 @@ static const JNINativeMethod g_methods[] = {
     { "nBlendLibAssFrame",       "(JJIIIJ)Z",                   (void*)jni_BlendLibAssFrame },
     { "nDisposeLibAssRenderer",  "(J)V",                        (void*)jni_DisposeLibAssRenderer },
     { "nOpenUri",                "(JLjava/lang/String;)V",      (void*)jni_OpenUri },
+    { "nOpenUriWithHeaders",     "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaders },
+    { "nOpenUriWithHeaderLines", "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaderLines },
     { "nPlay",                   "(J)V",                        (void*)jni_Play },
     { "nPause",                  "(J)V",                        (void*)jni_Pause },
     { "nSetVolume",              "(JF)V",                       (void*)jni_SetVolume },

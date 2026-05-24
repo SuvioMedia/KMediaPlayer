@@ -11,8 +11,12 @@
 #include <memory>
 #include <mfapi.h>
 #include <mferror.h>
+#include <propsys.h>
+#include <propvarutil.h>
+#include <wininet.h>
 #include <string>
 #include <cctype>
+#include <cwctype>
 #include <evr.h>
 #include <wrl/client.h>
 #include <intrin.h>
@@ -99,6 +103,111 @@ static bool IsHLSUrl(const wchar_t* url) {
     std::wstring lower(url);
     for (auto& ch : lower) ch = static_cast<wchar_t>(towlower(ch));
     return lower.find(L".m3u8") != std::wstring::npos;
+}
+
+static std::wstring TrimHeaderPart(const std::wstring& value) {
+    size_t first = 0;
+    while (first < value.size() && iswspace(value[first])) ++first;
+
+    size_t last = value.size();
+    while (last > first && iswspace(value[last - 1])) --last;
+
+    return value.substr(first, last - first);
+}
+
+static bool HeaderNameEquals(const std::wstring& left, const wchar_t* right) {
+    return _wcsicmp(left.c_str(), right) == 0;
+}
+
+static std::wstring FindHeaderValue(const wchar_t* requestHeaders, const wchar_t* wantedName) {
+    if (!requestHeaders || !requestHeaders[0]) return std::wstring();
+
+    const wchar_t* lineStart = requestHeaders;
+    while (*lineStart) {
+        const wchar_t* lineEnd = wcschr(lineStart, L'\n');
+        std::wstring line =
+            lineEnd
+                ? std::wstring(lineStart, static_cast<size_t>(lineEnd - lineStart))
+                : std::wstring(lineStart);
+        if (!line.empty() && line.back() == L'\r') {
+            line.pop_back();
+        }
+
+        size_t separator = line.find(L':');
+        if (separator != std::wstring::npos) {
+            std::wstring name = TrimHeaderPart(line.substr(0, separator));
+            if (HeaderNameEquals(name, wantedName)) {
+                return TrimHeaderPart(line.substr(separator + 1));
+            }
+        }
+
+        if (!lineEnd) break;
+        lineStart = lineEnd + 1;
+    }
+
+    return std::wstring();
+}
+
+static HRESULT SetPropStoreString(IPropertyStore* store, REFPROPERTYKEY key, const std::wstring& value) {
+    if (!store || value.empty()) return S_OK;
+
+    PROPVARIANT variant;
+    HRESULT hr = InitPropVariantFromString(value.c_str(), &variant);
+    if (FAILED(hr)) return hr;
+
+    hr = store->SetValue(key, variant);
+    PropVariantClear(&variant);
+    return hr;
+}
+
+static HRESULT ApplyRequestHeadersToSourceReaderAttributes(
+    IMFAttributes* attrs,
+    const wchar_t* requestHeaders
+) {
+    if (!attrs || !requestHeaders || !requestHeaders[0]) return S_OK;
+
+    std::wstring userAgent = FindHeaderValue(requestHeaders, L"User-Agent");
+    std::wstring referer = FindHeaderValue(requestHeaders, L"Referer");
+    if (referer.empty()) {
+        referer = FindHeaderValue(requestHeaders, L"Referrer");
+    }
+
+    if (userAgent.empty() && referer.empty()) return S_OK;
+
+    ComPtr<IPropertyStore> sourceConfig;
+    HRESULT hr = PSCreateMemoryPropertyStore(IID_PPV_ARGS(sourceConfig.GetAddressOf()));
+    if (FAILED(hr)) return hr;
+
+    hr = SetPropStoreString(sourceConfig.Get(), MFNETSOURCE_BROWSERUSERAGENT, userAgent);
+    if (SUCCEEDED(hr)) {
+        hr = SetPropStoreString(sourceConfig.Get(), MFNETSOURCE_PLAYERUSERAGENT, userAgent);
+    }
+    if (SUCCEEDED(hr)) {
+        hr = SetPropStoreString(sourceConfig.Get(), MFNETSOURCE_BROWSERWEBPAGE, referer);
+    }
+    if (FAILED(hr)) return hr;
+
+    return attrs->SetUnknown(MF_SOURCE_READER_MEDIASOURCE_CONFIG, sourceConfig.Get());
+}
+
+static void ApplyCookieHeaderToWinInet(const wchar_t* url, const wchar_t* requestHeaders) {
+    if (!url || !requestHeaders || !requestHeaders[0]) return;
+
+    const std::wstring cookieHeader = FindHeaderValue(requestHeaders, L"Cookie");
+    if (cookieHeader.empty()) return;
+
+    size_t start = 0;
+    while (start < cookieHeader.size()) {
+        const size_t separator = cookieHeader.find(L';', start);
+        const size_t length =
+            separator == std::wstring::npos ? std::wstring::npos : separator - start;
+        const std::wstring cookie = TrimHeaderPart(cookieHeader.substr(start, length));
+        if (!cookie.empty()) {
+            InternetSetCookieExW(url, nullptr, cookie.c_str(), 0, 0);
+        }
+        if (separator == std::wstring::npos) break;
+        start = separator + 1;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +510,15 @@ NATIVEVIDEOPLAYER_API void DestroyVideoPlayerInstance(VideoPlayerInstance* pInst
 }
 
 NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wchar_t* url, BOOL startPlayback) {
+    return OpenMediaWithHeaders(pInstance, url, nullptr, startPlayback);
+}
+
+NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
+    VideoPlayerInstance* pInstance,
+    const wchar_t* url,
+    const wchar_t* requestHeaders,
+    BOOL startPlayback
+) {
     if (!pInstance || !url) return OP_E_INVALID_PARAMETER;
     if (!IsInitialized()) return OP_E_NOT_INITIALIZED;
 
@@ -415,12 +533,16 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
     pInstance->bIsNetworkSource = isNetwork;
     pInstance->bIsLiveStream = false;
 
+    if (isNetwork) {
+        ApplyCookieHeaderToWinInet(url, requestHeaders);
+    }
+
     if (isNetwork && IsHLSUrl(url))
         return OpenMediaHLS(pInstance, url, startPlayback);
 
     // ---- Configure and open source reader ----
     ComPtr<IMFAttributes> attrs;
-    HRESULT hr = MFCreateAttributes(attrs.GetAddressOf(), 6);
+    HRESULT hr = MFCreateAttributes(attrs.GetAddressOf(), 7);
     if (FAILED(hr)) return hr;
 
     attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
@@ -428,6 +550,10 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
     attrs->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, GetDXGIDeviceManager());
     attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
     if (isNetwork) attrs->SetUINT32(MF_LOW_LATENCY, TRUE);
+    if (isNetwork) {
+        hr = ApplyRequestHeadersToSourceReaderAttributes(attrs.Get(), requestHeaders);
+        if (FAILED(hr)) return hr;
+    }
 
     hr = MFCreateSourceReaderFromURL(url, attrs.Get(), pInstance->pSourceReader.ReleaseAndGetAddressOf());
     if (FAILED(hr)) {

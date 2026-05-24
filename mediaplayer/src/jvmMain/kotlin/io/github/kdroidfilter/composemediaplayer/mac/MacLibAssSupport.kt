@@ -1,5 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
+import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
+import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,30 +38,41 @@ internal object MacEmbeddedAssExtractor {
         uri: String,
         streamIndex: Int,
         playbackTimeMs: Long = 0L,
+        requestHeaders: Map<String, String> = emptyMap(),
     ): MacAssSubtitleData {
-        val cacheKey = "$uri#$streamIndex"
+        val headers = requestHeaders.sanitizedRequestHeaders()
+        val cacheKey = cacheKey(uri, streamIndex, headers)
         cache[cacheKey]?.let { return it }
 
         MacMatroskaAssExtractor
-            .extractPartial(uri = uri, streamIndex = streamIndex, playbackTimeMs = playbackTimeMs)
+            .extractPartial(
+                uri = uri,
+                streamIndex = streamIndex,
+                playbackTimeMs = playbackTimeMs,
+                requestHeaders = headers,
+            )
             ?.let { return it }
 
-        return extractComplete(uri = uri, streamIndex = streamIndex)
+        return extractComplete(uri = uri, streamIndex = streamIndex, requestHeaders = headers)
     }
 
     fun extractComplete(
         uri: String,
         streamIndex: Int,
+        requestHeaders: Map<String, String> = emptyMap(),
     ): MacAssSubtitleData {
-        val cacheKey = "$uri#$streamIndex"
+        val headers = requestHeaders.sanitizedRequestHeaders()
+        val cacheKey = cacheKey(uri, streamIndex, headers)
         cache[cacheKey]?.let { return it }
 
         var builtInExtractorFailure: Throwable? = null
         try {
-            MacMatroskaAssExtractor.extract(uri = uri, streamIndex = streamIndex)?.let { data ->
-                cache[cacheKey] = data
-                return data
-            }
+            MacMatroskaAssExtractor
+                .extract(uri = uri, streamIndex = streamIndex, requestHeaders = headers)
+                ?.let { data ->
+                    cache[cacheKey] = data
+                    return data
+                }
         } catch (e: Throwable) {
             builtInExtractorFailure = e
         }
@@ -75,8 +88,8 @@ internal object MacEmbeddedAssExtractor {
         val outputDirectory = Files.createTempDirectory("compose-media-player-ass-")
         val outputFile = outputDirectory.resolve("subtitles.ass")
         try {
-            val process =
-                ProcessBuilder(
+            val command =
+                mutableListOf(
                     ffmpeg,
                     "-nostdin",
                     "-y",
@@ -84,6 +97,12 @@ internal object MacEmbeddedAssExtractor {
                     "error",
                     "-dump_attachment:t",
                     "",
+                )
+            headers.requestHeadersLineString().takeIf { it.isNotBlank() }?.let { headerLines ->
+                command += listOf("-headers", headerLines)
+            }
+            command +=
+                listOf(
                     "-i",
                     uri,
                     "-map",
@@ -93,7 +112,10 @@ internal object MacEmbeddedAssExtractor {
                     "-f",
                     "ass",
                     outputFile.fileName.toString(),
-                ).redirectErrorStream(true)
+                )
+            val process =
+                ProcessBuilder(command)
+                    .redirectErrorStream(true)
                     .directory(outputDirectory.toFile())
                     .start()
 
@@ -162,6 +184,15 @@ internal object MacEmbeddedAssExtractor {
                     .sorted(Comparator.reverseOrder())
                     .forEach { Files.deleteIfExists(it) }
             }
+    }
+
+    private fun cacheKey(
+        uri: String,
+        streamIndex: Int,
+        requestHeaders: Map<String, String>,
+    ): String {
+        val headerToken = requestHeaders.toSortedMap(String.CASE_INSENSITIVE_ORDER).hashCode()
+        return "$uri#$streamIndex#$headerToken"
     }
 }
 

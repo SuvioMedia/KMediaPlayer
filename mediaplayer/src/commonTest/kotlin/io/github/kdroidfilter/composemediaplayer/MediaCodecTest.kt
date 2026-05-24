@@ -9,26 +9,26 @@ class MediaCodecTest {
     @Test
     fun supportedAudioCodecsContainOnlyAudioCodecs() =
         runTest {
-            assertTrue(SupportedMediaCodecs.queryAudioCodecs().all { it.type == MediaCodecType.AUDIO })
+            assertTrue(MediaSupport.queryAudioCodecs().all { it.type == MediaCodecType.AUDIO })
         }
 
     @Test
     fun supportedVideoCodecsContainOnlyVideoCodecs() =
         runTest {
-            assertTrue(SupportedMediaCodecs.queryVideoCodecs().all { it.type == MediaCodecType.VIDEO })
+            assertTrue(MediaSupport.queryVideoCodecs().all { it.type == MediaCodecType.VIDEO })
         }
 
     @Test
     fun queryReturnsSnapshotWithAudioAndVideoCodecs() =
         runTest {
-            val support = SupportedMediaCodecs.query()
+            val support = MediaSupport.query()
 
             assertEquals(
-                SupportedMediaCodecs.queryAudioCodecs(),
+                MediaSupport.queryAudioCodecs(),
                 support.audioCodecs,
             )
             assertEquals(
-                SupportedMediaCodecs.queryVideoCodecs(),
+                MediaSupport.queryVideoCodecs(),
                 support.videoCodecs,
             )
         }
@@ -36,7 +36,7 @@ class MediaCodecTest {
     @Test
     fun allCodecsIsTheUnionOfAudioAndVideoCodecs() =
         runTest {
-            val support = SupportedMediaCodecs.query()
+            val support = MediaSupport.query()
 
             assertEquals(
                 support.audioCodecs + support.videoCodecs,
@@ -48,17 +48,26 @@ class MediaCodecTest {
     fun codecExtensionMatchesProviderResult() =
         runTest {
             MediaCodec.entries.forEach { codec ->
-                assertEquals(SupportedMediaCodecs.queryIsSupported(codec), codec.isSupported())
+                assertEquals(MediaSupport.queryIsCodecSupported(codec), codec.isSupported())
             }
         }
 
     @Test
     fun snapshotChecksCodecSupportWithoutQueryingAgain() =
         runTest {
-            val support = SupportedMediaCodecs.query()
+            val support = MediaSupport.query()
 
             MediaCodec.entries.forEach { codec ->
-                assertEquals(SupportedMediaCodecs.queryIsSupported(codec), support.isSupported(codec))
+                assertEquals(MediaSupport.queryIsCodecSupported(codec), support.isCodecSupported(codec))
             }
+        }
+
+    @Test
+    fun queryReturnsPlayerCapabilitiesAndCodecSupportTogether() =
+        runTest {
+            val support = MediaSupport.query()
+
+            assertEquals(MediaSupport.queryCapabilities(), support.capabilities)
+            assertEquals(MediaSupport.queryCodecs(), support.codecs)
         }
 }

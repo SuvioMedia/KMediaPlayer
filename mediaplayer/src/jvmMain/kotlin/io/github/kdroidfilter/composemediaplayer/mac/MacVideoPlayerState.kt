@@ -23,6 +23,9 @@ import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.requestHeadersJsonObjectString
+import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
+import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
@@ -156,16 +159,14 @@ class MacVideoPlayerState : VideoPlayerState {
     override val metadata: VideoMetadata = VideoMetadata()
     override val capabilities: PlayerCapabilities =
         PlayerCapabilities(
-            supportsHls = true,
             supportsMkv = true,
-            supportsExternalSubtitles = true,
-            supportsAudioTracks = true,
         )
     override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo()
     override var isFullscreen: Boolean by mutableStateOf(false)
     internal var usesLibAssSubtitleOverlay: Boolean by mutableStateOf(false)
         private set
     private var lastUri: String? = null
+    private var lastRequestHeaders: Map<String, String> = emptyMap()
 
     // Non-blocking text properties
     private val _positionText = mutableStateOf("00:00.000")
@@ -335,10 +336,13 @@ class MacVideoPlayerState : VideoPlayerState {
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
     ) {
         macLogger.d { "openUri() - Opening URI: $uri, initializeplayerState: $initializeplayerState" }
 
+        val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
         lastUri = uri
+        lastRequestHeaders = sanitizedHeaders
 
         // Check if this is a local file that doesn't exist
         if (!checkExistsIfLocalFile(uri)) {
@@ -375,13 +379,13 @@ class MacVideoPlayerState : VideoPlayerState {
 
                 val playableUri =
                     if (libVlcBackend != null) {
-                        prepareUriForLibVlcPlayback(uri, libVlcBackend.renderMode)
+                        prepareUriForLibVlcPlayback(uri, sanitizedHeaders, libVlcBackend.renderMode)
                     } else {
-                        prepareUriForMacPlayback(uri)
+                        prepareUriForMacPlayback(uri, sanitizedHeaders)
                     }
 
                 // Open URI on IO thread and capture result
-                val result = openMediaUri(playableUri)
+                val result = openMediaUri(playableUri, sanitizedHeaders)
 
                 if (result) {
                     // Launch parallel background tasks
@@ -481,8 +485,11 @@ class MacVideoPlayerState : VideoPlayerState {
         clearLibVlcTrackState()
     }
 
-    private suspend fun prepareUriForMacPlayback(uri: String): String {
-        if (!MacAvFoundationContainerSupport.needsFfmpegFallback(uri)) {
+    private suspend fun prepareUriForMacPlayback(
+        uri: String,
+        requestHeaders: Map<String, String> = emptyMap(),
+    ): String {
+        if (!MacAvFoundationContainerSupport.needsFfmpegFallback(uri, requestHeaders)) {
             withContext(Dispatchers.Main) {
                 renderingInfo.update(
                     backend = "AVFoundation",
@@ -554,6 +561,7 @@ class MacVideoPlayerState : VideoPlayerState {
                     is MacVlcHlsFallback ->
                         fallback.start(
                             uri = uri,
+                            requestHeaders = requestHeaders,
                             selectedAudioStreamIndex = ffmpegHlsSelectedAudioStreamIndex,
                             selectedSubtitleStreamIndex = ffmpegHlsSelectedSubtitleStreamIndex,
                             startTimeSeconds = ffmpegHlsPlaybackOffsetSeconds,
@@ -561,6 +569,7 @@ class MacVideoPlayerState : VideoPlayerState {
                     is MacFfmpegHlsFallback ->
                         fallback.start(
                             uri = uri,
+                            requestHeaders = requestHeaders,
                             selectedAudioStreamIndex = ffmpegHlsSelectedAudioStreamIndex,
                             selectedSubtitleStreamIndex = ffmpegHlsSelectedSubtitleStreamIndex,
                             startTimeSeconds = ffmpegHlsPlaybackOffsetSeconds,
@@ -604,6 +613,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
     private suspend fun prepareUriForLibVlcPlayback(
         uri: String,
+        requestHeaders: Map<String, String> = emptyMap(),
         renderMode: MacLibVlcRenderMode,
     ): String {
         libVlcBackendActive = true
@@ -621,7 +631,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 notes = "VLC is loaded dynamically from the user's installation; not bundled or linked.",
             )
         }
-        val trackInfo = withContext(Dispatchers.IO) { MacLibVlcMediaProbe.probe(uri) }
+        val trackInfo = withContext(Dispatchers.IO) { MacLibVlcMediaProbe.probe(uri, requestHeaders) }
         libVlcTrackInfo = trackInfo
         updateLibVlcTracks(trackInfo)
         return uri
@@ -831,6 +841,7 @@ class MacVideoPlayerState : VideoPlayerState {
                                     "No embedded subtitle stream index is available.",
                                 ),
                         playbackTimeMs = playbackTimeMs,
+                        requestHeaders = lastRequestHeaders,
                     )
                 } else {
                     MacAssSubtitleData(content = loadSubtitleContent(track.src))
@@ -849,6 +860,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 track = track,
                 streamIndex = streamIndex,
                 sourceUri = embeddedSourceUri,
+                requestHeaders = lastRequestHeaders,
                 selectionToken = selectionToken,
             )
         }
@@ -926,13 +938,14 @@ class MacVideoPlayerState : VideoPlayerState {
         track: SubtitleTrack,
         streamIndex: Int,
         sourceUri: String,
+        requestHeaders: Map<String, String>,
         selectionToken: Long,
     ) {
         ioScope.launch {
             try {
                 val completeData =
                     withContext(Dispatchers.IO) {
-                        MacEmbeddedAssExtractor.extractComplete(sourceUri, streamIndex)
+                        MacEmbeddedAssExtractor.extractComplete(sourceUri, streamIndex, requestHeaders)
                     }
                 if (!isCurrentLibAssSelection(selectionToken)) return@launch
                 installLibAssSubtitleData(track, streamIndex, completeData, selectionToken)
@@ -1180,7 +1193,10 @@ class MacVideoPlayerState : VideoPlayerState {
     }
 
     /** Opens media URI and returns a success flag. */
-    private suspend fun openMediaUri(uri: String): Boolean {
+    private suspend fun openMediaUri(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): Boolean {
         macLogger.d { "openMediaUri() - Opening URI: $uri" }
         val ptr = playerPtr
         if (ptr == 0L) return false
@@ -1196,7 +1212,14 @@ class MacVideoPlayerState : VideoPlayerState {
 
         return try {
             // Open video asynchronously
-            MacNativeBridge.nOpenUri(ptr, uri)
+            val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
+            if (sanitizedHeaders.isEmpty()) {
+                MacNativeBridge.nOpenUri(ptr, uri)
+            } else if (nativeBackendUsesLibVlc) {
+                MacNativeBridge.nOpenUriWithHeaderLines(ptr, uri, sanitizedHeaders.requestHeadersLineString())
+            } else {
+                MacNativeBridge.nOpenUriWithHeaders(ptr, uri, sanitizedHeaders.requestHeadersJsonObjectString())
+            }
 
             // Instead of directly calling `updateMetadata()`,
             // we poll until valid dimensions are available
@@ -1575,7 +1598,7 @@ class MacVideoPlayerState : VideoPlayerState {
         ioScope.launch {
             if (!hasMedia && lastUri != null) {
                 // Reload the media using the saved URI
-                openUri(lastUri!!)
+                openUri(lastUri!!, requestHeaders = lastRequestHeaders)
                 // The openUri method will start reading if the opening is successful
             } else if (hasMedia) {
                 // If the media is already loaded, start playing in the background
@@ -2059,8 +2082,8 @@ class MacVideoPlayerState : VideoPlayerState {
             ffmpegHlsSelectedAudioStreamIndex = streamIndex
             ffmpegHlsSelectedSubtitleStreamIndex = selectedSubtitleStreamIndex
             ffmpegHlsPlaybackOffsetSeconds = restartPositionSeconds
-            val playableUri = prepareUriForMacPlayback(sourceUri)
-            val opened = openMediaUri(playableUri)
+            val playableUri = prepareUriForMacPlayback(sourceUri, lastRequestHeaders)
+            val opened = openMediaUri(playableUri, lastRequestHeaders)
             if (!opened) {
                 closeFfmpegHlsFallback()
                 clearFfmpegFallbackTrackState()
@@ -2343,8 +2366,8 @@ class MacVideoPlayerState : VideoPlayerState {
             ffmpegHlsSelectedAudioStreamIndex = selectedAudioStreamIndex
             ffmpegHlsSelectedSubtitleStreamIndex = streamIndex
             ffmpegHlsPlaybackOffsetSeconds = restartPositionSeconds
-            val playableUri = prepareUriForMacPlayback(sourceUri)
-            val opened = openMediaUri(playableUri)
+            val playableUri = prepareUriForMacPlayback(sourceUri, lastRequestHeaders)
+            val opened = openMediaUri(playableUri, lastRequestHeaders)
             if (!opened) {
                 closeFfmpegHlsFallback()
                 clearFfmpegFallbackTrackState()

@@ -146,14 +146,7 @@ open class DefaultVideoPlayerState(
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     override val error: VideoPlayerError? get() = _error
     override val capabilities: PlayerCapabilities
-        get() =
-            PlayerCapabilities(
-                supportsHls = true,
-                supportsMkv = false,
-                supportsExternalSubtitles = true,
-                supportsAudioTracks = true,
-                supportsPiP = isPipSupported,
-            )
+        get() = platformPlayerCapabilities().copy(supportsPiP = isPipSupported)
 
     // Observable instance of AVPlayer
     var player: AVPlayer? by mutableStateOf(null)
@@ -559,6 +552,7 @@ open class DefaultVideoPlayerState(
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
     ) {
         iosLogger.d { "openUri called with uri: $uri, initializeplayerState: $initializeplayerState" }
         val nsUrl =
@@ -585,7 +579,7 @@ open class DefaultVideoPlayerState(
         // AVPlayer handles async loading internally — metadata is extracted
         // safely in the KVO readyToPlay callback, avoiding ObjC exceptions
         // from accessing track properties on an unloaded/failed asset.
-        val asset = AVURLAsset.URLAssetWithURL(nsUrl, null)
+        val asset = AVURLAsset.URLAssetWithURL(nsUrl, requestHeaders.avAssetOptions())
         val playerItem = AVPlayerItem(asset)
 
         nsUrl.lastPathComponent?.let { _metadata.title = it }
@@ -607,6 +601,12 @@ open class DefaultVideoPlayerState(
         } else {
             newPlayer.pause()
         }
+    }
+
+    private fun Map<String, String>.avAssetOptions(): Map<Any?, *>? {
+        val headers = sanitizedRequestHeaders()
+        if (headers.isEmpty()) return null
+        return mapOf<Any?, Any>("AVURLAssetHTTPHeaderFieldsKey" to headers)
     }
 
     override fun play() {

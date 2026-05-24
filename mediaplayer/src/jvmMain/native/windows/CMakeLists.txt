@@ -84,6 +84,8 @@ target_link_libraries(NativeVideoPlayer PRIVATE
         wmcodecdspuuid
         ole32
         oleaut32
+        propsys
+        wininet
         avrt
         mfsensorgroup
         dxva2

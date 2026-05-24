@@ -12,7 +12,7 @@
 #include <mmdeviceapi.h>
 
 // Native API version — bump when the exported API changes.
-#define NATIVE_VIDEO_PLAYER_VERSION 2
+#define NATIVE_VIDEO_PLAYER_VERSION 3
 
 // Playback speed bounds — kept in sync with
 // io.github.kdroidfilter.composemediaplayer.VideoPlayerState.{MIN,MAX}_PLAYBACK_SPEED.
@@ -61,6 +61,8 @@ NATIVEVIDEOPLAYER_API HRESULT InitMediaFoundation();
 NATIVEVIDEOPLAYER_API HRESULT CreateVideoPlayerInstance(VideoPlayerInstance** ppInstance);
 NATIVEVIDEOPLAYER_API void    DestroyVideoPlayerInstance(VideoPlayerInstance* pInstance);
 NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wchar_t* url, BOOL startPlayback = TRUE);
+NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(VideoPlayerInstance* pInstance, const wchar_t* url,
+                                                   const wchar_t* requestHeaders, BOOL startPlayback = TRUE);
 NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYTE** pData, DWORD* pDataSize);
 NATIVEVIDEOPLAYER_API HRESULT UnlockVideoFrame(VideoPlayerInstance* pInstance);
 NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(VideoPlayerInstance* pInstance,

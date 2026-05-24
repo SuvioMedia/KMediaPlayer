@@ -31,6 +31,34 @@ static void JNICALL jni_OpenUri(JNIEnv* env, jclass cls, jlong handle, jstring u
     (*env)->ReleaseStringUTFChars(env, uri, cUri);
 }
 
+static void JNICALL jni_OpenUriWithHeaders(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jstring uri,
+    jstring requestHeaders
+) {
+    if (!handle || !uri) return;
+    const char* cUri = (*env)->GetStringUTFChars(env, uri, NULL);
+    if (!cUri) return;
+
+    const char* cHeaders = NULL;
+    if (requestHeaders) {
+        cHeaders = (*env)->GetStringUTFChars(env, requestHeaders, NULL);
+        if (!cHeaders) {
+            (*env)->ReleaseStringUTFChars(env, uri, cUri);
+            return;
+        }
+    }
+
+    nvp_open_uri_with_headers(toCtx(handle), cUri, cHeaders);
+
+    if (cHeaders) {
+        (*env)->ReleaseStringUTFChars(env, requestHeaders, cHeaders);
+    }
+    (*env)->ReleaseStringUTFChars(env, uri, cUri);
+}
+
 static void JNICALL jni_Play(JNIEnv* env, jclass cls, jlong handle) {
     if (handle) nvp_play(toCtx(handle));
 }
@@ -152,6 +180,7 @@ static jboolean JNICALL jni_ConsumeDidPlayToEnd(JNIEnv* env, jclass cls, jlong h
 static const JNINativeMethod g_methods[] = {
     { "nCreatePlayer",           "()J",                         (void*)jni_CreatePlayer },
     { "nOpenUri",                "(JLjava/lang/String;)V",      (void*)jni_OpenUri },
+    { "nOpenUriWithHeaders",     "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaders },
     { "nPlay",                   "(J)V",                        (void*)jni_Play },
     { "nPause",                  "(J)V",                        (void*)jni_Pause },
     { "nSetVolume",              "(JF)V",                       (void*)jni_SetVolume },

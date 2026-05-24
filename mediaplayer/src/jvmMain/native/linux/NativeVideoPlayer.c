@@ -46,6 +46,8 @@ struct VideoPlayer {
     float   volume;
     float   playback_speed;
     int     did_play_to_end; // atomic flag
+    pthread_mutex_t headers_lock;
+    char*   request_headers;
 
     // Bus polling thread
     pthread_t bus_thread;
@@ -59,6 +61,9 @@ struct VideoPlayer {
 static void  process_bus_message(VideoPlayer* p, GstMessage* msg);
 static void* bus_thread_func(void* data);
 static GstFlowReturn on_new_sample(GstAppSink* sink, gpointer data);
+static void  on_source_setup(GstElement* playbin, GstElement* source, gpointer data);
+static void  on_element_setup(GstElement* playbin, GstElement* element, gpointer data);
+static void  apply_request_headers_to_source(GstElement* source, const char* header_lines);
 static void  update_metadata_from_tags(VideoPlayer* p, GstTagList* tags);
 static void  update_stream_metadata(VideoPlayer* p);
 
@@ -138,6 +143,93 @@ static void process_bus_message(VideoPlayer* p, GstMessage* msg) {
 }
 
 // ---------------------------------------------------------------------------
+// HTTP request headers
+// ---------------------------------------------------------------------------
+
+static void on_source_setup(GstElement* playbin, GstElement* source, gpointer data) {
+    (void)playbin;
+    VideoPlayer* p = (VideoPlayer*)data;
+    if (!p || !source) return;
+
+    char* headers = NULL;
+    pthread_mutex_lock(&p->headers_lock);
+    if (p->request_headers) {
+        headers = g_strdup(p->request_headers);
+    }
+    pthread_mutex_unlock(&p->headers_lock);
+
+    if (!headers) return;
+    apply_request_headers_to_source(source, headers);
+    g_free(headers);
+}
+
+static void on_element_setup(GstElement* playbin, GstElement* element, gpointer data) {
+    (void)playbin;
+    VideoPlayer* p = (VideoPlayer*)data;
+    if (!p || !element) return;
+
+    char* headers = NULL;
+    pthread_mutex_lock(&p->headers_lock);
+    if (p->request_headers) {
+        headers = g_strdup(p->request_headers);
+    }
+    pthread_mutex_unlock(&p->headers_lock);
+
+    if (!headers) return;
+    apply_request_headers_to_source(element, headers);
+    g_free(headers);
+}
+
+static void apply_request_headers_to_source(GstElement* source, const char* header_lines) {
+    if (!source || !header_lines || !header_lines[0]) return;
+
+    GParamSpec* extra_headers_property =
+        g_object_class_find_property(G_OBJECT_GET_CLASS(source), "extra-headers");
+    GParamSpec* user_agent_property =
+        g_object_class_find_property(G_OBJECT_GET_CLASS(source), "user-agent");
+    if (extra_headers_property && extra_headers_property->value_type != GST_TYPE_STRUCTURE) {
+        extra_headers_property = NULL;
+    }
+    if (user_agent_property && user_agent_property->value_type != G_TYPE_STRING) {
+        user_agent_property = NULL;
+    }
+
+    if (!extra_headers_property && !user_agent_property) return;
+
+    GstStructure* headers = gst_structure_new_empty("request-headers");
+    gboolean has_headers = FALSE;
+    gchar** lines = g_strsplit(header_lines, "\n", -1);
+
+    for (gchar** cursor = lines; cursor && *cursor; cursor++) {
+        gchar* line = g_strstrip(*cursor);
+        if (!line[0]) continue;
+
+        gchar* separator = strchr(line, ':');
+        if (!separator) continue;
+
+        *separator = '\0';
+        gchar* name = g_strstrip(line);
+        gchar* value = g_strstrip(separator + 1);
+        if (!name[0] || !value[0]) continue;
+
+        if (extra_headers_property) {
+            gst_structure_set(headers, name, G_TYPE_STRING, value, NULL);
+            has_headers = TRUE;
+        }
+        if (user_agent_property && g_ascii_strcasecmp(name, "User-Agent") == 0) {
+            g_object_set(source, "user-agent", value, NULL);
+        }
+    }
+
+    if (extra_headers_property && has_headers) {
+        g_object_set(source, "extra-headers", headers, NULL);
+    }
+
+    g_strfreev(lines);
+    gst_structure_free(headers);
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
@@ -149,6 +241,7 @@ VideoPlayer* nvp_create(void) {
 
     pthread_mutex_init(&p->frame_lock, NULL);
     pthread_mutex_init(&p->meta_lock, NULL);
+    pthread_mutex_init(&p->headers_lock, NULL);
     p->volume = 1.0f;
     p->playback_speed = 1.0f;
 
@@ -157,8 +250,16 @@ VideoPlayer* nvp_create(void) {
     if (!p->pipeline) {
         pthread_mutex_destroy(&p->frame_lock);
         pthread_mutex_destroy(&p->meta_lock);
+        pthread_mutex_destroy(&p->headers_lock);
         free(p);
         return NULL;
+    }
+
+    if (g_signal_lookup("source-setup", G_OBJECT_TYPE(p->pipeline)) != 0) {
+        g_signal_connect(p->pipeline, "source-setup", G_CALLBACK(on_source_setup), p);
+    }
+    if (g_signal_lookup("element-setup", G_OBJECT_TYPE(p->pipeline)) != 0) {
+        g_signal_connect(p->pipeline, "element-setup", G_CALLBACK(on_element_setup), p);
     }
 
     // Create appsink for video frames
@@ -167,6 +268,7 @@ VideoPlayer* nvp_create(void) {
         gst_object_unref(p->pipeline);
         pthread_mutex_destroy(&p->frame_lock);
         pthread_mutex_destroy(&p->meta_lock);
+        pthread_mutex_destroy(&p->headers_lock);
         free(p);
         return NULL;
     }
@@ -276,6 +378,12 @@ void nvp_destroy(VideoPlayer* p) {
     pthread_mutex_unlock(&p->meta_lock);
     pthread_mutex_destroy(&p->meta_lock);
 
+    pthread_mutex_lock(&p->headers_lock);
+    g_free(p->request_headers);
+    p->request_headers = NULL;
+    pthread_mutex_unlock(&p->headers_lock);
+    pthread_mutex_destroy(&p->headers_lock);
+
     free(p);
 }
 
@@ -284,11 +392,20 @@ void nvp_destroy(VideoPlayer* p) {
 // ---------------------------------------------------------------------------
 
 int nvp_open_uri(VideoPlayer* p, const char* uri) {
+    return nvp_open_uri_with_headers(p, uri, NULL);
+}
+
+int nvp_open_uri_with_headers(VideoPlayer* p, const char* uri, const char* request_headers) {
     if (!p || !uri) return 0;
 
     // Reset state
     gst_element_set_state(p->pipeline, GST_STATE_NULL);
     p->did_play_to_end = 0;
+
+    pthread_mutex_lock(&p->headers_lock);
+    g_free(p->request_headers);
+    p->request_headers = request_headers && request_headers[0] ? g_strdup(request_headers) : NULL;
+    pthread_mutex_unlock(&p->headers_lock);
 
     // Clear old frame
     pthread_mutex_lock(&p->frame_lock);

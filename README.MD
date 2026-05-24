@@ -96,24 +96,29 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 
 > † On macOS, MKV/WebM support is handled by optional fallback backends for formats AVPlayer cannot demux directly; see [macOS MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
-## ✅ Supported Codec Checks
+## ✅ Media Support Preflight
 
-The library exposes a codec enum and suspendable platform-specific queries so apps can check whether a codec is reported as supported by the current backend:
+The library exposes a single suspendable preflight query so apps can check player capabilities, source/container support and codecs before creating a `VideoPlayerState` or navigating to the player screen:
 
 ```kotlin
-val codecSupport = SupportedMediaCodecs.query()
+val mediaSupport = MediaSupport.query()
 
-val h264Supported = codecSupport.isSupported(MediaCodec.H264)
-val supportedVideoCodecs = codecSupport.videoCodecs
-val supportedAudioCodecs = codecSupport.audioCodecs
-val supportedCodecs = codecSupport.allCodecs
+val mkvSupported = mediaSupport.capabilities.supportsMkv
+val canOpenSource = mediaSupport.canPlaySource(
+    uri = "file:///movie.mkv",
+    mimeType = "video/x-matroska",
+)
 
-// Or query a single codec from a coroutine:
-val aacSupported = SupportedMediaCodecs.queryIsSupported(MediaCodec.AAC)
+val h264Supported = mediaSupport.isCodecSupported(MediaCodec.H264)
+val supportedVideoCodecs = mediaSupport.videoCodecs
+val supportedAudioCodecs = mediaSupport.audioCodecs
+val supportedCodecs = mediaSupport.allCodecs
 ```
 
+`MediaSupport.query()` checks the current platform contract for URI schemes and known container/adaptive formats such as MKV and HLS, plus codec support reported by the backend. On browser targets it also asks `HTMLVideoElement.canPlayType` for MIME types that the browser can report before playback.
+
 > [!NOTE]
-> Codec support can still depend on the device, OS version, browser, installed system components, or GStreamer plugins. Android and web targets query the current runtime where possible. Desktop and iOS expose conservative backend capability lists. Query methods are suspend functions so callers can run them from `LaunchedEffect`, `async`, `produceState`, or their own coroutine/lazy strategy.
+> Media support can still depend on the device, OS version, browser, installed system components, or GStreamer plugins. Android and web targets query the current runtime where possible. Desktop and iOS expose conservative backend capability lists. Query methods are suspend functions so callers can run them from `LaunchedEffect`, `async`, `produceState`, or their own coroutine/lazy strategy.
 
 ## 🔧 Installation
 

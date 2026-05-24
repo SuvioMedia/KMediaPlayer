@@ -7,7 +7,7 @@ import java.nio.ByteBuffer
 
 internal object WindowsNativeBridge {
     /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the DLL. */
-    private const val EXPECTED_NATIVE_VERSION = 2
+    private const val EXPECTED_NATIVE_VERSION = 3
 
     init {
         NativeLibraryLoader.load("NativeVideoPlayer", WindowsNativeBridge::class.java)
@@ -64,6 +64,13 @@ internal object WindowsNativeBridge {
     @JvmStatic external fun nOpenMedia(
         handle: Long,
         url: String,
+        startPlayback: Boolean,
+    ): Int
+
+    @JvmStatic external fun nOpenMediaWithHeaders(
+        handle: Long,
+        url: String,
+        requestHeaders: String,
         startPlayback: Boolean,
     ): Int
 

@@ -19,6 +19,8 @@ import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
+import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.hundredNanosecondsAsDuration
@@ -211,10 +213,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     override val error get() = _error
     override val capabilities: PlayerCapabilities =
         PlayerCapabilities(
-            supportsHls = true,
             supportsMkv = false,
-            supportsExternalSubtitles = true,
-            supportsAudioTracks = true,
         )
 
     override fun clearError() {
@@ -342,6 +341,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
     // Variable to store the last opened URI
     private var lastUri: String? = null
+    private var lastRequestHeaders: Map<String, String> = emptyMap()
 
     init {
         // Kick off native initialization immediately
@@ -385,6 +385,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
         val instance = videoPlayerInstance
         videoPlayerInstance = 0L
         lastUri = null
+        lastRequestHeaders = emptyMap()
 
         // Native cleanup must run SYNCHRONOUSLY. Compose Desktop's window close
         // ultimately calls System.exit, which will not wait for an arbitrary
@@ -486,13 +487,16 @@ class WindowsVideoPlayerState : VideoPlayerState {
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
     ) {
         if (isDisposing.get()) {
             windowsLogger.w { "Ignoring openUri call - player is being disposed" }
             return
         }
 
+        val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
         lastUri = uri
+        lastRequestHeaders = sanitizedHeaders
         playbackSpeed = 1.0f
 
         scope.launch {
@@ -501,7 +505,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 withTimeout(10_000) { initReady.await() }
 
                 // Here the native instance is guaranteed to be non-null
-                openUriInternal(uri, initializeplayerState)
+                openUriInternal(uri, initializeplayerState, sanitizedHeaders)
             } catch (_: TimeoutCancellationException) {
                 setError("Player initialization timed out after 10 s.")
             } catch (e: Exception) {
@@ -526,6 +530,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private fun openUriInternal(
         uri: String,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
     ) {
         scope.launch {
             if (isDisposing.get()) {
@@ -575,7 +580,13 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     // We explicitly call SetPlaybackState(true) later, right before starting
                     // the frame-reading coroutine, so the wall-clock is in sync with frame production.
                     val startPlayback = initializeplayerState == InitialPlayerState.PLAY
-                    val hrOpen = player.OpenMedia(instance, uri, false)
+                    val requestHeaderLines = requestHeaders.requestHeadersLineString()
+                    val hrOpen =
+                        if (requestHeaderLines.isBlank()) {
+                            player.OpenMedia(instance, uri, false)
+                        } else {
+                            player.nOpenMediaWithHeaders(instance, uri, requestHeaderLines, false)
+                        }
                     if (hrOpen < 0) {
                         setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                         return@withLock
@@ -682,7 +693,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     setError("Error while opening media: ${e.message}")
                     _hasMedia = false
                 } finally {
-                    if (!_hasMedia) isLoading = false
+                    if (!_hasMedia) {
+                        isLoading = false
+                    }
                 }
             }
         }
@@ -1006,7 +1019,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // Timeout or cancellation — if we still have a URI, try a fresh open
                 if (!_hasMedia) {
                     lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
-                        openUriInternal(uri, InitialPlayerState.PLAY)
+                        openUriInternal(uri, InitialPlayerState.PLAY, lastRequestHeaders)
                     }
                 }
                 return@launch

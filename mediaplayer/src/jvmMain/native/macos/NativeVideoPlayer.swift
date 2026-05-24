@@ -137,11 +137,14 @@ class MacVideoPlayer {
     }
 
     /// Configures the asset for HLS streaming
-    private func configureHLSAsset(_ asset: AVURLAsset) -> AVURLAsset {
+    private func configureHLSAsset(_ asset: AVURLAsset, requestHeaders: [String: String]) -> AVURLAsset {
         // Configure asset for optimal HLS streaming
-        let options: [String: Any] = [
+        var options: [String: Any] = [
             AVURLAssetPreferPreciseDurationAndTimingKey: true
         ]
+        if !requestHeaders.isEmpty {
+            options["AVURLAssetHTTPHeaderFieldsKey"] = requestHeaders
+        }
 
         // Create new asset with HLS-optimized options
         return AVURLAsset(url: asset.url, options: options)
@@ -681,6 +684,11 @@ class MacVideoPlayer {
 
     /// Opens the video from the given URI (local or network)
     func openUri(_ uri: String) {
+        openUri(uri, requestHeaders: [:])
+    }
+
+    /// Opens the video from the given URI (local or network) with HTTP headers for remote assets.
+    func openUri(_ uri: String, requestHeaders: [String: String]) {
         isReadyForPlayback = false
         pendingPlay = false
 
@@ -704,10 +712,17 @@ class MacVideoPlayer {
         }
 
         let mimeType = detectMimeType(at:url)
-        var asset = AVURLAsset(url: url, options: mimeType != nil ? ["AVURLAssetOutOfBandMIMETypeKey": mimeType!] : nil)
+        var assetOptions: [String: Any] = [:]
+        if let mimeType = mimeType {
+            assetOptions["AVURLAssetOutOfBandMIMETypeKey"] = mimeType
+        }
+        if !requestHeaders.isEmpty {
+            assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = requestHeaders
+        }
+        var asset = AVURLAsset(url: url, options: assetOptions.isEmpty ? nil : assetOptions)
         // Configure asset for HLS if needed
         if isHLSStream {
-            asset = configureHLSAsset(asset)
+            asset = configureHLSAsset(asset, requestHeaders: requestHeaders)
         }
 
         // Extract metadata from the asset
@@ -1356,6 +1371,37 @@ public func openUri(_ context: UnsafeMutableRawPointer?, _ uri: UnsafePointer<CC
     DispatchQueue.global(qos: .userInitiated).async {
         player.openUri(swiftUri)
     }
+}
+
+@_cdecl("openUriWithHeaders")
+public func openUriWithHeaders(
+    _ context: UnsafeMutableRawPointer?,
+    _ uri: UnsafePointer<CChar>?,
+    _ requestHeadersJson: UnsafePointer<CChar>?
+) {
+    guard let context = context,
+          let uriCStr = uri,
+          let swiftUri = String(validatingUTF8: uriCStr)
+    else {
+        print("Invalid parameters for openUriWithHeaders")
+        return
+    }
+    let requestHeaders = parseRequestHeadersJson(requestHeadersJson)
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    DispatchQueue.global(qos: .userInitiated).async {
+        player.openUri(swiftUri, requestHeaders: requestHeaders)
+    }
+}
+
+private func parseRequestHeadersJson(_ requestHeadersJson: UnsafePointer<CChar>?) -> [String: String] {
+    guard let requestHeadersJson = requestHeadersJson,
+          let json = String(validatingUTF8: requestHeadersJson),
+          let data = json.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+        return [:]
+    }
+    return object.compactMapValues { value in value as? String }
 }
 
 @_cdecl("playVideo")

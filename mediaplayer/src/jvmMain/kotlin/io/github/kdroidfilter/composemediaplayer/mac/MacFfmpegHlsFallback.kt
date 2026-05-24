@@ -7,6 +7,8 @@ import io.github.kdroidfilter.composemediaplayer.MAC_FFMPEG_AUDIO_TRACK_ID_PREFI
 import io.github.kdroidfilter.composemediaplayer.MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
+import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -38,8 +40,12 @@ internal object MacAvFoundationContainerSupport {
             "audio/webm",
         )
 
-    suspend fun needsFfmpegFallback(uri: String): Boolean =
+    suspend fun needsFfmpegFallback(
+        uri: String,
+        requestHeaders: Map<String, String> = emptyMap(),
+    ): Boolean =
         withContext(Dispatchers.IO) {
+            val headers = requestHeaders.sanitizedRequestHeaders()
             val localFile = localFile(uri)
             if (localFile != null) {
                 return@withContext hasUnsupportedExtension(localFile.name) || hasMatroskaSignature(localFile)
@@ -53,22 +59,22 @@ internal object MacAvFoundationContainerSupport {
                 return@withContext false
             }
 
-            val headers = readRemoteHeaders(uri)
-            if (headers != null) {
+            val remoteHeaders = readRemoteHeaders(uri, headers)
+            if (remoteHeaders != null) {
                 val contentType =
-                    headers.contentType
+                    remoteHeaders.contentType
                         ?.substringBefore(";")
                         ?.trim()
                         ?.lowercase()
                 if (contentType in unsupportedContentTypes) {
                     return@withContext true
                 }
-                if (hasUnsupportedExtension(headers.contentDispositionFilename)) {
+                if (hasUnsupportedExtension(remoteHeaders.contentDispositionFilename)) {
                     return@withContext true
                 }
             }
 
-            readRemotePrefix(uri)?.let(::hasMatroskaSignature)
+            readRemotePrefix(uri, headers)?.let(::hasMatroskaSignature)
                 ?: false
         }
 
@@ -123,7 +129,10 @@ internal object MacAvFoundationContainerSupport {
         return scheme == "http" || scheme == "https"
     }
 
-    private fun readRemoteHeaders(uri: String): RemoteHeaders? =
+    private fun readRemoteHeaders(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): RemoteHeaders? =
         runCatching {
             (URL(uri).openConnection() as? HttpURLConnection)?.run {
                 instanceFollowRedirects = true
@@ -131,6 +140,7 @@ internal object MacAvFoundationContainerSupport {
                 connectTimeout = REMOTE_PROBE_TIMEOUT_MS
                 readTimeout = REMOTE_PROBE_TIMEOUT_MS
                 setRequestProperty("User-Agent", USER_AGENT)
+                requestHeaders.forEach { (name, value) -> setRequestProperty(name, value) }
                 try {
                     RemoteHeaders(
                         contentType = contentType,
@@ -142,7 +152,10 @@ internal object MacAvFoundationContainerSupport {
             }
         }.getOrNull()
 
-    private fun readRemotePrefix(uri: String): ByteArray? =
+    private fun readRemotePrefix(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): ByteArray? =
         runCatching {
             (URL(uri).openConnection() as? HttpURLConnection)?.run {
                 instanceFollowRedirects = true
@@ -150,6 +163,7 @@ internal object MacAvFoundationContainerSupport {
                 connectTimeout = REMOTE_PROBE_TIMEOUT_MS
                 readTimeout = REMOTE_PROBE_TIMEOUT_MS
                 setRequestProperty("User-Agent", USER_AGENT)
+                requestHeaders.forEach { (name, value) -> setRequestProperty(name, value) }
                 setRequestProperty("Range", "bytes=0-63")
                 try {
                     inputStream.use { input ->
@@ -265,6 +279,7 @@ internal class MacFfmpegHlsFallback(
 
     suspend fun start(
         uri: String,
+        requestHeaders: Map<String, String> = emptyMap(),
         selectedAudioStreamIndex: Int? = null,
         selectedSubtitleStreamIndex: Int? = null,
         startTimeSeconds: Double = 0.0,
@@ -272,7 +287,8 @@ internal class MacFfmpegHlsFallback(
         withContext(Dispatchers.IO) {
             close()
 
-            val trackInfo = probeTrackInfo(uri)
+            val headers = requestHeaders.sanitizedRequestHeaders()
+            val trackInfo = probeTrackInfo(uri, headers)
             val selectedAudioStream =
                 selectedAudioStreamIndex
                     ?.let { requested -> trackInfo.audioStreams.firstOrNull { it.streamIndex == requested } }
@@ -300,6 +316,7 @@ internal class MacFfmpegHlsFallback(
             val command =
                 buildFfmpegCommand(
                     uri = uri,
+                    requestHeaders = headers,
                     segmentPattern = segmentPattern,
                     playlist = playlist,
                     selectedAudioStreamIndex = selectedAudioStream?.streamIndex,
@@ -406,6 +423,7 @@ internal class MacFfmpegHlsFallback(
 
     private fun buildFfmpegCommand(
         uri: String,
+        requestHeaders: Map<String, String>,
         segmentPattern: String,
         playlist: Path,
         selectedAudioStreamIndex: Int?,
@@ -425,6 +443,10 @@ internal class MacFfmpegHlsFallback(
 
         if (startTimeSeconds > 0.0) {
             command += listOf("-ss", formatSeekTime(startTimeSeconds))
+        }
+
+        requestHeaders.requestHeadersLineString().takeIf { it.isNotBlank() }?.let { headerLines ->
+            command += listOf("-headers", headerLines)
         }
 
         command +=
@@ -489,20 +511,32 @@ internal class MacFfmpegHlsFallback(
 
     private fun formatSeekTime(seconds: Double): String = "%.3f".format(java.util.Locale.US, seconds.coerceAtLeast(0.0))
 
-    private fun probeTrackInfo(uri: String): ProbeTrackInfo {
+    private fun probeTrackInfo(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): ProbeTrackInfo {
         val ffprobe = MacFfmpegLocator.findFfprobe(ffmpegPath) ?: return ProbeTrackInfo()
-        val process =
-            ProcessBuilder(
+        val command =
+            mutableListOf(
                 ffprobe,
                 "-v",
                 "error",
+            )
+        requestHeaders.requestHeadersLineString().takeIf { it.isNotBlank() }?.let { headerLines ->
+            command += listOf("-headers", headerLines)
+        }
+        command +=
+            listOf(
                 "-show_entries",
                 "stream=index,codec_type,codec_name,channels,sample_rate,bit_rate:stream_tags=language,title:" +
                     "stream_disposition=default:format=duration",
                 "-of",
                 "flat",
                 uri,
-            ).redirectErrorStream(true)
+            )
+        val process =
+            ProcessBuilder(command)
+                .redirectErrorStream(true)
                 .start()
 
         if (!process.waitFor(12, TimeUnit.SECONDS)) {

@@ -40,15 +40,29 @@ actual fun createVideoPlayerState(
     cacheConfig: CacheConfig,
 ): VideoPlayerState = DefaultVideoPlayerState()
 
+internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
+    PlayerCapabilities(
+        supportsMkv = canPlayWebMimeType(MATROSKA_MIME_TYPE),
+        supportsPiP = isWebPictureInPictureSupported(),
+    )
+
+internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
+    canPlayWebSource(
+        uri = source.uri,
+        mimeType = source.mimeType,
+        capabilities = platformPlayerCapabilities(),
+    )
+
 /**
  * Implementation of VideoPlayerState for WebAssembly.
  * Manages the state of a video player including playback controls, media information,
  * and error handling.
  */
-@Stable
-open class DefaultVideoPlayerState : VideoPlayerState {
-    // Variable to store the last opened URI for potential replay
-    private var lastUri: String? = null
+    @Stable
+    open class DefaultVideoPlayerState : VideoPlayerState {
+        // Variable to store the last opened URI for potential replay
+        private var lastUri: String? = null
+        private var lastRequestHeaders: Map<String, String> = emptyMap()
 
     // Coroutine scope for managing async operations
     private val playerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -72,6 +86,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     // Source URI of the current media
     private var _sourceUri by mutableStateOf<String?>(null)
     val sourceUri: String? get() = _sourceUri
+    private var _requestHeaders by mutableStateOf<Map<String, String>>(emptyMap())
+    val requestHeaders: Map<String, String> get() = _requestHeaders
 
     // Playback state properties
     private var _isPlaying by mutableStateOf(false)
@@ -111,17 +127,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override val hlsQualityMode: HlsQualityMode get() = _hlsQualityMode
     internal var applyHlsQualityCallback: ((String?) -> Unit)? = null
     override val capabilities: PlayerCapabilities
-        get() =
-            PlayerCapabilities(
-                supportsHls = true,
-                supportsMkv = canPlayWebMimeType(MATROSKA_MIME_TYPE),
-                supportsExternalSubtitles = true,
-                supportsAudioTracks = true,
-                supportsPiP = isWebPictureInPictureSupported(),
-                supportsHlsQualitySelection = true,
-                supportsPlaybackDiagnostics = true,
-                supportedUriSchemes = PlayerCapabilities.DEFAULT_URI_SCHEMES,
-            )
+        get() = platformPlayerCapabilities()
     override val aspectRatio: Float = 16f / 9f // TO DO: Get from video source
 
     // Subtitle management
@@ -408,14 +414,18 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
     ) {
         playerScope.coroutineContext.cancelChildren()
         val sessionId = nextMediaSessionId()
+        val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
 
         // Store the URI for potential replay after stop
         lastUri = uri
+        lastRequestHeaders = sanitizedHeaders
 
         _sourceUri = uri
+        _requestHeaders = sanitizedHeaders
         _hasMedia = true
         _isLoading = true // Set initial loading state
         _error = null
@@ -496,7 +506,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             _isPlaying = true
         } else if (!_hasMedia && lastUri != null) {
             // If we have a stored URI but no media, reopen the media
-            openUri(lastUri!!)
+            openUri(lastUri!!, requestHeaders = lastRequestHeaders)
         }
     }
 
@@ -546,6 +556,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override fun releaseSource() {
         stop()
         lastUri = null
+        lastRequestHeaders = emptyMap()
+        _requestHeaders = emptyMap()
     }
 
     /**
@@ -781,7 +793,7 @@ private fun canPlayWebSource(
 
     val normalizedMimeType = mimeType?.substringBefore(';')?.trim()?.lowercase()
     val cleanUri = uri.substringBefore('?').substringBefore('#').lowercase()
-    if (normalizedMimeType.isHlsMimeType() || cleanUri.endsWith(".m3u8")) return capabilities.supportsHls
+    if (normalizedMimeType.isHlsMimeType() || cleanUri.endsWith(".m3u8")) return true
     if (normalizedMimeType != null) return canPlayWebMimeType(normalizedMimeType)
 
     val extension = cleanUri.substringAfterLast('.', "")

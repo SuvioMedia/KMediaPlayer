@@ -19,6 +19,7 @@ void         nvp_destroy(VideoPlayer* p);
 
 // Playback control
 int  nvp_open_uri(VideoPlayer* p, const char* uri);
+int  nvp_open_uri_with_headers(VideoPlayer* p, const char* uri, const char* request_headers);
 void nvp_play(VideoPlayer* p);
 void nvp_pause(VideoPlayer* p);
 void nvp_set_volume(VideoPlayer* p, float volume);

@@ -64,6 +64,8 @@ private fun isHlsLoaded(): Boolean = js("typeof globalThis.Hls === 'function'")
 internal suspend fun HTMLVideoElement.configureHlsSource(
     playerState: DefaultVideoPlayerState,
     sourceUri: String,
+    requestHeadersJson: String,
+    useCredentials: Boolean,
     scope: CoroutineScope,
     mediaSessionId: Long,
 ): Boolean {
@@ -73,6 +75,8 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
     setupHlsSource(
         video = this,
         sourceUri = sourceUri,
+        requestHeadersJson = requestHeadersJson,
+        useCredentials = useCredentials,
         onTracksChanged = {
             scope.launch {
                 if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
@@ -116,13 +120,32 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
 private fun setupHlsSource(
     video: HTMLVideoElement,
     sourceUri: String,
+    requestHeadersJson: String,
+    useCredentials: Boolean,
     onTracksChanged: () -> Unit,
     onError: (String, String?, String?, Boolean) -> Unit,
 ): Unit =
     js(
         """
         {
-                const Hls = globalThis.Hls;
+            const Hls = globalThis.Hls;
+            const requestHeaders = (function() {
+                try { return JSON.parse(requestHeadersJson || "{}") || {}; } catch (_) { return {}; }
+            })();
+            const hasRequestHeaders = Object.keys(requestHeaders).length > 0;
+            const applyRequestHeaders = function(xhr) {
+                if (useCredentials) xhr.withCredentials = true;
+                if (!hasRequestHeaders) return;
+                Object.keys(requestHeaders).forEach(function(name) {
+                    try { xhr.setRequestHeader(name, requestHeaders[name]); } catch (_) {}
+                });
+            };
+            const fetchOptions = function() {
+                const options = {};
+                if (hasRequestHeaders) options.headers = requestHeaders;
+                if (useCredentials) options.credentials = "include";
+                return options;
+            };
             if (!Hls || typeof Hls.isSupported !== "function" || !Hls.isSupported()) {
                 video.src = sourceUri;
                 video.__composeMediaPlayerHlsSourceUri = sourceUri;
@@ -133,7 +156,22 @@ private fun setupHlsSource(
                     try { video.__composeMediaPlayerHls.destroy(); } catch (_) {}
                 }
 
-                const hls = new Hls({ renderTextTracksNatively: false });
+                const hls = new Hls({
+                    renderTextTracksNatively: false,
+                    xhrSetup: function(xhr) {
+                        applyRequestHeaders(xhr);
+                    },
+                    fetchSetup: function(context, initParams) {
+                        const init = Object.assign({}, initParams || {});
+                        const headers = new Headers(init.headers || {});
+                        Object.keys(requestHeaders).forEach(function(name) {
+                            try { headers.set(name, requestHeaders[name]); } catch (_) {}
+                        });
+                        init.headers = headers;
+                        if (useCredentials) init.credentials = "include";
+                        return new Request(context.url, init);
+                    }
+                });
                 video.__composeMediaPlayerHls = hls;
                 video.__composeMediaPlayerHlsSourceUri = sourceUri;
                 video.__composeMediaPlayerHlsSubtitleRows = "";
@@ -209,7 +247,7 @@ private fun setupHlsSource(
                 });
                 hls.attachMedia(video);
 
-                fetch(sourceUri)
+                fetch(sourceUri, fetchOptions())
                     .then(function(response) { return response.ok ? response.text() : ""; })
                     .then(function(text) {
                         if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;

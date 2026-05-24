@@ -7,6 +7,8 @@ import io.github.kdroidfilter.composemediaplayer.MAC_VLC_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.MAC_VLC_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
+import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -153,6 +155,7 @@ internal class MacVlcHlsFallback(
 
     suspend fun start(
         uri: String,
+        requestHeaders: Map<String, String> = emptyMap(),
         selectedAudioStreamIndex: Int? = null,
         selectedSubtitleStreamIndex: Int? = null,
         startTimeSeconds: Double = 0.0,
@@ -160,7 +163,8 @@ internal class MacVlcHlsFallback(
         withContext(Dispatchers.IO) {
             close()
 
-            val trackInfo = probeTrackInfo(uri)
+            val headers = requestHeaders.sanitizedRequestHeaders()
+            val trackInfo = probeTrackInfo(uri, headers)
             val selectedAudioStream =
                 selectedAudioStreamIndex
                     ?.let { requested -> trackInfo.audioStreams.firstOrNull { it.streamIndex == requested } }
@@ -187,6 +191,7 @@ internal class MacVlcHlsFallback(
             val command =
                 buildVlcCommand(
                     uri = uri,
+                    requestHeaders = headers,
                     segmentPattern = segmentPattern,
                     playlist = playlist,
                     selectedAudioStream = selectedAudioStream,
@@ -244,6 +249,7 @@ internal class MacVlcHlsFallback(
 
     private fun buildVlcCommand(
         uri: String,
+        requestHeaders: Map<String, String>,
         segmentPattern: String,
         playlist: Path,
         selectedAudioStream: VlcAudioStream?,
@@ -280,6 +286,14 @@ internal class MacVlcHlsFallback(
         }
         if (startTimeSeconds > 0.0) {
             command += "--start-time=${formatSeekTime(startTimeSeconds)}"
+        }
+        requestHeaders.forEach { (name, value) ->
+            when {
+                name.equals("User-Agent", ignoreCase = true) -> command += "--http-user-agent=$value"
+                name.equals("Referer", ignoreCase = true) || name.equals("Referrer", ignoreCase = true) ->
+                    command += "--http-referrer=$value"
+                name.equals("Cookie", ignoreCase = true) -> command += "--http-cookie=$value"
+            }
         }
 
         command += uri
@@ -344,20 +358,32 @@ internal class MacVlcHlsFallback(
             else -> "application/octet-stream"
         }
 
-    private fun probeTrackInfo(uri: String): VlcProbeTrackInfo {
+    private fun probeTrackInfo(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): VlcProbeTrackInfo {
         val ffprobe = MacFfmpegLocator.findFfprobe() ?: return VlcProbeTrackInfo()
-        val process =
-            ProcessBuilder(
+        val command =
+            mutableListOf(
                 ffprobe,
                 "-v",
                 "error",
+            )
+        requestHeaders.requestHeadersLineString().takeIf { it.isNotBlank() }?.let { headerLines ->
+            command += listOf("-headers", headerLines)
+        }
+        command +=
+            listOf(
                 "-show_entries",
                 "stream=index,codec_type,codec_name,channels,sample_rate,bit_rate:stream_tags=language,title:" +
                     "stream_disposition=default:format=duration",
                 "-of",
                 "flat",
                 uri,
-            ).redirectErrorStream(true)
+            )
+        val process =
+            ProcessBuilder(command)
+                .redirectErrorStream(true)
                 .start()
 
         if (!process.waitFor(12, TimeUnit.SECONDS)) {

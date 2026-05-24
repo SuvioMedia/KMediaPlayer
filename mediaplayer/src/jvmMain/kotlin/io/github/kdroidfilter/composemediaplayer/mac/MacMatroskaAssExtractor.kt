@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
+import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
 import java.io.Closeable
@@ -10,6 +11,7 @@ import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.net.URLConnection
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToLong
@@ -61,17 +63,34 @@ private const val FAST_MAX_CLUSTER_RANGE_BYTES = 4L * 1024L * 1024L
 private const val FAST_SUBTITLE_LOOKAHEAD_MS = 180_000L
 private const val FAST_MAX_CLUSTERS = 12
 
+private fun URLConnection.applyRequestHeaders(headers: Map<String, String>) {
+    if (headers.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+        setRequestProperty("User-Agent", "ComposeMediaPlayer")
+    }
+    headers.forEach { (name, value) -> setRequestProperty(name, value) }
+}
+
+@Suppress("LargeClass")
 internal object MacMatroskaAssExtractor {
-    fun probe(uri: String): MacMatroskaProbeInfo? =
-        scan(uri = uri, targetStreamIndex = null, stopAfterTracks = true)?.probeInfo
+    fun probe(
+        uri: String,
+        requestHeaders: Map<String, String> = emptyMap(),
+    ): MacMatroskaProbeInfo? =
+        scan(
+            uri = uri,
+            targetStreamIndex = null,
+            stopAfterTracks = true,
+            requestHeaders = requestHeaders,
+        )?.probeInfo
 
     fun extractPartial(
         uri: String,
         streamIndex: Int,
         playbackTimeMs: Long,
+        requestHeaders: Map<String, String> = emptyMap(),
     ): MacAssSubtitleData? =
         runCatching {
-            MatroskaRangeSource.open(uri).use { source ->
+            MatroskaRangeSource.open(uri, requestHeaders).use { source ->
                 val header = readFastHeader(source) ?: return@use null
                 val targetTrack =
                     header.tracks.firstOrNull { it.streamIndex == streamIndex }
@@ -98,14 +117,22 @@ internal object MacMatroskaAssExtractor {
     fun extract(
         uri: String,
         streamIndex: Int,
-    ): MacAssSubtitleData? = scan(uri = uri, targetStreamIndex = streamIndex, stopAfterTracks = false)?.subtitleData
+        requestHeaders: Map<String, String> = emptyMap(),
+    ): MacAssSubtitleData? =
+        scan(
+            uri = uri,
+            targetStreamIndex = streamIndex,
+            stopAfterTracks = false,
+            requestHeaders = requestHeaders,
+        )?.subtitleData
 
     private fun scan(
         uri: String,
         targetStreamIndex: Int?,
         stopAfterTracks: Boolean,
+        requestHeaders: Map<String, String>,
     ): MacMatroskaScanResult? {
-        openInput(uri).use { input ->
+        openInput(uri, requestHeaders).use { input ->
             val state = MatroskaScanState(targetStreamIndex = targetStreamIndex)
             while (!input.isAtEnd()) {
                 val element = input.readElementHeaderOrNull() ?: break
@@ -798,7 +825,11 @@ internal object MacMatroskaAssExtractor {
             lowerMime == "application/vnd.ms-opentype"
     }
 
-    private fun openInput(uri: String): EbmlInput {
+    private fun openInput(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): EbmlInput {
+        val headers = requestHeaders.sanitizedRequestHeaders()
         val input =
             when {
                 uri.startsWith("http://", ignoreCase = true) ||
@@ -806,7 +837,7 @@ internal object MacMatroskaAssExtractor {
                     val connection = URL(uri).openConnection()
                     connection.connectTimeout = 15_000
                     connection.readTimeout = 300_000
-                    connection.setRequestProperty("User-Agent", "ComposeMediaPlayer")
+                    connection.applyRequestHeaders(headers)
                     if (connection is HttpURLConnection) {
                         connection.instanceFollowRedirects = true
                     }
@@ -1051,10 +1082,14 @@ private interface MatroskaRangeSource : Closeable {
     ): ByteArray?
 
     companion object {
-        fun open(uri: String): MatroskaRangeSource =
+        fun open(
+            uri: String,
+            requestHeaders: Map<String, String>,
+        ): MatroskaRangeSource =
             when {
                 uri.startsWith("http://", ignoreCase = true) ||
-                    uri.startsWith("https://", ignoreCase = true) -> HttpMatroskaRangeSource(uri)
+                    uri.startsWith("https://", ignoreCase = true) ->
+                    HttpMatroskaRangeSource(uri, requestHeaders.sanitizedRequestHeaders())
                 uri.startsWith("file:", ignoreCase = true) -> FileMatroskaRangeSource(File(URI(uri)))
                 else -> FileMatroskaRangeSource(File(uri))
             }
@@ -1088,6 +1123,7 @@ private class FileMatroskaRangeSource(
 
 private class HttpMatroskaRangeSource(
     private val uri: String,
+    private val requestHeaders: Map<String, String>,
 ) : MatroskaRangeSource {
     override val length: Long? by lazy { readLength() }
 
@@ -1103,7 +1139,7 @@ private class HttpMatroskaRangeSource(
         connection.connectTimeout = 15_000
         connection.readTimeout = 60_000
         connection.instanceFollowRedirects = true
-        connection.setRequestProperty("User-Agent", "ComposeMediaPlayer")
+        connection.applyRequestHeaders(requestHeaders)
         connection.setRequestProperty("Range", "bytes=$start-$endInclusive")
         return try {
             val code = connection.responseCode
@@ -1122,7 +1158,7 @@ private class HttpMatroskaRangeSource(
         connection.connectTimeout = 15_000
         connection.readTimeout = 15_000
         connection.instanceFollowRedirects = true
-        connection.setRequestProperty("User-Agent", "ComposeMediaPlayer")
+        connection.applyRequestHeaders(requestHeaders)
         return try {
             connection.inputStream.close()
             connection.getHeaderField("Content-Length")?.toLongOrNull()?.takeIf { it > 0L }

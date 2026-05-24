@@ -31,6 +31,8 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import com.kdroid.androidcontextprovider.ContextProvider
@@ -137,14 +139,7 @@ open class DefaultVideoPlayerState(
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     override val error: VideoPlayerError? get() = _error
     override val capabilities: PlayerCapabilities
-        get() =
-            PlayerCapabilities(
-                supportsHls = true,
-                supportsMkv = true,
-                supportsExternalSubtitles = true,
-                supportsAudioTracks = true,
-                supportsPiP = isPipSupported,
-            )
+        get() = platformPlayerCapabilities().copy(supportsPiP = isPipSupported)
 
     private var _metadata = VideoMetadata()
     override val metadata: VideoMetadata get() = _metadata
@@ -727,10 +722,11 @@ open class DefaultVideoPlayerState(
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
     ) {
         val mediaItemBuilder = MediaItem.Builder().setUri(uri)
         val mediaItem = mediaItemBuilder.build()
-        openFromMediaItem(mediaItem, initializeplayerState)
+        openFromMediaItem(mediaItem, initializeplayerState, requestHeaders)
     }
 
     override fun openFile(
@@ -758,6 +754,7 @@ open class DefaultVideoPlayerState(
     private fun openFromMediaItem(
         mediaItem: MediaItem,
         initializeplayerState: InitialPlayerState,
+        requestHeaders: Map<String, String> = emptyMap(),
     ) {
         synchronized(playerInitializationLock) {
             if (isPlayerReleased) return
@@ -772,7 +769,11 @@ open class DefaultVideoPlayerState(
                     // Extract metadata before preparing the player
                     extractMediaItemMetadata(mediaItem)
 
-                    player.setMediaItem(mediaItem)
+                    if (requestHeaders.isEmpty()) {
+                        player.setMediaItem(mediaItem)
+                    } else {
+                        player.setMediaSource(requestHeaders.mediaSourceFactory().createMediaSource(mediaItem))
+                    }
                     player.prepare()
                     player.volume = volume
                     player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
@@ -794,6 +795,12 @@ open class DefaultVideoPlayerState(
                 }
             }
         }
+    }
+
+    private fun Map<String, String>.mediaSourceFactory(): DefaultMediaSourceFactory {
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(sanitizedRequestHeaders())
+        return DefaultMediaSourceFactory(DefaultDataSource.Factory(context, httpFactory))
     }
 
     override fun play() {

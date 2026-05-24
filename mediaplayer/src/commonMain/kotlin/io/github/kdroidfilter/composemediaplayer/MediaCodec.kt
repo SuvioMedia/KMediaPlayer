@@ -79,16 +79,58 @@ data class MediaCodecSupport(
 }
 
 /**
- * Queries codecs supported by the current platform backend.
- *
- * Query methods are suspend functions because the first runtime query may inspect system decoders
- * or browser media capabilities. Platform implementations cache the result where a runtime query is needed.
+ * Immutable preflight snapshot of player capabilities and codec support for the current platform.
  */
-object SupportedMediaCodecs {
+class MediaSupportSnapshot internal constructor(
+    val capabilities: PlayerCapabilities,
+    val codecs: MediaCodecSupport,
+    private val canPlaySourceQuery: (MediaSourceSpec) -> Boolean,
+) {
+    val audioCodecs: Set<MediaCodec>
+        get() = codecs.audioCodecs
+
+    val videoCodecs: Set<MediaCodec>
+        get() = codecs.videoCodecs
+
+    val allCodecs: Set<MediaCodec>
+        get() = codecs.allCodecs
+
+    fun isCodecSupported(codec: MediaCodec): Boolean = codecs.isSupported(codec)
+
+    fun canPlaySource(
+        uri: String,
+        mimeType: String? = null,
+    ): Boolean = canPlaySource(MediaSourceSpec(uri = uri, mimeType = mimeType))
+
+    fun canPlaySource(source: MediaSourceSpec): Boolean = canPlaySourceQuery(source)
+}
+
+/**
+ * Queries preflight media support for the current platform backend.
+ *
+ * Query methods are suspend functions because codec support may inspect system decoders or browser
+ * media capabilities. Platform implementations cache runtime-heavy results where needed.
+ */
+object MediaSupport {
+    /**
+     * Queries player capabilities and codec support in one snapshot.
+     */
+    suspend fun query(): MediaSupportSnapshot =
+        MediaSupportSnapshot(
+            capabilities = queryCapabilities(),
+            codecs = queryCodecs(),
+            canPlaySourceQuery = ::platformQueryCanPlaySource,
+        )
+
+    /**
+     * Queries player/source capabilities without creating a [VideoPlayerState].
+     */
+    suspend fun queryCapabilities(): PlayerCapabilities = platformPlayerCapabilities()
+
     /**
      * Queries a snapshot of all audio and video codecs reported as supported.
      */
-    suspend fun query(): MediaCodecSupport =
+    suspend fun queryCodecs(): MediaCodecSupport =
         MediaCodecSupport(
             audioCodecs = queryAudioCodecs(),
             videoCodecs = queryVideoCodecs(),
@@ -107,18 +149,33 @@ object SupportedMediaCodecs {
     /**
      * Queries whether [codec] is reported as supported.
      */
-    suspend fun queryIsSupported(codec: MediaCodec): Boolean =
+    suspend fun queryIsCodecSupported(codec: MediaCodec): Boolean =
         when (codec.type) {
             MediaCodecType.AUDIO -> codec in queryAudioCodecs()
             MediaCodecType.VIDEO -> codec in queryVideoCodecs()
         }
+
+    /**
+     * Queries whether the current platform can play a source by URI and optional MIME type.
+     */
+    suspend fun queryCanPlaySource(
+        uri: String,
+        mimeType: String? = null,
+    ): Boolean = queryCanPlaySource(MediaSourceSpec(uri = uri, mimeType = mimeType))
+
+    /**
+     * Queries whether the current platform can play a source.
+     */
+    suspend fun queryCanPlaySource(source: MediaSourceSpec): Boolean = platformQueryCanPlaySource(source)
 }
 
 /**
  * Returns true when this codec is reported as supported by the current platform backend.
  */
-suspend fun MediaCodec.isSupported(): Boolean = SupportedMediaCodecs.queryIsSupported(this)
+suspend fun MediaCodec.isSupported(): Boolean = MediaSupport.queryIsCodecSupported(this)
 
 internal expect suspend fun platformQuerySupportedAudioCodecs(): Set<MediaCodec>
 
 internal expect suspend fun platformQuerySupportedVideoCodecs(): Set<MediaCodec>
+
+internal expect fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean

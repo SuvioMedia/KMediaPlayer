@@ -49,6 +49,18 @@ internal object MacNativeBridge {
         uri: String,
     )
 
+    @JvmStatic external fun nOpenUriWithHeaders(
+        handle: Long,
+        uri: String,
+        requestHeadersJson: String,
+    )
+
+    @JvmStatic external fun nOpenUriWithHeaderLines(
+        handle: Long,
+        uri: String,
+        requestHeaders: String,
+    )
+
     @JvmStatic external fun nPlay(handle: Long)
 
     @JvmStatic external fun nPause(handle: Long)

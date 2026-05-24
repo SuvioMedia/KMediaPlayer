@@ -149,12 +149,14 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
-    ) = delegate.openUri(uri, initializeplayerState)
+        requestHeaders: Map<String, String>,
+    ) = delegate.openUri(uri, initializeplayerState, requestHeaders)
 
     override fun prepare(
         uri: String,
         initializeplayerState: InitialPlayerState,
-    ) = delegate.prepare(uri, initializeplayerState)
+        requestHeaders: Map<String, String>,
+    ) = delegate.prepare(uri, initializeplayerState, requestHeaders)
 
     override fun openFile(
         file: PlatformFile,

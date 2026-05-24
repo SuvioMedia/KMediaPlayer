@@ -10,14 +10,8 @@ data class MediaSourceSpec(
 
 @Stable
 data class PlayerCapabilities(
-    val supportsHls: Boolean = false,
     val supportsMkv: Boolean = false,
-    val supportsExternalSubtitles: Boolean = true,
-    val supportsAudioTracks: Boolean = false,
     val supportsPiP: Boolean = false,
-    val supportsHlsQualitySelection: Boolean = false,
-    val supportsPlaybackDiagnostics: Boolean = false,
-    val supportedUriSchemes: Set<String> = DEFAULT_URI_SCHEMES,
 ) {
     fun canPlaySource(
         uri: String,
@@ -29,23 +23,23 @@ data class PlayerCapabilities(
         if (trimmedUri.isEmpty()) return false
 
         val scheme = trimmedUri.substringBefore(':', missingDelimiterValue = "").lowercase()
-        if (scheme.isNotEmpty() && scheme !in supportedUriSchemes) return false
+        if (scheme.isNotEmpty() && scheme !in DEFAULT_SUPPORTED_URI_SCHEMES) return false
 
         val normalizedMimeType =
             source.mimeType
                 ?.substringBefore(';')
                 ?.trim()
                 ?.lowercase()
-        if (normalizedMimeType.isHlsMimeType() || trimmedUri.isHlsUri()) return supportsHls
+        if (normalizedMimeType.isHlsMimeType() || trimmedUri.isHlsUri()) return true
         if (normalizedMimeType.isMkvMimeType() || trimmedUri.isMkvUri()) return supportsMkv
 
         return true
     }
-
-    companion object {
-        val DEFAULT_URI_SCHEMES = setOf("asset", "blob", "content", "data", "file", "http", "https")
-    }
 }
+
+internal expect fun platformPlayerCapabilities(): PlayerCapabilities
+
+private val DEFAULT_SUPPORTED_URI_SCHEMES = setOf("asset", "blob", "content", "data", "file", "http", "https")
 
 private fun String?.isHlsMimeType(): Boolean =
     this == "application/vnd.apple.mpegurl" ||
