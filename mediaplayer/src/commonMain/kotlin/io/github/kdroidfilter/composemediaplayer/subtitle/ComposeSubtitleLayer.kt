@@ -10,7 +10,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import io.github.kdroidfilter.composemediaplayer.MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +60,7 @@ fun ComposeSubtitleLayer(
             return@LaunchedEffect
         }
 
-        val shouldRefreshLiveSidecar = subtitleTrack.id.startsWith(MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX)
+        val shouldRefreshLiveSidecar = subtitleTrack.id.startsWith(EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX)
         do {
             subtitles = loadAndParseSubtitles(subtitleTrack)
             if (shouldRefreshLiveSidecar) {

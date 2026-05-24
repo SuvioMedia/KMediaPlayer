@@ -1,14 +1,10 @@
-package io.github.kdroidfilter.composemediaplayer.mac
+@file:Suppress("MagicNumber", "TooGenericExceptionCaught", "LoopWithTooManyJumpStatements")
+
+package io.github.kdroidfilter.composemediaplayer
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
-import io.github.kdroidfilter.composemediaplayer.AudioTrack
-import io.github.kdroidfilter.composemediaplayer.MAC_FFMPEG_AUDIO_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
-import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
-import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
-import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -29,7 +25,7 @@ import kotlin.io.path.exists
 import kotlin.io.path.name
 import kotlin.time.Duration.Companion.milliseconds
 
-internal object MacAvFoundationContainerSupport {
+internal object JvmExternalFallbackContainerSupport {
     private val unsupportedExtensions = setOf("mkv", "mk3d", "mka", "mks", "webm")
     private val unsupportedContentTypes =
         setOf(
@@ -40,7 +36,7 @@ internal object MacAvFoundationContainerSupport {
             "audio/webm",
         )
 
-    suspend fun needsFfmpegFallback(
+    suspend fun needsContainerFallback(
         uri: String,
         requestHeaders: Map<String, String> = emptyMap(),
     ): Boolean =
@@ -200,7 +196,7 @@ internal object MacAvFoundationContainerSupport {
     private const val USER_AGENT = "ComposeMediaPlayer/1.0"
 }
 
-internal object MacFfmpegLocator {
+internal object ExternalFfmpegLocator {
     fun findFfmpeg(): String? {
         val configured = configuredFfmpeg()
         if (configured != null && isExecutable(configured)) {
@@ -215,20 +211,20 @@ internal object MacFfmpegLocator {
     fun findFfmpegWithSubtitles(): String? {
         val configured = configuredFfmpeg()
         if (configured != null) {
-            return configured.takeIf { isExecutable(it) && MacFfmpegHlsFallback.supportsSubtitlesFilter(it) }
+            return configured.takeIf { isExecutable(it) && ExternalFfmpegHlsFallback.supportsSubtitlesFilter(it) }
         }
 
         return (homebrewFfmpegFullCandidates() + executableCandidates("ffmpeg"))
             .distinct()
-            .firstOrNull { isExecutable(it) && MacFfmpegHlsFallback.supportsSubtitlesFilter(it) }
+            .firstOrNull { isExecutable(it) && ExternalFfmpegHlsFallback.supportsSubtitlesFilter(it) }
     }
 
     fun findFfprobe(ffmpegPath: String): String? {
         val ffmpegFile = File(ffmpegPath)
-        val sibling = ffmpegFile.parentFile?.resolve("ffprobe")?.absolutePath
-        if (sibling != null && isExecutable(sibling)) {
-            return sibling
-        }
+        ffmpegFile.parentFile
+            ?.let { parent -> executableNames("ffprobe").map { executable -> parent.resolve(executable).absolutePath } }
+            ?.firstOrNull(::isExecutable)
+            ?.let { return it }
         return searchExecutable("ffprobe")
     }
 
@@ -236,6 +232,7 @@ internal object MacFfmpegLocator {
 
     private fun configuredFfmpeg(): String? =
         listOfNotNull(
+            System.getProperty("composemediaplayer.ffmpeg"),
             System.getProperty("composemediaplayer.macos.ffmpeg"),
             System.getenv("COMPOSE_MEDIA_PLAYER_FFMPEG"),
             System.getenv("FFMPEG_PATH"),
@@ -247,13 +244,23 @@ internal object MacFfmpegLocator {
         System
             .getenv("PATH")
             ?.split(File.pathSeparator)
-            ?.map { File(it, name).absolutePath }
-            .orEmpty() +
+            ?.flatMap { directory ->
+                executableNames(name).map { executable -> File(directory, executable).absolutePath }
+            }.orEmpty() +
             listOf(
                 "/opt/homebrew/bin/$name",
                 "/usr/local/bin/$name",
                 "/opt/local/bin/$name",
+                "/usr/bin/$name",
+                "/snap/bin/$name",
             )
+
+    private fun executableNames(name: String): List<String> =
+        if (CurrentPlatform.os == CurrentPlatform.OS.WINDOWS && !name.endsWith(".exe", ignoreCase = true)) {
+            listOf("$name.exe", name)
+        } else {
+            listOf(name)
+        }
 
     private fun homebrewFfmpegFullCandidates(): List<String> =
         listOf(
@@ -267,7 +274,7 @@ internal object MacFfmpegLocator {
     }
 }
 
-internal class MacFfmpegHlsFallback(
+internal class ExternalFfmpegHlsFallback(
     private val ffmpegPath: String,
 ) : Closeable {
     private var process: Process? = null
@@ -275,6 +282,7 @@ internal class MacFfmpegHlsFallback(
     private var httpServer: HttpServer? = null
     private var logReader: Thread? = null
     private var hasSubtitlesFilter: Boolean? = null
+    private var supportedVideoEncoders: Set<String>? = null
     private val recentOutput = StringBuilder()
 
     suspend fun start(
@@ -300,12 +308,12 @@ internal class MacFfmpegHlsFallback(
 
             if (selectedSubtitleStream != null && !supportsSubtitlesFilter()) {
                 throw UnsupportedOperationException(
-                    "Full ASS/SSA rendering on macOS fallback requires an external ffmpeg build with libass " +
+                    "Full ASS/SSA rendering through the external HLS fallback requires an ffmpeg build with libass " +
                         "and the subtitles filter enabled. The configured ffmpeg does not expose that filter.",
                 )
             }
 
-            val tempDirectory = Files.createTempDirectory("compose-media-player-macos-hls-")
+            val tempDirectory = Files.createTempDirectory("compose-media-player-hls-")
             outputDirectory = tempDirectory
             val playlist = tempDirectory.resolve("stream.m3u8")
             val server = startHttpServer(tempDirectory)
@@ -471,14 +479,7 @@ internal class MacFfmpegHlsFallback(
 
         command +=
             listOf(
-                "-c:v",
-                "h264_videotoolbox",
-                "-b:v",
-                "5000k",
-                "-maxrate",
-                "7000k",
-                "-bufsize",
-                "10000k",
+                *videoEncoderArgs().toTypedArray(),
                 "-pix_fmt",
                 "yuv420p",
                 "-c:a",
@@ -511,11 +512,75 @@ internal class MacFfmpegHlsFallback(
 
     private fun formatSeekTime(seconds: Double): String = "%.3f".format(java.util.Locale.US, seconds.coerceAtLeast(0.0))
 
+    private fun videoEncoderArgs(): List<String> {
+        val encoder =
+            when {
+                CurrentPlatform.os == CurrentPlatform.OS.MAC &&
+                    supportsEncoder(
+                        "h264_videotoolbox",
+                    ) -> "h264_videotoolbox"
+                supportsEncoder("libx264") -> "libx264"
+                supportsEncoder("h264") -> "h264"
+                else -> "libx264"
+            }
+
+        return buildList {
+            add("-c:v")
+            add(encoder)
+            if (encoder == "libx264") {
+                add("-preset")
+                add("veryfast")
+                add("-tune")
+                add("zerolatency")
+            }
+            add("-b:v")
+            add("5000k")
+            add("-maxrate")
+            add("7000k")
+            add("-bufsize")
+            add("10000k")
+        }
+    }
+
+    private fun supportsEncoder(name: String): Boolean = name in supportedVideoEncoders()
+
+    private fun supportedVideoEncoders(): Set<String> {
+        supportedVideoEncoders?.let { return it }
+        val encoders =
+            runCatching {
+                val process =
+                    ProcessBuilder(
+                        ffmpegPath,
+                        "-hide_banner",
+                        "-encoders",
+                    ).redirectErrorStream(true)
+                        .start()
+
+                if (!process.waitFor(4, TimeUnit.SECONDS)) {
+                    process.destroyForcibly()
+                    return@runCatching emptySet<String>()
+                }
+
+                process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .lineSequence()
+                    .mapNotNull { line ->
+                        line
+                            .trim()
+                            .split(Regex("""\s+"""))
+                            .getOrNull(1)
+                    }.toSet()
+            }.getOrDefault(emptySet())
+        supportedVideoEncoders = encoders
+        return encoders
+    }
+
     private fun probeTrackInfo(
         uri: String,
         requestHeaders: Map<String, String>,
     ): ProbeTrackInfo {
-        val ffprobe = MacFfmpegLocator.findFfprobe(ffmpegPath) ?: return ProbeTrackInfo()
+        val ffprobe = ExternalFfmpegLocator.findFfprobe(ffmpegPath) ?: return ProbeTrackInfo()
         val command =
             mutableListOf(
                 ffprobe,
@@ -587,7 +652,7 @@ internal class MacFfmpegHlsFallback(
                         subtitleOrdinal = subtitleOrdinal,
                         track =
                             SubtitleTrack(
-                                id = "$MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX${stream.index}",
+                                id = "$EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX${stream.index}",
                                 label = stream.displayLabel("Subtitles"),
                                 language = stream.language,
                                 src = "",
@@ -624,7 +689,7 @@ internal class MacFfmpegHlsFallback(
             streamIndex = index,
             track =
                 AudioTrack(
-                    id = "$MAC_FFMPEG_AUDIO_TRACK_ID_PREFIX$index",
+                    id = "$EXTERNAL_FFMPEG_AUDIO_TRACK_ID_PREFIX$index",
                     label = displayLabel("Audio ${ordinal + 1}"),
                     language = language,
                     channels = channels,

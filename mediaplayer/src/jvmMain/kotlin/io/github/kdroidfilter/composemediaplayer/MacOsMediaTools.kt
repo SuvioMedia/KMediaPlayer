@@ -1,12 +1,9 @@
 package io.github.kdroidfilter.composemediaplayer
 
-import io.github.kdroidfilter.composemediaplayer.mac.MacFfmpegLocator
 import io.github.kdroidfilter.composemediaplayer.mac.MacLibAssLocator
-import io.github.kdroidfilter.composemediaplayer.mac.MacVlcLocator
-import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 
 /**
- * Status for an optional user-installed media tool used by macOS JVM fallbacks.
+ * Status for an optional user-installed media tool used by JVM fallbacks.
  *
  * ComposeMediaPlayer does not bundle or redistribute these tools. The path is
  * reported only when a compatible user/system installation is detected.
@@ -18,8 +15,27 @@ data class ExternalMediaToolStatus(
 )
 
 /**
- * Snapshot of optional macOS JVM media helper availability.
+ * Snapshot of optional JVM media helper availability.
  */
+data class JvmMediaToolAvailability(
+    val vlc: ExternalMediaToolStatus,
+    val libVlc: ExternalMediaToolStatus,
+    val ffmpeg: ExternalMediaToolStatus,
+    val ffmpegWithSubtitlesFilter: ExternalMediaToolStatus,
+    val ffprobe: ExternalMediaToolStatus,
+    val libass: ExternalMediaToolStatus,
+)
+
+/**
+ * Snapshot of optional media helper availability.
+ *
+ * Kept for source and binary compatibility with the original macOS-only API.
+ * Prefer [JvmMediaToolAvailability] for new code.
+ */
+@Deprecated(
+    "Use JvmMediaToolAvailability; JVM fallback tool detection is no longer macOS-only.",
+    ReplaceWith("JvmMediaToolAvailability"),
+)
 data class MacOsMediaToolAvailability(
     val vlc: ExternalMediaToolStatus,
     val libVlc: ExternalMediaToolStatus,
@@ -29,32 +45,20 @@ data class MacOsMediaToolAvailability(
     val libass: ExternalMediaToolStatus,
 )
 
-object MacOsMediaTools {
+object JvmMediaTools {
     /**
-     * Detects optional user-installed tools used by the macOS JVM MKV fallbacks.
+     * Detects optional user-installed tools used by JVM external media fallbacks.
      */
     @JvmStatic
-    fun query(): MacOsMediaToolAvailability {
-        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
-            val unavailable = ExternalMediaToolStatus(false, detail = "macOS JVM fallback only")
-            return MacOsMediaToolAvailability(
-                vlc = unavailable,
-                libVlc = unavailable,
-                ffmpeg = unavailable,
-                ffmpegWithSubtitlesFilter = unavailable,
-                ffprobe = unavailable,
-                libass = unavailable,
-            )
-        }
-
-        val vlcPath = MacVlcLocator.findVlc()
-        val libVlc = MacVlcLocator.findLibVlc()
-        val ffmpegPath = MacFfmpegLocator.findFfmpeg()
-        val ffmpegWithSubtitlesPath = MacFfmpegLocator.findFfmpegWithSubtitles()
-        val ffprobePath = ffmpegPath?.let(MacFfmpegLocator::findFfprobe) ?: MacFfmpegLocator.findFfprobe()
+    fun query(): JvmMediaToolAvailability {
+        val vlcPath = ExternalVlcLocator.findVlc()
+        val libVlc = ExternalVlcLocator.findLibVlc()
+        val ffmpegPath = ExternalFfmpegLocator.findFfmpeg()
+        val ffmpegWithSubtitlesPath = ExternalFfmpegLocator.findFfmpegWithSubtitles()
+        val ffprobePath = ffmpegPath?.let(ExternalFfmpegLocator::findFfprobe) ?: ExternalFfmpegLocator.findFfprobe()
         val libassPath = MacLibAssLocator.findLibAss()
 
-        return MacOsMediaToolAvailability(
+        return JvmMediaToolAvailability(
             vlc =
                 toolStatus(
                     path = vlcPath,
@@ -70,7 +74,7 @@ object MacOsMediaTools {
                 } else {
                     ExternalMediaToolStatus(
                         available = false,
-                        detail = "Compatible libVLC was not found in VLC.app or configured paths.",
+                        detail = "Compatible libVLC was not found in configured or default VLC paths.",
                     )
                 },
             ffmpeg =
@@ -105,7 +109,7 @@ object MacOsMediaTools {
             libass =
                 toolStatus(
                     path = libassPath,
-                    missingDetail = "libass dylib was not found.",
+                    missingDetail = "libass library was not found.",
                 ),
         )
     }
@@ -119,4 +123,26 @@ object MacOsMediaTools {
         } else {
             ExternalMediaToolStatus(available = false, detail = missingDetail)
         }
+}
+
+@Deprecated(
+    "Use JvmMediaTools; JVM fallback tool detection is no longer macOS-only.",
+    ReplaceWith("JvmMediaTools"),
+)
+@Suppress("DEPRECATION")
+object MacOsMediaTools {
+    @JvmStatic
+    fun query(): MacOsMediaToolAvailability =
+        JvmMediaTools
+            .query()
+            .let { tools ->
+                MacOsMediaToolAvailability(
+                    vlc = tools.vlc,
+                    libVlc = tools.libVlc,
+                    ffmpeg = tools.ffmpeg,
+                    ffmpegWithSubtitlesFilter = tools.ffmpegWithSubtitlesFilter,
+                    ffprobe = tools.ffprobe,
+                    libass = tools.libass,
+                )
+            }
 }

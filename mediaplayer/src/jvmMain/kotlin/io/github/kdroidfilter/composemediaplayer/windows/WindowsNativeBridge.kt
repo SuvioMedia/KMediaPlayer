@@ -27,6 +27,13 @@ internal object WindowsNativeBridge {
 
     fun destroyInstance(handle: Long) = nDestroyInstance(handle)
 
+    fun createLibVlcInstance(
+        libVlcPath: String,
+        pluginPath: String,
+    ): Long = nCreateLibVlcInstance(libVlcPath, pluginPath)
+
+    fun destroyLibVlcInstance(handle: Long) = nDestroyLibVlcInstance(handle)
+
     fun getVideoMetadata(handle: Long): VideoMetadata? {
         val title = CharArray(256)
         val mimeType = CharArray(64)
@@ -148,6 +155,95 @@ internal object WindowsNativeBridge {
         width: Int,
         height: Int,
     ): Int
+
+    @JvmStatic external fun nCreateLibVlcInstance(
+        libVlcPath: String,
+        pluginPath: String,
+    ): Long
+
+    @JvmStatic external fun nDestroyLibVlcInstance(handle: Long)
+
+    @JvmStatic external fun nOpenLibVlcMediaWithHeaders(
+        handle: Long,
+        url: String,
+        requestHeaders: String,
+        startPlayback: Boolean,
+    ): Int
+
+    @JvmStatic external fun nReadLibVlcVideoFrame(
+        handle: Long,
+        outResult: IntArray,
+    ): ByteBuffer?
+
+    @JvmStatic external fun nUnlockLibVlcVideoFrame(handle: Long): Int
+
+    @JvmStatic external fun nCloseLibVlcMedia(handle: Long)
+
+    @JvmStatic external fun nIsLibVlcEOF(handle: Long): Boolean
+
+    @JvmStatic external fun nGetLibVlcVideoSize(
+        handle: Long,
+        outSize: IntArray,
+    )
+
+    @JvmStatic external fun nGetLibVlcVideoFrameRate(handle: Long): Float
+
+    @JvmStatic external fun nSeekLibVlcMedia(
+        handle: Long,
+        position: Long,
+    ): Int
+
+    @JvmStatic external fun nGetLibVlcMediaDuration(
+        handle: Long,
+        outDuration: LongArray,
+    ): Int
+
+    @JvmStatic external fun nGetLibVlcMediaPosition(
+        handle: Long,
+        outPosition: LongArray,
+    ): Int
+
+    @JvmStatic external fun nSetLibVlcPlaybackState(
+        handle: Long,
+        isPlaying: Boolean,
+        stop: Boolean,
+    ): Int
+
+    @JvmStatic external fun nSetLibVlcAudioVolume(
+        handle: Long,
+        volume: Float,
+    ): Int
+
+    @JvmStatic external fun nGetLibVlcAudioVolume(
+        handle: Long,
+        outVolume: FloatArray,
+    ): Int
+
+    @JvmStatic external fun nSetLibVlcPlaybackSpeed(
+        handle: Long,
+        speed: Float,
+    ): Int
+
+    @JvmStatic external fun nGetLibVlcPlaybackSpeed(
+        handle: Long,
+        outSpeed: FloatArray,
+    ): Int
+
+    @JvmStatic external fun nSelectLibVlcAudioTrack(
+        handle: Long,
+        ordinal: Int,
+    ): Boolean
+
+    @JvmStatic external fun nSelectLibVlcSubtitleTrack(
+        handle: Long,
+        ordinal: Int,
+    ): Boolean
+
+    @JvmStatic external fun nDisableLibVlcSubtitles(handle: Long): Boolean
+
+    @JvmStatic external fun nGetLibVlcAudioTrackDescriptions(handle: Long): String?
+
+    @JvmStatic external fun nGetLibVlcSubtitleTrackDescriptions(handle: Long): String?
 
     @JvmStatic private external fun nGetVideoMetadata(
         handle: Long,

@@ -39,6 +39,8 @@ add_library(NativeVideoPlayer SHARED
         AudioManager.h
         HLSPlayer.cpp
         HLSPlayer.h
+        LibVlcCanvas.cpp
+        LibVlcCanvas.h
         jni_bridge.cpp
 )
 

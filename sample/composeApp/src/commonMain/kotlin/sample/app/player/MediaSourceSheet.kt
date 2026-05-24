@@ -96,7 +96,7 @@ internal fun MediaSourceSheet(
                 val selectedBackendOption = backendOptions.firstOrNull { it.backend == selectedMacMkvBackend }
 
                 Text(
-                    text = "macOS MKV backend",
+                    text = "JVM MKV backend",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )

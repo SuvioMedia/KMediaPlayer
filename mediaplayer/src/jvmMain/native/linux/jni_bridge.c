@@ -4,6 +4,7 @@
 #include <jni.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include "LibVlcCanvas.h"
 #include "NativeVideoPlayer.h"
 
 // ---------------------------------------------------------------------------
@@ -14,6 +15,10 @@ static inline VideoPlayer* toCtx(jlong h) {
     return (VideoPlayer*)(uintptr_t)(uint64_t)h;
 }
 
+static inline LibVlcCanvasPlayer* toLibVlc(jlong h) {
+    return (LibVlcCanvasPlayer*)(uintptr_t)(uint64_t)h;
+}
+
 // ---------------------------------------------------------------------------
 // JNI implementations
 // ---------------------------------------------------------------------------
@@ -21,6 +26,137 @@ static inline VideoPlayer* toCtx(jlong h) {
 static jlong JNICALL jni_CreatePlayer(JNIEnv* env, jclass cls) {
     VideoPlayer* p = nvp_create();
     return p ? (jlong)(uintptr_t)p : 0L;
+}
+
+static jlong JNICALL jni_CreateLibVlcPlayer(JNIEnv* env, jclass cls, jstring libPath, jstring pluginPath) {
+    if (!libPath || !pluginPath) return 0L;
+    const char* cLibPath = (*env)->GetStringUTFChars(env, libPath, NULL);
+    if (!cLibPath) return 0L;
+    const char* cPluginPath = (*env)->GetStringUTFChars(env, pluginPath, NULL);
+    if (!cPluginPath) {
+        (*env)->ReleaseStringUTFChars(env, libPath, cLibPath);
+        return 0L;
+    }
+    LibVlcCanvasPlayer* p = lvc_create(cLibPath, cPluginPath);
+    (*env)->ReleaseStringUTFChars(env, libPath, cLibPath);
+    (*env)->ReleaseStringUTFChars(env, pluginPath, cPluginPath);
+    return p ? (jlong)(uintptr_t)p : 0L;
+}
+
+static jboolean JNICALL jni_OpenLibVlcUriWithHeaders(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jstring uri,
+    jstring requestHeaders
+) {
+    if (!handle || !uri) return JNI_FALSE;
+    const char* cUri = (*env)->GetStringUTFChars(env, uri, NULL);
+    if (!cUri) return JNI_FALSE;
+    const char* cHeaders = requestHeaders ? (*env)->GetStringUTFChars(env, requestHeaders, NULL) : NULL;
+    int result = lvc_open_uri_with_headers(toLibVlc(handle), cUri, cHeaders);
+    if (cHeaders) (*env)->ReleaseStringUTFChars(env, requestHeaders, cHeaders);
+    (*env)->ReleaseStringUTFChars(env, uri, cUri);
+    return (jboolean)(result != 0);
+}
+
+static void JNICALL jni_PlayLibVlc(JNIEnv* env, jclass cls, jlong handle) {
+    if (handle) lvc_play(toLibVlc(handle));
+}
+
+static void JNICALL jni_PauseLibVlc(JNIEnv* env, jclass cls, jlong handle) {
+    if (handle) lvc_pause(toLibVlc(handle));
+}
+
+static void JNICALL jni_SetLibVlcVolume(JNIEnv* env, jclass cls, jlong handle, jfloat volume) {
+    if (handle) lvc_set_volume(toLibVlc(handle), (float)volume);
+}
+
+static jfloat JNICALL jni_GetLibVlcVolume(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? lvc_get_volume(toLibVlc(handle)) : 0.0f;
+}
+
+static jlong JNICALL jni_LockLibVlcFrame(JNIEnv* env, jclass cls, jlong handle, jintArray outInfo) {
+    if (!handle || !outInfo) return 0L;
+    int32_t info[3] = {0, 0, 0};
+    void* ptr = lvc_lock_frame(toLibVlc(handle), info);
+    if (!ptr) return 0L;
+    (*env)->SetIntArrayRegion(env, outInfo, 0, 3, (jint*)info);
+    return (jlong)(uintptr_t)ptr;
+}
+
+static void JNICALL jni_UnlockLibVlcFrame(JNIEnv* env, jclass cls, jlong handle) {
+    if (handle) lvc_unlock_frame(toLibVlc(handle));
+}
+
+static jint JNICALL jni_GetLibVlcFrameWidth(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? (jint)lvc_get_frame_width(toLibVlc(handle)) : 0;
+}
+
+static jint JNICALL jni_GetLibVlcFrameHeight(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? (jint)lvc_get_frame_height(toLibVlc(handle)) : 0;
+}
+
+static void JNICALL jni_SeekLibVlcTo(JNIEnv* env, jclass cls, jlong handle, jdouble time) {
+    if (handle) lvc_seek_to(toLibVlc(handle), (double)time);
+}
+
+static void JNICALL jni_DisposeLibVlcPlayer(JNIEnv* env, jclass cls, jlong handle) {
+    if (handle) lvc_destroy(toLibVlc(handle));
+}
+
+static void JNICALL jni_SetLibVlcPlaybackSpeed(JNIEnv* env, jclass cls, jlong handle, jfloat speed) {
+    if (handle) lvc_set_playback_speed(toLibVlc(handle), (float)speed);
+}
+
+static jfloat JNICALL jni_GetLibVlcPlaybackSpeed(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? lvc_get_playback_speed(toLibVlc(handle)) : 1.0f;
+}
+
+static jdouble JNICALL jni_GetLibVlcVideoDuration(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? lvc_get_duration(toLibVlc(handle)) : 0.0;
+}
+
+static jdouble JNICALL jni_GetLibVlcCurrentTime(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? lvc_get_current_time(toLibVlc(handle)) : 0.0;
+}
+
+static jfloat JNICALL jni_GetLibVlcFrameRate(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? lvc_get_frame_rate(toLibVlc(handle)) : 0.0f;
+}
+
+static jboolean JNICALL jni_ConsumeLibVlcDidPlayToEnd(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? (jboolean)(lvc_consume_did_play_to_end(toLibVlc(handle)) != 0) : JNI_FALSE;
+}
+
+static jboolean JNICALL jni_SelectLibVlcAudioTrack(JNIEnv* env, jclass cls, jlong handle, jint ordinal) {
+    return handle ? (jboolean)(lvc_select_audio_track(toLibVlc(handle), (int32_t)ordinal) != 0) : JNI_FALSE;
+}
+
+static jboolean JNICALL jni_SelectLibVlcSubtitleTrack(JNIEnv* env, jclass cls, jlong handle, jint ordinal) {
+    return handle ? (jboolean)(lvc_select_subtitle_track(toLibVlc(handle), (int32_t)ordinal) != 0) : JNI_FALSE;
+}
+
+static jboolean JNICALL jni_DisableLibVlcSubtitles(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? (jboolean)(lvc_disable_subtitles(toLibVlc(handle)) != 0) : JNI_FALSE;
+}
+
+static jstring JNICALL jni_GetLibVlcAudioTrackDescriptions(JNIEnv* env, jclass cls, jlong handle) {
+    if (!handle) return NULL;
+    char* value = lvc_get_audio_track_descriptions(toLibVlc(handle));
+    if (!value) return NULL;
+    jstring result = (*env)->NewStringUTF(env, value);
+    free(value);
+    return result;
+}
+
+static jstring JNICALL jni_GetLibVlcSubtitleTrackDescriptions(JNIEnv* env, jclass cls, jlong handle) {
+    if (!handle) return NULL;
+    char* value = lvc_get_subtitle_track_descriptions(toLibVlc(handle));
+    if (!value) return NULL;
+    jstring result = (*env)->NewStringUTF(env, value);
+    free(value);
+    return result;
 }
 
 static void JNICALL jni_OpenUri(JNIEnv* env, jclass cls, jlong handle, jstring uri) {
@@ -179,6 +315,29 @@ static jboolean JNICALL jni_ConsumeDidPlayToEnd(JNIEnv* env, jclass cls, jlong h
 
 static const JNINativeMethod g_methods[] = {
     { "nCreatePlayer",           "()J",                         (void*)jni_CreatePlayer },
+    { "nCreateLibVlcPlayer",     "(Ljava/lang/String;Ljava/lang/String;)J", (void*)jni_CreateLibVlcPlayer },
+    { "nOpenLibVlcUriWithHeaders", "(JLjava/lang/String;Ljava/lang/String;)Z", (void*)jni_OpenLibVlcUriWithHeaders },
+    { "nPlayLibVlc",             "(J)V",                        (void*)jni_PlayLibVlc },
+    { "nPauseLibVlc",            "(J)V",                        (void*)jni_PauseLibVlc },
+    { "nSetLibVlcVolume",        "(JF)V",                       (void*)jni_SetLibVlcVolume },
+    { "nGetLibVlcVolume",        "(J)F",                        (void*)jni_GetLibVlcVolume },
+    { "nLockLibVlcFrame",        "(J[I)J",                      (void*)jni_LockLibVlcFrame },
+    { "nUnlockLibVlcFrame",      "(J)V",                        (void*)jni_UnlockLibVlcFrame },
+    { "nGetLibVlcFrameWidth",    "(J)I",                        (void*)jni_GetLibVlcFrameWidth },
+    { "nGetLibVlcFrameHeight",   "(J)I",                        (void*)jni_GetLibVlcFrameHeight },
+    { "nSeekLibVlcTo",           "(JD)V",                       (void*)jni_SeekLibVlcTo },
+    { "nDisposeLibVlcPlayer",    "(J)V",                        (void*)jni_DisposeLibVlcPlayer },
+    { "nSetLibVlcPlaybackSpeed", "(JF)V",                       (void*)jni_SetLibVlcPlaybackSpeed },
+    { "nGetLibVlcPlaybackSpeed", "(J)F",                        (void*)jni_GetLibVlcPlaybackSpeed },
+    { "nGetLibVlcVideoDuration", "(J)D",                        (void*)jni_GetLibVlcVideoDuration },
+    { "nGetLibVlcCurrentTime",   "(J)D",                        (void*)jni_GetLibVlcCurrentTime },
+    { "nGetLibVlcFrameRate",     "(J)F",                        (void*)jni_GetLibVlcFrameRate },
+    { "nConsumeLibVlcDidPlayToEnd", "(J)Z",                     (void*)jni_ConsumeLibVlcDidPlayToEnd },
+    { "nSelectLibVlcAudioTrack", "(JI)Z",                       (void*)jni_SelectLibVlcAudioTrack },
+    { "nSelectLibVlcSubtitleTrack", "(JI)Z",                    (void*)jni_SelectLibVlcSubtitleTrack },
+    { "nDisableLibVlcSubtitles", "(J)Z",                        (void*)jni_DisableLibVlcSubtitles },
+    { "nGetLibVlcAudioTrackDescriptions", "(J)Ljava/lang/String;", (void*)jni_GetLibVlcAudioTrackDescriptions },
+    { "nGetLibVlcSubtitleTrackDescriptions", "(J)Ljava/lang/String;", (void*)jni_GetLibVlcSubtitleTrackDescriptions },
     { "nOpenUri",                "(JLjava/lang/String;)V",      (void*)jni_OpenUri },
     { "nOpenUriWithHeaders",     "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaders },
     { "nPlay",                   "(J)V",                        (void*)jni_Play },

@@ -9,13 +9,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.EXTERNAL_FFMPEG_AUDIO_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.EXTERNAL_VLC_AUDIO_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.EXTERNAL_VLC_SUBTITLE_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.ExternalFfmpegHlsFallback
+import io.github.kdroidfilter.composemediaplayer.ExternalFfmpegLocator
+import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackBackend
+import io.github.kdroidfilter.composemediaplayer.ExternalVlcHlsFallback
+import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
+import io.github.kdroidfilter.composemediaplayer.HlsFallbackSource
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.MAC_FFMPEG_AUDIO_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.MAC_VLC_AUDIO_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.MAC_VLC_SUBTITLE_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.JvmExternalFallbackContainerSupport
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcAudioStream
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcInstallation
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcMediaProbe
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcSubtitleStream
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcTrackInfo
+import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
@@ -48,19 +60,12 @@ import kotlin.time.Duration.Companion.milliseconds
 
 internal val macLogger = TaggedLogger("MacVideoPlayerState")
 
-private enum class MacHlsFallbackBackend(
-    val displayName: String,
-) {
-    FFMPEG("ffmpeg"),
-    VLC("VLC"),
-}
-
 private enum class MacLibVlcRenderMode {
     MEMORY,
 }
 
 private data class MacResolvedLibVlcBackend(
-    val installation: MacLibVlcInstallation,
+    val installation: JvmLibVlcInstallation,
     val renderMode: MacLibVlcRenderMode,
 )
 
@@ -111,7 +116,7 @@ class MacVideoPlayerState : VideoPlayerState {
     private var ffmpegHlsPlaybackOffsetSeconds: Double = 0.0
     private var libVlcBackendActive: Boolean = false
     private var libVlcSourceUri: String? = null
-    private var libVlcTrackInfo: MacLibVlcTrackInfo? = null
+    private var libVlcTrackInfo: JvmLibVlcTrackInfo? = null
     private var libVlcSelectedAudioStreamIndex: Int? = null
     private var libVlcSelectedSubtitleStreamIndex: Int? = null
     private var libVlcRenderMode: MacLibVlcRenderMode? = null
@@ -489,7 +494,7 @@ class MacVideoPlayerState : VideoPlayerState {
         uri: String,
         requestHeaders: Map<String, String> = emptyMap(),
     ): String {
-        if (!MacAvFoundationContainerSupport.needsFfmpegFallback(uri, requestHeaders)) {
+        if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders)) {
             withContext(Dispatchers.Main) {
                 renderingInfo.update(
                     backend = "AVFoundation",
@@ -506,59 +511,59 @@ class MacVideoPlayerState : VideoPlayerState {
         }
 
         if (isFfmpegFallbackDisabled()) {
-            throw UnsupportedOperationException(
+            val disabledFallbackMessage =
                 "Matroska/WebM is not supported by AVPlayer on macOS. " +
                     "Enable the optional external ffmpeg fallback with " +
-                    "composemediaplayer.macos.ffmpegFallback=true or COMPOSE_MEDIA_PLAYER_MACOS_FFMPEG_FALLBACK=true.",
-            )
+                    "composemediaplayer.hlsFallback=true or COMPOSE_MEDIA_PLAYER_HLS_FALLBACK=true."
+            throw UnsupportedOperationException(disabledFallbackMessage)
         }
-
         val backend = selectHlsFallbackBackend(requiresSubtitleRendering = ffmpegHlsSelectedSubtitleStreamIndex != null)
         val fallback =
             when (backend) {
-                MacHlsFallbackBackend.VLC -> {
+                ExternalHlsFallbackBackend.VLC -> {
                     val vlcPath =
-                        MacVlcLocator.findVlc()
+                        ExternalVlcLocator.findVlc()
                             ?: throw UnsupportedOperationException(
-                                "Matroska/WebM fallback backend is set to VLC, but VLC.app was not found. " +
-                                    "Install VLC or set composemediaplayer.macos.vlc=/path/to/VLC " +
+                                "Matroska/WebM fallback backend is set to VLC, but VLC was not found. " +
+                                    "Install VLC or set composemediaplayer.vlc=/path/to/vlc " +
                                     "or COMPOSE_MEDIA_PLAYER_VLC. " +
                                     "ComposeMediaPlayer does not bundle or link VLC.",
                             )
-                    macLogger.d { "Using external VLC fallback for macOS unsupported container: $vlcPath" }
-                    MacVlcHlsFallback(vlcPath)
+                    macLogger.d { "Using external VLC fallback for AVPlayer unsupported container: $vlcPath" }
+                    ExternalVlcHlsFallback(vlcPath)
                 }
-                MacHlsFallbackBackend.FFMPEG -> {
+                ExternalHlsFallbackBackend.FFMPEG -> {
                     val requiresSubtitleFilter = ffmpegHlsSelectedSubtitleStreamIndex != null
                     val ffmpegPath =
                         if (requiresSubtitleFilter) {
-                            MacFfmpegLocator.findFfmpegWithSubtitles()
+                            ExternalFfmpegLocator.findFfmpegWithSubtitles()
                         } else {
-                            MacFfmpegLocator.findFfmpeg()
+                            ExternalFfmpegLocator.findFfmpeg()
                         }
                             ?: throw UnsupportedOperationException(
                                 if (requiresSubtitleFilter) {
-                                    "Embedded subtitle rendering on macOS fallback requires an external ffmpeg build " +
+                                    "Embedded subtitle rendering through the external HLS fallback requires " +
+                                        "an ffmpeg build " +
                                         "with libass and the subtitles filter enabled, or VLC fallback. " +
                                         "Install ffmpeg-full/VLC or set " +
-                                        "composemediaplayer.macos.ffmpeg=/path/to/ffmpeg " +
+                                        "composemediaplayer.ffmpeg=/path/to/ffmpeg " +
                                         "or COMPOSE_MEDIA_PLAYER_FFMPEG. " +
                                         "ComposeMediaPlayer does not bundle or link ffmpeg or VLC."
                                 } else {
                                     "Matroska/WebM is not supported by AVPlayer on macOS. Install ffmpeg or VLC, " +
-                                        "or set composemediaplayer.macos.ffmpeg=/path/to/ffmpeg " +
+                                        "or set composemediaplayer.ffmpeg=/path/to/ffmpeg " +
                                         "or COMPOSE_MEDIA_PLAYER_FFMPEG. " +
                                         "ComposeMediaPlayer does not bundle or link ffmpeg or VLC."
                                 },
                             )
-                    macLogger.d { "Using external ffmpeg fallback for macOS unsupported container: $ffmpegPath" }
-                    MacFfmpegHlsFallback(ffmpegPath)
+                    macLogger.d { "Using external ffmpeg fallback for AVPlayer unsupported container: $ffmpegPath" }
+                    ExternalFfmpegHlsFallback(ffmpegPath)
                 }
             }
         return try {
             val hlsSource =
                 when (fallback) {
-                    is MacVlcHlsFallback ->
+                    is ExternalVlcHlsFallback ->
                         fallback.start(
                             uri = uri,
                             requestHeaders = requestHeaders,
@@ -566,7 +571,7 @@ class MacVideoPlayerState : VideoPlayerState {
                             selectedSubtitleStreamIndex = ffmpegHlsSelectedSubtitleStreamIndex,
                             startTimeSeconds = ffmpegHlsPlaybackOffsetSeconds,
                         )
-                    is MacFfmpegHlsFallback ->
+                    is ExternalFfmpegHlsFallback ->
                         fallback.start(
                             uri = uri,
                             requestHeaders = requestHeaders,
@@ -574,7 +579,7 @@ class MacVideoPlayerState : VideoPlayerState {
                             selectedSubtitleStreamIndex = ffmpegHlsSelectedSubtitleStreamIndex,
                             startTimeSeconds = ffmpegHlsPlaybackOffsetSeconds,
                         )
-                    else -> error("Unsupported macOS HLS fallback backend")
+                    else -> error("Unsupported external HLS fallback backend")
                 }
             ffmpegHlsFallback = fallback
             ffmpegHlsFallbackDurationSeconds = hlsSource.durationSeconds
@@ -631,13 +636,13 @@ class MacVideoPlayerState : VideoPlayerState {
                 notes = "VLC is loaded dynamically from the user's installation; not bundled or linked.",
             )
         }
-        val trackInfo = withContext(Dispatchers.IO) { MacLibVlcMediaProbe.probe(uri, requestHeaders) }
+        val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
         libVlcTrackInfo = trackInfo
         updateLibVlcTracks(trackInfo)
         return uri
     }
 
-    private suspend fun updateLibVlcTracks(trackInfo: MacLibVlcTrackInfo) {
+    private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
         withContext(Dispatchers.Main) {
             availableAudioTracks.removeAll { isMacLibVlcAudioTrackId(it.id) }
             availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
@@ -669,7 +674,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
     private suspend fun refreshLibVlcRuntimeTracksIfNeeded() {
         val ptr = playerPtr
-        val currentInfo = libVlcTrackInfo ?: MacLibVlcTrackInfo()
+        val currentInfo = libVlcTrackInfo ?: JvmLibVlcTrackInfo()
         if (ptr == 0L || currentInfo.audioStreams.isNotEmpty() || currentInfo.subtitleStreams.isNotEmpty()) return
 
         repeat(12) {
@@ -684,12 +689,12 @@ class MacVideoPlayerState : VideoPlayerState {
                         audioStreams =
                             currentInfo.audioStreams.ifEmpty {
                                 runtimeAudioTracks.map { description ->
-                                    MacLibVlcAudioStream(
+                                    JvmLibVlcAudioStream(
                                         streamIndex = description.ordinal,
                                         ordinal = description.ordinal,
                                         track =
                                             AudioTrack(
-                                                id = "$MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX${description.ordinal}",
+                                                id = "$LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX${description.ordinal}",
                                                 label =
                                                     description.label.ifBlank {
                                                         "Audio ${description.ordinal + 1}"
@@ -701,12 +706,12 @@ class MacVideoPlayerState : VideoPlayerState {
                         subtitleStreams =
                             currentInfo.subtitleStreams.ifEmpty {
                                 runtimeSubtitleTracks.map { description ->
-                                    MacLibVlcSubtitleStream(
+                                    JvmLibVlcSubtitleStream(
                                         streamIndex = description.ordinal,
                                         ordinal = description.ordinal,
                                         track =
                                             SubtitleTrack(
-                                                id = "$MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX${description.ordinal}",
+                                                id = "$LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX${description.ordinal}",
                                                 label =
                                                     description.label.ifBlank {
                                                         "Subtitle ${description.ordinal + 1}"
@@ -970,12 +975,16 @@ class MacVideoPlayerState : VideoPlayerState {
         }
 
     private suspend fun resolveLibVlcBackendForUri(uri: String): MacResolvedLibVlcBackend? {
-        if (!MacAvFoundationContainerSupport.needsFfmpegFallback(uri)) return null
+        if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri)) return null
 
         val configured =
             (
                 System.getProperty("composemediaplayer.macos.fallbackBackend")
+                    ?: System.getProperty("composemediaplayer.fallbackBackend")
+                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_FALLBACK_BACKEND")
                     ?: System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_FALLBACK_BACKEND")
+                    ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
+                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
                     ?: System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
                     ?: System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
                     ?: "auto"
@@ -983,15 +992,11 @@ class MacVideoPlayerState : VideoPlayerState {
 
         return when (configured) {
             "libvlc" ->
-                MacVlcLocator
-                    .findLibVlc()
-                    ?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
+                ExternalVlcLocator.findLibVlc()?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
                     ?: throw missingLibVlcBackendException()
             "auto" ->
                 if (MacLibAssLocator.findLibAss() != null) {
-                    MacVlcLocator
-                        .findLibVlc()
-                        ?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
+                    ExternalVlcLocator.findLibVlc()?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
                 } else {
                     null
                 }
@@ -1009,37 +1014,39 @@ class MacVideoPlayerState : VideoPlayerState {
     private fun missingLibVlcBackendException(): UnsupportedOperationException =
         UnsupportedOperationException(
             "The macOS libVLC backend was requested, but no compatible VLC.app libVLC was found for " +
-                "${MacVlcLocator.currentProcessArchitecture() ?: "the current"} JVM architecture. " +
+                "${ExternalVlcLocator.currentProcessArchitecture() ?: "the current"} JVM architecture. " +
                 "Install a VLC build matching the app/JVM architecture or set " +
                 "composemediaplayer.macos.libvlc and composemediaplayer.macos.libvlc.plugins to compatible paths. " +
                 "ComposeMediaPlayer does not bundle or link VLC.",
         )
 
-    private fun selectHlsFallbackBackend(requiresSubtitleRendering: Boolean): MacHlsFallbackBackend {
+    private fun selectHlsFallbackBackend(requiresSubtitleRendering: Boolean): ExternalHlsFallbackBackend {
         val configured =
             (
                 System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
+                    ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
+                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
                     ?: System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
                     ?: "auto"
             ).lowercase()
 
         return when (configured) {
-            "vlc" -> MacHlsFallbackBackend.VLC
-            "ffmpeg" -> MacHlsFallbackBackend.FFMPEG
+            "vlc" -> ExternalHlsFallbackBackend.VLC
+            "ffmpeg" -> ExternalHlsFallbackBackend.FFMPEG
             else -> {
-                val vlcPath = MacVlcLocator.findVlc()
+                val vlcPath = ExternalVlcLocator.findVlc()
                 val ffmpegPath =
                     if (requiresSubtitleRendering) {
-                        MacFfmpegLocator.findFfmpegWithSubtitles()
+                        ExternalFfmpegLocator.findFfmpegWithSubtitles()
                     } else {
-                        MacFfmpegLocator.findFfmpeg()
+                        ExternalFfmpegLocator.findFfmpeg()
                     }
 
                 when {
-                    requiresSubtitleRendering && vlcPath != null -> MacHlsFallbackBackend.VLC
-                    ffmpegPath != null -> MacHlsFallbackBackend.FFMPEG
-                    vlcPath != null -> MacHlsFallbackBackend.VLC
-                    else -> MacHlsFallbackBackend.FFMPEG
+                    requiresSubtitleRendering && vlcPath != null -> ExternalHlsFallbackBackend.VLC
+                    ffmpegPath != null -> ExternalHlsFallbackBackend.FFMPEG
+                    vlcPath != null -> ExternalHlsFallbackBackend.VLC
+                    else -> ExternalHlsFallbackBackend.FFMPEG
                 }
             }
         }
@@ -1047,7 +1054,9 @@ class MacVideoPlayerState : VideoPlayerState {
 
     private fun isFfmpegFallbackDisabled(): Boolean {
         val configured =
-            System.getProperty("composemediaplayer.macos.ffmpegFallback")
+            System.getProperty("composemediaplayer.hlsFallback")
+                ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK")
+                ?: System.getProperty("composemediaplayer.macos.ffmpegFallback")
                 ?: System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_FFMPEG_FALLBACK")
                 ?: "true"
         return configured.equals("false", ignoreCase = true) ||
@@ -1125,28 +1134,36 @@ class MacVideoPlayerState : VideoPlayerState {
     }
 
     private fun isMacExternalHlsAudioTrackId(id: String): Boolean =
-        id.startsWith(MAC_FFMPEG_AUDIO_TRACK_ID_PREFIX) || id.startsWith(MAC_VLC_AUDIO_TRACK_ID_PREFIX)
+        id.startsWith(EXTERNAL_FFMPEG_AUDIO_TRACK_ID_PREFIX) || id.startsWith(EXTERNAL_VLC_AUDIO_TRACK_ID_PREFIX)
 
     private fun isMacExternalHlsSubtitleTrackId(id: String): Boolean =
-        id.startsWith(MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX) || id.startsWith(MAC_VLC_SUBTITLE_TRACK_ID_PREFIX)
+        id.startsWith(EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX) || id.startsWith(EXTERNAL_VLC_SUBTITLE_TRACK_ID_PREFIX)
 
-    private fun isMacLibVlcAudioTrackId(id: String): Boolean = id.startsWith(MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX)
+    private fun isMacLibVlcAudioTrackId(id: String): Boolean = id.startsWith(LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX)
 
-    private fun isMacLibVlcSubtitleTrackId(id: String): Boolean = id.startsWith(MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX)
+    private fun isMacLibVlcSubtitleTrackId(id: String): Boolean = id.startsWith(LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX)
 
     private fun libVlcTrackStreamIndex(id: String): Int? =
         when {
-            id.startsWith(MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX) -> id.removePrefix(MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX)
-            id.startsWith(MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX) -> id.removePrefix(MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX)
+            id.startsWith(LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX) -> id.removePrefix(LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX)
+            id.startsWith(
+                LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX,
+            ) -> id.removePrefix(LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX)
             else -> null
         }?.toIntOrNull()
 
     private fun externalHlsTrackStreamIndex(id: String): Int? =
         when {
-            id.startsWith(MAC_FFMPEG_AUDIO_TRACK_ID_PREFIX) -> id.removePrefix(MAC_FFMPEG_AUDIO_TRACK_ID_PREFIX)
-            id.startsWith(MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX) -> id.removePrefix(MAC_FFMPEG_SUBTITLE_TRACK_ID_PREFIX)
-            id.startsWith(MAC_VLC_AUDIO_TRACK_ID_PREFIX) -> id.removePrefix(MAC_VLC_AUDIO_TRACK_ID_PREFIX)
-            id.startsWith(MAC_VLC_SUBTITLE_TRACK_ID_PREFIX) -> id.removePrefix(MAC_VLC_SUBTITLE_TRACK_ID_PREFIX)
+            id.startsWith(
+                EXTERNAL_FFMPEG_AUDIO_TRACK_ID_PREFIX,
+            ) -> id.removePrefix(EXTERNAL_FFMPEG_AUDIO_TRACK_ID_PREFIX)
+            id.startsWith(
+                EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX,
+            ) -> id.removePrefix(EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX)
+            id.startsWith(EXTERNAL_VLC_AUDIO_TRACK_ID_PREFIX) -> id.removePrefix(EXTERNAL_VLC_AUDIO_TRACK_ID_PREFIX)
+            id.startsWith(
+                EXTERNAL_VLC_SUBTITLE_TRACK_ID_PREFIX,
+            ) -> id.removePrefix(EXTERNAL_VLC_SUBTITLE_TRACK_ID_PREFIX)
             else -> null
         }?.toIntOrNull()
 
@@ -2245,7 +2262,7 @@ class MacVideoPlayerState : VideoPlayerState {
             track = track,
             streamIndex = streamIndex,
             selectedAudioStreamIndex = libVlcSelectedAudioStreamIndex,
-            failureMessage = "Failed to switch subtitle track through an external macOS renderer",
+            failureMessage = "Failed to switch subtitle track through the external HLS renderer",
         )
     }
 
@@ -2332,8 +2349,8 @@ class MacVideoPlayerState : VideoPlayerState {
             if (track != null) {
                 val hasSubtitleRenderer =
                     when (selectHlsFallbackBackend(requiresSubtitleRendering = true)) {
-                        MacHlsFallbackBackend.VLC -> MacVlcLocator.findVlc() != null
-                        MacHlsFallbackBackend.FFMPEG -> MacFfmpegLocator.findFfmpegWithSubtitles() != null
+                        ExternalHlsFallbackBackend.VLC -> ExternalVlcLocator.findVlc() != null
+                        ExternalHlsFallbackBackend.FFMPEG -> ExternalFfmpegLocator.findFfmpegWithSubtitles() != null
                     }
 
                 if (!hasSubtitleRenderer) {
@@ -2343,7 +2360,8 @@ class MacVideoPlayerState : VideoPlayerState {
                         subtitlesEnabled = false
                         error =
                             VideoPlayerError.CodecError(
-                                "Full ASS/SSA rendering on macOS fallback requires VLC or an external ffmpeg build " +
+                                "Full ASS/SSA rendering through the external HLS fallback requires VLC " +
+                                    "or an ffmpeg build " +
                                     "with libass and the subtitles filter enabled. No suitable external renderer was found.",
                             )
                     }

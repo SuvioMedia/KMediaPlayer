@@ -1,14 +1,10 @@
-package io.github.kdroidfilter.composemediaplayer.mac
+@file:Suppress("MagicNumber", "TooGenericExceptionCaught", "LoopWithTooManyJumpStatements")
+
+package io.github.kdroidfilter.composemediaplayer
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
-import io.github.kdroidfilter.composemediaplayer.AudioTrack
-import io.github.kdroidfilter.composemediaplayer.MAC_VLC_AUDIO_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.MAC_VLC_SUBTITLE_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
-import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
-import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
-import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -26,10 +22,11 @@ import kotlin.io.path.exists
 import kotlin.io.path.name
 import kotlin.time.Duration.Companion.milliseconds
 
-internal object MacVlcLocator {
+internal object ExternalVlcLocator {
     fun findVlc(): String? {
         val configured =
             listOfNotNull(
+                System.getProperty("composemediaplayer.vlc"),
                 System.getProperty("composemediaplayer.macos.vlc"),
                 System.getenv("COMPOSE_MEDIA_PLAYER_VLC"),
                 System.getenv("VLC_PATH"),
@@ -44,61 +41,83 @@ internal object MacVlcLocator {
                 .getenv("PATH")
                 ?.split(File.pathSeparator)
                 ?.flatMap { directory ->
-                    listOf(
-                        File(directory, "vlc").absolutePath,
-                        File(directory, "cvlc").absolutePath,
-                    )
+                    vlcExecutableNames().map { executable -> File(directory, executable).absolutePath }
                 }.orEmpty()
 
         val appCandidates =
             listOf(
                 "/Applications/VLC.app/Contents/MacOS/VLC",
                 "${System.getProperty("user.home")}/Applications/VLC.app/Contents/MacOS/VLC",
+                "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe",
+                "C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe",
             )
 
         return (pathCandidates + appCandidates)
             .firstOrNull(::isExecutable)
     }
 
-    fun findLibVlc(): MacLibVlcInstallation? {
+    fun findLibVlc(): JvmLibVlcInstallation? {
         val configuredLib =
-            System.getProperty("composemediaplayer.macos.libvlc")
+            System.getProperty("composemediaplayer.libvlc")
+                ?: System.getProperty("composemediaplayer.macos.libvlc")
                 ?: System.getenv("COMPOSE_MEDIA_PLAYER_LIBVLC")
         val configuredPlugins =
-            System.getProperty("composemediaplayer.macos.libvlc.plugins")
+            System.getProperty("composemediaplayer.libvlc.plugins")
+                ?: System.getProperty("composemediaplayer.macos.libvlc.plugins")
                 ?: System.getenv("COMPOSE_MEDIA_PLAYER_LIBVLC_PLUGINS")
 
         if (!configuredLib.isNullOrBlank() && !configuredPlugins.isNullOrBlank()) {
-            return MacLibVlcInstallation(configuredLib, configuredPlugins)
-                .takeIf { isLoadableDylib(it.libVlcPath) && File(it.pluginPath).isDirectory }
+            return JvmLibVlcInstallation(configuredLib, configuredPlugins)
+                .takeIf { isLoadableLibrary(it.libVlcPath) && File(it.pluginPath).isDirectory }
         }
 
         val vlcExecutable = findVlc()
-        val vlcMacOsDirectory = vlcExecutable?.let(::File)?.parentFile
-        val appCandidate =
-            vlcMacOsDirectory?.let { macOs ->
-                MacLibVlcInstallation(
-                    libVlcPath = macOs.resolve("lib/libvlc.5.dylib").absolutePath,
-                    pluginPath = macOs.resolve("plugins").absolutePath,
-                )
-            }
+        val vlcDirectory = vlcExecutable?.let(::File)?.parentFile
 
         val candidates =
-            listOfNotNull(appCandidate) +
+            libVlcCandidatesFromVlcDirectory(vlcDirectory) +
                 listOf(
-                    MacLibVlcInstallation(
+                    JvmLibVlcInstallation(
                         libVlcPath = "/Applications/VLC.app/Contents/MacOS/lib/libvlc.5.dylib",
                         pluginPath = "/Applications/VLC.app/Contents/MacOS/plugins",
                     ),
-                    MacLibVlcInstallation(
+                    JvmLibVlcInstallation(
                         libVlcPath = "${System.getProperty(
                             "user.home",
                         )}/Applications/VLC.app/Contents/MacOS/lib/libvlc.5.dylib",
                         pluginPath = "${System.getProperty("user.home")}/Applications/VLC.app/Contents/MacOS/plugins",
                     ),
+                    JvmLibVlcInstallation(
+                        libVlcPath = "C:\\Program Files\\VideoLAN\\VLC\\libvlc.dll",
+                        pluginPath = "C:\\Program Files\\VideoLAN\\VLC\\plugins",
+                    ),
+                    JvmLibVlcInstallation(
+                        libVlcPath = "C:\\Program Files (x86)\\VideoLAN\\VLC\\libvlc.dll",
+                        pluginPath = "C:\\Program Files (x86)\\VideoLAN\\VLC\\plugins",
+                    ),
+                    JvmLibVlcInstallation(
+                        libVlcPath = "/usr/lib/x86_64-linux-gnu/libvlc.so.5",
+                        pluginPath = "/usr/lib/x86_64-linux-gnu/vlc/plugins",
+                    ),
+                    JvmLibVlcInstallation(
+                        libVlcPath = "/usr/lib/aarch64-linux-gnu/libvlc.so.5",
+                        pluginPath = "/usr/lib/aarch64-linux-gnu/vlc/plugins",
+                    ),
+                    JvmLibVlcInstallation(
+                        libVlcPath = "/usr/lib64/libvlc.so.5",
+                        pluginPath = "/usr/lib64/vlc/plugins",
+                    ),
+                    JvmLibVlcInstallation(
+                        libVlcPath = "/usr/lib/libvlc.so.5",
+                        pluginPath = "/usr/lib/vlc/plugins",
+                    ),
+                    JvmLibVlcInstallation(
+                        libVlcPath = "/usr/local/lib/libvlc.so.5",
+                        pluginPath = "/usr/local/lib/vlc/plugins",
+                    ),
                 )
 
-        return candidates.firstOrNull { isLoadableDylib(it.libVlcPath) && File(it.pluginPath).isDirectory }
+        return candidates.firstOrNull { isLoadableLibrary(it.libVlcPath) && File(it.pluginPath).isDirectory }
     }
 
     fun currentProcessArchitecture(): String? =
@@ -113,9 +132,39 @@ internal object MacVlcLocator {
         return file.exists() && file.isFile && file.canExecute()
     }
 
-    private fun isLoadableDylib(path: String): Boolean {
+    private fun vlcExecutableNames(): List<String> =
+        if (CurrentPlatform.os == CurrentPlatform.OS.WINDOWS) {
+            listOf("vlc.exe", "cvlc.exe", "vlc", "cvlc")
+        } else {
+            listOf("vlc", "cvlc")
+        }
+
+    private fun libVlcCandidatesFromVlcDirectory(directory: File?): List<JvmLibVlcInstallation> {
+        if (directory == null) return emptyList()
+        return when (CurrentPlatform.os) {
+            CurrentPlatform.OS.WINDOWS ->
+                listOf(
+                    JvmLibVlcInstallation(
+                        libVlcPath = directory.resolve("libvlc.dll").absolutePath,
+                        pluginPath = directory.resolve("plugins").absolutePath,
+                    ),
+                )
+            CurrentPlatform.OS.MAC ->
+                listOf(
+                    JvmLibVlcInstallation(
+                        libVlcPath = directory.resolve("lib/libvlc.5.dylib").absolutePath,
+                        pluginPath = directory.resolve("plugins").absolutePath,
+                    ),
+                )
+            CurrentPlatform.OS.LINUX -> emptyList()
+        }
+    }
+
+    private fun isLoadableLibrary(path: String): Boolean {
         val file = File(path)
-        return file.exists() && file.isFile && hasCompatibleMachOArchitecture(file)
+        return file.exists() &&
+            file.isFile &&
+            (CurrentPlatform.os != CurrentPlatform.OS.MAC || hasCompatibleMachOArchitecture(file))
     }
 
     private fun hasCompatibleMachOArchitecture(file: File): Boolean {
@@ -139,12 +188,12 @@ internal object MacVlcLocator {
     }
 }
 
-internal data class MacLibVlcInstallation(
+internal data class JvmLibVlcInstallation(
     val libVlcPath: String,
     val pluginPath: String,
 )
 
-internal class MacVlcHlsFallback(
+internal class ExternalVlcHlsFallback(
     private val vlcPath: String,
 ) : Closeable {
     private var process: Process? = null
@@ -180,7 +229,7 @@ internal class MacVlcHlsFallback(
                     0.0
                 }
 
-            val tempDirectory = Files.createTempDirectory("compose-media-player-macos-vlc-hls-")
+            val tempDirectory = Files.createTempDirectory("compose-media-player-vlc-hls-")
             outputDirectory = tempDirectory
             val playlist = tempDirectory.resolve("stream.m3u8")
             val server = startHttpServer(tempDirectory)
@@ -362,7 +411,7 @@ internal class MacVlcHlsFallback(
         uri: String,
         requestHeaders: Map<String, String>,
     ): VlcProbeTrackInfo {
-        val ffprobe = MacFfmpegLocator.findFfprobe() ?: return VlcProbeTrackInfo()
+        val ffprobe = ExternalFfmpegLocator.findFfprobe() ?: return VlcProbeTrackInfo()
         val command =
             mutableListOf(
                 ffprobe,
@@ -434,7 +483,7 @@ internal class MacVlcHlsFallback(
                         subtitleTrackNumber = subtitleTrackNumber,
                         track =
                             SubtitleTrack(
-                                id = "$MAC_VLC_SUBTITLE_TRACK_ID_PREFIX${stream.index}",
+                                id = "$EXTERNAL_VLC_SUBTITLE_TRACK_ID_PREFIX${stream.index}",
                                 label = stream.displayLabel("Subtitles"),
                                 language = stream.language,
                                 src = "",
@@ -472,7 +521,7 @@ internal class MacVlcHlsFallback(
             audioTrackNumber = audioTrackNumber,
             track =
                 AudioTrack(
-                    id = "$MAC_VLC_AUDIO_TRACK_ID_PREFIX$index",
+                    id = "$EXTERNAL_VLC_AUDIO_TRACK_ID_PREFIX$index",
                     label = displayLabel("Audio ${audioTrackNumber + 1}"),
                     language = language,
                     channels = channels,

@@ -1,23 +1,21 @@
-package io.github.kdroidfilter.composemediaplayer.mac
+@file:Suppress("MagicNumber", "LoopWithTooManyJumpStatements")
 
-import io.github.kdroidfilter.composemediaplayer.AudioTrack
-import io.github.kdroidfilter.composemediaplayer.MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX
-import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
-import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
-import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
-import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
+package io.github.kdroidfilter.composemediaplayer
+
+import io.github.kdroidfilter.composemediaplayer.mac.MacMatroskaAssExtractor
+import io.github.kdroidfilter.composemediaplayer.mac.MacMatroskaProbeInfo
+import io.github.kdroidfilter.composemediaplayer.mac.MacMatroskaTrack
 import java.util.concurrent.TimeUnit
 
-internal object MacLibVlcMediaProbe {
+internal object JvmLibVlcMediaProbe {
     fun probe(
         uri: String,
         requestHeaders: Map<String, String> = emptyMap(),
-    ): MacLibVlcTrackInfo {
+    ): JvmLibVlcTrackInfo {
         val headers = requestHeaders.sanitizedRequestHeaders()
         probeWithBuiltInMatroskaReader(uri, headers).takeIf { it.hasTracks() }?.let { return it }
 
-        val ffprobe = MacFfmpegLocator.findFfprobe() ?: return probeWithBuiltInMatroskaReader(uri, headers)
+        val ffprobe = ExternalFfmpegLocator.findFfprobe() ?: return probeWithBuiltInMatroskaReader(uri, headers)
         val command =
             mutableListOf(
                 ffprobe,
@@ -53,33 +51,33 @@ internal object MacLibVlcMediaProbe {
             ?: probeWithBuiltInMatroskaReader(uri, headers)
     }
 
-    private fun MacLibVlcTrackInfo.hasTracks(): Boolean = audioStreams.isNotEmpty() || subtitleStreams.isNotEmpty()
+    private fun JvmLibVlcTrackInfo.hasTracks(): Boolean = audioStreams.isNotEmpty() || subtitleStreams.isNotEmpty()
 
     private fun probeWithBuiltInMatroskaReader(
         uri: String,
         requestHeaders: Map<String, String>,
-    ): MacLibVlcTrackInfo =
+    ): JvmLibVlcTrackInfo =
         runCatching {
             MacMatroskaAssExtractor.probe(uri, requestHeaders)?.toLibVlcTrackInfo()
-        }.getOrNull() ?: MacLibVlcTrackInfo()
+        }.getOrNull() ?: JvmLibVlcTrackInfo()
 
-    private fun MacMatroskaProbeInfo.toLibVlcTrackInfo(): MacLibVlcTrackInfo {
+    private fun MacMatroskaProbeInfo.toLibVlcTrackInfo(): JvmLibVlcTrackInfo {
         val audioTracks = tracks.filter { it.isAudio() }
         val subtitleTracks = tracks.filter { it.isSubtitle() }
         val videoTrack = tracks.firstOrNull { it.isVideo() }
 
-        return MacLibVlcTrackInfo(
+        return JvmLibVlcTrackInfo(
             durationSeconds = durationSeconds,
             videoWidth = videoTrack?.videoWidth,
             videoHeight = videoTrack?.videoHeight,
             audioStreams =
                 audioTracks.mapIndexed { audioOrdinal, track ->
-                    MacLibVlcAudioStream(
+                    JvmLibVlcAudioStream(
                         streamIndex = track.streamIndex,
                         ordinal = audioOrdinal,
                         track =
                             AudioTrack(
-                                id = "$MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX${track.streamIndex}",
+                                id = "$LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX${track.streamIndex}",
                                 label = track.displayLabel("Audio ${audioOrdinal + 1}"),
                                 language = track.language,
                                 channels = track.audioChannels,
@@ -91,12 +89,12 @@ internal object MacLibVlcMediaProbe {
             subtitleStreams =
                 subtitleTracks.mapIndexedNotNull { subtitleOrdinal, track ->
                     val format = subtitleFormatForMatroskaTrack(track) ?: return@mapIndexedNotNull null
-                    MacLibVlcSubtitleStream(
+                    JvmLibVlcSubtitleStream(
                         streamIndex = track.streamIndex,
                         ordinal = subtitleOrdinal,
                         track =
                             SubtitleTrack(
-                                id = "$MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX${track.streamIndex}",
+                                id = "$LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX${track.streamIndex}",
                                 label = track.displayLabel("Subtitles ${subtitleOrdinal + 1}"),
                                 language = track.language,
                                 src = "matroska-track:${track.trackNumber}",
@@ -108,7 +106,7 @@ internal object MacLibVlcMediaProbe {
         )
     }
 
-    private fun parse(output: String): MacLibVlcTrackInfo {
+    private fun parse(output: String): JvmLibVlcTrackInfo {
         val streamValues = linkedMapOf<Int, MutableMap<String, String>>()
         var durationSeconds: Double? = null
 
@@ -135,12 +133,12 @@ internal object MacLibVlcMediaProbe {
             streams
                 .filter { it.codecType == "audio" }
                 .mapIndexed { audioOrdinal, stream ->
-                    MacLibVlcAudioStream(
+                    JvmLibVlcAudioStream(
                         streamIndex = stream.index,
                         ordinal = audioOrdinal,
                         track =
                             AudioTrack(
-                                id = "$MAC_LIBVLC_AUDIO_TRACK_ID_PREFIX${stream.index}",
+                                id = "$LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX${stream.index}",
                                 label = stream.displayLabel("Audio ${audioOrdinal + 1}"),
                                 language = stream.language,
                                 channels = stream.channels,
@@ -156,12 +154,12 @@ internal object MacLibVlcMediaProbe {
                 .filter { it.codecType == "subtitle" }
                 .mapIndexedNotNull { subtitleOrdinal, stream ->
                     val format = subtitleFormatForCodec(stream.codecName) ?: return@mapIndexedNotNull null
-                    MacLibVlcSubtitleStream(
+                    JvmLibVlcSubtitleStream(
                         streamIndex = stream.index,
                         ordinal = subtitleOrdinal,
                         track =
                             SubtitleTrack(
-                                id = "$MAC_LIBVLC_SUBTITLE_TRACK_ID_PREFIX${stream.index}",
+                                id = "$LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX${stream.index}",
                                 label = stream.displayLabel("Subtitles"),
                                 language = stream.language,
                                 src = "",
@@ -173,7 +171,7 @@ internal object MacLibVlcMediaProbe {
 
         val videoStream = streams.firstOrNull { it.codecType == "video" }
 
-        return MacLibVlcTrackInfo(
+        return JvmLibVlcTrackInfo(
             durationSeconds = durationSeconds,
             videoWidth = videoStream?.width,
             videoHeight = videoStream?.height,
@@ -262,21 +260,21 @@ internal object MacLibVlcMediaProbe {
     )
 }
 
-internal data class MacLibVlcTrackInfo(
+internal data class JvmLibVlcTrackInfo(
     val durationSeconds: Double? = null,
     val videoWidth: Int? = null,
     val videoHeight: Int? = null,
-    val audioStreams: List<MacLibVlcAudioStream> = emptyList(),
-    val subtitleStreams: List<MacLibVlcSubtitleStream> = emptyList(),
+    val audioStreams: List<JvmLibVlcAudioStream> = emptyList(),
+    val subtitleStreams: List<JvmLibVlcSubtitleStream> = emptyList(),
 )
 
-internal data class MacLibVlcAudioStream(
+internal data class JvmLibVlcAudioStream(
     val streamIndex: Int,
     val ordinal: Int,
     val track: AudioTrack,
 )
 
-internal data class MacLibVlcSubtitleStream(
+internal data class JvmLibVlcSubtitleStream(
     val streamIndex: Int,
     val ordinal: Int,
     val track: SubtitleTrack,

@@ -9,8 +9,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackSupport
+import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
+import io.github.kdroidfilter.composemediaplayer.HlsFallbackSource
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.JvmExternalFallbackContainerSupport
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcAudioStream
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcInstallation
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcMediaProbe
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcSubtitleStream
+import io.github.kdroidfilter.composemediaplayer.JvmLibVlcTrackInfo
+import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
@@ -29,6 +41,7 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
+import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -38,13 +51,22 @@ import kotlin.time.Duration.Companion.milliseconds
 
 internal val linuxLogger = TaggedLogger("LinuxVideoPlayerState")
 
+private data class LinuxResolvedLibVlcBackend(
+    val installation: JvmLibVlcInstallation,
+)
+
+private data class LinuxLibVlcRuntimeTrackDescription(
+    val ordinal: Int,
+    val label: String,
+)
+
 /**
  * LinuxVideoPlayerState — JNI-based implementation using a native C GStreamer player.
  *
  * Architecture mirrors MacVideoPlayerState: coroutine-driven polling of the native
  * layer for frames, position, audio levels, and end-of-playback detection.
  */
-@Suppress("LargeClass")
+@Suppress("LargeClass", "MagicNumber", "TooManyFunctions")
 @Stable
 class LinuxVideoPlayerState : VideoPlayerState {
     // Native player pointer (AtomicLong for lock-free reads from the frame hot path)
@@ -75,6 +97,18 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private var frameUpdateJob: Job? = null
     private var bufferingCheckJob: Job? = null
     private var uiUpdateJob: Job? = null
+    private var externalHlsFallback: Closeable? = null
+    private var externalHlsFallbackDurationSeconds: Double? = null
+    private var externalHlsSourceUri: String? = null
+    private var externalHlsSelectedAudioStreamIndex: Int? = null
+    private var externalHlsSelectedSubtitleStreamIndex: Int? = null
+    private var externalHlsPlaybackOffsetSeconds: Double = 0.0
+    private var libVlcBackendActive: Boolean = false
+    private var libVlcSourceUri: String? = null
+    private var libVlcTrackInfo: JvmLibVlcTrackInfo? = null
+    private var libVlcSelectedAudioStreamIndex: Int? = null
+    private var libVlcSelectedSubtitleStreamIndex: Int? = null
+    private var nativeBackendUsesLibVlc: Boolean = false
 
     // State tracking
     private var lastFrameUpdateTime: Long = 0
@@ -199,6 +233,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     val ptr = LinuxNativeBridge.nCreatePlayer()
                     if (ptr != 0L) {
                         playerPtrAtomic.set(ptr)
+                        nativeBackendUsesLibVlc = false
                         linuxLogger.d { "Native player created successfully" }
                         applyVolume()
                         applyPlaybackSpeed()
@@ -253,13 +288,32 @@ class LinuxVideoPlayerState : VideoPlayerState {
             }
 
             try {
-                if (hasMedia) {
+                if (hasMedia || externalHlsFallback != null || libVlcBackendActive) {
                     cleanupCurrentPlayback()
                 }
 
-                ensurePlayerInitialized()
+                clearExternalHlsFallbackTrackState()
+                clearLibVlcTrackState()
 
-                val result = openMediaUri(uri, sanitizedHeaders)
+                val libVlcBackend = resolveLibVlcBackendForUri(uri, sanitizedHeaders)
+                ensurePlayerInitialized(libVlcBackend)
+
+                var playbackUri = uri
+                var playbackHeaders = sanitizedHeaders
+                if (libVlcBackend != null) {
+                    playbackUri = prepareLibVlcPlayback(uri, sanitizedHeaders)
+                }
+
+                var result = openMediaUri(playbackUri, playbackHeaders)
+                if (libVlcBackend == null && !result && shouldRetryWithExternalHlsFallback(uri, sanitizedHeaders)) {
+                    linuxLogger.d { "Native GStreamer open failed; retrying through external HLS fallback" }
+                    closeExternalHlsFallback()
+                    clearExternalHlsFallbackTrackState()
+                    val fallbackUri = prepareExternalHlsPlayback(uri, sanitizedHeaders)
+                    playbackHeaders = emptyMap()
+                    withContext(Dispatchers.Main) { error = null }
+                    result = openMediaUri(fallbackUri, playbackHeaders)
+                }
 
                 if (result) {
                     // Update frame rate from native layer
@@ -280,11 +334,21 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     updateFrameAsync()
                     startBufferingCheck()
 
+                    if (libVlcBackend != null) {
+                        refreshLibVlcRuntimeTracksIfNeeded()
+                        applyLibVlcSelectedTracks()
+                    }
+
                     if (isPlaying) {
                         playInBackground()
+                    } else if (libVlcBackendActive) {
+                        pauseInBackground()
                     }
                 } else {
                     linuxLogger.e { "Failed to open URI" }
+                    closeExternalHlsFallback()
+                    clearExternalHlsFallbackTrackState()
+                    clearLibVlcTrackState()
                     withContext(Dispatchers.Main) {
                         isLoading = false
                         error = VideoPlayerError.SourceError("Failed to open media source")
@@ -317,25 +381,47 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
         if (ptrToDispose != 0L) {
             try {
-                LinuxNativeBridge.nDisposePlayer(ptrToDispose)
+                disposeNativePlayer(ptrToDispose)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 linuxLogger.e { "Error disposing player: ${e.message}" }
             }
         }
+        nativeBackendUsesLibVlc = false
+        closeExternalHlsFallback()
+        clearLibVlcTrackState()
     }
 
-    private suspend fun ensurePlayerInitialized() {
+    private suspend fun ensurePlayerInitialized(libVlcBackend: LinuxResolvedLibVlcBackend? = null) {
         if (!playerScope.isActive) {
             playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         }
 
+        val wantsLibVlc = libVlcBackend != null
+        val existingPtr = playerPtr
+        if (existingPtr != 0L && nativeBackendUsesLibVlc != wantsLibVlc) {
+            val ptrToDispose = playerPtrAtomic.getAndSet(0L)
+            if (ptrToDispose != 0L) {
+                disposeNativePlayer(ptrToDispose, wasLibVlc = nativeBackendUsesLibVlc)
+            }
+            nativeBackendUsesLibVlc = false
+        }
+
         if (playerPtr == 0L) {
-            val ptr = LinuxNativeBridge.nCreatePlayer()
+            val ptr =
+                if (libVlcBackend != null) {
+                    LinuxNativeBridge.nCreateLibVlcPlayer(
+                        libVlcBackend.installation.libVlcPath,
+                        libVlcBackend.installation.pluginPath,
+                    )
+                } else {
+                    LinuxNativeBridge.nCreatePlayer()
+                }
             if (ptr != 0L) {
                 if (!playerPtrAtomic.compareAndSet(0L, ptr)) {
-                    LinuxNativeBridge.nDisposePlayer(ptr)
+                    disposeNativePlayer(ptr, wasLibVlc = wantsLibVlc)
                 } else {
+                    nativeBackendUsesLibVlc = wantsLibVlc
                     applyVolume()
                     applyPlaybackSpeed()
                 }
@@ -359,7 +445,11 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
         return try {
             val headerLines = requestHeaders.requestHeadersLineString()
-            if (headerLines.isBlank()) {
+            if (nativeBackendUsesLibVlc) {
+                if (!LinuxNativeBridge.nOpenLibVlcUriWithHeaders(ptr, uri, headerLines)) {
+                    return false
+                }
+            } else if (headerLines.isBlank()) {
                 LinuxNativeBridge.nOpenUri(ptr, uri)
             } else {
                 LinuxNativeBridge.nOpenUriWithHeaders(ptr, uri, headerLines)
@@ -374,13 +464,319 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
+    private fun disposeNativePlayer(
+        ptr: Long,
+        wasLibVlc: Boolean = nativeBackendUsesLibVlc,
+    ) {
+        if (wasLibVlc) {
+            LinuxNativeBridge.nDisposeLibVlcPlayer(ptr)
+        } else {
+            LinuxNativeBridge.nDisposePlayer(ptr)
+        }
+    }
+
+    private suspend fun shouldRetryWithExternalHlsFallback(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): Boolean =
+        !ExternalHlsFallbackSupport.isDisabled() &&
+            ExternalHlsFallbackSupport.needsContainerFallback(uri, requestHeaders)
+
+    private suspend fun resolveLibVlcBackendForUri(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): LinuxResolvedLibVlcBackend? {
+        if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders)) return null
+
+        val configured =
+            (
+                System.getProperty("composemediaplayer.linux.fallbackBackend")
+                    ?: System.getProperty("composemediaplayer.fallbackBackend")
+                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_LINUX_FALLBACK_BACKEND")
+                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_FALLBACK_BACKEND")
+                    ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
+                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
+                    ?: "auto"
+            ).lowercase()
+
+        return when (configured) {
+            "libvlc" ->
+                ExternalVlcLocator.findLibVlc()?.let(::LinuxResolvedLibVlcBackend)
+                    ?: throw missingLibVlcBackendException()
+            "auto" -> ExternalVlcLocator.findLibVlc()?.let(::LinuxResolvedLibVlcBackend)
+            "ffmpeg", "vlc" -> null
+            else -> null
+        }
+    }
+
+    private fun missingLibVlcBackendException(): UnsupportedOperationException =
+        UnsupportedOperationException(
+            "The Linux libVLC canvas backend was requested, but no compatible libVLC installation was found. " +
+                "Install VLC/libVLC for ${ExternalVlcLocator.currentProcessArchitecture() ?: "the current"} " +
+                "JVM architecture or set composemediaplayer.libvlc and composemediaplayer.libvlc.plugins. " +
+                "ComposeMediaPlayer does not bundle or link VLC.",
+        )
+
+    private suspend fun prepareLibVlcPlayback(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): String {
+        libVlcBackendActive = true
+        libVlcSourceUri = uri
+        val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
+        libVlcTrackInfo = trackInfo
+        updateLibVlcTracks(trackInfo)
+        return uri
+    }
+
+    private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
+        withContext(Dispatchers.Main) {
+            availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
+            availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
+            currentAudioTrack =
+                libVlcSelectedAudioStreamIndex
+                    ?.let { streamIndex -> trackInfo.audioStreams.firstOrNull { it.streamIndex == streamIndex }?.track }
+                    ?: trackInfo.audioStreams.firstOrNull { it.track.isDefault }?.track
+                    ?: trackInfo.audioStreams.firstOrNull()?.track
+            libVlcSelectedAudioStreamIndex = currentAudioTrack?.id?.let(::libVlcTrackStreamIndex)
+
+            availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
+            availableSubtitleTracks.addAll(trackInfo.subtitleStreams.map { it.track })
+            val selectedSubtitle =
+                libVlcSelectedSubtitleStreamIndex
+                    ?.let { streamIndex ->
+                        trackInfo.subtitleStreams.firstOrNull { it.streamIndex == streamIndex }?.track
+                    }
+            if (selectedSubtitle != null) {
+                currentSubtitleTrack = selectedSubtitle
+                subtitlesEnabled = true
+                libVlcSelectedSubtitleStreamIndex = selectedSubtitle.id.let(::libVlcTrackStreamIndex)
+            } else if (currentSubtitleTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
+                currentSubtitleTrack = null
+                subtitlesEnabled = false
+            }
+        }
+    }
+
+    private suspend fun refreshLibVlcRuntimeTracksIfNeeded() {
+        val ptr = playerPtr
+        val currentInfo = libVlcTrackInfo ?: JvmLibVlcTrackInfo()
+        if (ptr == 0L || currentInfo.audioStreams.isNotEmpty() || currentInfo.subtitleStreams.isNotEmpty()) return
+
+        repeat(12) {
+            val runtimeAudioTracks =
+                parseLibVlcRuntimeTrackDescriptions(LinuxNativeBridge.nGetLibVlcAudioTrackDescriptions(ptr))
+            val runtimeSubtitleTracks =
+                parseLibVlcRuntimeTrackDescriptions(LinuxNativeBridge.nGetLibVlcSubtitleTrackDescriptions(ptr))
+
+            if (runtimeAudioTracks.isNotEmpty() || runtimeSubtitleTracks.isNotEmpty()) {
+                val mergedInfo =
+                    currentInfo.copy(
+                        audioStreams =
+                            currentInfo.audioStreams.ifEmpty {
+                                runtimeAudioTracks.map { description ->
+                                    JvmLibVlcAudioStream(
+                                        streamIndex = description.ordinal,
+                                        ordinal = description.ordinal,
+                                        track =
+                                            AudioTrack(
+                                                id = "$LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX${description.ordinal}",
+                                                label =
+                                                    description.label.ifBlank {
+                                                        "Audio ${description.ordinal + 1}"
+                                                    },
+                                            ),
+                                    )
+                                }
+                            },
+                        subtitleStreams =
+                            currentInfo.subtitleStreams.ifEmpty {
+                                runtimeSubtitleTracks.map { description ->
+                                    JvmLibVlcSubtitleStream(
+                                        streamIndex = description.ordinal,
+                                        ordinal = description.ordinal,
+                                        track =
+                                            SubtitleTrack(
+                                                id = "$LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX${description.ordinal}",
+                                                label =
+                                                    description.label.ifBlank {
+                                                        "Subtitle ${description.ordinal + 1}"
+                                                    },
+                                                language = "",
+                                                src = "",
+                                                format = SubtitleFormat.AUTO,
+                                                isEmbedded = true,
+                                            ),
+                                    )
+                                }
+                            },
+                    )
+                libVlcTrackInfo = mergedInfo
+                updateLibVlcTracks(mergedInfo)
+                return
+            }
+
+            delay(250.milliseconds)
+        }
+    }
+
+    private fun parseLibVlcRuntimeTrackDescriptions(raw: String?): List<LinuxLibVlcRuntimeTrackDescription> =
+        raw
+            ?.lineSequence()
+            ?.mapNotNull { line ->
+                val ordinal = line.substringBefore('\t').toIntOrNull() ?: return@mapNotNull null
+                val label = line.substringAfter('\t', missingDelimiterValue = "").trim()
+                LinuxLibVlcRuntimeTrackDescription(ordinal = ordinal, label = label)
+            }?.toList()
+            ?: emptyList()
+
+    private suspend fun clearLibVlcTrackState() {
+        libVlcBackendActive = false
+        libVlcSourceUri = null
+        libVlcTrackInfo = null
+        libVlcSelectedAudioStreamIndex = null
+        libVlcSelectedSubtitleStreamIndex = null
+        withContext(Dispatchers.Main) {
+            availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
+            if (currentAudioTrack?.id?.let(::isLibVlcAudioTrackId) == true) {
+                currentAudioTrack = null
+            }
+            availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
+            if (currentSubtitleTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
+                currentSubtitleTrack = null
+                subtitlesEnabled = false
+            }
+        }
+    }
+
+    private fun isLibVlcAudioTrackId(id: String): Boolean = id.startsWith(LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX)
+
+    private fun isLibVlcSubtitleTrackId(id: String): Boolean = id.startsWith(LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX)
+
+    private fun libVlcTrackStreamIndex(id: String): Int? =
+        when {
+            id.startsWith(LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX) -> id.removePrefix(LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX)
+            id.startsWith(
+                LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX,
+            ) -> id.removePrefix(LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX)
+            else -> null
+        }?.toIntOrNull()
+
+    private fun applyLibVlcSelectedTracks() {
+        if (!libVlcBackendActive) return
+        val info = libVlcTrackInfo ?: return
+        val ptr = playerPtr
+        if (ptr == 0L) return
+
+        libVlcSelectedAudioStreamIndex
+            ?.let { streamIndex -> info.audioStreams.firstOrNull { it.streamIndex == streamIndex }?.ordinal }
+            ?.let { ordinal -> LinuxNativeBridge.nSelectLibVlcAudioTrack(ptr, ordinal) }
+
+        val selectedSubtitleOrdinal =
+            libVlcSelectedSubtitleStreamIndex
+                ?.let { streamIndex -> info.subtitleStreams.firstOrNull { it.streamIndex == streamIndex }?.ordinal }
+
+        if (selectedSubtitleOrdinal != null) {
+            LinuxNativeBridge.nSelectLibVlcSubtitleTrack(ptr, selectedSubtitleOrdinal)
+        }
+    }
+
+    private suspend fun prepareExternalHlsPlayback(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): String {
+        val started =
+            ExternalHlsFallbackSupport.start(
+                uri = uri,
+                requestHeaders = requestHeaders,
+                selectedAudioStreamIndex = externalHlsSelectedAudioStreamIndex,
+                selectedSubtitleStreamIndex = externalHlsSelectedSubtitleStreamIndex,
+                startTimeSeconds = externalHlsPlaybackOffsetSeconds,
+            )
+        externalHlsFallback = started.fallback
+        externalHlsFallbackDurationSeconds = started.source.durationSeconds
+        externalHlsSourceUri = uri
+        externalHlsSelectedAudioStreamIndex = started.source.selectedAudioStreamIndex
+        externalHlsSelectedSubtitleStreamIndex = started.source.selectedSubtitleStreamIndex
+        externalHlsPlaybackOffsetSeconds = started.source.playbackOffsetSeconds
+        updateExternalHlsFallbackTracks(started.source)
+        return started.source.playlistUrl
+    }
+
+    private fun closeExternalHlsFallback() {
+        val fallback = externalHlsFallback
+        externalHlsFallback = null
+        externalHlsFallbackDurationSeconds = null
+        externalHlsSourceUri = null
+        externalHlsSelectedAudioStreamIndex = null
+        externalHlsSelectedSubtitleStreamIndex = null
+        externalHlsPlaybackOffsetSeconds = 0.0
+        fallback?.close()
+    }
+
+    private suspend fun clearExternalHlsFallbackTrackState() {
+        externalHlsSelectedAudioStreamIndex = null
+        externalHlsSelectedSubtitleStreamIndex = null
+        externalHlsPlaybackOffsetSeconds = 0.0
+        withContext(Dispatchers.Main) {
+            availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
+            if (currentAudioTrack?.id?.let(ExternalHlsFallbackSupport::isExternalHlsAudioTrackId) == true) {
+                currentAudioTrack = null
+            }
+
+            availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
+            if (currentSubtitleTrack?.id?.let(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId) == true) {
+                currentSubtitleTrack = null
+                subtitlesEnabled = false
+            }
+        }
+    }
+
+    private suspend fun updateExternalHlsFallbackTracks(hlsSource: HlsFallbackSource) {
+        val previousSubtitleId = currentSubtitleTrack?.id
+        withContext(Dispatchers.Main) {
+            availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
+            availableAudioTracks.addAll(hlsSource.audioTracks)
+            currentAudioTrack =
+                hlsSource.selectedAudioStreamIndex
+                    ?.let { streamIndex ->
+                        hlsSource.audioTracks.firstOrNull {
+                            ExternalHlsFallbackSupport.externalHlsTrackStreamIndex(it.id) == streamIndex
+                        }
+                    }
+                    ?: hlsSource.audioTracks.firstOrNull { it.isDefault }
+                    ?: hlsSource.audioTracks.firstOrNull()
+
+            availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
+            availableSubtitleTracks.addAll(hlsSource.subtitleTracks)
+            val selectedSubtitleTrack =
+                hlsSource.selectedSubtitleStreamIndex
+                    ?.let { streamIndex ->
+                        hlsSource.subtitleTracks.firstOrNull {
+                            ExternalHlsFallbackSupport.externalHlsTrackStreamIndex(it.id) == streamIndex
+                        }
+                    }
+                    ?: previousSubtitleId
+                        ?.takeIf(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId)
+                        ?.let { previousId -> hlsSource.subtitleTracks.firstOrNull { it.id == previousId } }
+
+            if (selectedSubtitleTrack != null) {
+                currentSubtitleTrack = selectedSubtitleTrack
+                subtitlesEnabled = true
+            } else if (previousSubtitleId?.let(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId) == true) {
+                currentSubtitleTrack = null
+                subtitlesEnabled = false
+            }
+        }
+    }
+
     private suspend fun pollDimensionsUntilReady(
         ptr: Long,
         maxAttempts: Int = 20,
     ) {
         for (attempt in 1..maxAttempts) {
-            val width = LinuxNativeBridge.nGetFrameWidth(ptr)
-            val height = LinuxNativeBridge.nGetFrameHeight(ptr)
+            val width = nativeFrameWidth(ptr)
+            val height = nativeFrameHeight(ptr)
             if (width > 0 && height > 0) {
                 linuxLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
                 return
@@ -395,7 +791,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return
         try {
-            captureFrameRate = LinuxNativeBridge.nGetFrameRate(ptr)
+            captureFrameRate = nativeFrameRate(ptr)
             linuxLogger.d { "Frame rate: $captureFrameRate" }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -408,10 +804,17 @@ class LinuxVideoPlayerState : VideoPlayerState {
         if (ptr == 0L) return
 
         try {
-            val width = LinuxNativeBridge.nGetFrameWidth(ptr)
-            val height = LinuxNativeBridge.nGetFrameHeight(ptr)
-            val duration = LinuxNativeBridge.nGetVideoDuration(ptr).secondsAsDuration()
-            val frameRate = LinuxNativeBridge.nGetFrameRate(ptr)
+            val probedVideoWidth = libVlcTrackInfo?.videoWidth
+            val probedVideoHeight = libVlcTrackInfo?.videoHeight
+            val width = probedVideoWidth ?: nativeFrameWidth(ptr)
+            val height = probedVideoHeight ?: nativeFrameHeight(ptr)
+            val durationSeconds =
+                externalHlsFallbackDurationSeconds
+                    ?.takeIf { it > 0.0 }
+                    ?: libVlcTrackInfo?.durationSeconds
+                    ?: nativeDuration(ptr)
+            val duration = durationSeconds.secondsAsDuration()
+            val frameRate = nativeFrameRate(ptr)
             val newAspectRatio =
                 if (width > 0 && height > 0) {
                     width.toFloat() / height.toFloat()
@@ -419,11 +822,11 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     _aspectRatio.value
                 }
 
-            val title = LinuxNativeBridge.nGetVideoTitle(ptr)
-            val bitrate = LinuxNativeBridge.nGetVideoBitrate(ptr)
-            val mimeType = LinuxNativeBridge.nGetVideoMimeType(ptr)
-            val audioChannels = LinuxNativeBridge.nGetAudioChannels(ptr)
-            val audioSampleRate = LinuxNativeBridge.nGetAudioSampleRate(ptr)
+            val title = if (nativeBackendUsesLibVlc) null else LinuxNativeBridge.nGetVideoTitle(ptr)
+            val bitrate = if (nativeBackendUsesLibVlc) 0 else LinuxNativeBridge.nGetVideoBitrate(ptr)
+            val mimeType = if (nativeBackendUsesLibVlc) null else LinuxNativeBridge.nGetVideoMimeType(ptr)
+            val audioChannels = if (nativeBackendUsesLibVlc) 0 else LinuxNativeBridge.nGetAudioChannels(ptr)
+            val audioSampleRate = if (nativeBackendUsesLibVlc) 0 else LinuxNativeBridge.nGetAudioSampleRate(ptr)
 
             withContext(Dispatchers.Main) {
                 metadata.duration = duration
@@ -499,7 +902,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 if (ptr == 0L) return@withContext
 
                 val outInfo = IntArray(3)
-                val frameAddress = LinuxNativeBridge.nLockFrame(ptr, outInfo)
+                val frameAddress = nativeLockFrame(ptr, outInfo)
                 if (frameAddress == 0L) return@withContext
 
                 var framePublished = false
@@ -551,7 +954,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                         framePublished = true
                     }
                 } finally {
-                    LinuxNativeBridge.nUnlockFrame(ptr)
+                    nativeUnlockFrame(ptr)
                 }
 
                 if (framePublished) {
@@ -608,7 +1011,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         duration: Duration,
     ) {
         val ptr = playerPtr
-        val ended = ptr != 0L && LinuxNativeBridge.nConsumeDidPlayToEnd(ptr)
+        val ended = ptr != 0L && nativeConsumeDidPlayToEnd(ptr)
         if (!ended && (duration <= Duration.ZERO || current < duration - 500.milliseconds)) return
 
         if (loop) {
@@ -642,7 +1045,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return
         try {
-            LinuxNativeBridge.nPlay(ptr)
+            nativePlay(ptr)
             withContext(Dispatchers.Main) { isPlaying = true }
             startFrameUpdates()
             startBufferingCheck()
@@ -661,7 +1064,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return
         try {
-            LinuxNativeBridge.nPause(ptr)
+            nativePause(ptr)
             withContext(Dispatchers.Main) {
                 isPlaying = false
                 isLoading = false
@@ -677,13 +1080,19 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     override fun stop() {
         ioScope.launch {
-            pauseInBackground()
-            if (hasMedia) seekToAsync(0f)
+            if (externalHlsFallback != null || libVlcBackendActive) {
+                cleanupCurrentPlayback()
+            } else {
+                pauseInBackground()
+                if (hasMedia) seekToAsync(0f)
+            }
             withContext(Dispatchers.Main) {
                 hasMedia = false
                 isLoading = false
                 resetState()
             }
+            clearExternalHlsFallbackTrackState()
+            clearLibVlcTrackState()
         }
     }
 
@@ -752,10 +1161,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
             val ptr = playerPtr
             if (ptr == 0L) return
-            LinuxNativeBridge.nSeekTo(ptr, seekTime.toSecondsDouble())
+            nativeSeekTo(ptr, seekTime.toSecondsDouble())
 
             if (isPlaying) {
-                LinuxNativeBridge.nPlay(ptr)
+                nativePlay(ptr)
                 delay(10.milliseconds)
                 updateFrameAsync()
                 ioScope.launch {
@@ -819,7 +1228,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
             if (ptrToDispose != 0L) {
                 try {
-                    LinuxNativeBridge.nDisposePlayer(ptrToDispose)
+                    disposeNativePlayer(ptrToDispose)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     linuxLogger.e { "Error disposing player: ${e.message}" }
@@ -827,11 +1236,38 @@ class LinuxVideoPlayerState : VideoPlayerState {
             }
         }.start()
 
+        closeExternalHlsFallback()
         ioScope.cancel()
     }
 
     // --- Subtitle stubs ---
     override fun selectAudioTrack(track: AudioTrack?) {
+        val selectedLibVlcStreamIndex =
+            track
+                ?.id
+                ?.takeIf(::isLibVlcAudioTrackId)
+                ?.let(::libVlcTrackStreamIndex)
+
+        if (track != null && selectedLibVlcStreamIndex != null) {
+            ioScope.launch {
+                selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex)
+            }
+            return
+        }
+
+        val selectedStreamIndex =
+            track
+                ?.id
+                ?.takeIf(ExternalHlsFallbackSupport::isExternalHlsAudioTrackId)
+                ?.let(ExternalHlsFallbackSupport::externalHlsTrackStreamIndex)
+
+        if (track != null && selectedStreamIndex != null) {
+            ioScope.launch {
+                switchExternalHlsAudioTrack(track, selectedStreamIndex)
+            }
+            return
+        }
+
         ioScope.launch {
             withContext(Dispatchers.Main) {
                 currentAudioTrack = track
@@ -840,6 +1276,39 @@ class LinuxVideoPlayerState : VideoPlayerState {
     }
 
     override fun selectSubtitleTrack(track: SubtitleTrack?) {
+        if (track == null && libVlcBackendActive) {
+            ioScope.launch {
+                disableLibVlcSubtitles()
+            }
+            return
+        }
+
+        val selectedLibVlcStreamIndex =
+            track
+                ?.id
+                ?.takeIf(::isLibVlcSubtitleTrackId)
+                ?.let(::libVlcTrackStreamIndex)
+
+        if (track != null && selectedLibVlcStreamIndex != null) {
+            ioScope.launch {
+                selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex)
+            }
+            return
+        }
+
+        val selectedStreamIndex =
+            track
+                ?.id
+                ?.takeIf(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId)
+                ?.let(ExternalHlsFallbackSupport::externalHlsTrackStreamIndex)
+
+        if (track != null && selectedStreamIndex != null) {
+            ioScope.launch {
+                switchExternalHlsSubtitleTrack(track, selectedStreamIndex)
+            }
+            return
+        }
+
         ioScope.launch {
             withContext(Dispatchers.Main) {
                 currentSubtitleTrack = track
@@ -849,11 +1318,224 @@ class LinuxVideoPlayerState : VideoPlayerState {
     }
 
     override fun disableSubtitles() {
+        if (libVlcBackendActive && currentSubtitleTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
+            ioScope.launch {
+                disableLibVlcSubtitles()
+            }
+            return
+        }
+
+        if (externalHlsSourceUri != null && externalHlsSelectedSubtitleStreamIndex != null) {
+            ioScope.launch {
+                switchExternalHlsSubtitleTrack(track = null, streamIndex = null)
+            }
+            return
+        }
+
         ioScope.launch {
             withContext(Dispatchers.Main) {
                 subtitlesEnabled = false
                 currentSubtitleTrack = null
             }
+        }
+    }
+
+    private suspend fun selectLibVlcAudioTrack(
+        track: AudioTrack,
+        streamIndex: Int,
+    ) {
+        libVlcSelectedAudioStreamIndex = streamIndex
+        withContext(Dispatchers.Main) {
+            currentAudioTrack = track
+        }
+
+        val ordinal =
+            libVlcTrackInfo
+                ?.audioStreams
+                ?.firstOrNull { it.streamIndex == streamIndex }
+                ?.ordinal
+                ?: return
+        val ptr = playerPtr
+        if (ptr != 0L) {
+            LinuxNativeBridge.nSelectLibVlcAudioTrack(ptr, ordinal)
+        }
+    }
+
+    private suspend fun selectLibVlcSubtitleTrack(
+        track: SubtitleTrack,
+        streamIndex: Int,
+    ) {
+        libVlcSelectedSubtitleStreamIndex = streamIndex
+        withContext(Dispatchers.Main) {
+            currentSubtitleTrack = track
+            subtitlesEnabled = true
+        }
+
+        val ordinal =
+            libVlcTrackInfo
+                ?.subtitleStreams
+                ?.firstOrNull { it.streamIndex == streamIndex }
+                ?.ordinal
+                ?: return
+        val ptr = playerPtr
+        if (ptr != 0L) {
+            LinuxNativeBridge.nSelectLibVlcSubtitleTrack(ptr, ordinal)
+        }
+    }
+
+    private suspend fun disableLibVlcSubtitles() {
+        libVlcSelectedSubtitleStreamIndex = null
+        val ptr = playerPtr
+        if (ptr != 0L) {
+            LinuxNativeBridge.nDisableLibVlcSubtitles(ptr)
+        }
+        withContext(Dispatchers.Main) {
+            subtitlesEnabled = false
+            currentSubtitleTrack = null
+        }
+    }
+
+    private suspend fun switchExternalHlsAudioTrack(
+        track: AudioTrack,
+        streamIndex: Int,
+    ) {
+        val sourceUri = externalHlsSourceUri
+        if (sourceUri == null) {
+            withContext(Dispatchers.Main) { currentAudioTrack = track }
+            return
+        }
+        if (externalHlsSelectedAudioStreamIndex == streamIndex) {
+            withContext(Dispatchers.Main) { currentAudioTrack = track }
+            return
+        }
+
+        restartExternalHlsPlayback(
+            sourceUri = sourceUri,
+            selectedAudioStreamIndex = streamIndex,
+            selectedSubtitleStreamIndex = externalHlsSelectedSubtitleStreamIndex,
+            onBeforeRestart = {
+                currentAudioTrack = track
+            },
+            failureMessage = "Failed to switch audio track",
+        )
+    }
+
+    private suspend fun switchExternalHlsSubtitleTrack(
+        track: SubtitleTrack?,
+        streamIndex: Int?,
+    ) {
+        val sourceUri = externalHlsSourceUri
+        if (sourceUri == null) {
+            withContext(Dispatchers.Main) {
+                currentSubtitleTrack = track
+                subtitlesEnabled = track != null
+            }
+            return
+        }
+        if (externalHlsSelectedSubtitleStreamIndex == streamIndex) {
+            withContext(Dispatchers.Main) {
+                currentSubtitleTrack = track
+                subtitlesEnabled = track != null
+            }
+            return
+        }
+        if (track != null && !ExternalHlsFallbackSupport.hasSubtitleRenderer()) {
+            withContext(Dispatchers.Main) {
+                isLoading = false
+                currentSubtitleTrack = null
+                subtitlesEnabled = false
+                error =
+                    VideoPlayerError.CodecError(
+                        "Full embedded subtitle rendering through the external HLS fallback requires VLC " +
+                            "or ffmpeg with libass and the subtitles filter enabled.",
+                    )
+            }
+            return
+        }
+
+        restartExternalHlsPlayback(
+            sourceUri = sourceUri,
+            selectedAudioStreamIndex = externalHlsSelectedAudioStreamIndex,
+            selectedSubtitleStreamIndex = streamIndex,
+            onBeforeRestart = {
+                currentSubtitleTrack = track
+                subtitlesEnabled = track != null
+            },
+            failureMessage = "Failed to switch subtitle track",
+        )
+    }
+
+    private suspend fun restartExternalHlsPlayback(
+        sourceUri: String,
+        selectedAudioStreamIndex: Int?,
+        selectedSubtitleStreamIndex: Int?,
+        onBeforeRestart: () -> Unit,
+        failureMessage: String,
+    ) {
+        val shouldResumePlayback = isPlaying
+        val restartPosition = getPositionSafely()
+        val duration = getDurationSafely()
+        val restartSliderPos =
+            if (duration > Duration.ZERO) {
+                (restartPosition.toSecondsDouble() / duration.toSecondsDouble() * VideoPlayerState.SLIDER_SCALE)
+                    .toFloat()
+                    .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
+            } else {
+                sliderPos
+            }
+
+        try {
+            withContext(Dispatchers.Main) {
+                isLoading = true
+                error = null
+                onBeforeRestart()
+                sliderPos = restartSliderPos
+                _positionText.value = formatTime(restartPosition)
+            }
+
+            cleanupCurrentPlayback()
+            ensurePlayerInitialized()
+
+            externalHlsSelectedAudioStreamIndex = selectedAudioStreamIndex
+            externalHlsSelectedSubtitleStreamIndex = selectedSubtitleStreamIndex
+            externalHlsPlaybackOffsetSeconds = restartPosition.toSecondsDouble()
+            val playableUri = prepareExternalHlsPlayback(sourceUri, lastRequestHeaders)
+            val opened = openMediaUri(playableUri, emptyMap())
+            if (!opened) {
+                closeExternalHlsFallback()
+                clearExternalHlsFallbackTrackState()
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                    error = VideoPlayerError.SourceError(failureMessage)
+                }
+                return
+            }
+
+            updateFrameRateInfo()
+            updateMetadata()
+            if (surfaceWidth > 0 && surfaceHeight > 0) {
+                applyOutputScaling()
+            }
+
+            withContext(Dispatchers.Main) {
+                hasMedia = true
+                isLoading = false
+                isPlaying = shouldResumePlayback
+            }
+
+            startFrameUpdates()
+            updateFrameAsync()
+            startBufferingCheck()
+
+            if (shouldResumePlayback) {
+                playInBackground()
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            linuxLogger.e { "restartExternalHlsPlayback() - Exception: ${e.message}" }
+            closeExternalHlsFallback()
+            clearExternalHlsFallbackTrackState()
+            handleError(e)
         }
     }
 
@@ -888,6 +1570,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         if (sw <= 0 || sh <= 0) return
         val ptr = playerPtr
         if (ptr == 0L) return
+        if (nativeBackendUsesLibVlc) return
 
         // Compute output dimensions that fit within the surface while preserving
         // the video's native aspect ratio. Passing the raw surface size would let
@@ -908,6 +1591,115 @@ class LinuxVideoPlayerState : VideoPlayerState {
     }
 
     // --- Internal helpers ---
+
+    private fun nativePlay(ptr: Long) {
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nPlayLibVlc(ptr)
+        } else {
+            LinuxNativeBridge.nPlay(ptr)
+        }
+    }
+
+    private fun nativePause(ptr: Long) {
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nPauseLibVlc(ptr)
+        } else {
+            LinuxNativeBridge.nPause(ptr)
+        }
+    }
+
+    private fun nativeSetVolume(
+        ptr: Long,
+        volume: Float,
+    ) {
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nSetLibVlcVolume(ptr, volume)
+        } else {
+            LinuxNativeBridge.nSetVolume(ptr, volume)
+        }
+    }
+
+    private fun nativeSetPlaybackSpeed(
+        ptr: Long,
+        speed: Float,
+    ) {
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nSetLibVlcPlaybackSpeed(ptr, speed)
+        } else {
+            LinuxNativeBridge.nSetPlaybackSpeed(ptr, speed)
+        }
+    }
+
+    private fun nativeLockFrame(
+        ptr: Long,
+        outInfo: IntArray,
+    ): Long =
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nLockLibVlcFrame(ptr, outInfo)
+        } else {
+            LinuxNativeBridge.nLockFrame(ptr, outInfo)
+        }
+
+    private fun nativeUnlockFrame(ptr: Long) {
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nUnlockLibVlcFrame(ptr)
+        } else {
+            LinuxNativeBridge.nUnlockFrame(ptr)
+        }
+    }
+
+    private fun nativeFrameWidth(ptr: Long): Int =
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nGetLibVlcFrameWidth(ptr)
+        } else {
+            LinuxNativeBridge.nGetFrameWidth(ptr)
+        }
+
+    private fun nativeFrameHeight(ptr: Long): Int =
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nGetLibVlcFrameHeight(ptr)
+        } else {
+            LinuxNativeBridge.nGetFrameHeight(ptr)
+        }
+
+    private fun nativeFrameRate(ptr: Long): Float =
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nGetLibVlcFrameRate(ptr)
+        } else {
+            LinuxNativeBridge.nGetFrameRate(ptr)
+        }
+
+    private fun nativeDuration(ptr: Long): Double =
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nGetLibVlcVideoDuration(ptr)
+        } else {
+            LinuxNativeBridge.nGetVideoDuration(ptr)
+        }
+
+    private fun nativeCurrentTime(ptr: Long): Double =
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nGetLibVlcCurrentTime(ptr)
+        } else {
+            LinuxNativeBridge.nGetCurrentTime(ptr)
+        }
+
+    private fun nativeSeekTo(
+        ptr: Long,
+        seconds: Double,
+    ) {
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nSeekLibVlcTo(ptr, seconds)
+        } else {
+            LinuxNativeBridge.nSeekTo(ptr, seconds)
+        }
+    }
+
+    private fun nativeConsumeDidPlayToEnd(ptr: Long): Boolean =
+        if (nativeBackendUsesLibVlc) {
+            LinuxNativeBridge.nConsumeLibVlcDidPlayToEnd(ptr)
+        } else {
+            LinuxNativeBridge.nConsumeDidPlayToEnd(ptr)
+        }
 
     private suspend fun resetState() {
         withContext(Dispatchers.Main) {
@@ -944,7 +1736,15 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return Duration.ZERO
         return try {
-            LinuxNativeBridge.nGetCurrentTime(ptr).secondsAsDuration()
+            val current = nativeCurrentTime(ptr)
+            val fallbackDuration = externalHlsFallbackDurationSeconds
+            if (fallbackDuration != null && fallbackDuration > 0.0) {
+                (externalHlsPlaybackOffsetSeconds + current)
+                    .coerceIn(0.0, fallbackDuration)
+                    .secondsAsDuration()
+            } else {
+                current.secondsAsDuration()
+            }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Duration.ZERO
@@ -952,10 +1752,14 @@ class LinuxVideoPlayerState : VideoPlayerState {
     }
 
     private suspend fun getDurationSafely(): Duration {
+        externalHlsFallbackDurationSeconds?.let { duration ->
+            if (duration > 0.0) return duration.secondsAsDuration()
+        }
         val ptr = playerPtr
         if (ptr == 0L) return Duration.ZERO
         return try {
-            LinuxNativeBridge.nGetVideoDuration(ptr).secondsAsDuration()
+            val durationSeconds = libVlcTrackInfo?.durationSeconds ?: nativeDuration(ptr)
+            durationSeconds.secondsAsDuration()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Duration.ZERO
@@ -966,7 +1770,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr != 0L) {
             try {
-                LinuxNativeBridge.nSetVolume(ptr, _volumeState.value)
+                nativeSetVolume(ptr, _volumeState.value)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
             }
@@ -977,7 +1781,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr != 0L) {
             try {
-                LinuxNativeBridge.nSetPlaybackSpeed(ptr, _playbackSpeedState.value)
+                nativeSetPlaybackSpeed(ptr, _playbackSpeedState.value)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
             }

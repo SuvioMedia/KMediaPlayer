@@ -7,7 +7,7 @@ import kotlin.test.assertTrue
 class MacOsMediaToolsTest {
     @Test
     fun queryReturnsConsistentToolStatus() {
-        val tools = MacOsMediaTools.query()
+        val tools = JvmMediaTools.query()
 
         listOf(
             tools.vlc,

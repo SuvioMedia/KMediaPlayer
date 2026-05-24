@@ -6,7 +6,7 @@ internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
     when (CurrentPlatform.os) {
         CurrentPlatform.OS.WINDOWS ->
             PlayerCapabilities(
-                supportsMkv = false,
+                supportsMkv = true,
             )
         CurrentPlatform.OS.MAC,
         CurrentPlatform.OS.LINUX,

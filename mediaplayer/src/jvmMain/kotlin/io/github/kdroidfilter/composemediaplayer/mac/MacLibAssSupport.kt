@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
+import io.github.kdroidfilter.composemediaplayer.ExternalFfmpegLocator
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import java.io.File
@@ -77,7 +78,7 @@ internal object MacEmbeddedAssExtractor {
         }
 
         val ffmpeg =
-            MacFfmpegLocator.findFfmpeg()
+            ExternalFfmpegLocator.findFfmpeg()
                 ?: throw UnsupportedOperationException(
                     "Embedded ASS subtitle extraction failed with the built-in Matroska extractor" +
                         builtInExtractorFailure?.message?.let { ": $it" }.orEmpty() +

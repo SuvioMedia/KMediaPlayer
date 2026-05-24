@@ -1,13 +1,13 @@
 package sample.app.player
 
-import io.github.kdroidfilter.composemediaplayer.MacOsMediaToolAvailability
-import io.github.kdroidfilter.composemediaplayer.MacOsMediaTools
+import io.github.kdroidfilter.composemediaplayer.JvmMediaToolAvailability
+import io.github.kdroidfilter.composemediaplayer.JvmMediaTools
 
 internal actual val macMkvPlaybackBackendSelectionAvailable: Boolean
-    get() = System.getProperty("os.name").contains("Mac", ignoreCase = true)
+    get() = true
 
-private const val FALLBACK_BACKEND_PROPERTY = "composemediaplayer.macos.fallbackBackend"
-private const val HLS_BACKEND_PROPERTY = "composemediaplayer.macos.hlsFallbackBackend"
+private const val FALLBACK_BACKEND_PROPERTY = "composemediaplayer.fallbackBackend"
+private const val HLS_BACKEND_PROPERTY = "composemediaplayer.hlsFallbackBackend"
 
 private var capturedOriginalValues = false
 private var originalFallbackBackend: String? = null
@@ -16,8 +16,8 @@ private var originalHlsBackend: String? = null
 internal actual fun macMkvPlaybackBackendOptions(): List<MacMkvPlaybackBackendOption> {
     if (!macMkvPlaybackBackendSelectionAvailable) return emptyList()
 
-    val tools = MacOsMediaTools.query()
-    val hasLibVlcCanvas = tools.libVlc.available && tools.libass.available
+    val tools = JvmMediaTools.query()
+    val hasLibVlcCanvas = tools.libVlc.available
     val hasHlsBackend =
         (tools.ffmpeg.available && tools.ffprobe.available && tools.ffmpegWithSubtitlesFilter.available) ||
             tools.vlc.available
@@ -30,9 +30,9 @@ internal actual fun macMkvPlaybackBackendOptions(): List<MacMkvPlaybackBackendOp
                 if (hasLibVlcCanvas) {
                     "Uses libVLC canvas first, then falls back to HLS helpers."
                 } else if (hasHlsBackend) {
-                    "Uses the first available HLS helper for macOS MKV playback."
+                    "Uses the first available external HLS helper for JVM MKV playback."
                 } else {
-                    "No MKV helper detected; regular AVFoundation formats can still play."
+                    "No MKV helper detected; native formats can still play."
                 },
             installHint =
                 if (hasLibVlcCanvas || hasHlsBackend) {
@@ -98,14 +98,14 @@ private fun restoreProperty(
     }
 }
 
-private fun libVlcOption(tools: MacOsMediaToolAvailability): MacMkvPlaybackBackendOption {
-    val enabled = tools.libVlc.available && tools.libass.available
+private fun libVlcOption(tools: JvmMediaToolAvailability): MacMkvPlaybackBackendOption {
+    val enabled = tools.libVlc.available
     val status =
         when {
-            enabled -> "Ready. VLC/libVLC and libass detected."
-            !tools.libVlc.available && !tools.libass.available -> "Requires VLC/libVLC and libass for ASS subtitle rendering."
+            enabled && isMacOs() && tools.libass.available -> "Ready. VLC/libVLC and libass detected."
+            enabled -> "Ready. VLC/libVLC detected."
             !tools.libVlc.available -> "Requires VLC/libVLC."
-            else -> "VLC/libVLC detected; libass is required for ASS subtitle rendering."
+            else -> "Requires VLC/libVLC."
         }
 
     return MacMkvPlaybackBackendOption(
@@ -114,14 +114,14 @@ private fun libVlcOption(tools: MacOsMediaToolAvailability): MacMkvPlaybackBacke
         status = status,
         installHint =
             if (enabled) {
-                "VLC: ${tools.vlc.path ?: tools.libVlc.path}; libass: ${tools.libass.path}. VLC is user-installed; it is not bundled or linked into the app."
+                "VLC: ${tools.vlc.path ?: tools.libVlc.path}. VLC is user-installed; it is not bundled or linked into the app."
             } else {
-                "Install VLC from https://www.videolan.org/vlc/ and libass from Homebrew or MacPorts."
+                "Install VLC from https://www.videolan.org/vlc/."
             },
     )
 }
 
-private fun ffmpegHlsOption(tools: MacOsMediaToolAvailability): MacMkvPlaybackBackendOption {
+private fun ffmpegHlsOption(tools: JvmMediaToolAvailability): MacMkvPlaybackBackendOption {
     val enabled = tools.ffmpeg.available && tools.ffprobe.available && tools.ffmpegWithSubtitlesFilter.available
     val status =
         when {
@@ -145,7 +145,7 @@ private fun ffmpegHlsOption(tools: MacOsMediaToolAvailability): MacMkvPlaybackBa
     )
 }
 
-private fun vlcHlsOption(tools: MacOsMediaToolAvailability): MacMkvPlaybackBackendOption =
+private fun vlcHlsOption(tools: JvmMediaToolAvailability): MacMkvPlaybackBackendOption =
     MacMkvPlaybackBackendOption(
         backend = MacMkvPlaybackBackend.VLC_HLS,
         enabled = tools.vlc.available,
@@ -162,3 +162,8 @@ private fun vlcHlsOption(tools: MacOsMediaToolAvailability): MacMkvPlaybackBacke
                 "Install VLC from https://www.videolan.org/vlc/"
             },
     )
+
+private fun isMacOs(): Boolean {
+    val osName = System.getProperty("os.name", "").lowercase()
+    return osName.contains("mac") || osName.contains("darwin")
+}

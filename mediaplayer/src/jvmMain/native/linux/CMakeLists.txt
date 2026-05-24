@@ -17,6 +17,7 @@ find_package(JNI REQUIRED)
 # Source files
 set(SOURCES
     NativeVideoPlayer.c
+    LibVlcCanvas.c
     jni_bridge.c
 )
 
@@ -29,6 +30,7 @@ target_include_directories(NativeVideoPlayer PRIVATE
 
 target_link_libraries(NativeVideoPlayer PRIVATE
     ${GST_LIBRARIES}
+    dl
     m
     pthread
 )

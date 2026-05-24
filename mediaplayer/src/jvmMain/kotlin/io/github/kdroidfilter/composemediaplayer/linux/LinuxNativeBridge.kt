@@ -15,6 +15,17 @@ internal object LinuxNativeBridge {
     // Playback control
     @JvmStatic external fun nCreatePlayer(): Long
 
+    @JvmStatic external fun nCreateLibVlcPlayer(
+        libVlcPath: String,
+        pluginPath: String,
+    ): Long
+
+    @JvmStatic external fun nOpenLibVlcUriWithHeaders(
+        handle: Long,
+        uri: String,
+        requestHeaders: String,
+    ): Boolean
+
     @JvmStatic external fun nOpenUri(
         handle: Long,
         uri: String,
@@ -28,28 +39,53 @@ internal object LinuxNativeBridge {
 
     @JvmStatic external fun nPlay(handle: Long)
 
+    @JvmStatic external fun nPlayLibVlc(handle: Long)
+
     @JvmStatic external fun nPause(handle: Long)
+
+    @JvmStatic external fun nPauseLibVlc(handle: Long)
 
     @JvmStatic external fun nSetVolume(
         handle: Long,
         volume: Float,
     )
 
+    @JvmStatic external fun nSetLibVlcVolume(
+        handle: Long,
+        volume: Float,
+    )
+
     @JvmStatic external fun nGetVolume(handle: Long): Float
+
+    @JvmStatic external fun nGetLibVlcVolume(handle: Long): Float
 
     @JvmStatic external fun nSeekTo(
         handle: Long,
         time: Double,
     )
 
+    @JvmStatic external fun nSeekLibVlcTo(
+        handle: Long,
+        time: Double,
+    )
+
     @JvmStatic external fun nDisposePlayer(handle: Long)
+
+    @JvmStatic external fun nDisposeLibVlcPlayer(handle: Long)
 
     @JvmStatic external fun nSetPlaybackSpeed(
         handle: Long,
         speed: Float,
     )
 
+    @JvmStatic external fun nSetLibVlcPlaybackSpeed(
+        handle: Long,
+        speed: Float,
+    )
+
     @JvmStatic external fun nGetPlaybackSpeed(handle: Long): Float
+
+    @JvmStatic external fun nGetLibVlcPlaybackSpeed(handle: Long): Float
 
     // Frame access
     @JvmStatic external fun nLockFrame(
@@ -57,7 +93,14 @@ internal object LinuxNativeBridge {
         outInfo: IntArray,
     ): Long
 
+    @JvmStatic external fun nLockLibVlcFrame(
+        handle: Long,
+        outInfo: IntArray,
+    ): Long
+
     @JvmStatic external fun nUnlockFrame(handle: Long)
+
+    @JvmStatic external fun nUnlockLibVlcFrame(handle: Long)
 
     @JvmStatic external fun nWrapPointer(
         address: Long,
@@ -66,7 +109,11 @@ internal object LinuxNativeBridge {
 
     @JvmStatic external fun nGetFrameWidth(handle: Long): Int
 
+    @JvmStatic external fun nGetLibVlcFrameWidth(handle: Long): Int
+
     @JvmStatic external fun nGetFrameHeight(handle: Long): Int
+
+    @JvmStatic external fun nGetLibVlcFrameHeight(handle: Long): Int
 
     @JvmStatic external fun nSetOutputSize(
         handle: Long,
@@ -77,7 +124,11 @@ internal object LinuxNativeBridge {
     // Timing
     @JvmStatic external fun nGetVideoDuration(handle: Long): Double
 
+    @JvmStatic external fun nGetLibVlcVideoDuration(handle: Long): Double
+
     @JvmStatic external fun nGetCurrentTime(handle: Long): Double
+
+    @JvmStatic external fun nGetLibVlcCurrentTime(handle: Long): Double
 
     // Metadata
     @JvmStatic external fun nGetVideoTitle(handle: Long): String?
@@ -92,6 +143,26 @@ internal object LinuxNativeBridge {
 
     @JvmStatic external fun nGetFrameRate(handle: Long): Float
 
+    @JvmStatic external fun nGetLibVlcFrameRate(handle: Long): Float
+
     // Playback completion
     @JvmStatic external fun nConsumeDidPlayToEnd(handle: Long): Boolean
+
+    @JvmStatic external fun nConsumeLibVlcDidPlayToEnd(handle: Long): Boolean
+
+    @JvmStatic external fun nSelectLibVlcAudioTrack(
+        handle: Long,
+        ordinal: Int,
+    ): Boolean
+
+    @JvmStatic external fun nSelectLibVlcSubtitleTrack(
+        handle: Long,
+        ordinal: Int,
+    ): Boolean
+
+    @JvmStatic external fun nGetLibVlcAudioTrackDescriptions(handle: Long): String?
+
+    @JvmStatic external fun nGetLibVlcSubtitleTrackDescriptions(handle: Long): String?
+
+    @JvmStatic external fun nDisableLibVlcSubtitles(handle: Long): Boolean
 }
