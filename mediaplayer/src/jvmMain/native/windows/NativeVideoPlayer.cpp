@@ -148,9 +148,10 @@ static std::wstring FindHeaderValue(const wchar_t* requestHeaders, const wchar_t
     return std::wstring();
 }
 
-static HRESULT SetPropStoreString(IPropertyStore* store, REFPROPERTYKEY key, const std::wstring& value) {
+static HRESULT SetPropStoreString(IPropertyStore* store, REFGUID keyGuid, const std::wstring& value) {
     if (!store || value.empty()) return S_OK;
 
+    PROPERTYKEY key = { keyGuid, 0 };
     PROPVARIANT variant;
     HRESULT hr = InitPropVariantFromString(value.c_str(), &variant);
     if (FAILED(hr)) return hr;

@@ -50,8 +50,7 @@ internal object MacEmbeddedAssExtractor {
                 streamIndex = streamIndex,
                 playbackTimeMs = playbackTimeMs,
                 requestHeaders = headers,
-            )
-            ?.let { return it }
+            )?.let { return it }
 
         return extractComplete(uri = uri, streamIndex = streamIndex, requestHeaders = headers)
     }

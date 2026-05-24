@@ -596,13 +596,14 @@ private const val HEADER_NAME_MIN_CHAR_CODE = 33
 private const val HEADER_NAME_MAX_CHAR_CODE = 126
 private const val HEADER_NAME_SEPARATORS = "()<>@,;:\\\"/[]?={} \t"
 
-private val FORBIDDEN_REQUEST_HEADER_NAMES = setOf(
-    "connection",
-    "content-length",
-    "host",
-    "keep-alive",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-)
+private val FORBIDDEN_REQUEST_HEADER_NAMES =
+    setOf(
+        "connection",
+        "content-length",
+        "host",
+        "keep-alive",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    )

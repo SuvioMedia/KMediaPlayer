@@ -30,7 +30,8 @@ internal object MacLibVlcMediaProbe {
         command +=
             listOf(
                 "-show_entries",
-                "stream=index,codec_type,codec_name,width,height,channels,sample_rate,bit_rate:stream_tags=language,title:" +
+                "stream=index,codec_type,codec_name,width,height,channels,sample_rate,bit_rate:" +
+                    "stream_tags=language,title:" +
                     "stream_disposition=default:format=duration",
                 "-of",
                 "flat",

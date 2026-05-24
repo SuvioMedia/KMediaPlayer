@@ -25,14 +25,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import com.kdroid.androidcontextprovider.ContextProvider
@@ -798,8 +798,10 @@ open class DefaultVideoPlayerState(
     }
 
     private fun Map<String, String>.mediaSourceFactory(): DefaultMediaSourceFactory {
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(sanitizedRequestHeaders())
+        val httpFactory =
+            DefaultHttpDataSource
+                .Factory()
+                .setDefaultRequestProperties(sanitizedRequestHeaders())
         return DefaultMediaSourceFactory(DefaultDataSource.Factory(context, httpFactory))
     }
 

@@ -58,11 +58,11 @@ internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean
  * Manages the state of a video player including playback controls, media information,
  * and error handling.
  */
-    @Stable
-    open class DefaultVideoPlayerState : VideoPlayerState {
-        // Variable to store the last opened URI for potential replay
-        private var lastUri: String? = null
-        private var lastRequestHeaders: Map<String, String> = emptyMap()
+@Stable
+open class DefaultVideoPlayerState : VideoPlayerState {
+    // Variable to store the last opened URI for potential replay
+    private var lastUri: String? = null
+    private var lastRequestHeaders: Map<String, String> = emptyMap()
 
     // Coroutine scope for managing async operations
     private val playerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
