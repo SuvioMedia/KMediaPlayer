@@ -28,9 +28,9 @@ internal actual fun macMkvPlaybackBackendOptions(): List<MacMkvPlaybackBackendOp
             enabled = true,
             status =
                 if (hasLibVlcCanvas) {
-                    "Uses libVLC canvas first, then falls back to HLS helpers."
+                    "Uses libVLC canvas first, then VLC HLS, with ffmpeg as the last fallback."
                 } else if (hasHlsBackend) {
-                    "Uses the first available external HLS helper for JVM MKV playback."
+                    "Uses VLC HLS when available, with ffmpeg as the last fallback."
                 } else {
                     "No MKV helper detected; native formats can still play."
                 },
@@ -38,7 +38,7 @@ internal actual fun macMkvPlaybackBackendOptions(): List<MacMkvPlaybackBackendOp
                 if (hasLibVlcCanvas || hasHlsBackend) {
                     null
                 } else {
-                    "Install VLC from https://www.videolan.org/vlc/ or ffmpeg from https://ffmpeg.org/download.html"
+                    "Install VLC from https://www.videolan.org/vlc/"
                 },
         ),
         libVlcOption(tools),

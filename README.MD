@@ -94,7 +94,7 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 > implementation("androidx.media3:media3-exoplayer-hls:<version>")
 > ```
 
-> † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC canvas playback, or external HLS fallback backends (`ffmpeg`/VLC) when the platform backend cannot demux the source directly; see [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
+> † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC canvas playback, or external HLS fallback backends when the platform backend cannot demux the source directly. VLC/libVLC is preferred in `auto` mode; `ffmpeg` is the last fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
 ## ✅ Media Support Preflight
 
@@ -419,7 +419,7 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered as plain dialogue text by Compose on native targets and with full styling on browser targets through JASSUB/libass. On desktop JVM, the libVLC canvas MKV/WebM backend can expose and select embedded subtitle tracks; on macOS it can also dynamically load user-installed libass and blend full ASS/SSA rendering into the Compose/Skia frame. The external JVM HLS fallback can burn embedded subtitle tracks through user-installed `ffmpeg` or VLC.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered as plain dialogue text by Compose on native targets and with full styling on browser targets through JASSUB/libass. On desktop JVM, the libVLC canvas MKV/WebM backend can expose and select embedded subtitle tracks; on macOS it can also dynamically load user-installed libass and blend full ASS/SSA rendering into the Compose/Skia frame. The external JVM HLS fallback can burn embedded subtitle tracks through user-installed VLC or `ffmpeg`.
 
 #### 🎯 Supported Formats
 
@@ -506,7 +506,7 @@ Browser notes:
 
 #### Selecting Embedded Audio and Subtitle Tracks
 
-When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, Android reads Media3 track groups, and the desktop JVM external HLS fallback exposes embedded audio/subtitle tracks when `ffprobe` is available.
+When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, Android reads Media3 track groups, and the desktop JVM libVLC/external HLS fallbacks expose embedded audio/subtitle tracks when probing is available.
 
 ```kotlin
 val audioTrack = playerState.availableAudioTracks.firstOrNull()

@@ -2,7 +2,7 @@ package sample.app.player
 
 internal enum class MacMkvPlaybackBackend(val label: String) {
     AUTO("Auto"),
-    LIBVLC("libVLC canvas + libass"),
+    LIBVLC("libVLC canvas"),
     FFMPEG_HLS("ffmpeg HLS"),
     VLC_HLS("VLC HLS"),
 }

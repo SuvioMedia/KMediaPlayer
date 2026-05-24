@@ -2,7 +2,7 @@
 
 On desktop JVM targets, MKV/WebM support can use native playback or optional fallback backends when the platform player cannot demux a source directly. macOS uses these fallbacks for formats AVPlayer cannot demux; Windows can use the same in-process libVLC canvas backend or external HLS fallback for Matroska/WebM; Linux keeps native GStreamer playback first and can use the same libVLC canvas backend or retry through the external HLS fallback if native open fails.
 
-In `auto` mode, Compose Media Player looks for a user-installed libVLC matching the current app/JVM architecture. When found, it loads libVLC dynamically at runtime, uses libVLC video callbacks inside the Compose surface, passes request headers/cookies directly to libVLC, exposes embedded audio/subtitle tracks, reports native progress/duration, and keeps playback inside the app. The app never launches the visible VLC UI.
+In `auto` mode, Compose Media Player treats a user-installed VLC/libVLC as the preferred JVM fallback. It first looks for libVLC matching the current app/JVM architecture. When found, it loads libVLC dynamically at runtime, uses libVLC video callbacks inside the Compose surface, passes request headers/cookies directly to libVLC, exposes embedded audio/subtitle tracks, reports native progress/duration, and keeps playback inside the app. The app never launches the visible VLC UI.
 
 For ASS/SSA subtitle rendering, the memory-callback path can optionally load a user-installed `libass.dylib` dynamically, render ASS/SSA to pixels, and blend those pixels into the Compose/Skia video frame. Embedded ASS/SSA tracks are extracted with the built-in Matroska reader.
 
@@ -52,20 +52,24 @@ COMPOSE_MEDIA_PLAYER_LIBASS=/path/to/libass.dylib
 
 Homebrew's common `/opt/homebrew` and `/usr/local` libass paths are auto-detected.
 
-If native playback or compatible libVLC is not available, the external HLS fallback can use user-installed `ffmpeg` or VLC. The ffmpeg backend transcodes the first video stream and selected audio stream to H.264/AAC HLS in a bounded temporary buffer, serves that HLS source from `127.0.0.1`, and hands it to the platform player. macOS prefers `h264_videotoolbox` when available; Windows and Linux use `libx264` or another available H.264 encoder.
+If native playback or compatible libVLC is not available, the external HLS fallback can use user-installed VLC or `ffmpeg`. In `auto` mode, VLC is preferred and `ffmpeg` is only the last fallback. The ffmpeg backend transcodes the first video stream and selected audio stream to H.264/AAC HLS in a bounded temporary buffer, serves that HLS source from `127.0.0.1`, and hands it to the platform player. macOS prefers `h264_videotoolbox` when available; Windows and Linux use `libx264` or another available H.264 encoder.
 
-Selecting an embedded text subtitle track such as ASS/SSA/SRT/WebVTT restarts the HLS fallback with ffmpeg's `subtitles` filter, so ASS/SSA is rendered by libass and burned into the temporary HLS video. The configured `ffmpeg` must expose that filter. On Homebrew, the regular `ffmpeg` formula may not include libass; install `ffmpeg-full` or point `COMPOSE_MEDIA_PLAYER_FFMPEG` to another ffmpeg build that exposes the `subtitles` filter. Homebrew's keg-only `ffmpeg-full` is auto-detected for embedded subtitle rendering when it is installed.
+Selecting an embedded text subtitle track such as ASS/SSA/SRT/WebVTT restarts the HLS fallback with the selected backend. VLC uses its `soverlay` transcode path; the ffmpeg backend uses the `subtitles` filter, so ASS/SSA is rendered by libass and burned into the temporary HLS video. When forcing ffmpeg, the configured `ffmpeg` must expose that filter. On Homebrew, the regular `ffmpeg` formula may not include libass; install `ffmpeg-full` or point `COMPOSE_MEDIA_PLAYER_FFMPEG` to another ffmpeg build that exposes the `subtitles` filter. Homebrew's keg-only `ffmpeg-full` is auto-detected for embedded subtitle rendering when it is installed.
 
 To use VLC as the external HLS fallback, set one of:
 
 ```shell
 COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND=vlc
 COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND=vlc
+COMPOSE_MEDIA_PLAYER_WINDOWS_HLS_FALLBACK_BACKEND=vlc
+COMPOSE_MEDIA_PLAYER_LINUX_HLS_FALLBACK_BACKEND=vlc
 ```
 
 ```shell
 -Dcomposemediaplayer.hlsFallbackBackend=vlc
 -Dcomposemediaplayer.macos.hlsFallbackBackend=vlc
+-Dcomposemediaplayer.windows.hlsFallbackBackend=vlc
+-Dcomposemediaplayer.linux.hlsFallbackBackend=vlc
 ```
 
 That backend uses VLC's `soverlay` transcode path for embedded subtitle rendering. To choose a specific executable, set one of:

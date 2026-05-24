@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import java.io.Closeable
 
 internal enum class ExternalHlsFallbackBackend(
@@ -34,14 +35,7 @@ internal object ExternalHlsFallbackSupport {
     }
 
     fun selectBackend(requiresSubtitleRendering: Boolean): ExternalHlsFallbackBackend {
-        val configured =
-            (
-                System.getProperty("composemediaplayer.hlsFallbackBackend")
-                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
-                    ?: System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
-                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
-                    ?: "auto"
-            ).lowercase()
+        val configured = configuredHlsFallbackBackend()
 
         return when (configured) {
             "vlc" -> ExternalHlsFallbackBackend.VLC
@@ -56,14 +50,32 @@ internal object ExternalHlsFallbackSupport {
                     }
 
                 when {
-                    requiresSubtitleRendering && vlcPath != null -> ExternalHlsFallbackBackend.VLC
-                    ffmpegPath != null -> ExternalHlsFallbackBackend.FFMPEG
                     vlcPath != null -> ExternalHlsFallbackBackend.VLC
+                    ffmpegPath != null -> ExternalHlsFallbackBackend.FFMPEG
                     else -> ExternalHlsFallbackBackend.FFMPEG
                 }
             }
         }
     }
+
+    private fun configuredHlsFallbackBackend(): String =
+        (
+            when (CurrentPlatform.os) {
+                CurrentPlatform.OS.MAC -> System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
+                CurrentPlatform.OS.WINDOWS -> System.getProperty("composemediaplayer.windows.hlsFallbackBackend")
+                CurrentPlatform.OS.LINUX -> System.getProperty("composemediaplayer.linux.hlsFallbackBackend")
+            }
+                ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
+                ?: when (CurrentPlatform.os) {
+                    CurrentPlatform.OS.MAC -> System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
+                    CurrentPlatform.OS.WINDOWS -> System.getenv("COMPOSE_MEDIA_PLAYER_WINDOWS_HLS_FALLBACK_BACKEND")
+                    CurrentPlatform.OS.LINUX -> System.getenv("COMPOSE_MEDIA_PLAYER_LINUX_HLS_FALLBACK_BACKEND")
+                }
+                ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
+                ?: System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
+                ?: System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
+                ?: "auto"
+        ).lowercase()
 
     suspend fun start(
         uri: String,

@@ -995,11 +995,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 ExternalVlcLocator.findLibVlc()?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
                     ?: throw missingLibVlcBackendException()
             "auto" ->
-                if (MacLibAssLocator.findLibAss() != null) {
-                    ExternalVlcLocator.findLibVlc()?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
-                } else {
-                    null
-                }
+                ExternalVlcLocator.findLibVlc()?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
             "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-nsview" ->
                 throw UnsupportedOperationException(
                     "The macOS libVLC native-view backend has been removed because it is unstable " +
@@ -1043,9 +1039,8 @@ class MacVideoPlayerState : VideoPlayerState {
                     }
 
                 when {
-                    requiresSubtitleRendering && vlcPath != null -> ExternalHlsFallbackBackend.VLC
-                    ffmpegPath != null -> ExternalHlsFallbackBackend.FFMPEG
                     vlcPath != null -> ExternalHlsFallbackBackend.VLC
+                    ffmpegPath != null -> ExternalHlsFallbackBackend.FFMPEG
                     else -> ExternalHlsFallbackBackend.FFMPEG
                 }
             }
