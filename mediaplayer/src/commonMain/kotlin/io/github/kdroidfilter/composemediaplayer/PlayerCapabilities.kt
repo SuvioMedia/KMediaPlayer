@@ -22,6 +22,7 @@ data class HdrCapabilities(
     val dolbyVision: HdrSupport = HdrSupport.UNKNOWN,
     val supportsNativeHdrPlayback: Boolean = false,
     val supportsToneMappingToSdr: Boolean = false,
+    val supportsDolbyVisionProfile7To8Transcoding: Boolean = false,
     val maxExtendedDynamicRange: Float = 1f,
 ) {
     val hasHdrDisplay: Boolean

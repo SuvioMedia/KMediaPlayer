@@ -6,6 +6,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import io.github.kdroidfilter.composemediaplayer.DolbyVisionMode
 import io.github.kdroidfilter.composemediaplayer.VideoOutputMode
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.nucleus.graalvm.GraalVmInitializer
@@ -33,6 +34,12 @@ fun main(args: Array<String>) {
                     ?.uppercase()
                     ?.let { runCatching { VideoOutputMode.valueOf(it) }.getOrNull() }
                     ?: VideoOutputMode.AUTO,
+            dolbyVisionMode =
+                System.getProperty("sample.app.dolbyVisionMode")
+                    ?.trim()
+                    ?.uppercase()
+                    ?.let { runCatching { DolbyVisionMode.valueOf(it) }.getOrNull() }
+                    ?: DolbyVisionMode.AUTO,
         )
 
     application {

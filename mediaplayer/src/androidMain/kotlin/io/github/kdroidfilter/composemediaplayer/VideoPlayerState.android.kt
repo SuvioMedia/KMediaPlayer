@@ -145,6 +145,12 @@ open class DefaultVideoPlayerState(
 
     private var _metadata = VideoMetadata()
     override val metadata: VideoMetadata get() = _metadata
+    override val renderingInfo: VideoRenderingInfo =
+        VideoRenderingInfo(
+            backend = "Media3 ExoPlayer",
+            videoRenderer = "MediaCodec surface",
+            audioRenderer = "AudioTrack",
+        )
 
     // Subtitle state
     override var subtitlesEnabled by mutableStateOf(false)
@@ -478,8 +484,12 @@ open class DefaultVideoPlayerState(
                     // Enable decoder fallback for better stability
                     setEnableDecoderFallback(true)
 
+                    if (usesDolbyVisionHevcFallbackSelector()) {
+                        setMediaCodecSelector(dolbyVisionHevcFallbackSelector())
+                    }
+
                     // On problematic devices, use more conservative settings
-                    if (shouldUseConservativeCodecHandling()) {
+                    if (shouldUseConservativeCodecHandling() && !usesDolbyVisionHevcFallbackSelector()) {
                         // Cannot disable async queueing as the method does not exist
                         // But we can use the default MediaCodecSelector
                         setMediaCodecSelector(MediaCodecSelector.DEFAULT)
@@ -767,6 +777,7 @@ open class DefaultVideoPlayerState(
                 try {
                     _error = null
                     resetStates(keepMedia = true)
+                    updateRenderingInfo()
 
                     // Extract metadata before preparing the player
                     extractMediaItemMetadata(mediaItem)
@@ -950,12 +961,17 @@ open class DefaultVideoPlayerState(
 
             syncAvailableMediaTracks(player)
 
+            var selectedVideoFormat: Format? = null
             player.currentTracks.groups.forEach { group ->
                 for (i in 0 until group.length) {
                     val trackFormat = group.getTrackFormat(i)
 
                     when (group.type) {
                         C.TRACK_TYPE_VIDEO -> {
+                            if (selectedVideoFormat == null || group.isTrackSelected(i)) {
+                                selectedVideoFormat = trackFormat
+                            }
+
                             if (trackFormat.frameRate > 0) {
                                 _metadata.frameRate = trackFormat.frameRate
                             }
@@ -983,11 +999,81 @@ open class DefaultVideoPlayerState(
             }
 
             extractMediaItemMetadata(player.currentMediaItem)
+            updateRenderingInfo(selectedVideoFormat)
 
             androidVideoLogger.d { "Metadata extracted: $_metadata" }
         } catch (e: Exception) {
             androidVideoLogger.e { "Error extracting format metadata: ${e.message}" }
         }
+    }
+
+    private fun updateRenderingInfo(videoFormat: Format? = null) {
+        val sampleMimeType = videoFormat?.sampleMimeType ?: _metadata.mimeType
+        val isDolbyVision =
+            sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION ||
+                videoFormat?.codecs?.isDolbyVisionCodec() == true
+        renderingInfo.update(
+            backend = "Media3 ExoPlayer",
+            container = videoFormat?.containerMimeType,
+            videoDecoder = sampleMimeType?.let { "MediaCodec ($it)" },
+            videoRenderer = "MediaCodec surface",
+            audioRenderer = "AudioTrack",
+            notes = dolbyVisionPlaybackNote(isDolbyVision),
+        )
+    }
+
+    private fun dolbyVisionPlaybackNote(isDolbyVisionStream: Boolean): String? =
+        when (playbackOptions.dolbyVisionMode) {
+            DolbyVisionMode.AUTO ->
+                if (isDolbyVisionStream) {
+                    "Dolby Vision detected; using platform decoder fallback policy."
+                } else {
+                    null
+                }
+            DolbyVisionMode.PASSTHROUGH ->
+                if (isDolbyVisionStream) {
+                    "Dolby Vision passthrough requested; relying on platform decoder and display support."
+                } else {
+                    null
+                }
+            DolbyVisionMode.PREFER_HDR10_COMPATIBLE ->
+                "Dolby Vision HDR10-compatible fallback requested; decoder queries include HEVC candidates."
+            DolbyVisionMode.TRANSCODE_PROFILE_7_TO_8_1 ->
+                "Dolby Vision Profile 7 to 8.1 transcoding requested, but this build has no libdovi bridge; " +
+                    "using HEVC-compatible decoder fallback."
+        }
+
+    private fun usesDolbyVisionHevcFallbackSelector(): Boolean =
+        playbackOptions.dolbyVisionMode == DolbyVisionMode.PREFER_HDR10_COMPATIBLE ||
+            playbackOptions.dolbyVisionMode == DolbyVisionMode.TRANSCODE_PROFILE_7_TO_8_1
+
+    private fun dolbyVisionHevcFallbackSelector(): MediaCodecSelector =
+        MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+            val defaultDecoders =
+                MediaCodecSelector.DEFAULT.getDecoderInfos(
+                    mimeType,
+                    requiresSecureDecoder,
+                    requiresTunnelingDecoder,
+                )
+            if (mimeType != MimeTypes.VIDEO_DOLBY_VISION) {
+                return@MediaCodecSelector defaultDecoders
+            }
+
+            val hevcDecoders =
+                MediaCodecSelector.DEFAULT.getDecoderInfos(
+                    MimeTypes.VIDEO_H265,
+                    requiresSecureDecoder,
+                    requiresTunnelingDecoder,
+                )
+            (hevcDecoders + defaultDecoders).distinctBy { "${it.name}:${it.mimeType}:${it.secure}" }
+        }
+
+    private fun String.isDolbyVisionCodec(): Boolean {
+        val normalized = lowercase()
+        return normalized.startsWith("dvav") ||
+            normalized.startsWith("dva1") ||
+            normalized.startsWith("dvhe") ||
+            normalized.startsWith("dvh1")
     }
 
     private fun syncAvailableMediaTracks(player: Player) {
@@ -1135,6 +1221,7 @@ open class DefaultVideoPlayerState(
         _aspectRatio = 16f / 9f
         _playbackSpeed = 1.0f
         _metadata = VideoMetadata()
+        updateRenderingInfo()
         exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
         currentAudioTrack = null
         availableAudioTracks.clear()

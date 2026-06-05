@@ -169,6 +169,10 @@ internal fun SettingsSheet(
                     InfoRow("Dolby Vision", hdr.dolbyVision.label())
                     InfoRow("Native HDR", if (hdr.supportsNativeHdrPlayback) "Supported" else "Not supported")
                     InfoRow("Tone map SDR", if (hdr.supportsToneMappingToSdr) "Supported" else "Not supported")
+                    InfoRow(
+                        "DV P7->8.1",
+                        if (hdr.supportsDolbyVisionProfile7To8Transcoding) "Supported" else "Not supported",
+                    )
                     InfoRow("Max EDR", "%.2f".format(hdr.maxExtendedDynamicRange))
                 }
             }
