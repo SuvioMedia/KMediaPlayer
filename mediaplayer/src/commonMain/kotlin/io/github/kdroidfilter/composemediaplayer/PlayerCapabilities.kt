@@ -8,10 +8,31 @@ data class MediaSourceSpec(
     val mimeType: String? = null,
 )
 
+enum class HdrSupport {
+    SUPPORTED,
+    UNSUPPORTED,
+    UNKNOWN,
+}
+
+@Stable
+data class HdrCapabilities(
+    val hdr: HdrSupport = HdrSupport.UNKNOWN,
+    val hdr10: HdrSupport = HdrSupport.UNKNOWN,
+    val hlg: HdrSupport = HdrSupport.UNKNOWN,
+    val dolbyVision: HdrSupport = HdrSupport.UNKNOWN,
+    val supportsNativeHdrPlayback: Boolean = false,
+    val supportsToneMappingToSdr: Boolean = false,
+    val maxExtendedDynamicRange: Float = 1f,
+) {
+    val hasHdrDisplay: Boolean
+        get() = maxExtendedDynamicRange > 1f
+}
+
 @Stable
 data class PlayerCapabilities(
     val supportsMkv: Boolean = false,
     val supportsPiP: Boolean = false,
+    val hdr: HdrCapabilities = HdrCapabilities(),
 ) {
     fun canPlaySource(
         uri: String,

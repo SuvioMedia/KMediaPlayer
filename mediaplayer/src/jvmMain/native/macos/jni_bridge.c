@@ -2,14 +2,23 @@
 // Calls Swift @_cdecl exports and registers them as JNI native methods.
 
 #include <jni.h>
+#include <jawt_md.h>
 #include <dlfcn.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+
+#ifdef __OBJC__
+#import <AppKit/AppKit.h>
+#import <QuartzCore/QuartzCore.h>
+
+static NSView* g_hdr_native_view = nil;
+#endif
 
 // ---------------------------------------------------------------------------
 // Forward declarations of Swift C exports
@@ -27,6 +36,14 @@ extern void   unlockLatestFrame(void* ctx);
 extern int32_t getFrameWidth(void* ctx);
 extern int32_t getFrameHeight(void* ctx);
 extern int32_t setOutputSize(void* ctx, int32_t width, int32_t height);
+extern void*   getHdrMetalLayer(void* ctx);
+extern void    setHdrMetalLayerSize(void* ctx, int32_t width, int32_t height, double scale);
+extern void    setHdrMetalPreferred(void* ctx, int32_t preferred);
+extern void    setHdrToneMappingEnabled(void* ctx, int32_t enabled);
+extern void    setHdrMetalContentScaleMode(void* ctx, int32_t mode);
+extern void    detachHdrMetalLayer(void* ctx);
+extern int32_t isHdrMetalAvailable(void* ctx);
+extern const char* getHdrCapabilities(void);
 extern float  getVideoFrameRate(void* ctx);
 extern float  getScreenRefreshRate(void* ctx);
 extern float  getCaptureFrameRate(void* ctx);
@@ -67,6 +84,301 @@ static NativePlayerHandle* toHandle(jlong h) {
 
 static void* avCtx(NativePlayerHandle* handle) {
     return (handle && handle->kind == PLAYER_KIND_AV) ? handle->ctx : NULL;
+}
+
+typedef jboolean (JNICALL *JAWT_GetAWT_Fn)(JNIEnv*, JAWT*);
+
+static JAWT_GetAWT_Fn resolve_jawt_get_awt(void) {
+    static JAWT_GetAWT_Fn fn = NULL;
+    static int attempted = 0;
+    if (attempted) return fn;
+    attempted = 1;
+
+    fn = (JAWT_GetAWT_Fn)dlsym(RTLD_DEFAULT, "JAWT_GetAWT");
+    if (fn) return fn;
+
+    void* jawt = dlopen("libjawt.dylib", RTLD_LAZY | RTLD_LOCAL);
+    if (!jawt) {
+        const char* java_home = getenv("JAVA_HOME");
+        if (java_home && java_home[0]) {
+            char path[PATH_MAX];
+            int written = snprintf(path, sizeof(path), "%s/lib/libjawt.dylib", java_home);
+            if (written > 0 && written < (int)sizeof(path)) {
+                jawt = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+            }
+        }
+    }
+    if (jawt) {
+        fn = (JAWT_GetAWT_Fn)dlsym(jawt, "JAWT_GetAWT");
+    }
+    return fn;
+}
+
+static jint call_component_int(JNIEnv* env, jobject component, const char* method_name) {
+    if (!component) return 0;
+    jclass cls = (*env)->GetObjectClass(env, component);
+    if (!cls) return 0;
+    jmethodID method = (*env)->GetMethodID(env, cls, method_name, "()I");
+    if (!method) {
+        (*env)->DeleteLocalRef(env, cls);
+        return 0;
+    }
+    jint value = (*env)->CallIntMethod(env, component, method);
+    (*env)->DeleteLocalRef(env, cls);
+    return (*env)->ExceptionCheck(env) ? 0 : value;
+}
+
+static jboolean is_awt_window(JNIEnv* env, jobject component) {
+    if (!component) return JNI_FALSE;
+    jclass window_cls = (*env)->FindClass(env, "java/awt/Window");
+    if (!window_cls) {
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        return JNI_FALSE;
+    }
+    jboolean result = (*env)->IsInstanceOf(env, component, window_cls);
+    (*env)->DeleteLocalRef(env, window_cls);
+    return result;
+}
+
+static jobject call_component_parent(JNIEnv* env, jobject component) {
+    if (!component) return NULL;
+    jclass cls = (*env)->GetObjectClass(env, component);
+    if (!cls) return NULL;
+    jmethodID method = (*env)->GetMethodID(env, cls, "getParent", "()Ljava/awt/Container;");
+    jobject parent = method ? (*env)->CallObjectMethod(env, component, method) : NULL;
+    (*env)->DeleteLocalRef(env, cls);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    return parent;
+}
+
+static jobject component_window_ancestor(JNIEnv* env, jobject component) {
+    jobject current = component ? (*env)->NewLocalRef(env, component) : NULL;
+    while (current) {
+        jobject parent = call_component_parent(env, current);
+        (*env)->DeleteLocalRef(env, current);
+        if (!parent) return NULL;
+        if (is_awt_window(env, parent)) {
+            return parent;
+        }
+        current = parent;
+    }
+    return NULL;
+}
+
+static jstring call_object_string(JNIEnv* env, jobject object, const char* method_name) {
+    if (!object) return NULL;
+    jclass cls = (*env)->GetObjectClass(env, object);
+    if (!cls) return NULL;
+    jmethodID method = (*env)->GetMethodID(env, cls, method_name, "()Ljava/lang/String;");
+    if (!method) {
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        (*env)->DeleteLocalRef(env, cls);
+        return NULL;
+    }
+    jstring value = (jstring)(*env)->CallObjectMethod(env, object, method);
+    (*env)->DeleteLocalRef(env, cls);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    return value;
+}
+
+static void component_position_in_window(JNIEnv* env, jobject component, jint* out_x, jint* out_y) {
+    jint x = 0;
+    jint y = 0;
+    jobject current = component ? (*env)->NewLocalRef(env, component) : NULL;
+    while (current) {
+        x += call_component_int(env, current, "getX");
+        y += call_component_int(env, current, "getY");
+
+        jobject parent = call_component_parent(env, current);
+        (*env)->DeleteLocalRef(env, current);
+        if (!parent || is_awt_window(env, parent)) {
+            if (parent) (*env)->DeleteLocalRef(env, parent);
+            break;
+        }
+        current = parent;
+    }
+    *out_x = x;
+    *out_y = y;
+}
+
+static double component_backing_scale(JNIEnv* env, jobject component) {
+    if (!component) return 1.0;
+    double scale = 1.0;
+    jclass component_cls = (*env)->GetObjectClass(env, component);
+    if (!component_cls) return scale;
+
+    jmethodID get_gc = (*env)->GetMethodID(
+        env, component_cls, "getGraphicsConfiguration", "()Ljava/awt/GraphicsConfiguration;");
+    if (!get_gc) {
+        (*env)->DeleteLocalRef(env, component_cls);
+        return scale;
+    }
+
+    jobject graphics_config = (*env)->CallObjectMethod(env, component, get_gc);
+    if ((*env)->ExceptionCheck(env) || !graphics_config) {
+        (*env)->DeleteLocalRef(env, component_cls);
+        return scale;
+    }
+
+    jclass gc_cls = (*env)->GetObjectClass(env, graphics_config);
+    jmethodID get_transform = gc_cls
+        ? (*env)->GetMethodID(env, gc_cls, "getDefaultTransform", "()Ljava/awt/geom/AffineTransform;")
+        : NULL;
+    jobject transform = get_transform
+        ? (*env)->CallObjectMethod(env, graphics_config, get_transform)
+        : NULL;
+    if (!(*env)->ExceptionCheck(env) && transform) {
+        jclass transform_cls = (*env)->GetObjectClass(env, transform);
+        jmethodID get_scale_x = transform_cls
+            ? (*env)->GetMethodID(env, transform_cls, "getScaleX", "()D")
+            : NULL;
+        if (get_scale_x) {
+            double value = (*env)->CallDoubleMethod(env, transform, get_scale_x);
+            if (!(*env)->ExceptionCheck(env) && value > 0.0) {
+                scale = value;
+            }
+        }
+        if (transform_cls) (*env)->DeleteLocalRef(env, transform_cls);
+        (*env)->DeleteLocalRef(env, transform);
+    }
+
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        scale = 1.0;
+    }
+    if (gc_cls) (*env)->DeleteLocalRef(env, gc_cls);
+    (*env)->DeleteLocalRef(env, graphics_config);
+    (*env)->DeleteLocalRef(env, component_cls);
+    return scale;
+}
+
+static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer* layer) {
+#ifdef __OBJC__
+    if (!component) return JNI_FALSE;
+    jobject awt_window = component_window_ancestor(env, component);
+    jstring awt_window_title = awt_window ? call_object_string(env, awt_window, "getTitle") : NULL;
+    const char* awt_window_title_utf = awt_window_title
+        ? (*env)->GetStringUTFChars(env, awt_window_title, NULL)
+        : NULL;
+    NSString* target_window_title = awt_window_title_utf
+        ? [NSString stringWithUTF8String:awt_window_title_utf]
+        : nil;
+
+    JAWT_GetAWT_Fn get_awt = resolve_jawt_get_awt();
+    if (!get_awt) {
+        if (layer) fprintf(stderr, "HDR Metal: JAWT_GetAWT unavailable\n");
+        if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
+        if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
+        if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+        return JNI_FALSE;
+    }
+
+    JAWT awt;
+    memset(&awt, 0, sizeof(awt));
+    awt.version = JAWT_VERSION_1_4 | JAWT_MACOSX_USE_CALAYER;
+    if (get_awt(env, &awt) == JNI_FALSE) {
+        if (layer) fprintf(stderr, "HDR Metal: JAWT_GetAWT returned false\n");
+        if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
+        if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
+        if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+        return JNI_FALSE;
+    }
+
+    JAWT_DrawingSurface* ds = awt.GetDrawingSurface(env, component);
+    if (!ds) {
+        if (layer) fprintf(stderr, "HDR Metal: GetDrawingSurface returned null\n");
+        if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
+        if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
+        if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+        return JNI_FALSE;
+    }
+
+    jboolean ok = JNI_FALSE;
+    jint lock = ds->Lock(ds);
+    if ((lock & JAWT_LOCK_ERROR) == 0) {
+        JAWT_DrawingSurfaceInfo* dsi = ds->GetDrawingSurfaceInfo(ds);
+        if (dsi && dsi->platformInfo) {
+            id surface_layers = (id)dsi->platformInfo;
+            if ([surface_layers respondsToSelector:@selector(setLayer:)]) {
+                ((id<JAWT_SurfaceLayers>)surface_layers).layer = nil;
+                if (!layer) {
+                    [g_hdr_native_view removeFromSuperview];
+                    [g_hdr_native_view setLayer:nil];
+                    [g_hdr_native_view release];
+                    g_hdr_native_view = nil;
+                    ok = JNI_TRUE;
+                } else {
+                    jint width = call_component_int(env, component, "getWidth");
+                    jint height = call_component_int(env, component, "getHeight");
+                    jint component_x = 0;
+                    jint component_y = 0;
+                    component_position_in_window(env, component, &component_x, &component_y);
+
+                    NSWindow* window = nil;
+                    if ([target_window_title length] > 0) {
+                        for (NSWindow* candidate in [NSApp windows]) {
+                            if ([[candidate title] isEqualToString:target_window_title]) {
+                                window = candidate;
+                                break;
+                            }
+                        }
+                    }
+                    if (!window) {
+                        window = [NSApp keyWindow] ?: [NSApp mainWindow];
+                    }
+                    if (!window) {
+                        window = [[NSApp windows] firstObject];
+                    }
+                    NSView* content_view = [window contentView];
+                    if (content_view) {
+                        if (!g_hdr_native_view) {
+                            g_hdr_native_view = [[NSView alloc] initWithFrame:NSZeroRect];
+                            [g_hdr_native_view setWantsLayer:YES];
+                        }
+                        CGFloat view_y = [content_view isFlipped]
+                            ? component_y
+                            : content_view.bounds.size.height - component_y - height;
+                        if (view_y < 0.0 && view_y > -64.0) {
+                            view_y = 0.0;
+                        }
+                        [g_hdr_native_view setFrame:NSMakeRect(component_x, view_y, width, height)];
+                        [g_hdr_native_view setLayer:layer];
+                        [g_hdr_native_view setWantsLayer:YES];
+                        if ([g_hdr_native_view superview] != content_view) {
+                            [g_hdr_native_view removeFromSuperview];
+                            [content_view addSubview:g_hdr_native_view positioned:NSWindowAbove relativeTo:nil];
+                        }
+                        ok = JNI_TRUE;
+                    }
+                }
+            } else if (layer) {
+                fprintf(stderr, "HDR Metal: platformInfo does not accept setLayer:\n");
+            }
+        } else if (layer) {
+            fprintf(stderr, "HDR Metal: drawing surface info missing platformInfo\n");
+        }
+        if (dsi) ds->FreeDrawingSurfaceInfo(dsi);
+        ds->Unlock(ds);
+    } else if (layer) {
+        fprintf(stderr, "HDR Metal: drawing surface lock error %d\n", lock);
+    }
+    awt.FreeDrawingSurface(ds);
+    if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
+    if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
+    if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+    return ok;
+#else
+    (void)env;
+    (void)component;
+    (void)layer;
+    return JNI_FALSE;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,6 +1454,74 @@ static jint JNICALL jni_SetOutputSize(JNIEnv* env, jclass cls, jlong handle, jin
     return ctx ? (jint)setOutputSize(ctx, (int32_t)width, (int32_t)height) : 0;
 }
 
+static void JNICALL jni_SetHdrMetalPreferred(JNIEnv* env, jclass cls, jlong handle, jboolean preferred) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return;
+    void* ctx = avCtx(native);
+    if (ctx) setHdrMetalPreferred(ctx, preferred ? 1 : 0);
+}
+
+static void JNICALL jni_SetHdrToneMappingEnabled(JNIEnv* env, jclass cls, jlong handle, jboolean enabled) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return;
+    void* ctx = avCtx(native);
+    if (ctx) setHdrToneMappingEnabled(ctx, enabled ? 1 : 0);
+}
+
+static jstring JNICALL jni_GetHdrCapabilities(JNIEnv* env, jclass cls) {
+    const char* s = getHdrCapabilities();
+    if (!s) return NULL;
+    jstring result = (*env)->NewStringUTF(env, s);
+    free((void*)s);
+    return result;
+}
+
+static jboolean JNICALL jni_AttachHdrMetalView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return JNI_FALSE;
+    void* ctx = avCtx(native);
+    if (!ctx || !component || !isHdrMetalAvailable(ctx)) return JNI_FALSE;
+
+    CALayer* layer = (CALayer*)getHdrMetalLayer(ctx);
+    if (!layer) {
+        fprintf(stderr, "HDR Metal: native layer is null\n");
+        return JNI_FALSE;
+    }
+    jint width = call_component_int(env, component, "getWidth");
+    jint height = call_component_int(env, component, "getHeight");
+    double scale = component_backing_scale(env, component);
+    setHdrMetalLayerSize(ctx, (int32_t)width, (int32_t)height, scale);
+
+    jboolean attached = set_awt_component_layer(env, component, layer);
+    if (!attached) {
+        fprintf(stderr, "HDR Metal: JAWT layer attach failed\n");
+    }
+    return attached;
+}
+
+static void JNICALL jni_DetachHdrMetalView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (!vlcCtx(native) && component) {
+        set_awt_component_layer(env, component, nil);
+    }
+    void* ctx = avCtx(native);
+    if (ctx) detachHdrMetalLayer(ctx);
+}
+
+static void JNICALL jni_SetHdrMetalContentScaleMode(JNIEnv* env, jclass cls, jlong handle, jint mode) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return;
+    void* ctx = avCtx(native);
+    if (ctx) setHdrMetalContentScaleMode(ctx, (int32_t)mode);
+}
+
+static jboolean JNICALL jni_IsHdrMetalAvailable(JNIEnv* env, jclass cls, jlong handle) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return JNI_FALSE;
+    void* ctx = avCtx(native);
+    return ctx ? (jboolean)(isHdrMetalAvailable(ctx) != 0) : JNI_FALSE;
+}
+
 static jfloat JNICALL jni_GetVideoFrameRate(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     if (vlcCtx(native)) return 0.0f;
@@ -1345,6 +1725,13 @@ static const JNINativeMethod g_methods[] = {
     { "nGetFrameWidth",          "(J)I",                        (void*)jni_GetFrameWidth },
     { "nGetFrameHeight",         "(J)I",                        (void*)jni_GetFrameHeight },
     { "nSetOutputSize",          "(JII)I",                      (void*)jni_SetOutputSize },
+    { "nSetHdrMetalPreferred",   "(JZ)V",                       (void*)jni_SetHdrMetalPreferred },
+    { "nSetHdrToneMappingEnabled", "(JZ)V",                     (void*)jni_SetHdrToneMappingEnabled },
+    { "nGetHdrCapabilities",     "()Ljava/lang/String;",        (void*)jni_GetHdrCapabilities },
+    { "nAttachHdrMetalView",     "(JLjava/awt/Component;)Z",    (void*)jni_AttachHdrMetalView },
+    { "nDetachHdrMetalView",     "(JLjava/awt/Component;)V",    (void*)jni_DetachHdrMetalView },
+    { "nSetHdrMetalContentScaleMode", "(JI)V",                  (void*)jni_SetHdrMetalContentScaleMode },
+    { "nIsHdrMetalAvailable",    "(J)Z",                        (void*)jni_IsHdrMetalAvailable },
     { "nGetVideoFrameRate",      "(J)F",                        (void*)jni_GetVideoFrameRate },
     { "nGetScreenRefreshRate",   "(J)F",                        (void*)jni_GetScreenRefreshRate },
     { "nGetCaptureFrameRate",    "(J)F",                        (void*)jni_GetCaptureFrameRate },

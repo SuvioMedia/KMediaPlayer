@@ -78,6 +78,10 @@ build_arch() {
         "$SWIFT_SOURCE" \
         "$BRIDGE_OBJ" \
         -framework AppKit \
+        -framework AVFoundation \
+        -framework CoreImage \
+        -framework CoreVideo \
+        -framework Metal \
         -framework QuartzCore \
         -O -whole-module-optimization
 

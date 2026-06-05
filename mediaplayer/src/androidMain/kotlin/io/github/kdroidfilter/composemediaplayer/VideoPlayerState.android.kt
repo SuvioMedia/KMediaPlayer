@@ -52,9 +52,10 @@ import kotlin.time.Duration.Companion.milliseconds
 actual fun createVideoPlayerState(
     audioMode: AudioMode,
     cacheConfig: CacheConfig,
+    playbackOptions: VideoPlaybackOptions,
 ): VideoPlayerState =
     try {
-        DefaultVideoPlayerState(audioMode, cacheConfig)
+        DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions)
     } catch (e: IllegalStateException) {
         PreviewableVideoPlayerState(
             hasMedia = false,
@@ -91,6 +92,7 @@ internal val androidVideoLogger = TaggedLogger("AndroidVideoPlayerSurface")
 open class DefaultVideoPlayerState(
     private val audioMode: AudioMode = AudioMode(),
     private val cacheConfig: CacheConfig = CacheConfig(),
+    private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
     companion object {
         var activity: WeakReference<Activity> = WeakReference(null)

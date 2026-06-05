@@ -38,6 +38,7 @@ import kotlin.time.TimeSource
 actual fun createVideoPlayerState(
     audioMode: AudioMode,
     cacheConfig: CacheConfig,
+    playbackOptions: VideoPlaybackOptions,
 ): VideoPlayerState = DefaultVideoPlayerState()
 
 internal actual fun platformPlayerCapabilities(): PlayerCapabilities =

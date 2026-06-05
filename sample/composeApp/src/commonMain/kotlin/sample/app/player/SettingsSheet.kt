@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.kdroidfilter.composemediaplayer.HdrSupport
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 
@@ -158,7 +159,20 @@ internal fun SettingsSheet(
                 }
             }
 
-            // Metadata
+            HorizontalDivider()
+            Section("HDR Capabilities") {
+                val hdr = playerState.capabilities.hdr
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    InfoRow("HDR", hdr.hdr.label())
+                    InfoRow("HDR10", hdr.hdr10.label())
+                    InfoRow("HLG", hdr.hlg.label())
+                    InfoRow("Dolby Vision", hdr.dolbyVision.label())
+                    InfoRow("Native HDR", if (hdr.supportsNativeHdrPlayback) "Supported" else "Not supported")
+                    InfoRow("Tone map SDR", if (hdr.supportsToneMappingToSdr) "Supported" else "Not supported")
+                    InfoRow("Max EDR", "%.2f".format(hdr.maxExtendedDynamicRange))
+                }
+            }
+
             if (!playerState.metadata.isAllNull()) {
                 HorizontalDivider()
                 Section("Metadata") {
@@ -238,3 +252,10 @@ private fun InfoRow(label: String, value: String) {
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
     }
 }
+
+private fun HdrSupport.label(): String =
+    when (this) {
+        HdrSupport.SUPPORTED -> "Supported"
+        HdrSupport.UNSUPPORTED -> "Not supported"
+        HdrSupport.UNKNOWN -> "Unknown"
+    }

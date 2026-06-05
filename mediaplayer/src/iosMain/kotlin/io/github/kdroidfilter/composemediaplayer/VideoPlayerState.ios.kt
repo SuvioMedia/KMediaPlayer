@@ -58,7 +58,8 @@ import kotlin.time.Duration
 actual fun createVideoPlayerState(
     audioMode: AudioMode,
     cacheConfig: CacheConfig,
-): VideoPlayerState = DefaultVideoPlayerState(audioMode, cacheConfig)
+    playbackOptions: VideoPlaybackOptions,
+): VideoPlayerState = DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions)
 
 private val iosLogger = TaggedLogger("iOSVideoPlayerState")
 
@@ -66,6 +67,7 @@ private val iosLogger = TaggedLogger("iOSVideoPlayerState")
 open class DefaultVideoPlayerState(
     private val audioMode: AudioMode = AudioMode(),
     private val cacheConfig: CacheConfig = CacheConfig(),
+    private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
     // Base states
     private var _volume = mutableStateOf(1.0f)

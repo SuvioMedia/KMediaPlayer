@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import sample.app.feed.FeedScreen
@@ -40,18 +41,34 @@ private enum class Screen(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-fun App() {
+fun App(
+    initialVideoUrl: String? = null,
+    demoSubtitleEnabled: Boolean = true,
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+) {
     AppTheme {
         var currentScreen by remember { mutableStateOf(Screen.Player) }
-        val playerState = rememberVideoPlayerState()
+        val playerState = rememberVideoPlayerState(playbackOptions = playbackOptions)
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val useRail = maxWidth >= 600.dp
 
             if (useRail) {
-                RailLayout(currentScreen, onScreenChange = { currentScreen = it }, playerState = playerState)
+                RailLayout(
+                    currentScreen,
+                    onScreenChange = { currentScreen = it },
+                    playerState = playerState,
+                    initialVideoUrl = initialVideoUrl,
+                    demoSubtitleEnabled = demoSubtitleEnabled,
+                )
             } else {
-                BarLayout(currentScreen, onScreenChange = { currentScreen = it }, playerState = playerState)
+                BarLayout(
+                    currentScreen,
+                    onScreenChange = { currentScreen = it },
+                    playerState = playerState,
+                    initialVideoUrl = initialVideoUrl,
+                    demoSubtitleEnabled = demoSubtitleEnabled,
+                )
             }
         }
     }
@@ -59,7 +76,13 @@ fun App() {
 
 // Compact: bottom NavigationBar
 @Composable
-private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerState: VideoPlayerState) {
+private fun BarLayout(
+    current: Screen,
+    onScreenChange: (Screen) -> Unit,
+    playerState: VideoPlayerState,
+    initialVideoUrl: String?,
+    demoSubtitleEnabled: Boolean,
+) {
     Scaffold(
         bottomBar = {
             NavigationBar(modifier = Modifier.zIndex(2f)) {
@@ -74,13 +97,25 @@ private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerS
             }
         },
     ) { padding ->
-        ScreenContent(current, Modifier.fillMaxSize().padding(padding).zIndex(0f), playerState)
+        ScreenContent(
+            current,
+            Modifier.fillMaxSize().padding(padding).zIndex(0f),
+            playerState,
+            initialVideoUrl,
+            demoSubtitleEnabled,
+        )
     }
 }
 
 // Medium+: side NavigationRail
 @Composable
-private fun RailLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerState: VideoPlayerState) {
+private fun RailLayout(
+    current: Screen,
+    onScreenChange: (Screen) -> Unit,
+    playerState: VideoPlayerState,
+    initialVideoUrl: String?,
+    demoSubtitleEnabled: Boolean,
+) {
     Row(modifier = Modifier.fillMaxSize()) {
         NavigationRail(modifier = Modifier.zIndex(2f)) {
             Spacer(Modifier.weight(1f))
@@ -94,14 +129,32 @@ private fun RailLayout(current: Screen, onScreenChange: (Screen) -> Unit, player
             }
             Spacer(Modifier.weight(1f))
         }
-        ScreenContent(current, Modifier.weight(1f).fillMaxHeight().zIndex(0f), playerState)
+        ScreenContent(
+            current,
+            Modifier.weight(1f).fillMaxHeight().zIndex(0f),
+            playerState,
+            initialVideoUrl,
+            demoSubtitleEnabled,
+        )
     }
 }
 
 @Composable
-private fun ScreenContent(screen: Screen, modifier: Modifier, playerState: VideoPlayerState) {
+private fun ScreenContent(
+    screen: Screen,
+    modifier: Modifier,
+    playerState: VideoPlayerState,
+    initialVideoUrl: String?,
+    demoSubtitleEnabled: Boolean,
+) {
     when (screen) {
-        Screen.Player -> PlayerScreen(modifier, playerState)
+        Screen.Player ->
+            PlayerScreen(
+                modifier,
+                playerState,
+                initialVideoUrl = initialVideoUrl,
+                demoSubtitleEnabled = demoSubtitleEnabled,
+            )
         Screen.Gallery -> GalleryScreen(modifier)
         Screen.Feed -> FeedScreen(modifier)
     }

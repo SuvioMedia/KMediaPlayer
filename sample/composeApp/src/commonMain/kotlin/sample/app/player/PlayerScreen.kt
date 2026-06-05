@@ -74,7 +74,12 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = rememberVideoPlayerState()) {
+fun PlayerScreen(
+    modifier: Modifier = Modifier,
+    playerState: VideoPlayerState = rememberVideoPlayerState(),
+    initialVideoUrl: String? = null,
+    demoSubtitleEnabled: Boolean = true,
+) {
     // Pause when leaving the screen, resume when coming back
     DisposableEffect(playerState) {
         val wasPlaying = playerState.isPlaying
@@ -88,7 +93,8 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
 
     val scope = rememberCoroutineScope()
 
-    var videoUrl by remember { mutableStateOf(SAMPLE_VIDEOS.first().second) }
+    val startupVideoUrl = remember(initialVideoUrl) { initialVideoUrl?.takeIf { it.isNotBlank() } ?: SAMPLE_VIDEOS.first().second }
+    var videoUrl by remember(startupVideoUrl) { mutableStateOf(startupVideoUrl) }
     var initialPlayerState by remember { mutableStateOf(InitialPlayerState.PLAY) }
     var selectedContentScale by remember { mutableStateOf(ContentScale.Fit) }
     var selectedMacMkvBackend by remember { mutableStateOf(MacMkvPlaybackBackend.AUTO) }
@@ -138,15 +144,17 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
 
     LaunchedEffect(playerState) {
         if (!demoLoaded && !playerState.hasMedia) {
-            val track =
-                SubtitleTrack(
-                    label = "ASS demo",
-                    language = "en",
-                    src = DEFAULT_DEMO_ASS_SUBTITLE_URL,
-                    format = SubtitleFormat.ASS,
-                )
-            playerState.availableSubtitleTracks.addIfMissing(track)
-            playerState.selectSubtitleTrack(track)
+            if (demoSubtitleEnabled) {
+                val track =
+                    SubtitleTrack(
+                        label = "ASS demo",
+                        language = "en",
+                        src = DEFAULT_DEMO_ASS_SUBTITLE_URL,
+                        format = SubtitleFormat.ASS,
+                    )
+                playerState.availableSubtitleTracks.addIfMissing(track)
+                playerState.selectSubtitleTrack(track)
+            }
             openVideoUrl(videoUrl)
             demoLoaded = true
         }
@@ -188,6 +196,20 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
         ) {
             if (playerState.isFullscreen) {
                 FullscreenOverlay(playerState)
+            } else {
+                AnimatedVisibility(
+                    visible = controlsVisible,
+                    enter = fadeIn(tween(250)),
+                    exit = fadeOut(tween(250)),
+                ) {
+                    ControlsOverlay(
+                        playerState = playerState,
+                        onSourceClick = { showSourceSheet = true },
+                        onSubtitlesClick = { showSubtitleSheet = true },
+                        onSettingsClick = { showSettingsSheet = true },
+                        onPipClick = { scope.launch { playerState.enterPip() } },
+                    )
+                }
             }
         }
 
@@ -219,25 +241,6 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
                 color = Color.White.copy(alpha = 0.8f),
                 strokeWidth = 3.dp,
             )
-        }
-
-        // Animated controls overlay
-        if (!playerState.isFullscreen) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                AnimatedVisibility(
-                    visible = controlsVisible,
-                    enter = fadeIn(tween(250)),
-                    exit = fadeOut(tween(250)),
-                ) {
-                    ControlsOverlay(
-                        playerState = playerState,
-                        onSourceClick = { showSourceSheet = true },
-                        onSubtitlesClick = { showSubtitleSheet = true },
-                        onSettingsClick = { showSettingsSheet = true },
-                        onPipClick = { scope.launch { playerState.enterPip() } },
-                    )
-                }
-            }
         }
 
         // Error snackbar
@@ -592,6 +595,7 @@ internal val SAMPLE_VIDEOS = listOf(
     "Big Buck Bunny (clip)" to "https://www.w3schools.com/html/mov_bbb.mp4",
     "Sample Video" to "https://archive.org/download/big-bunny-sample-video/SampleVideo.mp4",
     "Big Buck Bunny (full)" to "https://media.w3.org/2010/05/bunny/movie.mp4",
+    "Apple HDR / Dolby Vision HLS" to "https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/main.m3u8",
 )
 
 private const val DEFAULT_DEMO_ASS_SUBTITLE_URL =

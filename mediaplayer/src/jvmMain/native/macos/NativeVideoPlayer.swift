@@ -1,8 +1,245 @@
 import AVFoundation
+import CoreImage
 import CoreGraphics
 import CoreVideo
 import Foundation
 import AppKit
+import Metal
+import QuartzCore
+import VideoToolbox
+
+private func hdrMetalLog(_ message: String) {
+    if let data = "HDR Metal: \(message)\n".data(using: .utf8) {
+        FileHandle.standardError.write(data)
+    }
+}
+
+private final class HdrMetalVideoRenderer {
+    static var isAvailable: Bool {
+        MTLCreateSystemDefaultDevice() != nil
+    }
+
+    private let device: MTLDevice
+    private let commandQueue: MTLCommandQueue
+    private let ciContext: CIContext
+    private let outputColorSpace: CGColorSpace
+    let layer: CAMetalLayer
+
+    private weak var item: AVPlayerItem?
+    private var output: AVPlayerItemVideoOutput?
+    private var renderedFrameCount: Int = 0
+    private var skippedFrameCount: Int = 0
+    private var renderTimer: Timer?
+    private var contentScaleMode: Int32 = HdrMetalScaleMode.fit.rawValue
+
+    init?() {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let commandQueue = device.makeCommandQueue()
+        else {
+            return nil
+        }
+
+        self.device = device
+        self.commandQueue = commandQueue
+        self.ciContext = CIContext(mtlDevice: device)
+        self.outputColorSpace =
+            CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
+                ?? CGColorSpace(name: CGColorSpace.displayP3)
+                ?? CGColorSpaceCreateDeviceRGB()
+        self.layer = CAMetalLayer()
+
+        layer.device = device
+        layer.pixelFormat = .rgba16Float
+        layer.framebufferOnly = false
+        layer.isOpaque = true
+        layer.colorspace = outputColorSpace
+        layer.wantsExtendedDynamicRangeContent = true
+        layer.presentsWithTransaction = false
+        layer.displaySyncEnabled = true
+        layer.backgroundColor = NSColor.black.cgColor
+    }
+
+    func attach(to item: AVPlayerItem) {
+        if self.item === item, output != nil {
+            start()
+            return
+        }
+
+        detachFromItem()
+
+        let attrs: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_64RGBAHalf,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+        ]
+        let videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: attrs)
+        item.add(videoOutput)
+        videoOutput.requestNotificationOfMediaDataChange(withAdvanceInterval: 0.03)
+
+        self.item = item
+        self.output = videoOutput
+        renderedFrameCount = 0
+        skippedFrameCount = 0
+        start()
+    }
+
+    func detachFromItem() {
+        stop()
+        if let item = item, let output = output {
+            item.remove(output)
+        }
+        item = nil
+        output = nil
+    }
+
+    func setContentScaleMode(_ mode: Int32) {
+        contentScaleMode = mode
+    }
+
+    func setDrawableSize(width: Int32, height: Int32, scale: Double) {
+        guard width > 0, height > 0 else { return }
+        let backingScale = max(scale, 1.0)
+        let logicalSize = CGSize(width: CGFloat(width), height: CGFloat(height))
+        layer.bounds = CGRect(origin: .zero, size: logicalSize)
+        layer.frame = CGRect(origin: .zero, size: logicalSize)
+        layer.contentsScale = backingScale
+        layer.drawableSize =
+            CGSize(
+                width: logicalSize.width * backingScale,
+                height: logicalSize.height * backingScale
+            )
+    }
+
+    func start() {
+        guard renderTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.renderFrame()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        renderTimer = timer
+    }
+
+    func stop() {
+        renderTimer?.invalidate()
+        renderTimer = nil
+    }
+
+    func renderCurrentFrame() {
+        guard let item = item else { return }
+        renderFrame(at: item.currentTime(), requireNewFrame: false)
+    }
+
+    private func renderFrame() {
+        guard let item = item else { return }
+        renderFrame(at: item.currentTime(), requireNewFrame: false)
+    }
+
+    private func renderFrame(at itemTime: CMTime, requireNewFrame: Bool) {
+        guard let output = output else { return }
+        if requireNewFrame && !output.hasNewPixelBuffer(forItemTime: itemTime) {
+            return
+        }
+
+        var displayTime = CMTime.invalid
+        guard let pixelBuffer = output.copyPixelBuffer(
+            forItemTime: itemTime,
+            itemTimeForDisplay: &displayTime
+        ) else {
+            skippedFrameCount += 1
+            if skippedFrameCount == 120 {
+                hdrMetalLog("no pixel buffers received from AVPlayerItemVideoOutput")
+            }
+            return
+        }
+
+        skippedFrameCount = 0
+        render(pixelBuffer)
+    }
+
+    private func render(_ pixelBuffer: CVPixelBuffer) {
+        guard layer.drawableSize.width > 0,
+              layer.drawableSize.height > 0,
+              let drawable = layer.nextDrawable(),
+              let commandBuffer = commandQueue.makeCommandBuffer()
+        else {
+            skippedFrameCount += 1
+            if skippedFrameCount == 120 {
+                hdrMetalLog("drawable or command buffer unavailable")
+            }
+            return
+        }
+
+        let targetRect =
+            CGRect(
+                x: 0,
+                y: 0,
+                width: drawable.texture.width,
+                height: drawable.texture.height
+            )
+        let image = scaledImage(CIImage(cvPixelBuffer: pixelBuffer), to: targetRect)
+        let background = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1)).cropped(to: targetRect)
+        let composited = image.composited(over: background).cropped(to: targetRect)
+
+        ciContext.render(
+            composited,
+            to: drawable.texture,
+            commandBuffer: commandBuffer,
+            bounds: targetRect,
+            colorSpace: outputColorSpace
+        )
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+        renderedFrameCount += 1
+        if renderedFrameCount == 1 {
+            let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
+            hdrMetalLog("rendered first frame, pixel format \(format)")
+        }
+    }
+
+    private func scaledImage(_ image: CIImage, to targetRect: CGRect) -> CIImage {
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0, targetRect.width > 0, targetRect.height > 0 else {
+            return image
+        }
+
+        let scaleX = targetRect.width / extent.width
+        let scaleY = targetRect.height / extent.height
+        let scale: (x: CGFloat, y: CGFloat)
+        switch HdrMetalScaleMode(rawValue: contentScaleMode) ?? .fit {
+        case .fit:
+            let uniform = min(scaleX, scaleY)
+            scale = (uniform, uniform)
+        case .crop:
+            let uniform = max(scaleX, scaleY)
+            scale = (uniform, uniform)
+        case .fill:
+            scale = (scaleX, scaleY)
+        }
+
+        let scaledWidth = extent.width * scale.x
+        let scaledHeight = extent.height * scale.y
+        let dx = (targetRect.width - scaledWidth) / 2.0
+        let dy = (targetRect.height - scaledHeight) / 2.0
+
+        return image
+            .transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
+            .transformed(by: CGAffineTransform(scaleX: scale.x, y: scale.y))
+            .transformed(by: CGAffineTransform(translationX: dx, y: dy))
+    }
+}
+
+private enum HdrMetalScaleMode: Int32 {
+    case fit = 0
+    case crop = 1
+    case fill = 2
+}
+
+private func syncOnMain<T>(_ body: () -> T) -> T {
+    if Thread.isMainThread {
+        return body()
+    }
+    return DispatchQueue.main.sync(execute: body)
+}
 
 /// Class that manages video playback and frame capture into an optimized shared buffer.
 /// Frame capture rate adapts to the lower of screen refresh rate and video frame rate.
@@ -10,6 +247,11 @@ import AppKit
 class MacVideoPlayer {
     private var player: AVPlayer?
     private var videoOutput: AVPlayerItemVideoOutput?
+    private var hdrMetalRenderer: HdrMetalVideoRenderer?
+    private var hdrPlayerLayer: AVPlayerLayer?
+    private var prefersHdrMetalOutput: Bool = false
+    private var toneMapsHdrToSdr: Bool = false
+    private let useHdrPlayerLayerForSurface: Bool = true
 
     // Timer for capturing frames at adaptive rate
     private var displayLink: Timer?
@@ -854,15 +1096,6 @@ class MacVideoPlayer {
 
     // Helper method to setup video output and player
     private func setupVideoOutputAndPlayer(with asset: AVAsset, videoComposition: AVVideoComposition? = nil) {
-        // Create attributes for the CVPixelBuffer (BGRA format) with IOSurface for better performance
-        let pixelBufferAttributes: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: frameWidth,
-            kCVPixelBufferHeightKey as String: frameHeight,
-            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
-        ]
-        videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: pixelBufferAttributes)
-
         let item = AVPlayerItem(asset: asset)
 
         // Apply the video composition (if any) so that pixel buffers delivered to
@@ -890,11 +1123,41 @@ class MacVideoPlayer {
             setupHLSMonitoring(for: item)
         }
 
-        if let output = videoOutput {
-            item.add(output)
+        if prefersHdrMetalOutput, HdrMetalVideoRenderer.isAvailable {
+            videoOutput = nil
+            if useHdrPlayerLayerForSurface {
+                hdrMetalRenderer?.detachFromItem()
+            } else {
+                if hdrMetalRenderer == nil {
+                    hdrMetalRenderer = HdrMetalVideoRenderer()
+                }
+                hdrMetalRenderer?.attach(to: item)
+            }
+        } else {
+            var outputSettings: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: frameWidth,
+                kCVPixelBufferHeightKey as String: frameHeight,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            ]
+            if toneMapsHdrToSdr {
+                outputSettings[AVVideoColorPropertiesKey] = [
+                    AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                    AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+                ]
+            }
+            videoOutput = AVPlayerItemVideoOutput(outputSettings: outputSettings)
+            if let output = videoOutput {
+                item.add(output)
+            }
+            hdrMetalRenderer?.attach(to: item)
         }
 
         player = AVPlayer(playerItem: item)
+        if prefersHdrMetalOutput, useHdrPlayerLayerForSurface {
+            configureHdrPlayerLayer(with: player)
+        }
 
         // Monitor time control status for all media types (buffering, paused, playing)
         timeControlStatusObserver = player?.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
@@ -1094,7 +1357,10 @@ class MacVideoPlayer {
         if isReadyForPlayback {
             isPlaying = true
             player?.play()
-            configureDisplayLink()
+            if videoOutput != nil {
+                configureDisplayLink()
+            }
+            hdrMetalRenderer?.start()
         } else {
             // Mark that playback is pending
             pendingPlay = true
@@ -1106,6 +1372,7 @@ class MacVideoPlayer {
         isPlaying = false
         player?.pause()
         stopDisplayLink()
+        hdrMetalRenderer?.renderCurrentFrame()
 
         // Capture the current frame to display while paused (not for HLS)
         if !isHLSStream, let output = videoOutput, let item = player?.currentItem {
@@ -1187,6 +1454,9 @@ class MacVideoPlayer {
     func setOutputSize(width: Int, height: Int) -> Bool {
         guard width > 0, height > 0 else { return false }
         guard nativeVideoWidth > 0, nativeVideoHeight > 0 else { return false }
+        if prefersHdrMetalOutput {
+            return false
+        }
 
         let scaleX = Double(width) / Double(nativeVideoWidth)
         let scaleY = Double(height) / Double(nativeVideoHeight)
@@ -1305,6 +1575,9 @@ class MacVideoPlayer {
                     retainLatestPixelBuffer(pixelBuffer)
                 }
             }
+            if !isPlaying {
+                hdrMetalRenderer?.renderCurrentFrame()
+            }
         }
     }
 
@@ -1339,6 +1612,10 @@ class MacVideoPlayer {
     func dispose() {
         pause()
         cleanupObservers()
+        hdrMetalRenderer?.detachFromItem()
+        hdrMetalRenderer = nil
+        hdrPlayerLayer?.player = nil
+        hdrPlayerLayer = nil
         player = nil
         videoOutput = nil
         if let pb = lockedPixelBuffer {
@@ -1347,6 +1624,101 @@ class MacVideoPlayer {
         }
         latestPixelBuffer = nil
     }
+
+    private func configureHdrPlayerLayer(with player: AVPlayer?) {
+        let layer = hdrPlayerLayer ?? AVPlayerLayer()
+        layer.player = player
+        layer.videoGravity = .resizeAspect
+        layer.backgroundColor = NSColor.black.cgColor
+        layer.isOpaque = true
+        layer.wantsExtendedDynamicRangeContent = true
+        hdrPlayerLayer = layer
+    }
+
+    func getHdrMetalLayer() -> CALayer? {
+        if useHdrPlayerLayerForSurface {
+            configureHdrPlayerLayer(with: player)
+            return hdrPlayerLayer
+        }
+        if hdrMetalRenderer == nil {
+            hdrMetalRenderer = HdrMetalVideoRenderer()
+            if let item = player?.currentItem {
+                hdrMetalRenderer?.attach(to: item)
+            }
+        }
+        return hdrMetalRenderer?.layer
+    }
+
+    func setHdrMetalLayerSize(width: Int32, height: Int32, scale: Double) {
+        if useHdrPlayerLayerForSurface {
+            let logicalSize = CGSize(width: CGFloat(width), height: CGFloat(height))
+            let layer = hdrPlayerLayer ?? AVPlayerLayer()
+            layer.bounds = CGRect(origin: .zero, size: logicalSize)
+            layer.frame = CGRect(origin: .zero, size: logicalSize)
+            layer.contentsScale = max(scale, 1.0)
+            hdrPlayerLayer = layer
+            return
+        }
+        hdrMetalRenderer?.setDrawableSize(width: width, height: height, scale: scale)
+        hdrMetalRenderer?.renderCurrentFrame()
+    }
+
+    func setHdrMetalContentScaleMode(_ mode: Int32) {
+        if useHdrPlayerLayerForSurface {
+            switch HdrMetalScaleMode(rawValue: mode) ?? .fit {
+            case .fit:
+                hdrPlayerLayer?.videoGravity = .resizeAspect
+            case .crop:
+                hdrPlayerLayer?.videoGravity = .resizeAspectFill
+            case .fill:
+                hdrPlayerLayer?.videoGravity = .resize
+            }
+            return
+        }
+        hdrMetalRenderer?.setContentScaleMode(mode)
+        hdrMetalRenderer?.renderCurrentFrame()
+    }
+
+    func detachHdrMetalLayer() {
+        if useHdrPlayerLayerForSurface {
+            hdrPlayerLayer?.player = nil
+            return
+        }
+        hdrMetalRenderer?.stop()
+    }
+
+    func isHdrMetalAvailable() -> Bool {
+        if hdrMetalRenderer != nil { return true }
+        return HdrMetalVideoRenderer.isAvailable
+    }
+
+    func setHdrMetalPreferred(_ preferred: Bool) {
+        prefersHdrMetalOutput = preferred
+    }
+
+    func setHdrToneMappingEnabled(_ enabled: Bool) {
+        toneMapsHdrToSdr = enabled
+    }
+}
+
+private func hdrCapabilitiesString() -> String {
+    let maxEdr = syncOnMain {
+        NSScreen.screens
+            .map { Double($0.maximumPotentialExtendedDynamicRangeColorComponentValue) }
+            .max() ?? 1.0
+    }
+    let hevcSupported = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
+    let hdrSupport = hevcSupported ? "SUPPORTED" : "UNKNOWN"
+    let nativeHdr = maxEdr > 1.0 ? 1 : 0
+    return [
+        "maxEdr=\(maxEdr)",
+        "native=\(nativeHdr)",
+        "toneMap=1",
+        "hdr=\(hdrSupport)",
+        "hdr10=\(hdrSupport)",
+        "hlg=\(hdrSupport)",
+        "dolbyVision=UNKNOWN",
+    ].joined(separator: ";")
 }
 
 /// MARK: - C Exported Functions for JNA
@@ -1471,6 +1843,80 @@ public func setOutputSize(_ context: UnsafeMutableRawPointer?, _ width: Int32, _
     guard let context = context else { return 0 }
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.setOutputSize(width: Int(width), height: Int(height)) ? 1 : 0
+}
+
+@_cdecl("getHdrMetalLayer")
+public func getHdrMetalLayer(_ context: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        guard let layer = player.getHdrMetalLayer() else { return nil }
+        return Unmanaged.passUnretained(layer).toOpaque()
+    }
+}
+
+@_cdecl("setHdrMetalLayerSize")
+public func setHdrMetalLayerSize(
+    _ context: UnsafeMutableRawPointer?,
+    _ width: Int32,
+    _ height: Int32,
+    _ scale: Double
+) {
+    guard let context = context else { return }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.setHdrMetalLayerSize(width: width, height: height, scale: scale)
+    }
+}
+
+@_cdecl("setHdrMetalPreferred")
+public func setHdrMetalPreferred(_ context: UnsafeMutableRawPointer?, _ preferred: Int32) {
+    guard let context = context else { return }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.setHdrMetalPreferred(preferred != 0)
+    }
+}
+
+@_cdecl("setHdrToneMappingEnabled")
+public func setHdrToneMappingEnabled(_ context: UnsafeMutableRawPointer?, _ enabled: Int32) {
+    guard let context = context else { return }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.setHdrToneMappingEnabled(enabled != 0)
+    }
+}
+
+@_cdecl("getHdrCapabilities")
+public func getHdrCapabilities() -> UnsafeMutablePointer<CChar>? {
+    strdup(hdrCapabilitiesString())
+}
+
+@_cdecl("setHdrMetalContentScaleMode")
+public func setHdrMetalContentScaleMode(_ context: UnsafeMutableRawPointer?, _ mode: Int32) {
+    guard let context = context else { return }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.setHdrMetalContentScaleMode(mode)
+    }
+}
+
+@_cdecl("detachHdrMetalLayer")
+public func detachHdrMetalLayer(_ context: UnsafeMutableRawPointer?) {
+    guard let context = context else { return }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.detachHdrMetalLayer()
+    }
+}
+
+@_cdecl("isHdrMetalAvailable")
+public func isHdrMetalAvailable(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        player.isHdrMetalAvailable() ? 1 : 0
+    }
 }
 
 @_cdecl("getVideoFrameRate")

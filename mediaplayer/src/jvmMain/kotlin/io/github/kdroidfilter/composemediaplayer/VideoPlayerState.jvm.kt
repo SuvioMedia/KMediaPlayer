@@ -14,7 +14,8 @@ import kotlin.time.Duration
 actual fun createVideoPlayerState(
     audioMode: AudioMode,
     cacheConfig: CacheConfig,
-): VideoPlayerState = DefaultVideoPlayerState()
+    playbackOptions: VideoPlaybackOptions,
+): VideoPlayerState = DefaultVideoPlayerState(playbackOptions)
 
 /**
  * Represents the state and behavior of a video player. This class provides properties
@@ -39,11 +40,13 @@ actual fun createVideoPlayerState(
  * - `dispose()`: Releases resources used by the video player and disposes of the state.
  */
 @Stable
-open class DefaultVideoPlayerState : VideoPlayerState {
+open class DefaultVideoPlayerState(
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+) : VideoPlayerState {
     val delegate: VideoPlayerState =
         when (CurrentPlatform.os) {
             CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState()
-            CurrentPlatform.OS.MAC -> MacVideoPlayerState()
+            CurrentPlatform.OS.MAC -> MacVideoPlayerState(playbackOptions)
             CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState()
         }
 

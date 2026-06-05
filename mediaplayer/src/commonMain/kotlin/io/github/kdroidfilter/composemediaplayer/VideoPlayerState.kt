@@ -422,6 +422,7 @@ private object EmptyPlaybackEvents {
 expect fun createVideoPlayerState(
     audioMode: AudioMode = AudioMode(),
     cacheConfig: CacheConfig = CacheConfig(),
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ): VideoPlayerState
 
 /**
@@ -449,8 +450,11 @@ expect fun createVideoPlayerState(
 fun rememberVideoPlayerState(
     audioMode: AudioMode = AudioMode(),
     cacheConfig: CacheConfig = CacheConfig(),
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ): VideoPlayerState {
-    val playerState = remember(audioMode, cacheConfig) { createVideoPlayerState(audioMode, cacheConfig) }
+    val playerState = remember(audioMode, cacheConfig, playbackOptions) {
+        createVideoPlayerState(audioMode, cacheConfig, playbackOptions)
+    }
     DisposableEffect(playerState) {
         onDispose {
             playerState.dispose()

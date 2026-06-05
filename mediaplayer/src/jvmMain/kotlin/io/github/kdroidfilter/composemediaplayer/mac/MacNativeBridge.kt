@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
+import java.awt.Component
 import java.nio.ByteBuffer
 
 /**
@@ -111,6 +112,35 @@ internal object MacNativeBridge {
         width: Int,
         height: Int,
     ): Int
+
+    @JvmStatic external fun nSetHdrMetalPreferred(
+        handle: Long,
+        preferred: Boolean,
+    )
+
+    @JvmStatic external fun nSetHdrToneMappingEnabled(
+        handle: Long,
+        enabled: Boolean,
+    )
+
+    @JvmStatic external fun nGetHdrCapabilities(): String?
+
+    @JvmStatic external fun nAttachHdrMetalView(
+        handle: Long,
+        component: Component,
+    ): Boolean
+
+    @JvmStatic external fun nDetachHdrMetalView(
+        handle: Long,
+        component: Component,
+    )
+
+    @JvmStatic external fun nSetHdrMetalContentScaleMode(
+        handle: Long,
+        mode: Int,
+    )
+
+    @JvmStatic external fun nIsHdrMetalAvailable(handle: Long): Boolean
 
     // Timing / rate info
     @JvmStatic external fun nGetVideoFrameRate(handle: Long): Float

@@ -32,9 +32,12 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
+import io.github.kdroidfilter.composemediaplayer.VideoOutputMode
+import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.platformPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.requestHeadersJsonObjectString
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
@@ -50,6 +53,7 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
+import java.awt.Component
 import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -63,6 +67,14 @@ internal val macLogger = TaggedLogger("MacVideoPlayerState")
 private enum class MacLibVlcRenderMode {
     MEMORY,
 }
+
+private fun isMacHdrMetalPocEnabled(): Boolean =
+    listOf(
+        System.getProperty("composemediaplayer.macos.hdrMetal"),
+        System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HDR_METAL"),
+    ).any { value ->
+        value.equals("true", ignoreCase = true) || value == "1"
+    }
 
 private data class MacResolvedLibVlcBackend(
     val installation: JvmLibVlcInstallation,
@@ -79,7 +91,9 @@ private data class MacLibVlcRuntimeTrackDescription(
  *
  * This implementation uses a native video player via MacNativeBridge.
  */
-class MacVideoPlayerState : VideoPlayerState {
+class MacVideoPlayerState(
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+) : VideoPlayerState {
     // Main state variables
     // AtomicLong allows lock-free reads of the native pointer from the frame hot path
     private val playerPtrAtomic = AtomicLong(0L)
@@ -126,6 +140,17 @@ class MacVideoPlayerState : VideoPlayerState {
     private var libAssRendererHandle: Long = 0L
     private var libAssSubtitleKey: String? = null
     private var libAssSubtitleSource: String? = null
+    private val videoOutputMode: VideoOutputMode =
+        if (isMacHdrMetalPocEnabled()) {
+            VideoOutputMode.NATIVE_HDR
+        } else {
+            playbackOptions.videoOutputMode
+        }
+    private val hdrMetalRequested: Boolean = videoOutputMode == VideoOutputMode.NATIVE_HDR
+    private val hdrToneMappingRequested: Boolean =
+        videoOutputMode == VideoOutputMode.AUTO ||
+            videoOutputMode == VideoOutputMode.TONE_MAPPED_SDR
+    private var hdrMetalSurfaceAllowed: Boolean = false
 
     // State tracking
     private var lastFrameUpdateTime: Long = 0
@@ -162,10 +187,8 @@ class MacVideoPlayerState : VideoPlayerState {
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
     override var subtitleOffset: Duration by mutableStateOf(Duration.ZERO)
     override val metadata: VideoMetadata = VideoMetadata()
-    override val capabilities: PlayerCapabilities =
-        PlayerCapabilities(
-            supportsMkv = true,
-        )
+    override val capabilities: PlayerCapabilities
+        get() = platformPlayerCapabilities()
     override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo()
     override var isFullscreen: Boolean by mutableStateOf(false)
     internal var usesLibAssSubtitleOverlay: Boolean by mutableStateOf(false)
@@ -235,6 +258,9 @@ class MacVideoPlayerState : VideoPlayerState {
     private val bufferingTimeoutThreshold = 500L
 
     init {
+        if (hdrMetalRequested && System.getProperty("compose.interop.blending").isNullOrBlank()) {
+            System.setProperty("compose.interop.blending", "true")
+        }
         macLogger.d { "Initializing video player" }
         ioScope.launch {
             initPlayer()
@@ -417,11 +443,17 @@ class MacVideoPlayerState : VideoPlayerState {
                     }
 
                     // Start background processes for frame updates
-                    startFrameUpdates()
+                    if (shouldUseHdrMetalSurface()) {
+                        stopFrameUpdates()
+                    } else {
+                        startFrameUpdates()
+                    }
                     startPositionUpdates()
 
                     // First frame update in the background
-                    updateFrameAsync()
+                    if (!shouldUseHdrMetalSurface()) {
+                        updateFrameAsync()
+                    }
 
                     // Start buffering check in the background
                     startBufferingCheck()
@@ -485,9 +517,67 @@ class MacVideoPlayerState : VideoPlayerState {
         }
 
         nativeBackendUsesLibVlc = false
+        hdrMetalSurfaceAllowed = false
+        setNativeHdrToneMappingEnabled(false)
         clearLibAssSubtitleRenderer()
         closeFfmpegHlsFallback()
         clearLibVlcTrackState()
+    }
+
+    private fun setNativeHdrMetalPreferred(preferred: Boolean) {
+        val ptr = playerPtr
+        if (ptr == 0L || nativeBackendUsesLibVlc) return
+        runCatching {
+            MacNativeBridge.nSetHdrMetalPreferred(ptr, preferred)
+        }.onFailure { e ->
+            macLogger.e { "Failed to set HDR Metal preference: ${e.message}" }
+        }
+    }
+
+    private fun setNativeHdrToneMappingEnabled(enabled: Boolean) {
+        val ptr = playerPtr
+        if (ptr == 0L || nativeBackendUsesLibVlc) return
+        runCatching {
+            MacNativeBridge.nSetHdrToneMappingEnabled(ptr, enabled)
+        }.onFailure { e ->
+            macLogger.e { "Failed to set HDR tone mapping preference: ${e.message}" }
+        }
+    }
+
+    internal fun shouldUseHdrMetalSurface(): Boolean =
+        hdrMetalRequested &&
+            hdrMetalSurfaceAllowed &&
+            !nativeBackendUsesLibVlc &&
+            !usesLibAssSubtitleOverlay
+
+    internal fun attachHdrMetalComponent(
+        component: Component,
+        contentScaleMode: Int,
+    ): Boolean {
+        if (!shouldUseHdrMetalSurface()) return false
+        val ptr = playerPtr
+        if (ptr == 0L || !MacNativeBridge.nIsHdrMetalAvailable(ptr)) return false
+
+        return runCatching {
+            MacNativeBridge.nAttachHdrMetalView(ptr, component).also { attached ->
+                if (attached) {
+                    MacNativeBridge.nSetHdrMetalContentScaleMode(ptr, contentScaleMode)
+                }
+            }
+        }.getOrElse { e ->
+            macLogger.e { "Failed to attach HDR Metal surface: ${e.message}" }
+            false
+        }
+    }
+
+    internal fun detachHdrMetalComponent(component: Component) {
+        val ptr = playerPtr
+        if (ptr == 0L) return
+        runCatching {
+            MacNativeBridge.nDetachHdrMetalView(ptr, component)
+        }.onFailure { e ->
+            macLogger.e { "Failed to detach HDR Metal surface: ${e.message}" }
+        }
     }
 
     private suspend fun prepareUriForMacPlayback(
@@ -495,21 +585,39 @@ class MacVideoPlayerState : VideoPlayerState {
         requestHeaders: Map<String, String> = emptyMap(),
     ): String {
         if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders)) {
+            hdrMetalSurfaceAllowed = hdrMetalRequested
+            setNativeHdrMetalPreferred(hdrMetalSurfaceAllowed)
+            setNativeHdrToneMappingEnabled(hdrToneMappingRequested && !hdrMetalSurfaceAllowed)
             withContext(Dispatchers.Main) {
                 renderingInfo.update(
                     backend = "AVFoundation",
                     container = "AVFoundation-supported source",
                     videoDecoder = "AVFoundation",
-                    videoRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
+                    videoRenderer =
+                        when {
+                            hdrMetalRequested -> "AVPlayerLayer native HDR/EDR"
+                            hdrToneMappingRequested -> "AVPlayerItemVideoOutput tone-mapped BT.709 -> Compose Canvas (Skia)"
+                            else -> "CVPixelBuffer -> Compose Canvas (Skia)"
+                        },
                     audioRenderer = "AVFoundation / CoreAudio",
                     subtitleRenderer = null,
                     subtitleSource = null,
-                    notes = "No external GPL components are bundled or linked.",
+                    notes =
+                        when {
+                            hdrMetalRequested ->
+                                "Native macOS HDR path; Compose overlay is rendered in a separate transparent window."
+                            hdrToneMappingRequested ->
+                                "HDR sources are tone-mapped to SDR for stable Compose rendering."
+                            else -> "No external GPL components are bundled or linked."
+                        },
                 )
             }
             return normalizeLocalFileUriForPlayback(uri)
         }
 
+        hdrMetalSurfaceAllowed = false
+        setNativeHdrMetalPreferred(false)
+        setNativeHdrToneMappingEnabled(false)
         if (isFfmpegFallbackDisabled()) {
             val disabledFallbackMessage =
                 "Matroska/WebM is not supported by AVPlayer on macOS. " +
@@ -622,6 +730,9 @@ class MacVideoPlayerState : VideoPlayerState {
         renderMode: MacLibVlcRenderMode,
     ): String {
         libVlcBackendActive = true
+        hdrMetalSurfaceAllowed = false
+        setNativeHdrMetalPreferred(false)
+        setNativeHdrToneMappingEnabled(false)
         libVlcSourceUri = uri
         libVlcRenderMode = renderMode
         withContext(Dispatchers.Main) {
@@ -1636,7 +1747,11 @@ class MacVideoPlayerState : VideoPlayerState {
                 isPlaying = true
             }
 
-            startFrameUpdates()
+            if (shouldUseHdrMetalSurface()) {
+                stopFrameUpdates()
+            } else {
+                startFrameUpdates()
+            }
             startPositionUpdates()
             startBufferingCheck()
         } catch (e: Exception) {
@@ -2121,9 +2236,15 @@ class MacVideoPlayerState : VideoPlayerState {
                 isPlaying = shouldResumePlayback
             }
 
-            startFrameUpdates()
+            if (shouldUseHdrMetalSurface()) {
+                stopFrameUpdates()
+            } else {
+                startFrameUpdates()
+            }
             startPositionUpdates()
-            updateFrameAsync()
+            if (!shouldUseHdrMetalSurface()) {
+                updateFrameAsync()
+            }
             startBufferingCheck()
 
             if (shouldResumePlayback) {
@@ -2406,9 +2527,15 @@ class MacVideoPlayerState : VideoPlayerState {
                 isPlaying = shouldResumePlayback
             }
 
-            startFrameUpdates()
+            if (shouldUseHdrMetalSurface()) {
+                stopFrameUpdates()
+            } else {
+                startFrameUpdates()
+            }
             startPositionUpdates()
-            updateFrameAsync()
+            if (!shouldUseHdrMetalSurface()) {
+                updateFrameAsync()
+            }
             startBufferingCheck()
 
             if (shouldResumePlayback) {

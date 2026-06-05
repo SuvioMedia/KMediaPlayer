@@ -96,6 +96,8 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 
 > † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC canvas playback, or external HLS fallback backends when the platform backend cannot demux the source directly. VLC/libVLC is preferred in `auto` mode; `ffmpeg` is the last fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
+> macOS JVM also has an experimental opt-in HDR Metal rendering POC for AVFoundation-supported sources. Enable it with `-Dcomposemediaplayer.macos.hdrMetal=true` or `COMPOSE_MEDIA_PLAYER_MACOS_HDR_METAL=true`. See [macOS HDR Metal POC](docs/macos-hdr-metal-poc.md).
+
 ## ✅ Media Support Preflight
 
 The library exposes a single suspendable preflight query so apps can check player capabilities, source/container support and codecs before creating a `VideoPlayerState` or navigating to the player screen:

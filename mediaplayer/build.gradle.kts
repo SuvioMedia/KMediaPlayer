@@ -149,6 +149,7 @@ kotlin {
         }
 
         jvmMain.dependencies {
+            implementation(libs.compose.ui)
             implementation(libs.kotlinx.coroutines.swing)
         }
 
