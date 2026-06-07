@@ -45,9 +45,9 @@ open class DefaultVideoPlayerState(
 ) : VideoPlayerState {
     val delegate: VideoPlayerState =
         when (CurrentPlatform.os) {
-            CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState()
+            CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState(playbackOptions)
             CurrentPlatform.OS.MAC -> MacVideoPlayerState(playbackOptions)
-            CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState()
+            CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState(playbackOptions)
         }
 
     override val hasMedia: Boolean get() = delegate.hasMedia
@@ -131,6 +131,12 @@ open class DefaultVideoPlayerState(
 
     override fun selectSubtitleTrack(track: SubtitleTrack?) = delegate.selectSubtitleTrack(track)
 
+    override fun addSubtitleTrack(track: SubtitleTrack) = delegate.addSubtitleTrack(track)
+
+    override fun removeSubtitleTrack(trackId: String) = delegate.removeSubtitleTrack(trackId)
+
+    override fun clearExternalSubtitleTracks() = delegate.clearExternalSubtitleTracks()
+
     override fun disableSubtitles() = delegate.disableSubtitles()
 
     override val positionText: String get() = delegate.positionText
@@ -151,20 +157,20 @@ open class DefaultVideoPlayerState(
 
     override fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
-    ) = delegate.openUri(uri, initializeplayerState, requestHeaders)
+    ) = delegate.openUri(uri, initializePlayerState, requestHeaders)
 
     override fun prepare(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
-    ) = delegate.prepare(uri, initializeplayerState, requestHeaders)
+    ) = delegate.prepare(uri, initializePlayerState, requestHeaders)
 
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState,
-    ) = delegate.openUri(file.file.path, initializeplayerState)
+        initializePlayerState: InitialPlayerState,
+    ) = delegate.openUri(file.file.path, initializePlayerState)
 
     override fun play() = delegate.play()
 

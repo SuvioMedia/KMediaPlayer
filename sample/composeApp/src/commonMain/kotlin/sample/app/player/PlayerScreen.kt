@@ -137,7 +137,7 @@ fun PlayerScreen(
                     src = it.getUri(),
                     format = SubtitleFormat.fromSource(src = it.getUri(), label = it.name),
                 )
-            playerState.availableSubtitleTracks.addIfMissing(track)
+            playerState.addSubtitleTrack(track)
             playerState.selectSubtitleTrack(track)
         }
     }
@@ -152,7 +152,7 @@ fun PlayerScreen(
                         src = DEFAULT_DEMO_ASS_SUBTITLE_URL,
                         format = SubtitleFormat.ASS,
                     )
-                playerState.availableSubtitleTracks.addIfMissing(track)
+                playerState.addSubtitleTrack(track)
                 playerState.selectSubtitleTrack(track)
             }
             openVideoUrl(videoUrl)
@@ -164,7 +164,7 @@ fun PlayerScreen(
         if (playerState.currentSubtitleTrack?.src == DEFAULT_DEMO_ASS_SUBTITLE_URL) {
             playerState.disableSubtitles()
         }
-        playerState.availableSubtitleTracks.removeAll { it.src == DEFAULT_DEMO_ASS_SUBTITLE_URL }
+        playerState.removeSubtitleTrack(DEFAULT_DEMO_ASS_SUBTITLE_URL)
     }
 
     // Launch pickers only after the sheet is gone
@@ -339,7 +339,7 @@ fun PlayerScreen(
                 showSubtitleSheet = false
             },
             onAddTrack = { track ->
-                playerState.availableSubtitleTracks.addIfMissing(track)
+                playerState.addSubtitleTrack(track)
                 playerState.selectSubtitleTrack(track)
             },
             onDismiss = { showSubtitleSheet = false },
@@ -600,9 +600,3 @@ internal val SAMPLE_VIDEOS = listOf(
 
 private const val DEFAULT_DEMO_ASS_SUBTITLE_URL =
     "https://raw.githubusercontent.com/Shusek/KMediaPlayer/refs/heads/master/assets/subtitles/en.ass"
-
-private fun MutableList<SubtitleTrack>.addIfMissing(track: SubtitleTrack) {
-    if (none { it.id == track.id && it.src == track.src }) {
-        add(track)
-    }
-}

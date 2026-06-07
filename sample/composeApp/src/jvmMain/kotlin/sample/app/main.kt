@@ -6,6 +6,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DolbyVisionMode
 import io.github.kdroidfilter.composemediaplayer.VideoOutputMode
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
@@ -40,6 +41,12 @@ fun main(args: Array<String>) {
                     ?.uppercase()
                     ?.let { runCatching { DolbyVisionMode.valueOf(it) }.getOrNull() }
                     ?: DolbyVisionMode.AUTO,
+            desktopVideoBackend =
+                System.getProperty("sample.app.desktopVideoBackend")
+                    ?.trim()
+                    ?.uppercase()
+                    ?.let { runCatching { DesktopVideoBackend.valueOf(it) }.getOrNull() }
+                    ?: DesktopVideoBackend.AUTO,
         )
 
     application {

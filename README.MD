@@ -293,7 +293,7 @@ file?.let { playerState.openFile(it) }
 file?.let { playerState.openFile(it, InitialPlayerState.PAUSE) }
 ```
 
-The `initializeplayerState` parameter controls whether the video automatically starts playing after opening:
+The `initializePlayerState` parameter controls whether the video automatically starts playing after opening:
 - `InitialPlayerState.PLAY` (default): The video will automatically start playing after opening
 - `InitialPlayerState.PAUSE`: The video will be loaded but remain paused until you call `play()`
 
@@ -437,6 +437,7 @@ val track = SubtitleTrack(
     language = "en",
     src = "https://example.com/subtitles.vtt" // Works with .srt, .vtt, .ass and .ssa files
 )
+playerState.addSubtitleTrack(track)
 playerState.selectSubtitleTrack(track)
 ```
 
@@ -451,13 +452,13 @@ val playerState = rememberVideoPlayerState()
 
 LaunchedEffect(Unit) {
     playerState.openUri("https://example.com/video.mp4")
-    playerState.selectSubtitleTrack(
-        SubtitleTrack(
-            label = "English ASS",
-            language = "en",
-            src = "https://example.com/subtitles.ass",
-        )
+    val subtitleTrack = SubtitleTrack(
+        label = "English ASS",
+        language = "en",
+        src = "https://example.com/subtitles.ass",
     )
+    playerState.addSubtitleTrack(subtitleTrack)
+    playerState.selectSubtitleTrack(subtitleTrack)
 }
 ```
 
@@ -522,7 +523,7 @@ if (subtitleTrack != null) {
 }
 ```
 
-`availableSubtitleTracks` can contain both external tracks added by your app and embedded tracks discovered from the current media.
+`availableSubtitleTracks` can contain both external tracks added by your app through `addSubtitleTrack(...)` and embedded tracks discovered from the current media. Use `removeSubtitleTrack(...)` or `clearExternalSubtitleTracks()` to remove app-managed tracks.
 
 #### 🎨 Customizing Subtitle Appearance
 

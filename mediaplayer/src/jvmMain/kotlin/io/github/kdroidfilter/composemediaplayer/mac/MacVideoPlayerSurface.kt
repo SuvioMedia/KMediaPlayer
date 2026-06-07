@@ -25,11 +25,11 @@ import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import java.awt.BorderLayout
-import java.awt.Canvas as AwtCanvas
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.IllegalComponentStateException
 import java.awt.Point
+import java.awt.Rectangle
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.event.HierarchyBoundsAdapter
@@ -38,6 +38,8 @@ import java.awt.event.HierarchyListener
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 import javax.swing.Timer
+import java.awt.Canvas as AwtCanvas
+import java.awt.Window as AwtWindow
 
 /**
  * A Composable function that renders a video player surface for MacOS.
@@ -68,7 +70,9 @@ fun MacVideoPlayerSurface(
         contentAlignment = Alignment.Center,
     ) {
         // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window.
-        val shouldRenderVideo = playerState.hasMedia && (!playerState.isFullscreen || isInFullscreenWindow)
+        val shouldRenderVideo =
+            (playerState.hasMedia || playerState.libVlcNativeSurfaceRequested) &&
+                (!playerState.isFullscreen || isInFullscreenWindow || playerState.libVlcNativeSurfaceRequested)
         if (shouldRenderVideo) {
             if (playerState.shouldUseHdrMetalSurface()) {
                 MacHdrMetalVideoHost(
@@ -77,6 +81,21 @@ fun MacVideoPlayerSurface(
                     overlay = {
                         MacVideoOverlayContent(playerState, overlay)
                     },
+                    modifier =
+                        contentScale.toCanvasModifier(
+                            playerState.aspectRatio,
+                            playerState.metadata.width,
+                            playerState.metadata.height,
+                        ),
+                )
+            } else if (playerState.libVlcNativeSurfaceRequested) {
+                MacLibVlcNativeVideoHost(
+                    playerState = playerState,
+                    overlay = {
+                        MacVideoOverlayContent(playerState, overlay)
+                    },
+                    nativeFullscreen = playerState.isFullscreen && !isInFullscreenWindow,
+                    showExternalOverlay = !isInFullscreenWindow,
                     modifier =
                         contentScale.toCanvasModifier(
                             playerState.aspectRatio,
@@ -110,7 +129,7 @@ fun MacVideoPlayerSurface(
         }
     }
 
-    if (playerState.isFullscreen && !isInFullscreenWindow) {
+    if (playerState.isFullscreen && !isInFullscreenWindow && !playerState.libVlcNativeSurfaceRequested) {
         openFullscreenWindow(playerState, overlay = overlay, contentScale = contentScale)
     }
 }
@@ -186,6 +205,113 @@ private fun MacHdrMetalVideoHost(
     )
 
     if (overlayVisible) {
+        val bounds = initialOverlayBounds
+        if (bounds.width > 0 && bounds.height > 0) {
+            val overlayWindowState =
+                rememberWindowState(
+                    position = WindowPosition.Absolute(bounds.x.dp, bounds.y.dp),
+                    width = bounds.width.dp,
+                    height = bounds.height.dp,
+                )
+
+            Window(
+                onCloseRequest = {},
+                state = overlayWindowState,
+                visible = true,
+                title = "Compose Media Player Overlay",
+                undecorated = true,
+                transparent = true,
+                resizable = false,
+                alwaysOnTop = true,
+            ) {
+                DisposableEffect(panel, window) {
+                    var pendingBounds: AwtOverlayBounds? = null
+                    var updateScheduled = false
+                    var disposed = false
+                    val applyBounds: (AwtOverlayBounds?) -> Unit = { nextBounds ->
+                        pendingBounds = nextBounds
+                        if (!updateScheduled) {
+                            updateScheduled = true
+                            SwingUtilities.invokeLater {
+                                updateScheduled = false
+                                if (disposed) return@invokeLater
+                                val boundsToApply = pendingBounds
+                                if (boundsToApply == null) {
+                                    if (window.isVisible) {
+                                        window.isVisible = false
+                                    }
+                                } else {
+                                    if (window.x != boundsToApply.x ||
+                                        window.y != boundsToApply.y ||
+                                        window.width != boundsToApply.width ||
+                                        window.height != boundsToApply.height
+                                    ) {
+                                        window.setBounds(
+                                            boundsToApply.x,
+                                            boundsToApply.y,
+                                            boundsToApply.width,
+                                            boundsToApply.height,
+                                        )
+                                    }
+                                    if (!window.isVisible) {
+                                        window.isVisible = true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    panel.setOverlayBoundsApplier(applyBounds)
+                    onDispose {
+                        disposed = true
+                        panel.setOverlayBoundsApplier(null)
+                    }
+                }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    overlay()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MacLibVlcNativeVideoHost(
+    playerState: MacVideoPlayerState,
+    overlay: @Composable () -> Unit,
+    nativeFullscreen: Boolean,
+    showExternalOverlay: Boolean,
+    modifier: Modifier,
+) {
+    var overlayVisible by remember { mutableStateOf(false) }
+    var initialOverlayBounds by remember { mutableStateOf(AwtOverlayBounds(0, 0, 1, 1)) }
+    val panel =
+        remember(playerState) {
+            MacLibVlcNativePanel(playerState) { bounds ->
+                if (bounds == null) {
+                    overlayVisible = false
+                } else {
+                    initialOverlayBounds = bounds
+                    overlayVisible = true
+                }
+            }
+        }
+    DisposableEffect(panel) {
+        onDispose {
+            panel.detachFromNative()
+        }
+    }
+
+    SwingPanel(
+        background = Color.Black,
+        factory = { panel },
+        modifier = modifier,
+        update = { host ->
+            host.updateNativeFullscreen(nativeFullscreen)
+            host.attachOrUpdate()
+        },
+    )
+
+    if (overlayVisible && showExternalOverlay) {
         val bounds = initialOverlayBounds
         if (bounds.width > 0 && bounds.height > 0) {
             val overlayWindowState =
@@ -442,6 +568,218 @@ private class MacHdrMetalPanel(
     }
 }
 
+private class MacLibVlcNativePanel(
+    private val playerState: MacVideoPlayerState,
+    private val onOverlayBoundsChanged: (AwtOverlayBounds?) -> Unit,
+) : JPanel(BorderLayout()) {
+    private val awtCanvas =
+        LibVlcNativeCanvas().apply {
+            name = "ComposeMediaPlayer libVLC native canvas"
+            background = java.awt.Color.BLACK
+            ignoreRepaint = true
+            minimumSize = Dimension(1, 1)
+            preferredSize = Dimension(1, 1)
+        }
+    private var attached = false
+    private var lastOverlayBounds: AwtOverlayBounds? = null
+    private var trackedWindow: AwtWindow? = null
+    private var fullscreenWindow: AwtWindow? = null
+    private var previousWindowBounds: Rectangle? = null
+    private var overlayBoundsApplier: ((AwtOverlayBounds?) -> Unit)? = null
+    private var pendingSettledOverlayBounds: AwtOverlayBounds? = null
+    private val settledBoundsTimer =
+        Timer(GEOMETRY_SETTLE_DELAY_MS) {
+            pendingSettledOverlayBounds?.let { bounds ->
+                pendingSettledOverlayBounds = null
+                applyNativeGeometry()
+                overlayBoundsApplier?.invoke(bounds)
+            }
+        }.apply {
+            isRepeats = false
+            isCoalesce = true
+        }
+    private val componentGeometryListener =
+        object : ComponentAdapter() {
+            override fun componentMoved(e: ComponentEvent?) = publishOverlayBounds()
+
+            override fun componentResized(e: ComponentEvent?) {
+                publishOverlayBounds()
+            }
+
+            override fun componentShown(e: ComponentEvent?) {
+                publishOverlayBounds()
+            }
+
+            override fun componentHidden(e: ComponentEvent?) {
+                clearOverlayBounds()
+            }
+        }
+    private val hierarchyBoundsListener =
+        object : HierarchyBoundsAdapter() {
+            override fun ancestorMoved(e: HierarchyEvent?) = publishOverlayBounds()
+
+            override fun ancestorResized(e: HierarchyEvent?) {
+                publishOverlayBounds()
+            }
+        }
+    private val hierarchyListener =
+        HierarchyListener { event ->
+            val flags = event.changeFlags
+            if ((flags and HierarchyEvent.SHOWING_CHANGED.toLong()) != 0L ||
+                (flags and HierarchyEvent.DISPLAYABILITY_CHANGED.toLong()) != 0L
+            ) {
+                if (awtCanvas.isShowing) {
+                    publishOverlayBounds()
+                } else {
+                    clearOverlayBounds()
+                }
+            }
+        }
+
+    init {
+        name = "ComposeMediaPlayer libVLC native host"
+        isOpaque = true
+        background = java.awt.Color.BLACK
+        minimumSize = Dimension(1, 1)
+        preferredSize = Dimension(1, 1)
+        add(awtCanvas, BorderLayout.CENTER)
+        addComponentListener(componentGeometryListener)
+        addHierarchyBoundsListener(hierarchyBoundsListener)
+        addHierarchyListener(hierarchyListener)
+        awtCanvas.addComponentListener(componentGeometryListener)
+        awtCanvas.addHierarchyBoundsListener(hierarchyBoundsListener)
+        awtCanvas.addHierarchyListener(hierarchyListener)
+    }
+
+    fun attachOrUpdate() {
+        if (!attached && lastOverlayBounds != null) {
+            applyNativeGeometry()
+        }
+        publishOverlayBounds()
+    }
+
+    fun detachFromNative() {
+        if (!attached) return
+        updateNativeFullscreen(false)
+        playerState.detachLibVlcNativeComponent(awtCanvas)
+        attached = false
+        clearOverlayBounds()
+    }
+
+    fun updateNativeFullscreen(requested: Boolean) {
+        val window = SwingUtilities.getWindowAncestor(awtCanvas) ?: return
+        if (requested) {
+            if (fullscreenWindow === window) return
+            exitNativeFullscreen()
+            fullscreenWindow = window
+            previousWindowBounds = window.bounds
+            window.graphicsConfiguration?.bounds?.let { bounds ->
+                window.bounds = bounds
+            }
+            SwingUtilities.invokeLater {
+                publishOverlayBounds()
+            }
+        } else {
+            exitNativeFullscreen()
+        }
+    }
+
+    override fun addNotify() {
+        super.addNotify()
+        attachOrUpdate()
+        SwingUtilities.invokeLater { publishOverlayBounds() }
+    }
+
+    override fun removeNotify() {
+        settledBoundsTimer.stop()
+        trackedWindow?.removeComponentListener(componentGeometryListener)
+        trackedWindow = null
+        exitNativeFullscreen()
+        detachFromNative()
+        super.removeNotify()
+    }
+
+    override fun doLayout() {
+        super.doLayout()
+        publishOverlayBounds()
+    }
+
+    fun setOverlayBoundsApplier(applier: ((AwtOverlayBounds?) -> Unit)?) {
+        overlayBoundsApplier = applier
+        applier?.invoke(lastOverlayBounds)
+    }
+
+    private fun publishOverlayBounds() {
+        if (!awtCanvas.isShowing || awtCanvas.width <= 0 || awtCanvas.height <= 0) return
+        updateTrackedWindow()
+        val location: Point =
+            try {
+                awtCanvas.locationOnScreen
+            } catch (_: IllegalComponentStateException) {
+                return
+            }
+        val bounds =
+            AwtOverlayBounds(
+                x = location.x,
+                y = location.y,
+                width = awtCanvas.width,
+                height = awtCanvas.height,
+            )
+        if (bounds != lastOverlayBounds) {
+            val wasHidden = lastOverlayBounds == null
+            lastOverlayBounds = bounds
+            if (wasHidden) {
+                settledBoundsTimer.stop()
+                pendingSettledOverlayBounds = null
+                applyNativeGeometry()
+                overlayBoundsApplier?.invoke(bounds)
+                onOverlayBoundsChanged(bounds)
+            } else {
+                pendingSettledOverlayBounds = bounds
+                overlayBoundsApplier?.invoke(null)
+                settledBoundsTimer.restart()
+            }
+        }
+    }
+
+    private fun applyNativeGeometry() {
+        if (!awtCanvas.isDisplayable || awtCanvas.width <= 0 || awtCanvas.height <= 0) return
+        val wasAttached = attached
+        attached = playerState.attachLibVlcNativeComponent(awtCanvas) || wasAttached
+    }
+
+    private fun updateTrackedWindow() {
+        val window = SwingUtilities.getWindowAncestor(awtCanvas)
+        if (window === trackedWindow) return
+        trackedWindow?.removeComponentListener(componentGeometryListener)
+        trackedWindow = window
+        trackedWindow?.addComponentListener(componentGeometryListener)
+    }
+
+    private fun exitNativeFullscreen() {
+        val window = fullscreenWindow ?: return
+        previousWindowBounds?.let { bounds ->
+            if (window.isDisplayable) {
+                window.bounds = bounds
+            }
+        }
+        fullscreenWindow = null
+        previousWindowBounds = null
+        SwingUtilities.invokeLater {
+            publishOverlayBounds()
+        }
+    }
+
+    private fun clearOverlayBounds() {
+        if (lastOverlayBounds == null) return
+        settledBoundsTimer.stop()
+        pendingSettledOverlayBounds = null
+        lastOverlayBounds = null
+        overlayBoundsApplier?.invoke(null)
+        onOverlayBoundsChanged(null)
+    }
+}
+
 private data class AwtOverlayBounds(
     val x: Int,
     val y: Int,
@@ -450,6 +788,12 @@ private data class AwtOverlayBounds(
 )
 
 private class HdrMetalCanvas : AwtCanvas() {
+    override fun update(g: Graphics?) = Unit
+
+    override fun paint(g: Graphics?) = Unit
+}
+
+private class LibVlcNativeCanvas : AwtCanvas() {
     override fun update(g: Graphics?) = Unit
 
     override fun paint(g: Graphics?) = Unit

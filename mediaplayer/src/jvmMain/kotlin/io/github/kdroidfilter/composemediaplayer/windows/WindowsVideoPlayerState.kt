@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackSupport
 import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
 import io.github.kdroidfilter.composemediaplayer.HlsFallbackSource
@@ -29,8 +30,10 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
+import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
@@ -92,7 +95,9 @@ private data class WindowsLibVlcRuntimeTrackDescription(
  * Handles media playback using Media Foundation on Windows platform.
  */
 @Suppress("MagicNumber", "TooManyFunctions")
-class WindowsVideoPlayerState : VideoPlayerState {
+class WindowsVideoPlayerState(
+    private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+) : VideoPlayerState {
     companion object {
         private const val HUNDRED_NANOSECOND_TICKS_PER_SECOND = 10_000_000.0
         private val isMfBootstrapped = AtomicBoolean(false)
@@ -237,10 +242,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
     private var _error: VideoPlayerError? = null
     override val error get() = _error
-    override val capabilities: PlayerCapabilities =
-        PlayerCapabilities(
-            supportsMkv = true,
-        )
+    override val capabilities: PlayerCapabilities
+        get() = jvmPlayerCapabilities(playbackOptions)
 
     override fun clearError() {
         _error = null
@@ -266,9 +269,13 @@ class WindowsVideoPlayerState : VideoPlayerState {
     override val metadata: VideoMetadata get() = _metadata
     override var subtitlesEnabled by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
-    override val availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
+    private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
+    override val availableSubtitleTracks: List<SubtitleTrack>
+        get() = _availableSubtitleTracks
     override var currentAudioTrack: AudioTrack? by mutableStateOf(null)
-    override val availableAudioTracks = mutableStateListOf<AudioTrack>()
+    private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
+    override val availableAudioTracks: List<AudioTrack>
+        get() = _availableAudioTracks
     override var subtitleTextStyle: TextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
@@ -524,11 +531,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * Opens a media file or URL for playback
      *
      * @param uri The path to the media file or URL to open
-     * @param initializeplayerState Controls whether playback should start automatically after opening
+     * @param initializePlayerState Controls whether playback should start automatically after opening
      */
     override fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
         if (isDisposing.get()) {
@@ -547,7 +554,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 withTimeout(10_000) { initReady.await() }
 
                 // Here the native instance is guaranteed to be non-null
-                openUriInternal(uri, initializeplayerState, sanitizedHeaders)
+                openUriInternal(uri, initializePlayerState, sanitizedHeaders)
             } catch (_: TimeoutCancellationException) {
                 setError("Player initialization timed out after 10 s.")
             } catch (e: Exception) {
@@ -558,21 +565,21 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
     ) {
-        openUri(file.file.path, initializeplayerState)
+        openUri(file.file.path, initializePlayerState)
     }
 
     /**
      * Internal implementation of openUri that assumes the player is initialized
      *
      * @param uri The path to the media file or URL to open
-     * @param initializeplayerState Controls whether playback should start automatically after opening
+     * @param initializePlayerState Controls whether playback should start automatically after opening
      */
     @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun openUriInternal(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
         scope.launch {
@@ -653,7 +660,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     // playback clock before we've finished setup (SetOutputSize, metadata, etc.).
                     // We explicitly call SetPlaybackState(true) later, right before starting
                     // the frame-reading coroutine, so the wall-clock is in sync with frame production.
-                    val startPlayback = initializeplayerState == InitialPlayerState.PLAY
+                    val startPlayback = initializePlayerState == InitialPlayerState.PLAY
                     val requestHeaderLines = playbackRequestHeaders.requestHeadersLineString()
                     val hrOpen =
                         if (nativeBackendUsesLibVlc) {
@@ -796,27 +803,39 @@ class WindowsVideoPlayerState : VideoPlayerState {
         uri: String,
         requestHeaders: Map<String, String>,
     ): Boolean =
-        !ExternalHlsFallbackSupport.isDisabled() &&
+        playbackOptions.desktopVideoBackend == DesktopVideoBackend.AUTO &&
+            !ExternalHlsFallbackSupport.isDisabled() &&
             ExternalHlsFallbackSupport.needsContainerFallback(uri, requestHeaders)
 
     private suspend fun resolveLibVlcBackendForUri(
         uri: String,
         requestHeaders: Map<String, String>,
     ): WindowsResolvedLibVlcBackend? {
-        if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders)) return null
+        val forcedDesktopBackend =
+            when (playbackOptions.desktopVideoBackend) {
+                DesktopVideoBackend.LIBVLC -> "libvlc"
+                DesktopVideoBackend.LIBVLC_NATIVE ->
+                    throw UnsupportedOperationException(
+                        "LIBVLC_NATIVE is only available on macOS. Use LIBVLC for the Windows canvas backend.",
+                    )
+                DesktopVideoBackend.PLATFORM -> "platform"
+                DesktopVideoBackend.AUTO -> null
+            }
+        val shouldUsePlatformBackend =
+            forcedDesktopBackend == null &&
+                !JvmExternalFallbackContainerSupport.needsContainerFallback(
+                    uri = uri,
+                    requestHeaders = requestHeaders,
+                )
+        if (shouldUsePlatformBackend) {
+            return null
+        }
 
         val configured =
-            (
-                System.getProperty("composemediaplayer.windows.fallbackBackend")
-                    ?: System.getProperty("composemediaplayer.fallbackBackend")
-                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_WINDOWS_FALLBACK_BACKEND")
-                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_FALLBACK_BACKEND")
-                    ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
-                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
-                    ?: "auto"
-            ).lowercase()
+            (forcedDesktopBackend ?: windowsFallbackBackendProperty()).lowercase()
 
         return when (configured) {
+            "platform", "mediafoundation" -> null
             "libvlc" ->
                 ExternalVlcLocator.findLibVlc()?.let(::WindowsResolvedLibVlcBackend)
                     ?: throw missingLibVlcBackendException()
@@ -825,6 +844,15 @@ class WindowsVideoPlayerState : VideoPlayerState {
             else -> null
         }
     }
+
+    private fun windowsFallbackBackendProperty(): String =
+        System.getProperty("composemediaplayer.windows.fallbackBackend")
+            ?: System.getProperty("composemediaplayer.fallbackBackend")
+            ?: System.getenv("COMPOSE_MEDIA_PLAYER_WINDOWS_FALLBACK_BACKEND")
+            ?: System.getenv("COMPOSE_MEDIA_PLAYER_FALLBACK_BACKEND")
+            ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
+            ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
+            ?: "auto"
 
     private fun missingLibVlcBackendException(): UnsupportedOperationException =
         UnsupportedOperationException(
@@ -881,8 +909,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
     }
 
     private fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
-        availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
-        availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
+        _availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
+        _availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
         currentAudioTrack =
             libVlcSelectedAudioStreamIndex
                 ?.let { streamIndex -> trackInfo.audioStreams.firstOrNull { it.streamIndex == streamIndex }?.track }
@@ -890,8 +918,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 ?: trackInfo.audioStreams.firstOrNull()?.track
         libVlcSelectedAudioStreamIndex = currentAudioTrack?.id?.let(::libVlcTrackStreamIndex)
 
-        availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
-        availableSubtitleTracks.addAll(trackInfo.subtitleStreams.map { it.track })
+        _availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
+        _availableSubtitleTracks.addAll(trackInfo.subtitleStreams.map { it.track })
         val selectedSubtitle =
             libVlcSelectedSubtitleStreamIndex
                 ?.let { streamIndex ->
@@ -985,11 +1013,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
         libVlcTrackInfo = null
         libVlcSelectedAudioStreamIndex = null
         libVlcSelectedSubtitleStreamIndex = null
-        availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
+        _availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
         if (currentAudioTrack?.id?.let(::isLibVlcAudioTrackId) == true) {
             currentAudioTrack = null
         }
-        availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
+        _availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
         if (currentSubtitleTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
             currentSubtitleTrack = null
             subtitlesEnabled = false
@@ -1065,12 +1093,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
         externalHlsSelectedAudioStreamIndex = null
         externalHlsSelectedSubtitleStreamIndex = null
         externalHlsPlaybackOffsetSeconds = 0.0
-        availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
+        _availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
         if (currentAudioTrack?.id?.let(ExternalHlsFallbackSupport::isExternalHlsAudioTrackId) == true) {
             currentAudioTrack = null
         }
 
-        availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
+        _availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
         if (currentSubtitleTrack?.id?.let(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId) == true) {
             currentSubtitleTrack = null
             subtitlesEnabled = false
@@ -1079,8 +1107,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
     private fun updateExternalHlsFallbackTracks(hlsSource: HlsFallbackSource) {
         val previousSubtitleId = currentSubtitleTrack?.id
-        availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
-        availableAudioTracks.addAll(hlsSource.audioTracks)
+        _availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
+        _availableAudioTracks.addAll(hlsSource.audioTracks)
         currentAudioTrack =
             hlsSource.selectedAudioStreamIndex
                 ?.let { streamIndex ->
@@ -1091,8 +1119,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 ?: hlsSource.audioTracks.firstOrNull { it.isDefault }
                 ?: hlsSource.audioTracks.firstOrNull()
 
-        availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
-        availableSubtitleTracks.addAll(hlsSource.subtitleTracks)
+        _availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
+        _availableSubtitleTracks.addAll(hlsSource.subtitleTracks)
         val selectedSubtitleTrack =
             hlsSource.selectedSubtitleStreamIndex
                 ?.let { streamIndex ->
@@ -2142,8 +2170,33 @@ class WindowsVideoPlayerState : VideoPlayerState {
         }
     }
 
+    override fun addSubtitleTrack(track: SubtitleTrack) {
+        val externalTrack = track.copy(isEmbedded = false)
+        _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
+        _availableSubtitleTracks.add(externalTrack)
+    }
+
+    override fun removeSubtitleTrack(trackId: String) {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
+        if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
+            disableSubtitles()
+        }
+    }
+
+    override fun clearExternalSubtitleTracks() {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.isExternal }
+        if (selectedTrack?.isExternal == true) {
+            disableSubtitles()
+        }
+    }
+
     override fun disableSubtitles() {
-        if (libVlcBackendActive && currentSubtitleTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
+        val selectedTrack = currentSubtitleTrack
+        subtitlesEnabled = false
+        currentSubtitleTrack = null
+        if (libVlcBackendActive && selectedTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
             scope.launch {
                 disableLibVlcSubtitles()
             }
@@ -2155,13 +2208,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 switchExternalHlsSubtitleTrack(track = null, streamIndex = null)
             }
             return
-        }
-
-        scope.launch {
-            withContext(Dispatchers.Main) {
-                subtitlesEnabled = false
-                currentSubtitleTrack = null
-            }
         }
     }
 
@@ -2305,7 +2351,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
         openUriInternal(
             uri = sourceUri,
-            initializeplayerState = if (shouldResumePlayback) InitialPlayerState.PLAY else InitialPlayerState.PAUSE,
+            initializePlayerState = if (shouldResumePlayback) InitialPlayerState.PLAY else InitialPlayerState.PAUSE,
             requestHeaders = lastRequestHeaders,
         )
 

@@ -134,7 +134,9 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     // Subtitle management
     override var subtitlesEnabled by mutableStateOf(false)
     override var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
-    override val availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
+    private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
+    override val availableSubtitleTracks: List<SubtitleTrack>
+        get() = _availableSubtitleTracks
     override var subtitleTextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
@@ -148,7 +150,9 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     // Audio track management
     override var currentAudioTrack by mutableStateOf<AudioTrack?>(null)
-    override val availableAudioTracks = mutableStateListOf<AudioTrack>()
+    private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
+    override val availableAudioTracks: List<AudioTrack>
+        get() = _availableAudioTracks
 
     var applyAudioTrackCallback: ((AudioTrack?) -> Unit)? = null
     var applySubtitleTrackCallback: ((SubtitleTrack?) -> Unit)? = null
@@ -329,6 +333,28 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         applySubtitleTrackCallback?.invoke(null)
     }
 
+    override fun addSubtitleTrack(track: SubtitleTrack) {
+        val externalTrack = track.copy(isEmbedded = false)
+        _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
+        _availableSubtitleTracks.add(externalTrack)
+    }
+
+    override fun removeSubtitleTrack(trackId: String) {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
+        if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
+            disableSubtitles()
+        }
+    }
+
+    override fun clearExternalSubtitleTracks() {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.isExternal }
+        if (selectedTrack?.isExternal == true) {
+            disableSubtitles()
+        }
+    }
+
     override fun selectAudioTrack(track: AudioTrack?) {
         currentAudioTrack = track
         applyAudioTrackCallback?.invoke(track)
@@ -362,8 +388,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     }
 
     internal fun replaceAvailableAudioTracks(tracks: List<AudioTrack>) {
-        availableAudioTracks.clear()
-        availableAudioTracks.addAll(tracks)
+        _availableAudioTracks.clear()
+        _availableAudioTracks.addAll(tracks)
 
         currentAudioTrack =
             currentAudioTrack
@@ -372,10 +398,10 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     }
 
     internal fun replaceEmbeddedSubtitleTracks(tracks: List<SubtitleTrack>) {
-        val externalTracks = availableSubtitleTracks.filterNot { it.isEmbedded }
-        availableSubtitleTracks.clear()
-        availableSubtitleTracks.addAll(externalTracks)
-        availableSubtitleTracks.addAll(tracks)
+        val externalTracks = _availableSubtitleTracks.filterNot { it.isEmbedded }
+        _availableSubtitleTracks.clear()
+        _availableSubtitleTracks.addAll(externalTracks)
+        _availableSubtitleTracks.addAll(tracks)
 
         if (currentSubtitleTrack?.isEmbedded == true) {
             val refreshedTrack = tracks.firstOrNull { it.id == currentSubtitleTrack?.id }
@@ -410,11 +436,11 @@ open class DefaultVideoPlayerState : VideoPlayerState {
      * Opens a media source from the given URI.
      *
      * @param uri The URI of the media to open
-     * @param initializeplayerState Controls whether playback should start automatically after opening
+     * @param initializePlayerState Controls whether playback should start automatically after opening
      */
     override fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
         playerScope.coroutineContext.cancelChildren()
@@ -449,12 +475,12 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             notes = null,
         )
         currentAudioTrack = null
-        availableAudioTracks.clear()
+        _availableAudioTracks.clear()
         if (currentSubtitleTrack?.isEmbedded == true) {
             currentSubtitleTrack = null
             subtitlesEnabled = false
         }
-        availableSubtitleTracks.removeAll { it.isEmbedded }
+        _availableSubtitleTracks.removeAll { it.isEmbedded }
         emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
             PlaybackEvent.SourcePreparing(
                 mediaSessionId = eventSessionId,
@@ -466,9 +492,9 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         // Don't set isLoading to false here - let the video events handle it
         playerScope.launch {
             try {
-                // Set isPlaying based on the initializeplayerState parameter
+                // Set isPlaying based on the initializePlayerState parameter
                 if (isCurrentMediaSession(sessionId)) {
-                    _isPlaying = initializeplayerState == InitialPlayerState.PLAY
+                    _isPlaying = initializePlayerState == InitialPlayerState.PLAY
                 }
             } catch (e: Exception) {
                 if (isCurrentMediaSession(sessionId)) {
@@ -488,14 +514,14 @@ open class DefaultVideoPlayerState : VideoPlayerState {
      * Opens a media file.
      *
      * @param file The file to open
-     * @param initializeplayerState Controls whether playback should start automatically after opening
+     * @param initializePlayerState Controls whether playback should start automatically after opening
      */
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
     ) {
         val fileUri = file.getUri()
-        openUri(fileUri, initializeplayerState)
+        openUri(fileUri, initializePlayerState)
     }
 
     /**

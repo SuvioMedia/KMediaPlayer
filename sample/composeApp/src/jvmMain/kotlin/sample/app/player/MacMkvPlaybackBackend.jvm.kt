@@ -42,6 +42,7 @@ internal actual fun macMkvPlaybackBackendOptions(): List<MacMkvPlaybackBackendOp
                 },
         ),
         libVlcOption(tools),
+        libVlcNativeOption(tools),
         ffmpegHlsOption(tools),
         vlcHlsOption(tools),
     )
@@ -58,6 +59,10 @@ internal actual fun applyMacMkvPlaybackBackend(backend: MacMkvPlaybackBackend) {
         }
         MacMkvPlaybackBackend.LIBVLC -> {
             System.setProperty(FALLBACK_BACKEND_PROPERTY, "libvlc")
+            System.clearProperty(HLS_BACKEND_PROPERTY)
+        }
+        MacMkvPlaybackBackend.LIBVLC_NATIVE -> {
+            System.setProperty(FALLBACK_BACKEND_PROPERTY, "libvlc-native-view")
             System.clearProperty(HLS_BACKEND_PROPERTY)
         }
         MacMkvPlaybackBackend.FFMPEG_HLS -> {
@@ -115,6 +120,28 @@ private fun libVlcOption(tools: JvmMediaToolAvailability): MacMkvPlaybackBackend
         installHint =
             if (enabled) {
                 "VLC: ${tools.vlc.path ?: tools.libVlc.path}. VLC is user-installed; it is not bundled or linked into the app."
+            } else {
+                "Install VLC from https://www.videolan.org/vlc/."
+            },
+    )
+}
+
+private fun libVlcNativeOption(tools: JvmMediaToolAvailability): MacMkvPlaybackBackendOption {
+    val enabled = isMacOs() && tools.libVlc.available
+    val status =
+        when {
+            enabled -> "Ready. VLC/libVLC detected."
+            !isMacOs() -> "Available on macOS."
+            else -> "Requires VLC/libVLC."
+        }
+
+    return MacMkvPlaybackBackendOption(
+        backend = MacMkvPlaybackBackend.LIBVLC_NATIVE,
+        enabled = enabled,
+        status = status,
+        installHint =
+            if (enabled) {
+                "VLC: ${tools.vlc.path ?: tools.libVlc.path}. Compose controls render in a separate overlay window."
             } else {
                 "Install VLC from https://www.videolan.org/vlc/."
             },

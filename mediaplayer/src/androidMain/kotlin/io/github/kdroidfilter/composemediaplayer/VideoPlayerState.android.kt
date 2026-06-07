@@ -45,6 +45,7 @@ import io.github.vinceglb.filekit.AndroidFile
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import java.lang.ref.WeakReference
+import java.util.WeakHashMap
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -87,6 +88,54 @@ actual fun createVideoPlayerState(
 
 internal val androidVideoLogger = TaggedLogger("AndroidVideoPlayerSurface")
 
+private object AndroidPlayerActivityRegistry {
+    private val activities = WeakHashMap<DefaultVideoPlayerState, WeakReference<Activity>>()
+
+    fun attach(
+        state: DefaultVideoPlayerState,
+        activity: Activity,
+    ) {
+        activities[state] = WeakReference(activity)
+    }
+
+    fun detach(
+        state: DefaultVideoPlayerState,
+        activity: Activity,
+    ) {
+        if (activities[state]?.get() === activity) {
+            activities.remove(state)
+        }
+    }
+
+    fun activityFor(state: DefaultVideoPlayerState): Activity? = activities[state]?.get()
+}
+
+internal fun DefaultVideoPlayerState.attachActivity(activity: Activity) {
+    AndroidPlayerActivityRegistry.attach(state = this, activity = activity)
+}
+
+internal fun DefaultVideoPlayerState.detachActivity(activity: Activity) {
+    AndroidPlayerActivityRegistry.detach(state = this, activity = activity)
+}
+
+internal fun DefaultVideoPlayerState.onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+    isPipActive = isInPictureInPictureMode
+}
+
+private fun DefaultVideoPlayerState.attachedActivity(): Activity? = AndroidPlayerActivityRegistry.activityFor(this)
+
+private val conservativeCodecHandlingDevices =
+    setOf(
+        "SM-A155F", // Galaxy A15
+        "SM-A156B", // Galaxy A15 5G
+    )
+
+private fun shouldUseConservativeAndroidCodecHandling(): Boolean =
+    Build.DEVICE in conservativeCodecHandlingDevices ||
+        Build.MODEL in conservativeCodecHandlingDevices ||
+        Build.MANUFACTURER.equals("mediatek", ignoreCase = true)
+
+@Suppress("LargeClass")
 @UnstableApi
 @Stable
 open class DefaultVideoPlayerState(
@@ -95,21 +144,7 @@ open class DefaultVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
     companion object {
-        var activity: WeakReference<Activity> = WeakReference(null)
-
-        private var currentPlayerState: WeakReference<DefaultVideoPlayerState>? = null
         private const val PERCENT_SCALE = 100f
-
-        /**
-         * Call this from Activity.onPictureInPictureModeChanged()
-         */
-        fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
-            currentPlayerState?.get()?.isPipActive = isInPictureInPictureMode
-        }
-
-        internal fun register(state: DefaultVideoPlayerState) {
-            currentPlayerState = WeakReference(state)
-        }
     }
 
     private val context: Context = ContextProvider.getContext()
@@ -155,7 +190,9 @@ open class DefaultVideoPlayerState(
     // Subtitle state
     override var subtitlesEnabled by mutableStateOf(false)
     override var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
-    override val availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
+    private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
+    override val availableSubtitleTracks: List<SubtitleTrack>
+        get() = _availableSubtitleTracks
     override var subtitleTextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
@@ -170,7 +207,9 @@ open class DefaultVideoPlayerState(
 
     // Audio track state
     override var currentAudioTrack by mutableStateOf<AudioTrack?>(null)
-    override val availableAudioTracks = mutableStateListOf<AudioTrack>()
+    private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
+    override val availableAudioTracks: List<AudioTrack>
+        get() = _availableAudioTracks
 
     private var playerView: PlayerView? = null
 
@@ -254,6 +293,28 @@ open class DefaultVideoPlayerState(
             player.trackSelectionParameters = parameters
 
             playerView?.subtitleView?.visibility = android.view.View.GONE
+        }
+    }
+
+    override fun addSubtitleTrack(track: SubtitleTrack) {
+        val externalTrack = track.copy(isEmbedded = false)
+        _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
+        _availableSubtitleTracks.add(externalTrack)
+    }
+
+    override fun removeSubtitleTrack(trackId: String) {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
+        if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
+            disableSubtitles()
+        }
+    }
+
+    override fun clearExternalSubtitleTracks() {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.isExternal }
+        if (selectedTrack?.isExternal == true) {
+            disableSubtitles()
         }
     }
 
@@ -360,7 +421,7 @@ open class DefaultVideoPlayerState(
     override val isPipSupported: Boolean
         get() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val ctx = activity.get() ?: ContextProvider.getContext()
+                val ctx = attachedActivity() ?: context
                 return ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
             }
             return false
@@ -370,27 +431,8 @@ open class DefaultVideoPlayerState(
     override var isPipActive by mutableStateOf(false)
 
     init {
-        register(this)
         initializePlayer()
         registerScreenLockReceiver()
-    }
-
-    private fun shouldUseConservativeCodecHandling(): Boolean {
-        val device = android.os.Build.DEVICE
-        val manufacturer = android.os.Build.MANUFACTURER
-        val model = android.os.Build.MODEL
-
-        // List of devices known to have MediaCodec issues
-        val problematicDevices =
-            setOf(
-                "SM-A155F", // Galaxy A15
-                "SM-A156B", // Galaxy A15 5G
-                // Add other problematic models here
-            )
-
-        return device in problematicDevices ||
-            model in problematicDevices ||
-            manufacturer.equals("mediatek", ignoreCase = true)
     }
 
     private fun registerScreenLockReceiver() {
@@ -489,7 +531,7 @@ open class DefaultVideoPlayerState(
                     }
 
                     // On problematic devices, use more conservative settings
-                    if (shouldUseConservativeCodecHandling() && !usesDolbyVisionHevcFallbackSelector()) {
+                    if (shouldUseConservativeAndroidCodecHandling() && !usesDolbyVisionHevcFallbackSelector()) {
                         // Cannot disable async queueing as the method does not exist
                         // But we can use the default MediaCodecSelector
                         setMediaCodecSelector(MediaCodecSelector.DEFAULT)
@@ -733,17 +775,17 @@ open class DefaultVideoPlayerState(
 
     override fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
         val mediaItemBuilder = MediaItem.Builder().setUri(uri)
         val mediaItem = mediaItemBuilder.build()
-        openFromMediaItem(mediaItem, initializeplayerState, requestHeaders)
+        openFromMediaItem(mediaItem, initializePlayerState, requestHeaders)
     }
 
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
     ) {
         val mediaItemBuilder = MediaItem.Builder()
         val videoUri: Uri =
@@ -753,19 +795,19 @@ open class DefaultVideoPlayerState(
             }
         mediaItemBuilder.setUri(videoUri)
         val mediaItem = mediaItemBuilder.build()
-        openFromMediaItem(mediaItem, initializeplayerState)
+        openFromMediaItem(mediaItem, initializePlayerState)
     }
 
     override fun openAsset(
         fileName: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
     ) {
-        openUri("asset:///$fileName", initializeplayerState)
+        openUri("asset:///$fileName", initializePlayerState)
     }
 
     private fun openFromMediaItem(
         mediaItem: MediaItem,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String> = emptyMap(),
     ) {
         synchronized(playerInitializationLock) {
@@ -792,7 +834,7 @@ open class DefaultVideoPlayerState(
                     player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
 
                     // Control the initial playback state
-                    if (initializeplayerState == InitialPlayerState.PLAY) {
+                    if (initializePlayerState == InitialPlayerState.PLAY) {
                         player.play()
                         _hasMedia = true
                     } else {
@@ -878,7 +920,7 @@ open class DefaultVideoPlayerState(
         if (!isPipEnabled) return PipResult.NotEnabled
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return PipResult.NotPossible
 
-        val currentActivity = activity.get() ?: return PipResult.NotPossible
+        val currentActivity = attachedActivity() ?: return PipResult.NotPossible
 
         if (!isPipFullScreen) {
             togglePipFullScreen()
@@ -1128,18 +1170,18 @@ open class DefaultVideoPlayerState(
             }
         }
 
-        availableAudioTracks.clear()
-        availableAudioTracks.addAll(audioTracks)
+        _availableAudioTracks.clear()
+        _availableAudioTracks.addAll(audioTracks)
         currentAudioTrack =
             selectedAudioTrackId
                 ?.let { id -> audioTracks.firstOrNull { it.id == id } }
                 ?: currentAudioTrack?.let { current -> audioTracks.firstOrNull { it.id == current.id } }
                 ?: audioTracks.firstOrNull()
 
-        val externalSubtitleTracks = availableSubtitleTracks.filterNot { it.isEmbedded }
-        availableSubtitleTracks.clear()
-        availableSubtitleTracks.addAll(externalSubtitleTracks)
-        availableSubtitleTracks.addAll(embeddedSubtitleTracks)
+        val externalSubtitleTracks = _availableSubtitleTracks.filterNot { it.isEmbedded }
+        _availableSubtitleTracks.clear()
+        _availableSubtitleTracks.addAll(externalSubtitleTracks)
+        _availableSubtitleTracks.addAll(embeddedSubtitleTracks)
 
         if (currentSubtitleTrack?.isEmbedded == true) {
             val refreshedTrack =
@@ -1224,12 +1266,12 @@ open class DefaultVideoPlayerState(
         updateRenderingInfo()
         exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
         currentAudioTrack = null
-        availableAudioTracks.clear()
+        _availableAudioTracks.clear()
         if (currentSubtitleTrack?.isEmbedded == true) {
             currentSubtitleTrack = null
             subtitlesEnabled = false
         }
-        availableSubtitleTracks.removeAll { it.isEmbedded }
+        _availableSubtitleTracks.removeAll { it.isEmbedded }
         if (!keepMedia) {
             _hasMedia = false
         }

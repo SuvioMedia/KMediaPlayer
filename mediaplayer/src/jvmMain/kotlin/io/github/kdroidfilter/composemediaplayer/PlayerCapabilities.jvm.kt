@@ -3,22 +3,72 @@ package io.github.kdroidfilter.composemediaplayer
 import io.github.kdroidfilter.composemediaplayer.mac.MacNativeBridge
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 
-internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
+internal actual fun platformPlayerCapabilities(): PlayerCapabilities = jvmPlayerCapabilities(VideoPlaybackOptions())
+
+internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): PlayerCapabilities =
     when (CurrentPlatform.os) {
         CurrentPlatform.OS.WINDOWS ->
             PlayerCapabilities(
-                supportsMkv = true,
+                supportsMkv =
+                    supportsDesktopMkvPlayback(
+                        playbackOptions = playbackOptions,
+                        nativePlatformSupportsMkv = false,
+                        supportsLibVlcNativeBackend = false,
+                    ),
             )
         CurrentPlatform.OS.MAC ->
             PlayerCapabilities(
-                supportsMkv = true,
+                supportsMkv =
+                    supportsDesktopMkvPlayback(
+                        playbackOptions = playbackOptions,
+                        nativePlatformSupportsMkv = false,
+                        supportsLibVlcNativeBackend = true,
+                    ),
                 hdr = queryMacHdrCapabilities(),
             )
         CurrentPlatform.OS.LINUX ->
             PlayerCapabilities(
-                supportsMkv = true,
+                supportsMkv =
+                    supportsDesktopMkvPlayback(
+                        playbackOptions = playbackOptions,
+                        nativePlatformSupportsMkv = true,
+                        supportsLibVlcNativeBackend = false,
+                    ),
             )
     }
+
+private fun supportsDesktopMkvPlayback(
+    playbackOptions: VideoPlaybackOptions,
+    nativePlatformSupportsMkv: Boolean,
+    supportsLibVlcNativeBackend: Boolean,
+): Boolean =
+    when (playbackOptions.desktopVideoBackend) {
+        DesktopVideoBackend.PLATFORM -> nativePlatformSupportsMkv
+        DesktopVideoBackend.LIBVLC -> hasLibVlcBackend()
+        DesktopVideoBackend.LIBVLC_NATIVE -> supportsLibVlcNativeBackend && hasLibVlcBackend()
+        DesktopVideoBackend.AUTO ->
+            nativePlatformSupportsMkv ||
+                hasLibVlcBackend() ||
+                hasExternalHlsContainerFallback()
+    }
+
+private val detectedLibVlcBackend: Boolean by lazy {
+    runCatching { ExternalVlcLocator.findLibVlc() != null }.getOrDefault(false)
+}
+
+private val detectedExternalHlsContainerFallback: Boolean by lazy {
+    if (ExternalHlsFallbackSupport.isDisabled()) {
+        false
+    } else {
+        runCatching {
+            ExternalVlcLocator.findVlc() != null || ExternalFfmpegLocator.findFfmpeg() != null
+        }.getOrDefault(false)
+    }
+}
+
+private fun hasLibVlcBackend(): Boolean = detectedLibVlcBackend
+
+private fun hasExternalHlsContainerFallback(): Boolean = detectedExternalHlsContainerFallback
 
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
     platformPlayerCapabilities().canPlaySource(source)

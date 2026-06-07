@@ -56,8 +56,38 @@ enum class DolbyVisionMode {
     TRANSCODE_PROFILE_7_TO_8_1,
 }
 
+/**
+ * Selects the JVM desktop playback backend.
+ *
+ * [AUTO] keeps the platform default and optional fallback policy. [PLATFORM] disables optional fallbacks.
+ * [LIBVLC] requires the in-process libVLC canvas backend on macOS, Windows, and Linux. [LIBVLC_NATIVE] requires
+ * the macOS native-view libVLC backend and is rejected on other desktop JVM targets.
+ */
+enum class DesktopVideoBackend {
+    /**
+     * Use the platform default and optional fallback policy.
+     */
+    AUTO,
+
+    /**
+     * Prefer the platform media framework.
+     */
+    PLATFORM,
+
+    /**
+     * Use a user-installed libVLC backend that copies decoded frames into Compose.
+     */
+    LIBVLC,
+
+    /**
+     * Use a user-installed libVLC backend with VLC rendering directly into a native macOS view.
+     */
+    LIBVLC_NATIVE,
+}
+
 @Stable
 data class VideoPlaybackOptions(
     val videoOutputMode: VideoOutputMode = VideoOutputMode.AUTO,
     val dolbyVisionMode: DolbyVisionMode = DolbyVisionMode.AUTO,
+    val desktopVideoBackend: DesktopVideoBackend = DesktopVideoBackend.AUTO,
 )

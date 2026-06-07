@@ -19,6 +19,7 @@ internal object MacNativeBridge {
     @JvmStatic external fun nCreateLibVlcPlayer(
         libVlcPath: String,
         pluginPath: String,
+        nativeVideoOutput: Boolean,
     ): Long
 
     @JvmStatic external fun nCreateLibAssRenderer(libAssPath: String): Long
@@ -131,6 +132,16 @@ internal object MacNativeBridge {
     ): Boolean
 
     @JvmStatic external fun nDetachHdrMetalView(
+        handle: Long,
+        component: Component,
+    )
+
+    @JvmStatic external fun nAttachLibVlcNativeView(
+        handle: Long,
+        component: Component,
+    ): Boolean
+
+    @JvmStatic external fun nDetachLibVlcNativeView(
         handle: Long,
         component: Component,
     )

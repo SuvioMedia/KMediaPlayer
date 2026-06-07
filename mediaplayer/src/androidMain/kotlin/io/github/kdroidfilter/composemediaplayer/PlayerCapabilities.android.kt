@@ -42,10 +42,19 @@ private fun queryAndroidHdrCapabilities(): HdrCapabilities {
             }
         }.getOrNull() ?: return HdrCapabilities()
 
-    val hdrTypes = display.hdrCapabilities?.supportedHdrTypes?.toSet().orEmpty()
+    val hdrTypes =
+        display.hdrCapabilities
+            ?.supportedHdrTypes
+            ?.toSet()
+            .orEmpty()
     val hasHdr = hdrTypes.isNotEmpty()
+
     fun formatSupport(type: Int): HdrSupport =
-        if (type in hdrTypes) HdrSupport.SUPPORTED else HdrSupport.UNSUPPORTED
+        if (type in hdrTypes) {
+            HdrSupport.SUPPORTED
+        } else {
+            HdrSupport.UNSUPPORTED
+        }
 
     return HdrCapabilities(
         hdr = if (hasHdr) HdrSupport.SUPPORTED else HdrSupport.UNSUPPORTED,

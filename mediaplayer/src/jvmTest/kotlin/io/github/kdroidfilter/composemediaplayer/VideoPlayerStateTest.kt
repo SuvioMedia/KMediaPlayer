@@ -152,6 +152,37 @@ class VideoPlayerStateTest {
     }
 
     @Test
+    fun testExternalSubtitleTrackApiUpdatesAvailableTracks() {
+        if (!isNativePlayerAvailable()) {
+            println("Skipping test: Native player not available")
+            return
+        }
+
+        val playerState = createVideoPlayerState()
+        val subtitleTrack =
+            SubtitleTrack(
+                label = "External VTT",
+                language = "en",
+                src = "/tmp/external.vtt",
+                format = SubtitleFormat.WEBVTT,
+            )
+
+        playerState.addSubtitleTrack(subtitleTrack)
+
+        assertEquals(subtitleTrack, playerState.availableSubtitleTracks.single { it.id == subtitleTrack.id })
+
+        playerState.currentSubtitleTrack = subtitleTrack
+        playerState.subtitlesEnabled = true
+        playerState.removeSubtitleTrack(subtitleTrack.id)
+
+        assertTrue(playerState.availableSubtitleTracks.none { it.id == subtitleTrack.id })
+        assertNull(playerState.currentSubtitleTrack)
+        assertFalse(playerState.subtitlesEnabled)
+
+        playerState.dispose()
+    }
+
+    @Test
     fun testErrorHandling() {
         if (!isNativePlayerAvailable()) {
             println("Skipping test: Native player not available")

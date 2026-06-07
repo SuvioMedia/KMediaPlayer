@@ -549,14 +549,14 @@ open class DefaultVideoPlayerState(
      * 4. Update all relevant state variables
      *
      * @param uri The URI of the media to open
-     * @param initializeplayerState Controls whether playback should start automatically after opening
+     * @param initializePlayerState Controls whether playback should start automatically after opening
      */
     override fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
-        iosLogger.d { "openUri called with uri: $uri, initializeplayerState: $initializeplayerState" }
+        iosLogger.d { "openUri called with uri: $uri, initializePlayerState: $initializePlayerState" }
         val nsUrl =
             NSURL.URLWithString(uri) ?: run {
                 iosLogger.d { "Failed to create NSURL from uri: $uri" }
@@ -598,7 +598,7 @@ open class DefaultVideoPlayerState(
 
         setupObservers(newPlayer, playerItem)
 
-        if (initializeplayerState == InitialPlayerState.PLAY) {
+        if (initializePlayerState == InitialPlayerState.PLAY) {
             play()
         } else {
             newPlayer.pause()
@@ -779,17 +779,17 @@ open class DefaultVideoPlayerState(
 
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
     ) {
-        iosLogger.d { "openFile called with file: $file, initializeplayerState: $initializeplayerState" }
+        iosLogger.d { "openFile called with file: $file, initializePlayerState: $initializePlayerState" }
         val fileUrl = file.getUri()
         iosLogger.d { "Opening file with URL: $fileUrl" }
-        openUri(fileUrl, initializeplayerState)
+        openUri(fileUrl, initializePlayerState)
     }
 
     override fun openAsset(
         fileName: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
     ) {
         val name = fileName.substringBeforeLast(".")
         val ext = fileName.substringAfterLast(".", "")
@@ -797,7 +797,7 @@ open class DefaultVideoPlayerState(
             platform.Foundation.NSBundle.mainBundle
                 .pathForResource(name, ext.ifEmpty { null })
                 ?: throw IllegalArgumentException("Asset not found in app bundle: $fileName")
-        openUri("file://$path", initializeplayerState)
+        openUri("file://$path", initializePlayerState)
     }
 
     override val metadata: VideoMetadata
@@ -813,7 +813,7 @@ open class DefaultVideoPlayerState(
         }
 
     private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
-    override val availableAudioTracks: MutableList<AudioTrack>
+    override val availableAudioTracks: List<AudioTrack>
         get() = _availableAudioTracks
 
     override fun selectAudioTrack(track: AudioTrack?) {
@@ -836,7 +836,7 @@ open class DefaultVideoPlayerState(
         }
 
     private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
-    override val availableSubtitleTracks: MutableList<SubtitleTrack>
+    override val availableSubtitleTracks: List<SubtitleTrack>
         get() = _availableSubtitleTracks
 
     override var subtitleTextStyle: TextStyle =
@@ -869,6 +869,28 @@ open class DefaultVideoPlayerState(
 
         // iOS uses Compose-based subtitles, so we don't need to configure
         // the native player for subtitle display
+    }
+
+    override fun addSubtitleTrack(track: SubtitleTrack) {
+        val externalTrack = track.copy(isEmbedded = false)
+        _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
+        _availableSubtitleTracks.add(externalTrack)
+    }
+
+    override fun removeSubtitleTrack(trackId: String) {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
+        if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
+            disableSubtitles()
+        }
+    }
+
+    override fun clearExternalSubtitleTracks() {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.isExternal }
+        if (selectedTrack?.isExternal == true) {
+            disableSubtitles()
+        }
     }
 
     /**

@@ -1,10 +1,12 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import android.content.Context
+import android.os.Build
 import android.view.LayoutInflater
 import android.view.TextureView
 import android.view.View
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -19,9 +21,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.PictureInPictureModeChangedInfo
+import androidx.core.util.Consumer
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -90,6 +93,7 @@ private fun VideoPlayerSurfaceInternal(
     val isFullscreen = playerState.isFullscreen
     val isPipFullScreen = (playerState as? DefaultVideoPlayerState)?.isPipFullScreen ?: false
 
+    BindAndroidActivity(playerState = playerState)
     AutoPipEffect(playerState = playerState)
 
     // Exit fullscreen when returning from PiP
@@ -337,17 +341,43 @@ private fun createPlayerViewWithSurfaceType(
     }
 
 @Composable
+private fun BindAndroidActivity(playerState: VideoPlayerState) {
+    val defaultState = playerState as? DefaultVideoPlayerState
+    val activity = LocalActivity.current as? ComponentActivity
+
+    DisposableEffect(defaultState, activity) {
+        if (defaultState == null || activity == null) {
+            return@DisposableEffect onDispose { }
+        }
+
+        val listener =
+            Consumer<PictureInPictureModeChangedInfo> { info ->
+                defaultState.onPictureInPictureModeChanged(info.isInPictureInPictureMode)
+            }
+        defaultState.attachActivity(activity)
+        activity.addOnPictureInPictureModeChangedListener(listener)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            defaultState.onPictureInPictureModeChanged(activity.isInPictureInPictureMode)
+        }
+
+        onDispose {
+            activity.removeOnPictureInPictureModeChangedListener(listener)
+            defaultState.detachActivity(activity)
+        }
+    }
+}
+
+@Composable
 fun AutoPipEffect(playerState: VideoPlayerState) {
     val lifecycleOwner = LocalLifecycleOwner.current
-    val context = LocalContext.current
+    val activity = LocalActivity.current as? ComponentActivity
     val scope = rememberCoroutineScope()
 
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, activity, playerState) {
         val observer =
             LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_PAUSE && playerState.isPipEnabled) {
                     scope.coroutineContext[MonotonicFrameClock]?.let { monoticClock ->
-                        val activity = context as? ComponentActivity
                         activity?.lifecycleScope?.launch(context = Dispatchers.Main + monoticClock) {
                             playerState.enterPip()
                         }

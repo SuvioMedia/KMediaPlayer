@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackSupport
 import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
 import io.github.kdroidfilter.composemediaplayer.HlsFallbackSource
@@ -25,8 +26,10 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
+import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
@@ -68,7 +71,9 @@ private data class LinuxLibVlcRuntimeTrackDescription(
  */
 @Suppress("LargeClass", "MagicNumber", "TooManyFunctions")
 @Stable
-class LinuxVideoPlayerState : VideoPlayerState {
+class LinuxVideoPlayerState(
+    private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+) : VideoPlayerState {
     // Native player pointer (AtomicLong for lock-free reads from the frame hot path)
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
@@ -131,9 +136,13 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override var error: VideoPlayerError? by mutableStateOf(null)
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
-    override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableStateListOf()
+    private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
+    override val availableSubtitleTracks: List<SubtitleTrack>
+        get() = _availableSubtitleTracks
     override var currentAudioTrack: AudioTrack? by mutableStateOf(null)
-    override val availableAudioTracks: MutableList<AudioTrack> = mutableStateListOf()
+    private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
+    override val availableAudioTracks: List<AudioTrack>
+        get() = _availableAudioTracks
     override var subtitleTextStyle: TextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
@@ -145,10 +154,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
     override var subtitleOffset: Duration by mutableStateOf(Duration.ZERO)
     override val metadata: VideoMetadata = VideoMetadata()
-    override val capabilities: PlayerCapabilities =
-        PlayerCapabilities(
-            supportsMkv = true,
-        )
+    override val capabilities: PlayerCapabilities
+        get() = jvmPlayerCapabilities(playbackOptions)
     override var isFullscreen: Boolean by mutableStateOf(false)
     private var lastUri: String? = null
     private var lastRequestHeaders: Map<String, String> = emptyMap()
@@ -266,7 +273,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     override fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
         linuxLogger.d { "openUri() - Opening URI: $uri" }
@@ -327,7 +334,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     withContext(Dispatchers.Main) {
                         hasMedia = true
                         isLoading = false
-                        isPlaying = initializeplayerState == InitialPlayerState.PLAY
+                        isPlaying = initializePlayerState == InitialPlayerState.PLAY
                     }
 
                     startFrameUpdates()
@@ -364,9 +371,9 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
     ) {
-        openUri(file.file.path, initializeplayerState)
+        openUri(file.file.path, initializePlayerState)
     }
 
     private suspend fun cleanupCurrentPlayback() {
@@ -479,27 +486,39 @@ class LinuxVideoPlayerState : VideoPlayerState {
         uri: String,
         requestHeaders: Map<String, String>,
     ): Boolean =
-        !ExternalHlsFallbackSupport.isDisabled() &&
+        playbackOptions.desktopVideoBackend == DesktopVideoBackend.AUTO &&
+            !ExternalHlsFallbackSupport.isDisabled() &&
             ExternalHlsFallbackSupport.needsContainerFallback(uri, requestHeaders)
 
     private suspend fun resolveLibVlcBackendForUri(
         uri: String,
         requestHeaders: Map<String, String>,
     ): LinuxResolvedLibVlcBackend? {
-        if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders)) return null
+        val forcedDesktopBackend =
+            when (playbackOptions.desktopVideoBackend) {
+                DesktopVideoBackend.LIBVLC -> "libvlc"
+                DesktopVideoBackend.LIBVLC_NATIVE ->
+                    throw UnsupportedOperationException(
+                        "LIBVLC_NATIVE is only available on macOS. Use LIBVLC for the Linux canvas backend.",
+                    )
+                DesktopVideoBackend.PLATFORM -> "platform"
+                DesktopVideoBackend.AUTO -> null
+            }
+        val shouldUsePlatformBackend =
+            forcedDesktopBackend == null &&
+                !JvmExternalFallbackContainerSupport.needsContainerFallback(
+                    uri = uri,
+                    requestHeaders = requestHeaders,
+                )
+        if (shouldUsePlatformBackend) {
+            return null
+        }
 
         val configured =
-            (
-                System.getProperty("composemediaplayer.linux.fallbackBackend")
-                    ?: System.getProperty("composemediaplayer.fallbackBackend")
-                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_LINUX_FALLBACK_BACKEND")
-                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_FALLBACK_BACKEND")
-                    ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
-                    ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
-                    ?: "auto"
-            ).lowercase()
+            (forcedDesktopBackend ?: linuxFallbackBackendProperty()).lowercase()
 
         return when (configured) {
+            "platform", "gstreamer" -> null
             "libvlc" ->
                 ExternalVlcLocator.findLibVlc()?.let(::LinuxResolvedLibVlcBackend)
                     ?: throw missingLibVlcBackendException()
@@ -508,6 +527,15 @@ class LinuxVideoPlayerState : VideoPlayerState {
             else -> null
         }
     }
+
+    private fun linuxFallbackBackendProperty(): String =
+        System.getProperty("composemediaplayer.linux.fallbackBackend")
+            ?: System.getProperty("composemediaplayer.fallbackBackend")
+            ?: System.getenv("COMPOSE_MEDIA_PLAYER_LINUX_FALLBACK_BACKEND")
+            ?: System.getenv("COMPOSE_MEDIA_PLAYER_FALLBACK_BACKEND")
+            ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
+            ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
+            ?: "auto"
 
     private fun missingLibVlcBackendException(): UnsupportedOperationException =
         UnsupportedOperationException(
@@ -531,8 +559,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
         withContext(Dispatchers.Main) {
-            availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
-            availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
+            _availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
+            _availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
             currentAudioTrack =
                 libVlcSelectedAudioStreamIndex
                     ?.let { streamIndex -> trackInfo.audioStreams.firstOrNull { it.streamIndex == streamIndex }?.track }
@@ -540,8 +568,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     ?: trackInfo.audioStreams.firstOrNull()?.track
             libVlcSelectedAudioStreamIndex = currentAudioTrack?.id?.let(::libVlcTrackStreamIndex)
 
-            availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
-            availableSubtitleTracks.addAll(trackInfo.subtitleStreams.map { it.track })
+            _availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
+            _availableSubtitleTracks.addAll(trackInfo.subtitleStreams.map { it.track })
             val selectedSubtitle =
                 libVlcSelectedSubtitleStreamIndex
                     ?.let { streamIndex ->
@@ -637,11 +665,11 @@ class LinuxVideoPlayerState : VideoPlayerState {
         libVlcSelectedAudioStreamIndex = null
         libVlcSelectedSubtitleStreamIndex = null
         withContext(Dispatchers.Main) {
-            availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
+            _availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
             if (currentAudioTrack?.id?.let(::isLibVlcAudioTrackId) == true) {
                 currentAudioTrack = null
             }
-            availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
+            _availableSubtitleTracks.removeAll { isLibVlcSubtitleTrackId(it.id) }
             if (currentSubtitleTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
                 currentSubtitleTrack = null
                 subtitlesEnabled = false
@@ -719,12 +747,12 @@ class LinuxVideoPlayerState : VideoPlayerState {
         externalHlsSelectedSubtitleStreamIndex = null
         externalHlsPlaybackOffsetSeconds = 0.0
         withContext(Dispatchers.Main) {
-            availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
+            _availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
             if (currentAudioTrack?.id?.let(ExternalHlsFallbackSupport::isExternalHlsAudioTrackId) == true) {
                 currentAudioTrack = null
             }
 
-            availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
+            _availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
             if (currentSubtitleTrack?.id?.let(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId) == true) {
                 currentSubtitleTrack = null
                 subtitlesEnabled = false
@@ -735,8 +763,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private suspend fun updateExternalHlsFallbackTracks(hlsSource: HlsFallbackSource) {
         val previousSubtitleId = currentSubtitleTrack?.id
         withContext(Dispatchers.Main) {
-            availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
-            availableAudioTracks.addAll(hlsSource.audioTracks)
+            _availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
+            _availableAudioTracks.addAll(hlsSource.audioTracks)
             currentAudioTrack =
                 hlsSource.selectedAudioStreamIndex
                     ?.let { streamIndex ->
@@ -747,8 +775,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     ?: hlsSource.audioTracks.firstOrNull { it.isDefault }
                     ?: hlsSource.audioTracks.firstOrNull()
 
-            availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
-            availableSubtitleTracks.addAll(hlsSource.subtitleTracks)
+            _availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
+            _availableSubtitleTracks.addAll(hlsSource.subtitleTracks)
             val selectedSubtitleTrack =
                 hlsSource.selectedSubtitleStreamIndex
                     ?.let { streamIndex ->
@@ -1317,8 +1345,33 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
+    override fun addSubtitleTrack(track: SubtitleTrack) {
+        val externalTrack = track.copy(isEmbedded = false)
+        _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
+        _availableSubtitleTracks.add(externalTrack)
+    }
+
+    override fun removeSubtitleTrack(trackId: String) {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
+        if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
+            disableSubtitles()
+        }
+    }
+
+    override fun clearExternalSubtitleTracks() {
+        val selectedTrack = currentSubtitleTrack
+        _availableSubtitleTracks.removeAll { it.isExternal }
+        if (selectedTrack?.isExternal == true) {
+            disableSubtitles()
+        }
+    }
+
     override fun disableSubtitles() {
-        if (libVlcBackendActive && currentSubtitleTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
+        val selectedTrack = currentSubtitleTrack
+        subtitlesEnabled = false
+        currentSubtitleTrack = null
+        if (libVlcBackendActive && selectedTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
             ioScope.launch {
                 disableLibVlcSubtitles()
             }
@@ -1330,13 +1383,6 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 switchExternalHlsSubtitleTrack(track = null, streamIndex = null)
             }
             return
-        }
-
-        ioScope.launch {
-            withContext(Dispatchers.Main) {
-                subtitlesEnabled = false
-                currentSubtitleTrack = null
-            }
         }
     }
 

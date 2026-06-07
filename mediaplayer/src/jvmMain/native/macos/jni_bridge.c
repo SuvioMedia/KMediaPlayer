@@ -381,6 +381,98 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
 #endif
 }
 
+static NSView* attach_awt_component_native_view(
+    JNIEnv* env,
+    jobject component,
+    NSView** native_view_slot,
+    const char* log_prefix
+) {
+#ifdef __OBJC__
+    if (!component || !native_view_slot) return nil;
+
+    jobject awt_window = component_window_ancestor(env, component);
+    jstring awt_window_title = awt_window ? call_object_string(env, awt_window, "getTitle") : NULL;
+    const char* awt_window_title_utf = awt_window_title
+        ? (*env)->GetStringUTFChars(env, awt_window_title, NULL)
+        : NULL;
+    NSString* target_window_title = awt_window_title_utf
+        ? [NSString stringWithUTF8String:awt_window_title_utf]
+        : nil;
+
+    jint width = call_component_int(env, component, "getWidth");
+    jint height = call_component_int(env, component, "getHeight");
+    jint component_x = 0;
+    jint component_y = 0;
+    component_position_in_window(env, component, &component_x, &component_y);
+
+    NSWindow* window = nil;
+    if ([target_window_title length] > 0) {
+        for (NSWindow* candidate in [NSApp windows]) {
+            if ([[candidate title] isEqualToString:target_window_title]) {
+                window = candidate;
+                break;
+            }
+        }
+    }
+    if (!window) {
+        window = [NSApp keyWindow] ?: [NSApp mainWindow];
+    }
+    if (!window) {
+        window = [[NSApp windows] firstObject];
+    }
+
+    NSView* content_view = [window contentView];
+    if (!content_view || width <= 0 || height <= 0) {
+        if (log_prefix) fprintf(stderr, "%s: missing content view or invalid size\n", log_prefix);
+        if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
+        if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
+        if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+        return nil;
+    }
+
+    if (!*native_view_slot) {
+        *native_view_slot = [[NSView alloc] initWithFrame:NSZeroRect];
+        [*native_view_slot setWantsLayer:YES];
+        [[*native_view_slot layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
+    }
+
+    CGFloat view_y = [content_view isFlipped]
+        ? component_y
+        : content_view.bounds.size.height - component_y - height;
+    if (view_y < 0.0 && view_y > -64.0) {
+        view_y = 0.0;
+    }
+    [*native_view_slot setFrame:NSMakeRect(component_x, view_y, width, height)];
+    [*native_view_slot setWantsLayer:YES];
+    if ([*native_view_slot superview] != content_view) {
+        [*native_view_slot removeFromSuperview];
+        [content_view addSubview:*native_view_slot positioned:NSWindowAbove relativeTo:nil];
+    }
+
+    if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
+    if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
+    if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+    return *native_view_slot;
+#else
+    (void)env;
+    (void)component;
+    (void)native_view_slot;
+    (void)log_prefix;
+    return NULL;
+#endif
+}
+
+static void detach_awt_component_native_view(NSView** native_view_slot) {
+#ifdef __OBJC__
+    if (!native_view_slot || !*native_view_slot) return;
+    [*native_view_slot removeFromSuperview];
+    [*native_view_slot release];
+    *native_view_slot = nil;
+#else
+    (void)native_view_slot;
+#endif
+}
+
 // ---------------------------------------------------------------------------
 // Optional libVLC backend
 // ---------------------------------------------------------------------------
@@ -416,6 +508,7 @@ typedef struct {
     int (*audio_get_volume)(libvlc_media_player_t*);
     int (*media_player_set_rate)(libvlc_media_player_t*, float);
     float (*media_player_get_rate)(libvlc_media_player_t*);
+    void (*media_player_set_nsobject)(libvlc_media_player_t*, void*);
     void (*video_set_callbacks)(libvlc_media_player_t*, void* (*)(void*, void**), void (*)(void*, void*, void* const*), void (*)(void*, void*), void*);
     void (*video_set_format_callbacks)(libvlc_media_player_t*, unsigned (*)(void**, char*, unsigned*, unsigned*, unsigned*, unsigned*), void (*)(void*));
     libvlc_track_description_t* (*audio_get_track_description)(libvlc_media_player_t*);
@@ -448,6 +541,8 @@ typedef struct {
     int frame_ready;
     int pending_audio_ordinal;
     int pending_spu_ordinal;
+    int native_video;
+    void* native_view;
 } LibVlcPlayer;
 
 static void* vlc_sym(void* dylib, const char* name) {
@@ -504,6 +599,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     api->audio_get_volume = (int (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_audio_get_volume");
     api->media_player_set_rate = (int (*)(libvlc_media_player_t*, float))vlc_sym(dylib, "libvlc_media_player_set_rate");
     api->media_player_get_rate = (float (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_media_player_get_rate");
+    api->media_player_set_nsobject = (void (*)(libvlc_media_player_t*, void*))vlc_sym(dylib, "libvlc_media_player_set_nsobject");
     api->video_set_callbacks = (void (*)(libvlc_media_player_t*, void* (*)(void*, void**), void (*)(void*, void*, void* const*), void (*)(void*, void*), void*))vlc_sym(dylib, "libvlc_video_set_callbacks");
     api->video_set_format_callbacks = (void (*)(libvlc_media_player_t*, unsigned (*)(void**, char*, unsigned*, unsigned*, unsigned*, unsigned*), void (*)(void*)))vlc_sym(dylib, "libvlc_video_set_format_callbacks");
     api->audio_get_track_description = (libvlc_track_description_t* (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_audio_get_track_description");
@@ -517,7 +613,8 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
         !api->media_player_release || !api->media_player_play || !api->media_player_pause ||
         !api->media_player_stop || !api->media_player_get_time || !api->media_player_set_time ||
         !api->media_player_get_length || !api->audio_set_volume || !api->audio_get_volume ||
-        !api->media_player_set_rate || !api->media_player_get_rate || !api->video_set_callbacks ||
+        !api->media_player_set_rate || !api->media_player_get_rate || !api->media_player_set_nsobject ||
+        !api->video_set_callbacks ||
         !api->video_set_format_callbacks || !api->audio_get_track_description ||
         !api->audio_set_track || !api->video_get_spu_description || !api->video_set_spu ||
         !api->track_description_list_release) {
@@ -788,13 +885,14 @@ static int has_uri_scheme(const char* uri) {
     return uri && strstr(uri, "://") != NULL;
 }
 
-static LibVlcPlayer* create_libvlc_player(const char* libvlc_path, const char* plugin_path) {
+static LibVlcPlayer* create_libvlc_player(const char* libvlc_path, const char* plugin_path, int native_video) {
     if (!libvlc_path || !plugin_path) return NULL;
 
     LibVlcPlayer* player = (LibVlcPlayer*)calloc(1, sizeof(LibVlcPlayer));
     if (!player) return NULL;
     player->pending_audio_ordinal = -2;
     player->pending_spu_ordinal = -2;
+    player->native_video = native_video != 0;
     pthread_mutex_init(&player->frame_mutex, NULL);
 
     if (!load_libvlc_api(libvlc_path, &player->api)) {
@@ -814,7 +912,17 @@ static LibVlcPlayer* create_libvlc_player(const char* libvlc_path, const char* p
         "--no-videotoolbox",
         "--aout=auhal"
     };
-    player->instance = player->api.new_instance((int)(sizeof(memory_args) / sizeof(memory_args[0])), memory_args);
+    const char* native_args[] = {
+        "--no-video-title-show",
+        "--no-osd",
+        "--quiet",
+        "--aout=auhal"
+    };
+    const char* const* args = player->native_video ? native_args : memory_args;
+    int arg_count = player->native_video
+        ? (int)(sizeof(native_args) / sizeof(native_args[0]))
+        : (int)(sizeof(memory_args) / sizeof(memory_args[0]));
+    player->instance = player->api.new_instance(arg_count, args);
     if (!player->instance) {
         dlclose(player->api.dylib);
         if (player->api.core_dylib) dlclose(player->api.core_dylib);
@@ -829,10 +937,18 @@ static LibVlcPlayer* create_libvlc_player(const char* libvlc_path, const char* p
 static void dispose_libvlc_player(LibVlcPlayer* player) {
     if (!player) return;
     if (player->player) {
+        if (player->native_video && player->api.media_player_set_nsobject) {
+            player->api.media_player_set_nsobject(player->player, NULL);
+        }
         player->api.media_player_stop(player->player);
         player->api.media_player_release(player->player);
         player->player = NULL;
     }
+#ifdef __OBJC__
+    NSView* native_view = (NSView*)player->native_view;
+    detach_awt_component_native_view(&native_view);
+#endif
+    player->native_view = NULL;
     if (player->instance) {
         player->api.release_instance(player->instance);
         player->instance = NULL;
@@ -927,11 +1043,16 @@ static void libvlc_open_uri_with_headers(LibVlcPlayer* player, const char* uri, 
     player->api.media_release(media);
     if (!player->player) return;
 
-    player->api.video_set_callbacks(player->player, vlc_lock_cb, vlc_unlock_cb, vlc_display_cb, player);
-    void* opaque = player;
-    (void)opaque;
-    player->api.video_set_format_callbacks(player->player, vlc_format_cb, vlc_format_cleanup_cb);
+    if (player->native_video) {
+        if (player->native_view) {
+            player->api.media_player_set_nsobject(player->player, player->native_view);
+        }
+        vlc_apply_pending_tracks(player);
+        return;
+    }
 
+    player->api.video_set_callbacks(player->player, vlc_lock_cb, vlc_unlock_cb, vlc_display_cb, player);
+    player->api.video_set_format_callbacks(player->player, vlc_format_cb, vlc_format_cleanup_cb);
     player->api.media_player_play(player->player);
     vlc_apply_pending_tracks(player);
 }
@@ -1183,7 +1304,13 @@ static jlong JNICALL jni_CreatePlayer(JNIEnv* env, jclass cls) {
     return (jlong)(uintptr_t)handle;
 }
 
-static jlong JNICALL jni_CreateLibVlcPlayer(JNIEnv* env, jclass cls, jstring libPath, jstring pluginPath) {
+static jlong JNICALL jni_CreateLibVlcPlayer(
+    JNIEnv* env,
+    jclass cls,
+    jstring libPath,
+    jstring pluginPath,
+    jboolean nativeVideoOutput
+) {
     if (!libPath || !pluginPath) return 0L;
     const char* cLibPath = (*env)->GetStringUTFChars(env, libPath, NULL);
     if (!cLibPath) return 0L;
@@ -1193,7 +1320,7 @@ static jlong JNICALL jni_CreateLibVlcPlayer(JNIEnv* env, jclass cls, jstring lib
         return 0L;
     }
 
-    LibVlcPlayer* player = create_libvlc_player(cLibPath, cPluginPath);
+    LibVlcPlayer* player = create_libvlc_player(cLibPath, cPluginPath, nativeVideoOutput ? 1 : 0);
     (*env)->ReleaseStringUTFChars(env, libPath, cLibPath);
     (*env)->ReleaseStringUTFChars(env, pluginPath, cPluginPath);
     if (!player) return 0L;
@@ -1508,6 +1635,42 @@ static void JNICALL jni_DetachHdrMetalView(JNIEnv* env, jclass cls, jlong handle
     if (ctx) detachHdrMetalLayer(ctx);
 }
 
+static jboolean JNICALL jni_AttachLibVlcNativeView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
+    NativePlayerHandle* native = toHandle(handle);
+    LibVlcPlayer* vlc = vlcCtx(native);
+    if (!vlc || !vlc->native_video || !component) return JNI_FALSE;
+
+#ifdef __OBJC__
+    NSView* native_view = (NSView*)vlc->native_view;
+    NSView* view = attach_awt_component_native_view(env, component, &native_view, "libVLC native view");
+    if (!view) return JNI_FALSE;
+    vlc->native_view = view;
+    if (vlc->player && vlc->api.media_player_set_nsobject) {
+        vlc->api.media_player_set_nsobject(vlc->player, view);
+    }
+    return JNI_TRUE;
+#else
+    return JNI_FALSE;
+#endif
+}
+
+static void JNICALL jni_DetachLibVlcNativeView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
+    (void)env;
+    (void)cls;
+    (void)component;
+    NativePlayerHandle* native = toHandle(handle);
+    LibVlcPlayer* vlc = vlcCtx(native);
+    if (!vlc || !vlc->native_video) return;
+    if (vlc->player && vlc->api.media_player_set_nsobject) {
+        vlc->api.media_player_set_nsobject(vlc->player, NULL);
+    }
+#ifdef __OBJC__
+    NSView* native_view = (NSView*)vlc->native_view;
+    detach_awt_component_native_view(&native_view);
+#endif
+    vlc->native_view = NULL;
+}
+
 static void JNICALL jni_SetHdrMetalContentScaleMode(JNIEnv* env, jclass cls, jlong handle, jint mode) {
     NativePlayerHandle* native = toHandle(handle);
     if (vlcCtx(native)) return;
@@ -1706,7 +1869,7 @@ static jboolean JNICALL jni_DisableLibVlcSubtitles(JNIEnv* env, jclass cls, jlon
 
 static const JNINativeMethod g_methods[] = {
     { "nCreatePlayer",           "()J",                         (void*)jni_CreatePlayer },
-    { "nCreateLibVlcPlayer",     "(Ljava/lang/String;Ljava/lang/String;)J", (void*)jni_CreateLibVlcPlayer },
+    { "nCreateLibVlcPlayer",     "(Ljava/lang/String;Ljava/lang/String;Z)J", (void*)jni_CreateLibVlcPlayer },
     { "nCreateLibAssRenderer",   "(Ljava/lang/String;)J",       (void*)jni_CreateLibAssRenderer },
     { "nSetLibAssTrack",         "(JLjava/lang/String;)Z",      (void*)jni_SetLibAssTrack },
     { "nAddLibAssFont",          "(JLjava/lang/String;[B)Z",    (void*)jni_AddLibAssFont },
@@ -1730,6 +1893,8 @@ static const JNINativeMethod g_methods[] = {
     { "nGetHdrCapabilities",     "()Ljava/lang/String;",        (void*)jni_GetHdrCapabilities },
     { "nAttachHdrMetalView",     "(JLjava/awt/Component;)Z",    (void*)jni_AttachHdrMetalView },
     { "nDetachHdrMetalView",     "(JLjava/awt/Component;)V",    (void*)jni_DetachHdrMetalView },
+    { "nAttachLibVlcNativeView", "(JLjava/awt/Component;)Z",    (void*)jni_AttachLibVlcNativeView },
+    { "nDetachLibVlcNativeView", "(JLjava/awt/Component;)V",    (void*)jni_DetachLibVlcNativeView },
     { "nSetHdrMetalContentScaleMode", "(JI)V",                  (void*)jni_SetHdrMetalContentScaleMode },
     { "nIsHdrMetalAvailable",    "(J)Z",                        (void*)jni_IsHdrMetalAvailable },
     { "nGetVideoFrameRate",      "(J)F",                        (void*)jni_GetVideoFrameRate },

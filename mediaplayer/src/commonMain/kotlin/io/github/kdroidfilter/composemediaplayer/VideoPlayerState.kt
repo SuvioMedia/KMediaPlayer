@@ -251,21 +251,21 @@ interface VideoPlayerState {
      */
     fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+        initializePlayerState: InitialPlayerState = InitialPlayerState.PLAY,
         requestHeaders: Map<String, String> = emptyMap(),
     )
 
     fun prepare(
         uri: String,
-        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+        initializePlayerState: InitialPlayerState = InitialPlayerState.PLAY,
         requestHeaders: Map<String, String> = emptyMap(),
     ) {
-        openUri(uri, initializeplayerState, requestHeaders)
+        openUri(uri, initializePlayerState, requestHeaders)
     }
 
     fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+        initializePlayerState: InitialPlayerState = InitialPlayerState.PLAY,
     )
 
     /**
@@ -279,7 +279,7 @@ interface VideoPlayerState {
      */
     fun openAsset(
         fileName: String,
-        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+        initializePlayerState: InitialPlayerState = InitialPlayerState.PLAY,
     ): Unit = throw UnsupportedOperationException("openAsset is not supported on this platform")
 
     // Error handling
@@ -311,7 +311,7 @@ interface VideoPlayerState {
 
     // Audio track management
     var currentAudioTrack: AudioTrack?
-    val availableAudioTracks: MutableList<AudioTrack>
+    val availableAudioTracks: List<AudioTrack>
 
     fun selectAudioTrack(track: AudioTrack?)
 
@@ -322,7 +322,7 @@ interface VideoPlayerState {
     // Subtitle management
     var subtitlesEnabled: Boolean
     var currentSubtitleTrack: SubtitleTrack?
-    val availableSubtitleTracks: MutableList<SubtitleTrack>
+    val availableSubtitleTracks: List<SubtitleTrack>
     var subtitleTextStyle: TextStyle
     var subtitleBackgroundColor: Color
     var subtitleOffset: Duration
@@ -334,6 +334,16 @@ interface VideoPlayerState {
     fun selectSubtitleTrack(trackId: String?) {
         selectSubtitleTrack(trackId?.let { id -> availableSubtitleTracks.firstOrNull { it.id == id } })
     }
+
+    fun addSubtitleTrack(track: SubtitleTrack)
+
+    fun removeSubtitleTrack(trackId: String)
+
+    fun removeSubtitleTrack(track: SubtitleTrack) {
+        removeSubtitleTrack(track.id)
+    }
+
+    fun clearExternalSubtitleTracks()
 
     fun disableSubtitles()
 
@@ -452,9 +462,10 @@ fun rememberVideoPlayerState(
     cacheConfig: CacheConfig = CacheConfig(),
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ): VideoPlayerState {
-    val playerState = remember(audioMode, cacheConfig, playbackOptions) {
-        createVideoPlayerState(audioMode, cacheConfig, playbackOptions)
-    }
+    val playerState =
+        remember(audioMode, cacheConfig, playbackOptions) {
+            createVideoPlayerState(audioMode, cacheConfig, playbackOptions)
+        }
     DisposableEffect(playerState) {
         onDispose {
             playerState.dispose()
@@ -486,10 +497,10 @@ data class PreviewableVideoPlayerState(
     override val metadata: VideoMetadata = VideoMetadata(),
     override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo(),
     override var currentAudioTrack: AudioTrack? = null,
-    override val availableAudioTracks: MutableList<AudioTrack> = emptyList<AudioTrack>().toMutableList(),
+    override val availableAudioTracks: List<AudioTrack> = emptyList(),
     override var subtitlesEnabled: Boolean = false,
     override var currentSubtitleTrack: SubtitleTrack? = null,
-    override val availableSubtitleTracks: MutableList<SubtitleTrack> = emptyList<SubtitleTrack>().toMutableList(),
+    override val availableSubtitleTracks: List<SubtitleTrack> = emptyList(),
     override var subtitleTextStyle: TextStyle = TextStyle.Default,
     override var subtitleBackgroundColor: Color = Color.Transparent,
     override val isPipSupported: Boolean = false,
@@ -511,13 +522,13 @@ data class PreviewableVideoPlayerState(
 
     override fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {}
 
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState,
+        initializePlayerState: InitialPlayerState,
     ) {}
 
     override fun clearError() {}
@@ -525,6 +536,12 @@ data class PreviewableVideoPlayerState(
     override fun selectAudioTrack(track: AudioTrack?) {}
 
     override fun selectSubtitleTrack(track: SubtitleTrack?) {}
+
+    override fun addSubtitleTrack(track: SubtitleTrack) {}
+
+    override fun removeSubtitleTrack(trackId: String) {}
+
+    override fun clearExternalSubtitleTracks() {}
 
     override fun disableSubtitles() {}
 
