@@ -73,6 +73,10 @@ static void  update_stream_metadata(VideoPlayer* p);
 
 static pthread_once_t gst_init_once = PTHREAD_ONCE_INIT;
 
+int nvp_get_native_version(void) {
+    return NATIVE_VIDEO_PLAYER_VERSION;
+}
+
 static void gst_init_func(void) {
     gst_init(NULL, NULL);
 }

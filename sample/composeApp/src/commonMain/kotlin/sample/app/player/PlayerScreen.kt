@@ -87,7 +87,7 @@ fun PlayerScreen(
             if (playerState.isPlaying) {
                 playerState.pause()
             }
-            restoreMacMkvPlaybackBackend()
+            restoreDesktopMkvPlaybackBackend()
         }
     }
 
@@ -97,7 +97,7 @@ fun PlayerScreen(
     var videoUrl by remember(startupVideoUrl) { mutableStateOf(startupVideoUrl) }
     var initialPlayerState by remember { mutableStateOf(InitialPlayerState.PLAY) }
     var selectedContentScale by remember { mutableStateOf(ContentScale.Fit) }
-    var selectedMacMkvBackend by remember { mutableStateOf(MacMkvPlaybackBackend.AUTO) }
+    var selectedDesktopMkvBackend by remember { mutableStateOf(DesktopMkvPlaybackBackend.AUTO) }
 
     val controlsVisible = true
     var showSourceSheet by remember { mutableStateOf(false) }
@@ -111,18 +111,18 @@ fun PlayerScreen(
     var pendingPickSubtitle by remember { mutableStateOf(false) }
     var demoLoaded by remember { mutableStateOf(false) }
 
-    fun applyMacMkvBackend() {
-        applyMacMkvPlaybackBackend(selectedMacMkvBackend)
+    fun applyDesktopMkvBackend() {
+        applyDesktopMkvPlaybackBackend(selectedDesktopMkvBackend)
     }
 
     fun openVideoUrl(url: String) {
-        applyMacMkvBackend()
+        applyDesktopMkvBackend()
         playerState.openUri(url, initialPlayerState)
     }
 
     val videoFileLauncher = rememberFilePickerLauncher(type = FileKitType.Video) { file ->
         file?.let {
-            applyMacMkvBackend()
+            applyDesktopMkvBackend()
             playerState.openFile(it, initialPlayerState)
         }
     }
@@ -276,16 +276,16 @@ fun PlayerScreen(
 
     // Bottom sheets
     if (showSourceSheet) {
-        val macMkvBackendOptions = remember(showSourceSheet) { macMkvPlaybackBackendOptions() }
+        val desktopMkvBackendOptions = remember(showSourceSheet) { desktopMkvPlaybackBackendOptions() }
         MediaSourceSheet(
             videoUrl = videoUrl,
-            macMkvBackendAvailable = macMkvPlaybackBackendSelectionAvailable,
-            macMkvBackendOptions = macMkvBackendOptions,
-            selectedMacMkvBackend = selectedMacMkvBackend,
+            desktopMkvBackendAvailable = desktopMkvPlaybackBackendSelectionAvailable,
+            desktopMkvBackendOptions = desktopMkvBackendOptions,
+            selectedDesktopMkvBackend = selectedDesktopMkvBackend,
             onUrlChange = { videoUrl = it },
-            onMacMkvBackendChange = { backend ->
-                selectedMacMkvBackend = backend
-                applyMacMkvPlaybackBackend(backend)
+            onDesktopMkvBackendChange = { backend ->
+                selectedDesktopMkvBackend = backend
+                applyDesktopMkvPlaybackBackend(backend)
             },
             onLoadUrl = {
                 if (videoUrl.isNotEmpty()) {

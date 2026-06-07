@@ -1,10 +1,14 @@
 # JVM MKV/WebM Fallback Support
 
-On desktop JVM targets, MKV/WebM support can use native playback or optional fallback backends when the platform player cannot demux a source directly. macOS uses these fallbacks for formats AVPlayer cannot demux; Windows can use the same in-process libVLC canvas backend or external HLS fallback for Matroska/WebM; Linux keeps native GStreamer playback first and can use the same libVLC canvas backend or retry through the external HLS fallback if native open fails.
+On desktop JVM targets, MKV/WebM support can use native playback or optional fallback backends when the platform player cannot demux a source directly. macOS uses these fallbacks for formats AVPlayer cannot demux; Windows can use the in-process libVLC backends or external HLS fallback for Matroska/WebM; Linux keeps native GStreamer playback first and can use the same libVLC backends or retry through the external HLS fallback if native open fails.
 
-In `auto` mode, Compose Media Player treats a user-installed VLC/libVLC as the preferred JVM fallback. It first looks for libVLC matching the current app/JVM architecture. When found, it loads libVLC dynamically at runtime, uses libVLC video callbacks inside the Compose surface, passes request headers/cookies directly to libVLC, exposes embedded audio/subtitle tracks, reports native progress/duration, and keeps playback inside the app. The app never launches the visible VLC UI.
+In `auto` mode, Compose Media Player treats a user-installed VLC/libVLC as the preferred JVM fallback. It first looks for libVLC matching the current app/JVM architecture. When found, it loads libVLC dynamically at runtime, uses the memory-callback libVLC canvas path, passes request headers/cookies directly to libVLC, exposes embedded audio/subtitle tracks, reports native progress/duration, and keeps playback inside the app. The app never launches the visible VLC UI.
 
-For ASS/SSA subtitle rendering, the memory-callback path can optionally load a user-installed `libass.dylib` dynamically, render ASS/SSA to pixels, and blend those pixels into the Compose/Skia video frame. Embedded ASS/SSA tracks are extracted with the built-in Matroska reader.
+The opt-in `libvlc-native-view` backend lets VLC render directly into a native desktop child window instead of copying decoded frames into Compose. It uses an NSView on macOS, an HWND on Windows, and an X11/XWayland xwindow on Linux. Compose controls render above it in a separate overlay layer, so the video path stays native while the UI stays Compose.
+
+For HDR sources on Windows and Linux, `VideoOutputMode.NATIVE_HDR` with `DesktopVideoBackend.AUTO` selects `libvlc-native-view` instead of the Compose SDR frame-copy path. This is a best-effort HDR-preserving path: actual HDR passthrough still depends on VLC, OS compositor behavior, GPU drivers, display mode, and the connected HDR display.
+
+On macOS, ASS/SSA subtitle rendering in the memory-callback path can optionally load a user-installed `libass.dylib` dynamically, render ASS/SSA to pixels, and blend those pixels into the Compose/Skia video frame. Embedded ASS/SSA tracks are extracted with the built-in Matroska reader.
 
 For remote MKV files with cues, the reader first uses HTTP byte ranges to load the header, cue table, and subtitle clusters around the current playback time, then completes the full subtitle track in the background and caches it per `(URI, stream)`. A user-installed `ffmpeg` process is only an optional fallback for unsupported Matroska layouts.
 
@@ -24,14 +28,22 @@ COMPOSE_MEDIA_PLAYER_LINUX_FALLBACK_BACKEND=libvlc
 -Dcomposemediaplayer.linux.fallbackBackend=libvlc
 ```
 
-To point at a specific libVLC install, set:
+To require direct native libVLC rendering, use `libvlc-native-view` instead of `libvlc` in the same environment variables or JVM properties. The aliases `libvlc-native`, `libvlc-view`, `libvlc-nsview`, `libvlc-hwnd`, and `libvlc-xwindow` are also accepted on their matching desktop targets.
+
+The sample app can request that path with:
+
+```shell
+-Dsample.app.videoOutputMode=NATIVE_HDR
+```
+
+To point at a specific libVLC install on macOS, Windows, or Linux, set:
 
 ```shell
 COMPOSE_MEDIA_PLAYER_LIBVLC=/path/to/libvlc
 COMPOSE_MEDIA_PLAYER_LIBVLC_PLUGINS=/path/to/plugins
 ```
 
-or the equivalent JVM system properties:
+or the equivalent JVM system properties. The generic properties apply to every desktop JVM target; the macOS-specific aliases are kept for compatibility:
 
 ```shell
 -Dcomposemediaplayer.libvlc=/path/to/libvlc

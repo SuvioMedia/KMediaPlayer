@@ -2,8 +2,11 @@
 // Maps Kotlin external methods to the native C API and registers via JNI_OnLoad.
 
 #include <jni.h>
+#include <jawt.h>
+#include <jawt_md.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include "LibVlcCanvas.h"
 #include "NativeVideoPlayer.h"
 
@@ -19,6 +22,34 @@ static inline LibVlcCanvasPlayer* toLibVlc(jlong h) {
     return (LibVlcCanvasPlayer*)(uintptr_t)(uint64_t)h;
 }
 
+static uint32_t awt_component_xwindow(JNIEnv* env, jobject component) {
+    if (!component) return 0;
+
+    JAWT awt;
+    memset(&awt, 0, sizeof(awt));
+    awt.version = JAWT_VERSION_1_4;
+    if (JAWT_GetAWT(env, &awt) == JNI_FALSE) return 0;
+
+    JAWT_DrawingSurface* surface = awt.GetDrawingSurface(env, component);
+    if (!surface) return 0;
+
+    uint32_t xwindow = 0;
+    jint lock = surface->Lock(surface);
+    if ((lock & JAWT_LOCK_ERROR) == 0) {
+        JAWT_DrawingSurfaceInfo* surface_info = surface->GetDrawingSurfaceInfo(surface);
+        if (surface_info && surface_info->platformInfo) {
+            JAWT_X11DrawingSurfaceInfo* x11_info = (JAWT_X11DrawingSurfaceInfo*)surface_info->platformInfo;
+            xwindow = (uint32_t)x11_info->drawable;
+        }
+        if (surface_info) {
+            surface->FreeDrawingSurfaceInfo(surface_info);
+        }
+        surface->Unlock(surface);
+    }
+    awt.FreeDrawingSurface(surface);
+    return xwindow;
+}
+
 // ---------------------------------------------------------------------------
 // JNI implementations
 // ---------------------------------------------------------------------------
@@ -28,7 +59,17 @@ static jlong JNICALL jni_CreatePlayer(JNIEnv* env, jclass cls) {
     return p ? (jlong)(uintptr_t)p : 0L;
 }
 
-static jlong JNICALL jni_CreateLibVlcPlayer(JNIEnv* env, jclass cls, jstring libPath, jstring pluginPath) {
+static jint JNICALL jni_GetNativeVersion(JNIEnv* env, jclass cls) {
+    return (jint)nvp_get_native_version();
+}
+
+static jlong JNICALL jni_CreateLibVlcPlayer(
+    JNIEnv* env,
+    jclass cls,
+    jstring libPath,
+    jstring pluginPath,
+    jboolean nativeVideoOutput
+) {
     if (!libPath || !pluginPath) return 0L;
     const char* cLibPath = (*env)->GetStringUTFChars(env, libPath, NULL);
     if (!cLibPath) return 0L;
@@ -37,10 +78,23 @@ static jlong JNICALL jni_CreateLibVlcPlayer(JNIEnv* env, jclass cls, jstring lib
         (*env)->ReleaseStringUTFChars(env, libPath, cLibPath);
         return 0L;
     }
-    LibVlcCanvasPlayer* p = lvc_create(cLibPath, cPluginPath);
+    LibVlcCanvasPlayer* p = lvc_create(cLibPath, cPluginPath, nativeVideoOutput == JNI_TRUE);
     (*env)->ReleaseStringUTFChars(env, libPath, cLibPath);
     (*env)->ReleaseStringUTFChars(env, pluginPath, cPluginPath);
     return p ? (jlong)(uintptr_t)p : 0L;
+}
+
+static jboolean JNICALL jni_AttachLibVlcNativeView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
+    if (!handle || !component) return JNI_FALSE;
+    uint32_t xwindow = awt_component_xwindow(env, component);
+    if (!xwindow) return JNI_FALSE;
+    return (jboolean)(lvc_set_native_window(toLibVlc(handle), xwindow) != 0);
+}
+
+static void JNICALL jni_DetachLibVlcNativeView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
+    if (handle) {
+        lvc_set_native_window(toLibVlc(handle), 0);
+    }
 }
 
 static jboolean JNICALL jni_OpenLibVlcUriWithHeaders(
@@ -48,13 +102,14 @@ static jboolean JNICALL jni_OpenLibVlcUriWithHeaders(
     jclass cls,
     jlong handle,
     jstring uri,
-    jstring requestHeaders
+    jstring requestHeaders,
+    jboolean startPlayback
 ) {
     if (!handle || !uri) return JNI_FALSE;
     const char* cUri = (*env)->GetStringUTFChars(env, uri, NULL);
     if (!cUri) return JNI_FALSE;
     const char* cHeaders = requestHeaders ? (*env)->GetStringUTFChars(env, requestHeaders, NULL) : NULL;
-    int result = lvc_open_uri_with_headers(toLibVlc(handle), cUri, cHeaders);
+    int result = lvc_open_uri_with_headers(toLibVlc(handle), cUri, cHeaders, startPlayback == JNI_TRUE);
     if (cHeaders) (*env)->ReleaseStringUTFChars(env, requestHeaders, cHeaders);
     (*env)->ReleaseStringUTFChars(env, uri, cUri);
     return (jboolean)(result != 0);
@@ -314,9 +369,10 @@ static jboolean JNICALL jni_ConsumeDidPlayToEnd(JNIEnv* env, jclass cls, jlong h
 // ---------------------------------------------------------------------------
 
 static const JNINativeMethod g_methods[] = {
+    { "nGetNativeVersion",       "()I",                         (void*)jni_GetNativeVersion },
     { "nCreatePlayer",           "()J",                         (void*)jni_CreatePlayer },
-    { "nCreateLibVlcPlayer",     "(Ljava/lang/String;Ljava/lang/String;)J", (void*)jni_CreateLibVlcPlayer },
-    { "nOpenLibVlcUriWithHeaders", "(JLjava/lang/String;Ljava/lang/String;)Z", (void*)jni_OpenLibVlcUriWithHeaders },
+    { "nCreateLibVlcPlayer",     "(Ljava/lang/String;Ljava/lang/String;Z)J", (void*)jni_CreateLibVlcPlayer },
+    { "nOpenLibVlcUriWithHeaders", "(JLjava/lang/String;Ljava/lang/String;Z)Z", (void*)jni_OpenLibVlcUriWithHeaders },
     { "nPlayLibVlc",             "(J)V",                        (void*)jni_PlayLibVlc },
     { "nPauseLibVlc",            "(J)V",                        (void*)jni_PauseLibVlc },
     { "nSetLibVlcVolume",        "(JF)V",                       (void*)jni_SetLibVlcVolume },
@@ -338,6 +394,8 @@ static const JNINativeMethod g_methods[] = {
     { "nDisableLibVlcSubtitles", "(J)Z",                        (void*)jni_DisableLibVlcSubtitles },
     { "nGetLibVlcAudioTrackDescriptions", "(J)Ljava/lang/String;", (void*)jni_GetLibVlcAudioTrackDescriptions },
     { "nGetLibVlcSubtitleTrackDescriptions", "(J)Ljava/lang/String;", (void*)jni_GetLibVlcSubtitleTrackDescriptions },
+    { "nAttachLibVlcNativeView", "(JLjava/awt/Component;)Z",     (void*)jni_AttachLibVlcNativeView },
+    { "nDetachLibVlcNativeView", "(JLjava/awt/Component;)V",     (void*)jni_DetachLibVlcNativeView },
     { "nOpenUri",                "(JLjava/lang/String;)V",      (void*)jni_OpenUri },
     { "nOpenUriWithHeaders",     "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaders },
     { "nPlay",                   "(J)V",                        (void*)jni_Play },

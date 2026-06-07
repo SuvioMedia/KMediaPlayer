@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.HdrSupport
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -173,7 +175,7 @@ internal fun SettingsSheet(
                         "DV P7->8.1",
                         if (hdr.supportsDolbyVisionProfile7To8Transcoding) "Supported" else "Not supported",
                     )
-                    InfoRow("Max EDR", "%.2f".format(hdr.maxExtendedDynamicRange))
+                    InfoRow("Max EDR", formatTwoDecimals(hdr.maxExtendedDynamicRange))
                 }
             }
 
@@ -263,3 +265,10 @@ private fun HdrSupport.label(): String =
         HdrSupport.UNSUPPORTED -> "Not supported"
         HdrSupport.UNKNOWN -> "Unknown"
     }
+
+private fun formatTwoDecimals(value: Float): String {
+    val scaled = (value * 100).roundToInt()
+    val whole = scaled / 100
+    val fractional = abs(scaled % 100).toString().padStart(2, '0')
+    return "$whole.$fractional"
+}

@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.linux
 
 import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
+import java.awt.Component
 import java.nio.ByteBuffer
 
 /**
@@ -8,22 +9,42 @@ import java.nio.ByteBuffer
  * Handles are opaque Long values (native pointer cast to jlong, 0 = null).
  */
 internal object LinuxNativeBridge {
+    /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the Linux .so. */
+    private const val EXPECTED_NATIVE_VERSION = 2
+
     init {
         NativeLibraryLoader.load("NativeVideoPlayer", LinuxNativeBridge::class.java)
+        val nativeVersion =
+            runCatching { nGetNativeVersion() }
+                .getOrElse {
+                    throw IllegalStateException(
+                        "NativeVideoPlayer Linux library is missing the native version API. " +
+                            "Please rebuild libNativeVideoPlayer.so.",
+                        it,
+                    )
+                }
+        require(nativeVersion == EXPECTED_NATIVE_VERSION) {
+            "NativeVideoPlayer Linux library version mismatch: expected $EXPECTED_NATIVE_VERSION " +
+                "but got $nativeVersion. Please rebuild libNativeVideoPlayer.so or update the Kotlin bindings."
+        }
     }
 
     // Playback control
+    @JvmStatic external fun nGetNativeVersion(): Int
+
     @JvmStatic external fun nCreatePlayer(): Long
 
     @JvmStatic external fun nCreateLibVlcPlayer(
         libVlcPath: String,
         pluginPath: String,
+        nativeVideoOutput: Boolean,
     ): Long
 
     @JvmStatic external fun nOpenLibVlcUriWithHeaders(
         handle: Long,
         uri: String,
         requestHeaders: String,
+        startPlayback: Boolean,
     ): Boolean
 
     @JvmStatic external fun nOpenUri(
@@ -165,4 +186,14 @@ internal object LinuxNativeBridge {
     @JvmStatic external fun nGetLibVlcSubtitleTrackDescriptions(handle: Long): String?
 
     @JvmStatic external fun nDisableLibVlcSubtitles(handle: Long): Boolean
+
+    @JvmStatic external fun nAttachLibVlcNativeView(
+        handle: Long,
+        component: Component,
+    ): Boolean
+
+    @JvmStatic external fun nDetachLibVlcNativeView(
+        handle: Long,
+        component: Component,
+    )
 }

@@ -16,7 +16,7 @@ class PlayerCapabilitiesJvmTest {
     }
 
     @Test
-    fun `libvlc native backend is reported as macOS only`() {
+    fun `libvlc native backend follows libvlc availability on desktop`() {
         val libVlcCapabilities =
             jvmPlayerCapabilities(
                 VideoPlaybackOptions(desktopVideoBackend = DesktopVideoBackend.LIBVLC),
@@ -25,9 +25,6 @@ class PlayerCapabilitiesJvmTest {
             jvmPlayerCapabilities(
                 VideoPlaybackOptions(desktopVideoBackend = DesktopVideoBackend.LIBVLC_NATIVE),
             )
-        val expectedSupportsMkv =
-            CurrentPlatform.os == CurrentPlatform.OS.MAC && libVlcCapabilities.supportsMkv
-
-        assertEquals(expectedSupportsMkv, libVlcNativeCapabilities.supportsMkv)
+        assertEquals(libVlcCapabilities.supportsMkv, libVlcNativeCapabilities.supportsMkv)
     }
 }

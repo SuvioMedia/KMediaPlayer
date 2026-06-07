@@ -94,9 +94,11 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 > implementation("androidx.media3:media3-exoplayer-hls:<version>")
 > ```
 
-> † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC canvas playback, or external HLS fallback backends when the platform backend cannot demux the source directly. VLC/libVLC is preferred in `auto` mode; `ffmpeg` is the last fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
+> † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC playback, or external HLS fallback backends when the platform backend cannot demux the source directly. libVLC supports both the Compose canvas path and an opt-in direct native-view path (`libvlc-native-view`) on macOS, Windows, and Linux. VLC/libVLC is preferred in `auto` mode; `ffmpeg` is the last fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
 > macOS JVM also has an experimental opt-in HDR Metal rendering POC for AVFoundation-supported sources. Enable it with `-Dcomposemediaplayer.macos.hdrMetal=true` or `COMPOSE_MEDIA_PLAYER_MACOS_HDR_METAL=true`. See [macOS HDR Metal POC](docs/macos-hdr-metal-poc.md).
+
+> On Windows and Linux JVM, `VideoOutputMode.NATIVE_HDR` selects the libVLC native-view path in `DesktopVideoBackend.AUTO` mode. This avoids copying frames into Compose and is the intended best-effort path for HDR sources, but actual HDR passthrough depends on VLC, the OS compositor, GPU drivers, display mode, and an HDR-capable display.
 
 ## ✅ Media Support Preflight
 
@@ -421,11 +423,11 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered as plain dialogue text by Compose on native targets and with full styling on browser targets through JASSUB/libass. On desktop JVM, the libVLC canvas MKV/WebM backend can expose and select embedded subtitle tracks; on macOS it can also dynamically load user-installed libass and blend full ASS/SSA rendering into the Compose/Skia frame. The external JVM HLS fallback can burn embedded subtitle tracks through user-installed VLC or `ffmpeg`.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered as plain dialogue text by Compose on native targets and with full styling on browser targets through JASSUB/libass. On desktop JVM, the libVLC MKV/WebM backends can expose and select embedded subtitle tracks; on macOS the canvas path can also dynamically load user-installed libass and blend full ASS/SSA rendering into the Compose/Skia frame. The external JVM HLS fallback can burn embedded subtitle tracks through user-installed VLC or `ffmpeg`.
 
 #### 🎯 Supported Formats
 
-The player supports SRT, VTT, ASS and SSA subtitle formats with automatic format detection. Browser targets use JASSUB/libass for styled ASS/SSA rendering; native targets parse ASS/SSA timing and dialogue text in Compose unless a platform-specific backend, such as the macOS JVM libVLC canvas backend, provides full libass rendering.
+The player supports SRT, VTT, ASS and SSA subtitle formats with automatic format detection. Browser targets use JASSUB/libass for styled ASS/SSA rendering; native targets parse ASS/SSA timing and dialogue text in Compose unless a platform-specific backend, such as the desktop JVM libVLC canvas backend, provides full libass rendering.
 
 #### 🎯 Adding Subtitles from URL or Local File
 

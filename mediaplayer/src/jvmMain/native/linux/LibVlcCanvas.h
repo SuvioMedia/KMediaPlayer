@@ -5,9 +5,9 @@
 
 typedef struct LibVlcCanvasPlayer LibVlcCanvasPlayer;
 
-LibVlcCanvasPlayer* lvc_create(const char* libvlc_path, const char* plugin_path);
+LibVlcCanvasPlayer* lvc_create(const char* libvlc_path, const char* plugin_path, int native_video_output);
 void lvc_destroy(LibVlcCanvasPlayer* player);
-int lvc_open_uri_with_headers(LibVlcCanvasPlayer* player, const char* uri, const char* request_headers);
+int lvc_open_uri_with_headers(LibVlcCanvasPlayer* player, const char* uri, const char* request_headers, int start_playback);
 void lvc_play(LibVlcCanvasPlayer* player);
 void lvc_pause(LibVlcCanvasPlayer* player);
 void lvc_set_volume(LibVlcCanvasPlayer* player, float volume);
@@ -28,5 +28,6 @@ int32_t lvc_select_subtitle_track(LibVlcCanvasPlayer* player, int32_t ordinal);
 int32_t lvc_disable_subtitles(LibVlcCanvasPlayer* player);
 char* lvc_get_audio_track_descriptions(LibVlcCanvasPlayer* player);
 char* lvc_get_subtitle_track_descriptions(LibVlcCanvasPlayer* player);
+int lvc_set_native_window(LibVlcCanvasPlayer* player, uint32_t xwindow);
 
 #endif

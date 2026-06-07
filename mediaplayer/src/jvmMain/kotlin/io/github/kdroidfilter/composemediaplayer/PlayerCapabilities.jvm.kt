@@ -13,7 +13,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                     supportsDesktopMkvPlayback(
                         playbackOptions = playbackOptions,
                         nativePlatformSupportsMkv = false,
-                        supportsLibVlcNativeBackend = false,
+                        supportsLibVlcNativeBackend = true,
                     ),
             )
         CurrentPlatform.OS.MAC ->
@@ -32,7 +32,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                     supportsDesktopMkvPlayback(
                         playbackOptions = playbackOptions,
                         nativePlatformSupportsMkv = true,
-                        supportsLibVlcNativeBackend = false,
+                        supportsLibVlcNativeBackend = true,
                     ),
             )
     }

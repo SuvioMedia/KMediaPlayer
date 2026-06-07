@@ -12,6 +12,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.common.JvmNativeVideoHost
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
@@ -46,60 +47,91 @@ fun WindowsVideoPlayerSurface(
         contentAlignment = Alignment.Center,
     ) {
         // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
-        if (playerState.hasMedia && (!playerState.isFullscreen || isInFullscreenWindow)) {
-            // Force recomposition when currentFrameState changes
-            val currentFrame by remember(playerState) { playerState.currentFrameState }
-
-            currentFrame?.let { frame ->
-                Canvas(
+        val shouldRenderVideo =
+            (playerState.hasMedia || playerState.libVlcNativeSurfaceRequested) &&
+                (!playerState.isFullscreen || isInFullscreenWindow || playerState.libVlcNativeSurfaceRequested)
+        if (shouldRenderVideo) {
+            if (playerState.shouldUseLibVlcNativeSurface()) {
+                JvmNativeVideoHost(
                     modifier =
                         contentScale.toCanvasModifier(
                             playerState.aspectRatio,
                             playerState.metadata.width,
                             playerState.metadata.height,
                         ),
-                ) {
-                    drawScaledImage(
-                        image = frame,
-                        dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-                        contentScale = contentScale,
-                    )
-                }
-            }
-
-            // Add Compose-based subtitle layer
-            if (playerState.subtitlesEnabled &&
-                playerState.currentSubtitleTrack != null &&
-                playerState.currentSubtitleTrack?.isEmbedded != true
-            ) {
-                val currentTime =
-                    if (playerState.userDragging) {
-                        playerState.duration *
-                            (playerState.sliderPos / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
-                    } else {
-                        playerState.preciseCurrentTime
-                    } + playerState.subtitleOffset
-
-                ComposeSubtitleLayer(
-                    currentTime = currentTime,
-                    duration = playerState.duration,
-                    isPlaying = playerState.isPlaying,
-                    subtitleTrack = playerState.currentSubtitleTrack,
-                    subtitlesEnabled = playerState.subtitlesEnabled,
-                    textStyle = playerState.subtitleTextStyle,
-                    backgroundColor = playerState.subtitleBackgroundColor,
+                    canvasName = "ComposeMediaPlayer Windows libVLC native canvas",
+                    hostName = "ComposeMediaPlayer Windows libVLC native host",
+                    attachNative = playerState::attachLibVlcNativeComponent,
+                    detachNative = playerState::detachLibVlcNativeComponent,
+                    nativeFullscreen = playerState.isFullscreen && !isInFullscreenWindow,
+                    showExternalOverlay = !isInFullscreenWindow,
+                    overlay = {
+                        WindowsVideoOverlayContent(playerState, overlay)
+                    },
                 )
-            }
-        }
+            } else {
+                // Force recomposition when currentFrameState changes
+                val currentFrame by remember(playerState) { playerState.currentFrameState }
 
-        // Render the overlay content on top of the video with fillMaxSize modifier
-        // to ensure it takes the full height of the parent Box
-        Box(modifier = Modifier.fillMaxSize()) {
-            overlay()
+                currentFrame?.let { frame ->
+                    Canvas(
+                        modifier =
+                            contentScale.toCanvasModifier(
+                                playerState.aspectRatio,
+                                playerState.metadata.width,
+                                playerState.metadata.height,
+                            ),
+                    ) {
+                        drawScaledImage(
+                            image = frame,
+                            dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+                            contentScale = contentScale,
+                        )
+                    }
+                }
+
+                WindowsVideoOverlayContent(playerState, overlay)
+            }
         }
     }
 
-    if (playerState.isFullscreen && !isInFullscreenWindow) {
+    if (playerState.isFullscreen && !isInFullscreenWindow && !playerState.libVlcNativeSurfaceRequested) {
         openFullscreenWindow(playerState, contentScale = contentScale, overlay = overlay)
+    }
+}
+
+@Composable
+private fun WindowsVideoOverlayContent(
+    playerState: WindowsVideoPlayerState,
+    overlay: @Composable () -> Unit,
+) {
+    // Add Compose-based subtitle layer
+    if (playerState.subtitlesEnabled &&
+        playerState.currentSubtitleTrack != null &&
+        playerState.currentSubtitleTrack?.isEmbedded != true
+    ) {
+        val currentTime =
+            if (playerState.userDragging) {
+                playerState.duration *
+                    (playerState.sliderPos / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
+            } else {
+                playerState.preciseCurrentTime
+            } + playerState.subtitleOffset
+
+        ComposeSubtitleLayer(
+            currentTime = currentTime,
+            duration = playerState.duration,
+            isPlaying = playerState.isPlaying,
+            subtitleTrack = playerState.currentSubtitleTrack,
+            subtitlesEnabled = playerState.subtitlesEnabled,
+            textStyle = playerState.subtitleTextStyle,
+            backgroundColor = playerState.subtitleBackgroundColor,
+        )
+    }
+
+    // Render the overlay content on top of the video with fillMaxSize modifier
+    // to ensure it takes the full height of the parent Box
+    Box(modifier = Modifier.fillMaxSize()) {
+        overlay()
     }
 }

@@ -8,7 +8,8 @@ import androidx.compose.runtime.Stable
 enum class VideoOutputMode {
     /**
      * Use the platform default. On macOS this favors tone-mapped SDR for stable Compose rendering unless
-     * the legacy composemediaplayer.macos.hdrMetal property explicitly enables native HDR.
+     * the legacy composemediaplayer.macos.hdrMetal property explicitly enables native HDR. On Windows and Linux,
+     * this keeps the platform/canvas path unless a source needs a fallback backend.
      */
     AUTO,
 
@@ -23,7 +24,9 @@ enum class VideoOutputMode {
     TONE_MAPPED_SDR,
 
     /**
-     * Prefer a native HDR/EDR platform surface when available. This can require platform-native layering.
+     * Prefer a native HDR/EDR platform surface when available. On macOS this selects the AVFoundation native HDR
+     * surface. On Windows and Linux with [DesktopVideoBackend.AUTO], this selects the libVLC native-view backend
+     * as a best-effort HDR-preserving path that avoids copying frames into Compose.
      */
     NATIVE_HDR,
 }
@@ -61,7 +64,7 @@ enum class DolbyVisionMode {
  *
  * [AUTO] keeps the platform default and optional fallback policy. [PLATFORM] disables optional fallbacks.
  * [LIBVLC] requires the in-process libVLC canvas backend on macOS, Windows, and Linux. [LIBVLC_NATIVE] requires
- * the macOS native-view libVLC backend and is rejected on other desktop JVM targets.
+ * the libVLC native-view backend: NSView on macOS, HWND on Windows, and X11/XWayland xwindow on Linux.
  */
 enum class DesktopVideoBackend {
     /**
@@ -80,7 +83,8 @@ enum class DesktopVideoBackend {
     LIBVLC,
 
     /**
-     * Use a user-installed libVLC backend with VLC rendering directly into a native macOS view.
+     * Use a user-installed libVLC backend with VLC rendering directly into a native desktop view. This avoids the
+     * Compose SDR frame-copy path, but HDR passthrough still depends on VLC, the OS compositor, GPU, and display.
      */
     LIBVLC_NATIVE,
 }

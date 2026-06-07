@@ -4,6 +4,8 @@
 #include <jni.h>
 #include "LibVlcCanvas.h"
 #include "NativeVideoPlayer.h"
+#include <jawt.h>
+#include <jawt_md.h>
 #include <cstdlib>
 #include <cstring>
 
@@ -19,6 +21,33 @@ static inline LibVlcCanvasPlayer* toLibVlc(jlong handle) {
 }
 
 static constexpr double HUNDRED_NANOSECOND_TICKS_PER_SECOND = 10000000.0;
+
+static HWND awtComponentHwnd(JNIEnv* env, jobject component) {
+    if (!component) return nullptr;
+
+    JAWT awt{};
+    awt.version = JAWT_VERSION_1_4;
+    if (JAWT_GetAWT(env, &awt) == JNI_FALSE) return nullptr;
+
+    JAWT_DrawingSurface* surface = awt.GetDrawingSurface(env, component);
+    if (!surface) return nullptr;
+
+    HWND hwnd = nullptr;
+    const jint lock = surface->Lock(surface);
+    if ((lock & JAWT_LOCK_ERROR) == 0) {
+        JAWT_DrawingSurfaceInfo* surfaceInfo = surface->GetDrawingSurfaceInfo(surface);
+        if (surfaceInfo && surfaceInfo->platformInfo) {
+            auto* win32Info = static_cast<JAWT_Win32DrawingSurfaceInfo*>(surfaceInfo->platformInfo);
+            hwnd = win32Info->hwnd;
+        }
+        if (surfaceInfo) {
+            surface->FreeDrawingSurfaceInfo(surfaceInfo);
+        }
+        surface->Unlock(surface);
+    }
+    awt.FreeDrawingSurface(surface);
+    return hwnd;
+}
 
 // ---------------------------------------------------------------------------
 // JNI implementations
@@ -242,7 +271,13 @@ static jint JNICALL jni_SetOutputSize(JNIEnv*, jclass, jlong handle, jint width,
                   : E_INVALIDARG;
 }
 
-static jlong JNICALL jni_CreateLibVlcInstance(JNIEnv* env, jclass, jstring libPath, jstring pluginPath) {
+static jlong JNICALL jni_CreateLibVlcInstance(
+    JNIEnv* env,
+    jclass,
+    jstring libPath,
+    jstring pluginPath,
+    jboolean nativeVideoOutput
+) {
     if (!libPath || !pluginPath) return 0;
     const char* cLibPath = env->GetStringUTFChars(libPath, nullptr);
     if (!cLibPath) return 0;
@@ -251,10 +286,23 @@ static jlong JNICALL jni_CreateLibVlcInstance(JNIEnv* env, jclass, jstring libPa
         env->ReleaseStringUTFChars(libPath, cLibPath);
         return 0;
     }
-    LibVlcCanvasPlayer* p = lvc_create(cLibPath, cPluginPath);
+    LibVlcCanvasPlayer* p = lvc_create(cLibPath, cPluginPath, nativeVideoOutput == JNI_TRUE);
     env->ReleaseStringUTFChars(libPath, cLibPath);
     env->ReleaseStringUTFChars(pluginPath, cPluginPath);
     return p ? reinterpret_cast<jlong>(p) : 0;
+}
+
+static jboolean JNICALL jni_AttachLibVlcNativeView(JNIEnv* env, jclass, jlong handle, jobject component) {
+    if (!handle || !component) return JNI_FALSE;
+    HWND hwnd = awtComponentHwnd(env, component);
+    if (!hwnd) return JNI_FALSE;
+    return lvc_set_native_window(toLibVlc(handle), hwnd) ? JNI_TRUE : JNI_FALSE;
+}
+
+static void JNICALL jni_DetachLibVlcNativeView(JNIEnv*, jclass, jlong handle, jobject) {
+    if (handle) {
+        lvc_set_native_window(toLibVlc(handle), nullptr);
+    }
 }
 
 static void JNICALL jni_DestroyLibVlcInstance(JNIEnv*, jclass, jlong handle) {
@@ -278,13 +326,11 @@ static jint JNICALL jni_OpenLibVlcMediaWithHeaders(
         return E_OUTOFMEMORY;
     }
 
-    bool ok = lvc_open_uri_with_headers(toLibVlc(handle), cUrl, cHeaders);
+    bool ok = lvc_open_uri_with_headers(toLibVlc(handle), cUrl, cHeaders, startPlayback == JNI_TRUE);
     if (cHeaders) env->ReleaseStringUTFChars(requestHeaders, cHeaders);
     env->ReleaseStringUTFChars(url, cUrl);
 
-    if (!ok) return E_FAIL;
-    if (!startPlayback) lvc_pause(toLibVlc(handle));
-    return S_OK;
+    return ok ? S_OK : E_FAIL;
 }
 
 static jobject JNICALL jni_ReadLibVlcVideoFrame(JNIEnv* env, jclass, jlong handle, jintArray outResult) {
@@ -458,7 +504,7 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nGetVideoMetadata"),    const_cast<char*>("(J[C[C[J[I[F[Z)I"),             (void*)jni_GetVideoMetadata },
     { const_cast<char*>("nWrapPointer"),         const_cast<char*>("(JJ)Ljava/nio/ByteBuffer;"),    (void*)jni_WrapPointer },
     { const_cast<char*>("nSetOutputSize"),      const_cast<char*>("(JII)I"),                       (void*)jni_SetOutputSize },
-    { const_cast<char*>("nCreateLibVlcInstance"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)J"), (void*)jni_CreateLibVlcInstance },
+    { const_cast<char*>("nCreateLibVlcInstance"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;Z)J"), (void*)jni_CreateLibVlcInstance },
     { const_cast<char*>("nDestroyLibVlcInstance"), const_cast<char*>("(J)V"),                       (void*)jni_DestroyLibVlcInstance },
     { const_cast<char*>("nOpenLibVlcMediaWithHeaders"), const_cast<char*>("(JLjava/lang/String;Ljava/lang/String;Z)I"), (void*)jni_OpenLibVlcMediaWithHeaders },
     { const_cast<char*>("nReadLibVlcVideoFrame"), const_cast<char*>("(J[I)Ljava/nio/ByteBuffer;"),  (void*)jni_ReadLibVlcVideoFrame },
@@ -480,6 +526,8 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nDisableLibVlcSubtitles"), const_cast<char*>("(J)Z"),                      (void*)jni_DisableLibVlcSubtitles },
     { const_cast<char*>("nGetLibVlcAudioTrackDescriptions"), const_cast<char*>("(J)Ljava/lang/String;"), (void*)jni_GetLibVlcAudioTrackDescriptions },
     { const_cast<char*>("nGetLibVlcSubtitleTrackDescriptions"), const_cast<char*>("(J)Ljava/lang/String;"), (void*)jni_GetLibVlcSubtitleTrackDescriptions },
+    { const_cast<char*>("nAttachLibVlcNativeView"), const_cast<char*>("(JLjava/awt/Component;)Z"),   (void*)jni_AttachLibVlcNativeView },
+    { const_cast<char*>("nDetachLibVlcNativeView"), const_cast<char*>("(JLjava/awt/Component;)V"),   (void*)jni_DetachLibVlcNativeView },
 };
 
 extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {

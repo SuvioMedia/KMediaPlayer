@@ -10,8 +10,13 @@
 extern "C" {
 #endif
 
+// Native API version — bump when the exported JNI/native API changes.
+#define NATIVE_VIDEO_PLAYER_VERSION 2
+
 // Opaque player handle
 typedef struct VideoPlayer VideoPlayer;
+
+int nvp_get_native_version(void);
 
 // Lifecycle
 VideoPlayer* nvp_create(void);

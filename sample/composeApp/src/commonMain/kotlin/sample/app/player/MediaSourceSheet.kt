@@ -34,11 +34,11 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun MediaSourceSheet(
     videoUrl: String,
-    macMkvBackendAvailable: Boolean,
-    macMkvBackendOptions: List<MacMkvPlaybackBackendOption>,
-    selectedMacMkvBackend: MacMkvPlaybackBackend,
+    desktopMkvBackendAvailable: Boolean,
+    desktopMkvBackendOptions: List<DesktopMkvPlaybackBackendOption>,
+    selectedDesktopMkvBackend: DesktopMkvPlaybackBackend,
     onUrlChange: (String) -> Unit,
-    onMacMkvBackendChange: (MacMkvPlaybackBackend) -> Unit,
+    onDesktopMkvBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
     onLoadUrl: () -> Unit,
     onPickFile: () -> Unit,
     onSelectPreset: (String) -> Unit,
@@ -80,20 +80,20 @@ internal fun MediaSourceSheet(
                 shape = RoundedCornerShape(12.dp),
             )
 
-            if (macMkvBackendAvailable) {
+            if (desktopMkvBackendAvailable) {
                 HorizontalDivider()
 
                 val backendOptions =
-                    macMkvBackendOptions.ifEmpty {
-                        MacMkvPlaybackBackend.entries.map { backend ->
-                            MacMkvPlaybackBackendOption(
+                    desktopMkvBackendOptions.ifEmpty {
+                        DesktopMkvPlaybackBackend.entries.map { backend ->
+                            DesktopMkvPlaybackBackendOption(
                                 backend = backend,
                                 enabled = true,
                                 status = "Availability was not reported by this platform.",
                             )
                         }
                     }
-                val selectedBackendOption = backendOptions.firstOrNull { it.backend == selectedMacMkvBackend }
+                val selectedBackendOption = backendOptions.firstOrNull { it.backend == selectedDesktopMkvBackend }
 
                 Text(
                     text = "JVM MKV backend",
@@ -107,8 +107,8 @@ internal fun MediaSourceSheet(
                     backendOptions.forEach { option ->
                         FilterChip(
                             enabled = option.enabled,
-                            selected = selectedMacMkvBackend == option.backend,
-                            onClick = { onMacMkvBackendChange(option.backend) },
+                            selected = selectedDesktopMkvBackend == option.backend,
+                            onClick = { onDesktopMkvBackendChange(option.backend) },
                             label = { Text(option.backend.label) },
                         )
                     }
@@ -123,7 +123,7 @@ internal fun MediaSourceSheet(
                 }
 
                 backendOptions
-                    .filter { option -> !option.enabled && option.backend != MacMkvPlaybackBackend.AUTO }
+                    .filter { option -> !option.enabled && option.backend != DesktopMkvPlaybackBackend.AUTO }
                     .forEach { option ->
                         Text(
                             text = "${option.backend.label}: ${listOfNotNull(option.status, option.installHint).joinToString(" ")}",

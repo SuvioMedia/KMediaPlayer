@@ -12,7 +12,7 @@
 #include <mmdeviceapi.h>
 
 // Native API version — bump when the exported API changes.
-#define NATIVE_VIDEO_PLAYER_VERSION 3
+#define NATIVE_VIDEO_PLAYER_VERSION 4
 
 // Playback speed bounds — kept in sync with
 // io.github.kdroidfilter.composemediaplayer.VideoPlayerState.{MIN,MAX}_PLAYBACK_SPEED.

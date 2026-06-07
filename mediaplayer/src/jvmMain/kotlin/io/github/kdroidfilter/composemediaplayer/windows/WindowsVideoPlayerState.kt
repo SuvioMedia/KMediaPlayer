@@ -30,9 +30,11 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
+import io.github.kdroidfilter.composemediaplayer.VideoOutputMode
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
@@ -68,6 +70,7 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
+import java.awt.Component
 import java.io.Closeable
 import java.io.File
 import java.nio.ByteBuffer
@@ -81,8 +84,14 @@ import kotlin.time.Duration.Companion.milliseconds
 
 internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
 
+private enum class WindowsLibVlcRenderMode {
+    MEMORY,
+    NATIVE_VIEW,
+}
+
 private data class WindowsResolvedLibVlcBackend(
     val installation: JvmLibVlcInstallation,
+    val renderMode: WindowsLibVlcRenderMode,
 )
 
 private data class WindowsLibVlcRuntimeTrackDescription(
@@ -267,6 +276,7 @@ class WindowsVideoPlayerState(
     // Metadata and UI state
     private var _metadata by mutableStateOf(VideoMetadata())
     override val metadata: VideoMetadata get() = _metadata
+    override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo()
     override var subtitlesEnabled by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
     private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
@@ -387,6 +397,10 @@ class WindowsVideoPlayerState(
     private var libVlcSelectedAudioStreamIndex: Int? = null
     private var libVlcSelectedSubtitleStreamIndex: Int? = null
     private var nativeBackendUsesLibVlc: Boolean = false
+    private var nativeBackendLibVlcRenderMode: WindowsLibVlcRenderMode? = null
+    internal var libVlcNativeSurfaceRequested: Boolean by mutableStateOf(false)
+        private set
+    private var libVlcNativeSurfaceAttached: Boolean = false
 
     init {
         // Kick off native initialization immediately
@@ -648,7 +662,7 @@ class WindowsVideoPlayerState(
 
                     val playbackUri =
                         if (libVlcBackend != null) {
-                            prepareLibVlcPlayback(uri, requestHeaders)
+                            prepareLibVlcPlayback(uri, requestHeaders, libVlcBackend.renderMode)
                         } else if (shouldUseExternalHlsFallback(uri, requestHeaders)) {
                             prepareExternalHlsPlayback(uri, requestHeaders)
                         } else {
@@ -683,6 +697,16 @@ class WindowsVideoPlayerState(
                     // Get the video dimensions
                     val sizeArr = IntArray(2)
                     nativeGetVideoSize(instance, sizeArr)
+                    if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
+                        val probedInfo = libVlcTrackInfo
+                        if (nativeBackendUsesLibVlc &&
+                            probedInfo?.videoWidth != null &&
+                            probedInfo.videoHeight != null
+                        ) {
+                            sizeArr[0] = probedInfo.videoWidth
+                            sizeArr[1] = probedInfo.videoHeight
+                        }
+                    }
                     if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
                         setError("Failed to retrieve video size")
                         nativeCloseMedia(instance)
@@ -776,7 +800,11 @@ class WindowsVideoPlayerState(
                         // Start native playback as late as possible — this sets
                         // the wall-clock origin (llPlaybackStartTime) to NOW,
                         // minimising the gap before produceFrames reads its first frame.
-                        if (startPlayback) {
+                        val shouldDeferNativePlayback =
+                            startPlayback &&
+                                shouldUseLibVlcNativeSurface() &&
+                                !libVlcNativeSurfaceAttached
+                        if (startPlayback && !shouldDeferNativePlayback) {
                             val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
                             if (hrPlay < 0) {
                                 windowsLogger.e { "Failed to start playback (hr=0x${hrPlay.toString(16)})" }
@@ -811,15 +839,18 @@ class WindowsVideoPlayerState(
         uri: String,
         requestHeaders: Map<String, String>,
     ): WindowsResolvedLibVlcBackend? {
+        val nativeHdrRequested = playbackOptions.videoOutputMode == VideoOutputMode.NATIVE_HDR
         val forcedDesktopBackend =
             when (playbackOptions.desktopVideoBackend) {
                 DesktopVideoBackend.LIBVLC -> "libvlc"
-                DesktopVideoBackend.LIBVLC_NATIVE ->
-                    throw UnsupportedOperationException(
-                        "LIBVLC_NATIVE is only available on macOS. Use LIBVLC for the Windows canvas backend.",
-                    )
+                DesktopVideoBackend.LIBVLC_NATIVE -> "libvlc-native-view"
                 DesktopVideoBackend.PLATFORM -> "platform"
-                DesktopVideoBackend.AUTO -> null
+                DesktopVideoBackend.AUTO ->
+                    if (nativeHdrRequested) {
+                        "libvlc-native-view"
+                    } else {
+                        null
+                    }
             }
         val shouldUsePlatformBackend =
             forcedDesktopBackend == null &&
@@ -837,9 +868,18 @@ class WindowsVideoPlayerState(
         return when (configured) {
             "platform", "mediafoundation" -> null
             "libvlc" ->
-                ExternalVlcLocator.findLibVlc()?.let(::WindowsResolvedLibVlcBackend)
+                ExternalVlcLocator.findLibVlc()?.let {
+                    WindowsResolvedLibVlcBackend(it, WindowsLibVlcRenderMode.MEMORY)
+                }
                     ?: throw missingLibVlcBackendException()
-            "auto" -> ExternalVlcLocator.findLibVlc()?.let(::WindowsResolvedLibVlcBackend)
+            "auto" ->
+                ExternalVlcLocator.findLibVlc()?.let {
+                    WindowsResolvedLibVlcBackend(it, WindowsLibVlcRenderMode.MEMORY)
+                }
+            "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-hwnd" ->
+                ExternalVlcLocator.findLibVlc()?.let {
+                    WindowsResolvedLibVlcBackend(it, WindowsLibVlcRenderMode.NATIVE_VIEW)
+                } ?: throw missingLibVlcBackendException()
             "ffmpeg", "vlc" -> null
             else -> null
         }
@@ -856,7 +896,7 @@ class WindowsVideoPlayerState(
 
     private fun missingLibVlcBackendException(): UnsupportedOperationException =
         UnsupportedOperationException(
-            "The Windows libVLC canvas backend was requested, but no compatible libVLC installation was found. " +
+            "The Windows libVLC backend was requested, but no compatible libVLC installation was found. " +
                 "Install VLC for " +
                 "${ExternalVlcLocator.currentProcessArchitecture() ?: "the current"} JVM architecture " +
                 "or set composemediaplayer.libvlc and composemediaplayer.libvlc.plugins. " +
@@ -865,14 +905,21 @@ class WindowsVideoPlayerState(
 
     private suspend fun ensureNativeInstance(libVlcBackend: WindowsResolvedLibVlcBackend?) {
         val wantsLibVlc = libVlcBackend != null
+        val wantsLibVlcRenderMode = libVlcBackend?.renderMode
         val existingInstance = videoPlayerInstance
-        if (existingInstance != 0L && nativeBackendUsesLibVlc != wantsLibVlc) {
+        if (existingInstance != 0L &&
+            (
+                nativeBackendUsesLibVlc != wantsLibVlc ||
+                    (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
+            )
+        ) {
             nativeSetPlaybackState(existingInstance, false, stop = true)
             nativeCloseMedia(existingInstance)
             destroyNativeInstance(existingInstance)
             instanceVolumes.remove(existingInstance)
             videoPlayerInstance = 0L
             nativeBackendUsesLibVlc = false
+            nativeBackendLibVlcRenderMode = null
         }
 
         if (videoPlayerInstance == 0L) {
@@ -881,6 +928,7 @@ class WindowsVideoPlayerState(
                     WindowsNativeBridge.createLibVlcInstance(
                         libVlcBackend.installation.libVlcPath,
                         libVlcBackend.installation.pluginPath,
+                        libVlcBackend.renderMode == WindowsLibVlcRenderMode.NATIVE_VIEW,
                     )
                 } else {
                     WindowsNativeBridge.createInstance()
@@ -890,6 +938,7 @@ class WindowsVideoPlayerState(
             }
             videoPlayerInstance = handle
             nativeBackendUsesLibVlc = wantsLibVlc
+            nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
             instanceVolumes[handle] = _volume
             nativeSetAudioVolume(handle, _volume)
             nativeSetPlaybackSpeed(handle, _playbackSpeed)
@@ -899,14 +948,49 @@ class WindowsVideoPlayerState(
     private suspend fun prepareLibVlcPlayback(
         uri: String,
         requestHeaders: Map<String, String>,
+        renderMode: WindowsLibVlcRenderMode,
     ): String {
         libVlcBackendActive = true
         libVlcSourceUri = uri
+        libVlcNativeSurfaceRequested = renderMode == WindowsLibVlcRenderMode.NATIVE_VIEW
+        libVlcNativeSurfaceAttached = false
+        withContext(Dispatchers.Main) {
+            renderingInfo.update(
+                backend = libVlcBackendLabel(renderMode),
+                container = "Source through user-installed libVLC",
+                videoDecoder = "libVLC",
+                videoRenderer = libVlcVideoRenderer(renderMode),
+                audioRenderer = "libVLC / Windows audio output",
+                subtitleRenderer = null,
+                subtitleSource = null,
+                notes = libVlcRenderingNotes(renderMode),
+            )
+        }
         val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
         libVlcTrackInfo = trackInfo
         updateLibVlcTracks(trackInfo)
         return uri
     }
+
+    private fun libVlcBackendLabel(renderMode: WindowsLibVlcRenderMode): String =
+        when (renderMode) {
+            WindowsLibVlcRenderMode.MEMORY -> "libVLC memory backend"
+            WindowsLibVlcRenderMode.NATIVE_VIEW -> "libVLC native-view backend"
+        }
+
+    private fun libVlcVideoRenderer(renderMode: WindowsLibVlcRenderMode): String =
+        when (renderMode) {
+            WindowsLibVlcRenderMode.MEMORY -> "libVLC vmem -> Compose Canvas (Skia)"
+            WindowsLibVlcRenderMode.NATIVE_VIEW -> "libVLC native HWND"
+        }
+
+    private fun libVlcRenderingNotes(renderMode: WindowsLibVlcRenderMode): String =
+        when (renderMode) {
+            WindowsLibVlcRenderMode.MEMORY ->
+                "VLC is loaded dynamically from the user's installation; frames are copied into Compose SDR."
+            WindowsLibVlcRenderMode.NATIVE_VIEW ->
+                "Best-effort native HDR-preserving path; actual HDR output depends on VLC, Windows, GPU, and display settings. Compose controls use a separate overlay window."
+        }
 
     private fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
         _availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
@@ -1009,6 +1093,8 @@ class WindowsVideoPlayerState(
 
     private fun clearLibVlcTrackState() {
         libVlcBackendActive = false
+        libVlcNativeSurfaceRequested = false
+        libVlcNativeSurfaceAttached = false
         libVlcSourceUri = null
         libVlcTrackInfo = null
         libVlcSelectedAudioStreamIndex = null
@@ -1021,6 +1107,46 @@ class WindowsVideoPlayerState(
         if (currentSubtitleTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
             currentSubtitleTrack = null
             subtitlesEnabled = false
+        }
+    }
+
+    internal fun shouldUseLibVlcNativeSurface(): Boolean =
+        libVlcNativeSurfaceRequested &&
+            libVlcBackendActive &&
+            nativeBackendUsesLibVlc &&
+            nativeBackendLibVlcRenderMode == WindowsLibVlcRenderMode.NATIVE_VIEW
+
+    internal fun attachLibVlcNativeComponent(component: Component): Boolean {
+        if (!shouldUseLibVlcNativeSurface()) return false
+        val instance = videoPlayerInstance
+        if (instance == 0L) return false
+
+        return runCatching {
+            val attached = WindowsNativeBridge.nAttachLibVlcNativeView(instance, component)
+            libVlcNativeSurfaceAttached = attached
+            if (attached && _isPlaying) {
+                val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
+                if (hrPlay < 0) {
+                    windowsLogger.e {
+                        "Failed to start Windows libVLC native playback after attach: 0x${hrPlay.toString(16)}"
+                    }
+                }
+            }
+            attached
+        }.getOrElse { e ->
+            windowsLogger.e { "Failed to attach Windows libVLC native surface: ${e.message}" }
+            false
+        }
+    }
+
+    internal fun detachLibVlcNativeComponent(component: Component) {
+        val instance = videoPlayerInstance
+        if (instance == 0L) return
+        runCatching {
+            WindowsNativeBridge.nDetachLibVlcNativeView(instance, component)
+            libVlcNativeSurfaceAttached = false
+        }.onFailure { e ->
+            windowsLogger.e { "Failed to detach Windows libVLC native surface: ${e.message}" }
         }
     }
 
@@ -1162,9 +1288,62 @@ class WindowsVideoPlayerState(
      * the native side and pushes them to Compose.
      */
     private fun startVideoPipeline(): Job =
+        if (shouldUseLibVlcNativeSurface()) {
+            startNativeTimelinePipeline()
+        } else {
+            scope.launch {
+                launch { produceFrames() }
+                launch { consumeFrames() }
+            }
+        }
+
+    private fun startNativeTimelinePipeline(): Job =
         scope.launch {
-            launch { produceFrames() }
-            launch { consumeFrames() }
+            while (scope.isActive && _hasMedia && !isDisposing.get()) {
+                val instance = videoPlayerInstance
+                if (instance == 0L) break
+
+                if (nativeIsEOF(instance)) {
+                    if (_duration <= Duration.ZERO) {
+                        delay(1000.milliseconds)
+                        continue
+                    } else if (loop) {
+                        try {
+                            userPaused = false
+                            seekTo(Duration.ZERO)
+                            play()
+                            onRestart?.invoke()
+                        } catch (e: Exception) {
+                            setError("Error during SeekMedia for loop: ${e.message}")
+                        }
+                    } else {
+                        if (_duration > Duration.ZERO) {
+                            _currentTime = _duration
+                            _progress = 1f
+                        }
+                        pause()
+                        onPlaybackEnded?.invoke()
+                        break
+                    }
+                }
+
+                val posArr = LongArray(1)
+                if (nativeGetMediaPosition(instance, posArr) >= 0) {
+                    _currentTime = adjustedExternalHlsPosition(posArr[0].hundredNanosecondsAsDuration())
+                    if (!_userDragging) {
+                        _progress =
+                            if (_duration > Duration.ZERO) {
+                                (_currentTime.toSecondsDouble() / _duration.toSecondsDouble())
+                                    .toFloat()
+                                    .coerceIn(0f, 1f)
+                            } else {
+                                0f
+                            }
+                    }
+                }
+                isLoading = false
+                delay(100.milliseconds)
+            }
         }
 
     /**
@@ -1969,6 +2148,12 @@ class WindowsVideoPlayerState(
         bStop: Boolean = false,
     ): Boolean {
         return videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
+            if (shouldUseLibVlcNativeSurface() && !libVlcNativeSurfaceAttached && !bStop) {
+                _isPlaying = playing
+                _error?.let { clearError() }
+                return true
+            }
+
             for (attempt in 1..3) {
                 val res = nativeSetPlaybackState(instance, playing, stop = bStop)
                 if (res >= 0) {

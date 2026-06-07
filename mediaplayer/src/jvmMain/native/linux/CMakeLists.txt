@@ -35,6 +35,12 @@ target_link_libraries(NativeVideoPlayer PRIVATE
     pthread
 )
 
+if(NOT JNI_AWT_LIBRARY)
+    message(FATAL_ERROR "JNI AWT library is required for the libVLC native-view backend")
+endif()
+
+target_link_libraries(NativeVideoPlayer PRIVATE ${JNI_AWT_LIBRARY})
+
 target_compile_options(NativeVideoPlayer PRIVATE
     ${GST_CFLAGS_OTHER}
     -Wall -Wextra -Wno-unused-parameter

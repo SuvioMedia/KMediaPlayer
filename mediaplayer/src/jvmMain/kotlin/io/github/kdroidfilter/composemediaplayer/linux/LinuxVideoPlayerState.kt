@@ -26,9 +26,11 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
+import io.github.kdroidfilter.composemediaplayer.VideoOutputMode
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
@@ -44,6 +46,7 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
+import java.awt.Component
 import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -54,8 +57,14 @@ import kotlin.time.Duration.Companion.milliseconds
 
 internal val linuxLogger = TaggedLogger("LinuxVideoPlayerState")
 
+private enum class LinuxLibVlcRenderMode {
+    MEMORY,
+    NATIVE_VIEW,
+}
+
 private data class LinuxResolvedLibVlcBackend(
     val installation: JvmLibVlcInstallation,
+    val renderMode: LinuxLibVlcRenderMode,
 )
 
 private data class LinuxLibVlcRuntimeTrackDescription(
@@ -114,6 +123,10 @@ class LinuxVideoPlayerState(
     private var libVlcSelectedAudioStreamIndex: Int? = null
     private var libVlcSelectedSubtitleStreamIndex: Int? = null
     private var nativeBackendUsesLibVlc: Boolean = false
+    private var nativeBackendLibVlcRenderMode: LinuxLibVlcRenderMode? = null
+    internal var libVlcNativeSurfaceRequested: Boolean by mutableStateOf(false)
+        private set
+    private var libVlcNativeSurfaceAttached: Boolean = false
 
     // State tracking
     private var lastFrameUpdateTime: Long = 0
@@ -154,6 +167,7 @@ class LinuxVideoPlayerState(
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
     override var subtitleOffset: Duration by mutableStateOf(Duration.ZERO)
     override val metadata: VideoMetadata = VideoMetadata()
+    override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo()
     override val capabilities: PlayerCapabilities
         get() = jvmPlayerCapabilities(playbackOptions)
     override var isFullscreen: Boolean by mutableStateOf(false)
@@ -308,10 +322,17 @@ class LinuxVideoPlayerState(
                 var playbackUri = uri
                 var playbackHeaders = sanitizedHeaders
                 if (libVlcBackend != null) {
-                    playbackUri = prepareLibVlcPlayback(uri, sanitizedHeaders)
+                    playbackUri = prepareLibVlcPlayback(uri, sanitizedHeaders, libVlcBackend.renderMode)
                 }
 
-                var result = openMediaUri(playbackUri, playbackHeaders)
+                val startPlayback = initializePlayerState == InitialPlayerState.PLAY
+                val shouldDeferNativePlayback = shouldDeferLibVlcNativeStart(startPlayback, libVlcBackend)
+                var result =
+                    openMediaUri(
+                        playbackUri,
+                        playbackHeaders,
+                        startLibVlcPlayback = startPlayback && !shouldDeferNativePlayback,
+                    )
                 if (libVlcBackend == null && !result && shouldRetryWithExternalHlsFallback(uri, sanitizedHeaders)) {
                     linuxLogger.d { "Native GStreamer open failed; retrying through external HLS fallback" }
                     closeExternalHlsFallback()
@@ -334,7 +355,7 @@ class LinuxVideoPlayerState(
                     withContext(Dispatchers.Main) {
                         hasMedia = true
                         isLoading = false
-                        isPlaying = initializePlayerState == InitialPlayerState.PLAY
+                        isPlaying = startPlayback
                     }
 
                     startFrameUpdates()
@@ -346,7 +367,7 @@ class LinuxVideoPlayerState(
                         applyLibVlcSelectedTracks()
                     }
 
-                    if (isPlaying) {
+                    if (isPlaying && !shouldDeferNativePlayback) {
                         playInBackground()
                     } else if (libVlcBackendActive) {
                         pauseInBackground()
@@ -368,6 +389,14 @@ class LinuxVideoPlayerState(
             }
         }
     }
+
+    private fun shouldDeferLibVlcNativeStart(
+        startPlayback: Boolean,
+        libVlcBackend: LinuxResolvedLibVlcBackend?,
+    ): Boolean =
+        startPlayback &&
+            libVlcBackend?.renderMode == LinuxLibVlcRenderMode.NATIVE_VIEW &&
+            !libVlcNativeSurfaceAttached
 
     override fun openFile(
         file: PlatformFile,
@@ -395,6 +424,8 @@ class LinuxVideoPlayerState(
             }
         }
         nativeBackendUsesLibVlc = false
+        nativeBackendLibVlcRenderMode = null
+        libVlcNativeSurfaceAttached = false
         closeExternalHlsFallback()
         clearLibVlcTrackState()
     }
@@ -405,13 +436,20 @@ class LinuxVideoPlayerState(
         }
 
         val wantsLibVlc = libVlcBackend != null
+        val wantsLibVlcRenderMode = libVlcBackend?.renderMode
         val existingPtr = playerPtr
-        if (existingPtr != 0L && nativeBackendUsesLibVlc != wantsLibVlc) {
+        if (existingPtr != 0L &&
+            (
+                nativeBackendUsesLibVlc != wantsLibVlc ||
+                    (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
+            )
+        ) {
             val ptrToDispose = playerPtrAtomic.getAndSet(0L)
             if (ptrToDispose != 0L) {
                 disposeNativePlayer(ptrToDispose, wasLibVlc = nativeBackendUsesLibVlc)
             }
             nativeBackendUsesLibVlc = false
+            nativeBackendLibVlcRenderMode = null
         }
 
         if (playerPtr == 0L) {
@@ -420,6 +458,7 @@ class LinuxVideoPlayerState(
                     LinuxNativeBridge.nCreateLibVlcPlayer(
                         libVlcBackend.installation.libVlcPath,
                         libVlcBackend.installation.pluginPath,
+                        libVlcBackend.renderMode == LinuxLibVlcRenderMode.NATIVE_VIEW,
                     )
                 } else {
                     LinuxNativeBridge.nCreatePlayer()
@@ -429,6 +468,7 @@ class LinuxVideoPlayerState(
                     disposeNativePlayer(ptr, wasLibVlc = wantsLibVlc)
                 } else {
                     nativeBackendUsesLibVlc = wantsLibVlc
+                    nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
                     applyVolume()
                     applyPlaybackSpeed()
                 }
@@ -441,6 +481,7 @@ class LinuxVideoPlayerState(
     private suspend fun openMediaUri(
         uri: String,
         requestHeaders: Map<String, String>,
+        startLibVlcPlayback: Boolean = true,
     ): Boolean {
         val ptr = playerPtr
         if (ptr == 0L) return false
@@ -453,7 +494,7 @@ class LinuxVideoPlayerState(
         return try {
             val headerLines = requestHeaders.requestHeadersLineString()
             if (nativeBackendUsesLibVlc) {
-                if (!LinuxNativeBridge.nOpenLibVlcUriWithHeaders(ptr, uri, headerLines)) {
+                if (!LinuxNativeBridge.nOpenLibVlcUriWithHeaders(ptr, uri, headerLines, startLibVlcPlayback)) {
                     return false
                 }
             } else if (headerLines.isBlank()) {
@@ -494,15 +535,18 @@ class LinuxVideoPlayerState(
         uri: String,
         requestHeaders: Map<String, String>,
     ): LinuxResolvedLibVlcBackend? {
+        val nativeHdrRequested = playbackOptions.videoOutputMode == VideoOutputMode.NATIVE_HDR
         val forcedDesktopBackend =
             when (playbackOptions.desktopVideoBackend) {
                 DesktopVideoBackend.LIBVLC -> "libvlc"
-                DesktopVideoBackend.LIBVLC_NATIVE ->
-                    throw UnsupportedOperationException(
-                        "LIBVLC_NATIVE is only available on macOS. Use LIBVLC for the Linux canvas backend.",
-                    )
+                DesktopVideoBackend.LIBVLC_NATIVE -> "libvlc-native-view"
                 DesktopVideoBackend.PLATFORM -> "platform"
-                DesktopVideoBackend.AUTO -> null
+                DesktopVideoBackend.AUTO ->
+                    if (nativeHdrRequested) {
+                        "libvlc-native-view"
+                    } else {
+                        null
+                    }
             }
         val shouldUsePlatformBackend =
             forcedDesktopBackend == null &&
@@ -520,9 +564,18 @@ class LinuxVideoPlayerState(
         return when (configured) {
             "platform", "gstreamer" -> null
             "libvlc" ->
-                ExternalVlcLocator.findLibVlc()?.let(::LinuxResolvedLibVlcBackend)
+                ExternalVlcLocator.findLibVlc()?.let {
+                    LinuxResolvedLibVlcBackend(it, LinuxLibVlcRenderMode.MEMORY)
+                }
                     ?: throw missingLibVlcBackendException()
-            "auto" -> ExternalVlcLocator.findLibVlc()?.let(::LinuxResolvedLibVlcBackend)
+            "auto" ->
+                ExternalVlcLocator.findLibVlc()?.let {
+                    LinuxResolvedLibVlcBackend(it, LinuxLibVlcRenderMode.MEMORY)
+                }
+            "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-xwindow", "libvlc-x11" ->
+                ExternalVlcLocator.findLibVlc()?.let {
+                    LinuxResolvedLibVlcBackend(it, LinuxLibVlcRenderMode.NATIVE_VIEW)
+                } ?: throw missingLibVlcBackendException()
             "ffmpeg", "vlc" -> null
             else -> null
         }
@@ -539,7 +592,7 @@ class LinuxVideoPlayerState(
 
     private fun missingLibVlcBackendException(): UnsupportedOperationException =
         UnsupportedOperationException(
-            "The Linux libVLC canvas backend was requested, but no compatible libVLC installation was found. " +
+            "The Linux libVLC backend was requested, but no compatible libVLC installation was found. " +
                 "Install VLC/libVLC for ${ExternalVlcLocator.currentProcessArchitecture() ?: "the current"} " +
                 "JVM architecture or set composemediaplayer.libvlc and composemediaplayer.libvlc.plugins. " +
                 "ComposeMediaPlayer does not bundle or link VLC.",
@@ -548,14 +601,49 @@ class LinuxVideoPlayerState(
     private suspend fun prepareLibVlcPlayback(
         uri: String,
         requestHeaders: Map<String, String>,
+        renderMode: LinuxLibVlcRenderMode,
     ): String {
         libVlcBackendActive = true
         libVlcSourceUri = uri
+        withContext(Dispatchers.Main) {
+            libVlcNativeSurfaceRequested = renderMode == LinuxLibVlcRenderMode.NATIVE_VIEW
+            renderingInfo.update(
+                backend = libVlcBackendLabel(renderMode),
+                container = "Source through user-installed libVLC",
+                videoDecoder = "libVLC",
+                videoRenderer = libVlcVideoRenderer(renderMode),
+                audioRenderer = "libVLC / Linux audio output",
+                subtitleRenderer = null,
+                subtitleSource = null,
+                notes = libVlcRenderingNotes(renderMode),
+            )
+        }
+        libVlcNativeSurfaceAttached = false
         val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
         libVlcTrackInfo = trackInfo
         updateLibVlcTracks(trackInfo)
         return uri
     }
+
+    private fun libVlcBackendLabel(renderMode: LinuxLibVlcRenderMode): String =
+        when (renderMode) {
+            LinuxLibVlcRenderMode.MEMORY -> "libVLC memory backend"
+            LinuxLibVlcRenderMode.NATIVE_VIEW -> "libVLC native-view backend"
+        }
+
+    private fun libVlcVideoRenderer(renderMode: LinuxLibVlcRenderMode): String =
+        when (renderMode) {
+            LinuxLibVlcRenderMode.MEMORY -> "libVLC vmem -> Compose Canvas (Skia)"
+            LinuxLibVlcRenderMode.NATIVE_VIEW -> "libVLC native X11/XWayland xwindow"
+        }
+
+    private fun libVlcRenderingNotes(renderMode: LinuxLibVlcRenderMode): String =
+        when (renderMode) {
+            LinuxLibVlcRenderMode.MEMORY ->
+                "VLC is loaded dynamically from the user's installation; frames are copied into Compose SDR."
+            LinuxLibVlcRenderMode.NATIVE_VIEW ->
+                "Best-effort native HDR-preserving path; actual HDR output depends on VLC, Linux compositor, GPU, and display settings. Compose controls use a separate overlay window."
+        }
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
         withContext(Dispatchers.Main) {
@@ -660,6 +748,10 @@ class LinuxVideoPlayerState(
 
     private suspend fun clearLibVlcTrackState() {
         libVlcBackendActive = false
+        withContext(Dispatchers.Main) {
+            libVlcNativeSurfaceRequested = false
+        }
+        libVlcNativeSurfaceAttached = false
         libVlcSourceUri = null
         libVlcTrackInfo = null
         libVlcSelectedAudioStreamIndex = null
@@ -674,6 +766,43 @@ class LinuxVideoPlayerState(
                 currentSubtitleTrack = null
                 subtitlesEnabled = false
             }
+        }
+    }
+
+    internal fun shouldUseLibVlcNativeSurface(): Boolean =
+        libVlcNativeSurfaceRequested &&
+            libVlcBackendActive &&
+            nativeBackendUsesLibVlc &&
+            nativeBackendLibVlcRenderMode == LinuxLibVlcRenderMode.NATIVE_VIEW
+
+    internal fun attachLibVlcNativeComponent(component: Component): Boolean {
+        if (!shouldUseLibVlcNativeSurface()) return false
+        val ptr = playerPtr
+        if (ptr == 0L) return false
+
+        return runCatching {
+            val attached = LinuxNativeBridge.nAttachLibVlcNativeView(ptr, component)
+            libVlcNativeSurfaceAttached = attached
+            if (attached && isPlaying) {
+                nativePlay(ptr)
+                startFrameUpdates()
+                startBufferingCheck()
+            }
+            attached
+        }.getOrElse { e ->
+            linuxLogger.e { "Failed to attach Linux libVLC native surface: ${e.message}" }
+            false
+        }
+    }
+
+    internal fun detachLibVlcNativeComponent(component: Component) {
+        val ptr = playerPtr
+        if (ptr == 0L) return
+        runCatching {
+            LinuxNativeBridge.nDetachLibVlcNativeView(ptr, component)
+            libVlcNativeSurfaceAttached = false
+        }.onFailure { e ->
+            linuxLogger.e { "Failed to detach Linux libVLC native surface: ${e.message}" }
         }
     }
 
@@ -883,7 +1012,14 @@ class LinuxVideoPlayerState(
             ioScope.launch {
                 while (isActive) {
                     ensureActive()
-                    updateFrameAsync()
+                    if (shouldUseLibVlcNativeSurface()) {
+                        lastFrameUpdateTime = System.currentTimeMillis()
+                        if (isLoading) {
+                            withContext(Dispatchers.Main) { isLoading = false }
+                        }
+                    } else {
+                        updateFrameAsync()
+                    }
                     if (!userDragging) {
                         updatePositionAsync()
                     }
@@ -910,6 +1046,7 @@ class LinuxVideoPlayerState(
     }
 
     private suspend fun checkBufferingState() {
+        if (shouldUseLibVlcNativeSurface()) return
         if (isPlaying && !isLoading) {
             val timeSinceLastFrame = System.currentTimeMillis() - lastFrameUpdateTime
             if (timeSinceLastFrame > bufferingTimeoutThreshold) {
@@ -924,6 +1061,7 @@ class LinuxVideoPlayerState(
     }
 
     private suspend fun updateFrameAsync() {
+        if (shouldUseLibVlcNativeSurface()) return
         withContext(frameDispatcher) {
             try {
                 val ptr = playerPtr
@@ -1073,6 +1211,12 @@ class LinuxVideoPlayerState(
         val ptr = playerPtr
         if (ptr == 0L) return
         try {
+            if (shouldUseLibVlcNativeSurface() && !libVlcNativeSurfaceAttached) {
+                withContext(Dispatchers.Main) { isPlaying = true }
+                startFrameUpdates()
+                startBufferingCheck()
+                return
+            }
             nativePlay(ptr)
             withContext(Dispatchers.Main) { isPlaying = true }
             startFrameUpdates()
@@ -1097,7 +1241,9 @@ class LinuxVideoPlayerState(
                 isPlaying = false
                 isLoading = false
             }
-            updateFrameAsync()
+            if (!shouldUseLibVlcNativeSurface()) {
+                updateFrameAsync()
+            }
             stopFrameUpdates()
             stopBufferingCheck()
         } catch (e: Exception) {
@@ -1194,7 +1340,9 @@ class LinuxVideoPlayerState(
             if (isPlaying) {
                 nativePlay(ptr)
                 delay(10.milliseconds)
-                updateFrameAsync()
+                if (!shouldUseLibVlcNativeSurface()) {
+                    updateFrameAsync()
+                }
                 ioScope.launch {
                     delay(300.milliseconds)
                     if (seekInProgress) {
@@ -1205,7 +1353,9 @@ class LinuxVideoPlayerState(
                 }
             } else {
                 delay(50.milliseconds)
-                updateFrameAsync()
+                if (!shouldUseLibVlcNativeSurface()) {
+                    updateFrameAsync()
+                }
                 seekInProgress = false
                 targetSeekTime = null
                 withContext(Dispatchers.Main) { isLoading = false }

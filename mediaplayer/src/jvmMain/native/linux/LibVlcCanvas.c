@@ -51,6 +51,7 @@ typedef struct {
     int (*media_player_set_rate)(libvlc_media_player_t*, float);
     float (*media_player_get_rate)(libvlc_media_player_t*);
     libvlc_state_t (*media_player_get_state)(libvlc_media_player_t*);
+    void (*media_player_set_xwindow)(libvlc_media_player_t*, uint32_t);
     void (*video_set_callbacks)(libvlc_media_player_t*, void* (*)(void*, void**), void (*)(void*, void*, void* const*), void (*)(void*, void*), void*);
     void (*video_set_format_callbacks)(libvlc_media_player_t*, unsigned (*)(void**, char*, unsigned*, unsigned*, unsigned*, unsigned*), void (*)(void*));
     libvlc_track_description_t* (*audio_get_track_description)(libvlc_media_player_t*);
@@ -78,6 +79,8 @@ struct LibVlcCanvasPlayer {
     size_t u_offset;
     size_t v_offset;
     int frame_ready;
+    int native_video_output;
+    uint32_t native_window;
     int pending_audio_ordinal;
     int pending_spu_ordinal;
     int did_play_to_end;
@@ -135,6 +138,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     api->media_player_set_rate = (int (*)(libvlc_media_player_t*, float))vlc_sym(api->dylib, "libvlc_media_player_set_rate");
     api->media_player_get_rate = (float (*)(libvlc_media_player_t*))vlc_sym(api->dylib, "libvlc_media_player_get_rate");
     api->media_player_get_state = (libvlc_state_t (*)(libvlc_media_player_t*))vlc_sym(api->dylib, "libvlc_media_player_get_state");
+    api->media_player_set_xwindow = (void (*)(libvlc_media_player_t*, uint32_t))vlc_sym(api->dylib, "libvlc_media_player_set_xwindow");
     api->video_set_callbacks = (void (*)(libvlc_media_player_t*, void* (*)(void*, void**), void (*)(void*, void*, void* const*), void (*)(void*, void*), void*))vlc_sym(api->dylib, "libvlc_video_set_callbacks");
     api->video_set_format_callbacks = (void (*)(libvlc_media_player_t*, unsigned (*)(void**, char*, unsigned*, unsigned*, unsigned*, unsigned*), void (*)(void*)))vlc_sym(api->dylib, "libvlc_video_set_format_callbacks");
     api->audio_get_track_description = (libvlc_track_description_t* (*)(libvlc_media_player_t*))vlc_sym(api->dylib, "libvlc_audio_get_track_description");
@@ -149,9 +153,10 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
         !api->media_player_play || !api->media_player_pause || !api->media_player_stop ||
         !api->media_player_get_time || !api->media_player_set_time || !api->media_player_get_length ||
         !api->audio_set_volume || !api->audio_get_volume || !api->media_player_set_rate ||
-        !api->media_player_get_rate || !api->media_player_get_state || !api->video_set_callbacks ||
-        !api->video_set_format_callbacks || !api->audio_get_track_description || !api->audio_set_track ||
-        !api->video_get_spu_description || !api->video_set_spu || !api->track_description_list_release) {
+        !api->media_player_get_rate || !api->media_player_get_state || !api->media_player_set_xwindow ||
+        !api->video_set_callbacks || !api->video_set_format_callbacks || !api->audio_get_track_description ||
+        !api->audio_set_track || !api->video_get_spu_description || !api->video_set_spu ||
+        !api->track_description_list_release) {
         fprintf(stderr, "libVLC is missing required API symbols\n");
         dlclose(api->dylib);
         if (api->core_dylib) dlclose(api->core_dylib);
@@ -358,11 +363,12 @@ static void add_header_options(libvlc_media_t* media, LibVlcCanvasPlayer* player
     free(copy);
 }
 
-LibVlcCanvasPlayer* lvc_create(const char* libvlc_path, const char* plugin_path) {
+LibVlcCanvasPlayer* lvc_create(const char* libvlc_path, const char* plugin_path, int native_video_output) {
     if (!libvlc_path || !plugin_path) return NULL;
     LibVlcCanvasPlayer* player = (LibVlcCanvasPlayer*)calloc(1, sizeof(LibVlcCanvasPlayer));
     if (!player) return NULL;
     pthread_mutex_init(&player->frame_mutex, NULL);
+    player->native_video_output = native_video_output != 0;
     player->pending_audio_ordinal = -2;
     player->pending_spu_ordinal = -2;
 
@@ -373,7 +379,7 @@ LibVlcCanvasPlayer* lvc_create(const char* libvlc_path, const char* plugin_path)
     }
 
     setenv("VLC_PLUGIN_PATH", plugin_path, 1);
-    const char* args[] = {
+    const char* memory_args[] = {
         "--no-video-title-show",
         "--no-osd",
         "--quiet",
@@ -381,7 +387,18 @@ LibVlcCanvasPlayer* lvc_create(const char* libvlc_path, const char* plugin_path)
         "--avcodec-hw=none",
         "--no-avcodec-dr"
     };
-    player->instance = player->api.new_instance((int)(sizeof(args) / sizeof(args[0])), args);
+    const char* native_args[] = {
+        "--no-video-title-show",
+        "--no-osd",
+        "--quiet",
+        "--vout=xcb_x11"
+    };
+    const char* const* args = player->native_video_output ? native_args : memory_args;
+    int arg_count =
+        player->native_video_output
+            ? (int)(sizeof(native_args) / sizeof(native_args[0]))
+            : (int)(sizeof(memory_args) / sizeof(memory_args[0]));
+    player->instance = player->api.new_instance(arg_count, args);
     if (!player->instance) {
         lvc_destroy(player);
         return NULL;
@@ -407,7 +424,12 @@ void lvc_destroy(LibVlcCanvasPlayer* player) {
     free(player);
 }
 
-int lvc_open_uri_with_headers(LibVlcCanvasPlayer* player, const char* uri, const char* request_headers) {
+int lvc_open_uri_with_headers(
+    LibVlcCanvasPlayer* player,
+    const char* uri,
+    const char* request_headers,
+    int start_playback
+) {
     if (!player || !player->instance || !uri) return 0;
     if (player->player) {
         player->api.media_player_stop(player->player);
@@ -429,9 +451,17 @@ int lvc_open_uri_with_headers(LibVlcCanvasPlayer* player, const char* uri, const
     player->api.media_release(media);
     if (!player->player) return 0;
 
-    player->api.video_set_callbacks(player->player, vlc_lock_cb, vlc_unlock_cb, vlc_display_cb, player);
-    player->api.video_set_format_callbacks(player->player, vlc_format_cb, vlc_format_cleanup_cb);
-    if (player->api.media_player_play(player->player) != 0) return 0;
+    if (player->native_video_output) {
+        player->api.media_player_set_xwindow(player->player, player->native_window);
+    } else {
+        player->api.video_set_callbacks(player->player, vlc_lock_cb, vlc_unlock_cb, vlc_display_cb, player);
+        player->api.video_set_format_callbacks(player->player, vlc_format_cb, vlc_format_cleanup_cb);
+    }
+    int should_start = start_playback || !player->native_video_output;
+    if (should_start && player->api.media_player_play(player->player) != 0) return 0;
+    if (!start_playback && !player->native_video_output) {
+        player->api.media_player_pause(player->player);
+    }
     apply_pending_tracks(player);
     return 1;
 }
@@ -606,4 +636,13 @@ char* lvc_get_subtitle_track_descriptions(LibVlcCanvasPlayer* player) {
     char* result = descriptions_to_string(player, descriptions);
     if (descriptions) player->api.track_description_list_release(descriptions);
     return result;
+}
+
+int lvc_set_native_window(LibVlcCanvasPlayer* player, uint32_t xwindow) {
+    if (!player || !player->native_video_output) return 0;
+    player->native_window = xwindow;
+    if (player->player && player->api.media_player_set_xwindow) {
+        player->api.media_player_set_xwindow(player->player, xwindow);
+    }
+    return 1;
 }

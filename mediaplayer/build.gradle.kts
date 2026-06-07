@@ -208,13 +208,7 @@ val buildNativeMacOs by tasks.registering(Exec::class) {
 val buildNativeWindows by tasks.registering(Exec::class) {
     description = "Compiles the C++ native library into Windows DLLs (x64 + ARM64)"
     group = "build"
-    val hasPrebuilt =
-        nativeResourceDir
-            .dir("win32-x86-64")
-            .file("NativeVideoPlayer.dll")
-            .asFile
-            .exists()
-    enabled = Os.isFamily(Os.FAMILY_WINDOWS) && !hasPrebuilt
+    enabled = Os.isFamily(Os.FAMILY_WINDOWS)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/windows")
     inputs.dir(nativeDir)
@@ -226,13 +220,7 @@ val buildNativeWindows by tasks.registering(Exec::class) {
 val buildNativeLinux by tasks.registering(Exec::class) {
     description = "Compiles the C native library into Linux .so (GStreamer + JNI)"
     group = "build"
-    val hasPrebuilt =
-        nativeResourceDir
-            .dir("linux-x86-64")
-            .file("libNativeVideoPlayer.so")
-            .asFile
-            .exists()
-    enabled = Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC) && !hasPrebuilt
+    enabled = Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/linux")
     inputs.dir(nativeDir)
