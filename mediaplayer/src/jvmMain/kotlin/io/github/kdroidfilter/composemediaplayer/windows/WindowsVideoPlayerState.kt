@@ -30,11 +30,11 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
-import io.github.kdroidfilter.composemediaplayer.VideoOutputMode
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
@@ -839,19 +839,7 @@ class WindowsVideoPlayerState(
         uri: String,
         requestHeaders: Map<String, String>,
     ): WindowsResolvedLibVlcBackend? {
-        val nativeHdrRequested = playbackOptions.videoOutputMode == VideoOutputMode.NATIVE_HDR
-        val forcedDesktopBackend =
-            when (playbackOptions.desktopVideoBackend) {
-                DesktopVideoBackend.LIBVLC -> "libvlc"
-                DesktopVideoBackend.LIBVLC_NATIVE -> "libvlc-native-view"
-                DesktopVideoBackend.PLATFORM -> "platform"
-                DesktopVideoBackend.AUTO ->
-                    if (nativeHdrRequested) {
-                        "libvlc-native-view"
-                    } else {
-                        null
-                    }
-            }
+        val forcedDesktopBackend = playbackOptions.forcedJvmDesktopBackend()
         val shouldUsePlatformBackend =
             forcedDesktopBackend == null &&
                 !JvmExternalFallbackContainerSupport.needsContainerFallback(

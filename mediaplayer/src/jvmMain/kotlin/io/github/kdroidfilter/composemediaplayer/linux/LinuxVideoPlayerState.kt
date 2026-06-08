@@ -26,11 +26,11 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
-import io.github.kdroidfilter.composemediaplayer.VideoOutputMode
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
@@ -535,19 +535,7 @@ class LinuxVideoPlayerState(
         uri: String,
         requestHeaders: Map<String, String>,
     ): LinuxResolvedLibVlcBackend? {
-        val nativeHdrRequested = playbackOptions.videoOutputMode == VideoOutputMode.NATIVE_HDR
-        val forcedDesktopBackend =
-            when (playbackOptions.desktopVideoBackend) {
-                DesktopVideoBackend.LIBVLC -> "libvlc"
-                DesktopVideoBackend.LIBVLC_NATIVE -> "libvlc-native-view"
-                DesktopVideoBackend.PLATFORM -> "platform"
-                DesktopVideoBackend.AUTO ->
-                    if (nativeHdrRequested) {
-                        "libvlc-native-view"
-                    } else {
-                        null
-                    }
-            }
+        val forcedDesktopBackend = playbackOptions.forcedJvmDesktopBackend()
         val shouldUsePlatformBackend =
             forcedDesktopBackend == null &&
                 !JvmExternalFallbackContainerSupport.needsContainerFallback(
@@ -572,10 +560,13 @@ class LinuxVideoPlayerState(
                 ExternalVlcLocator.findLibVlc()?.let {
                     LinuxResolvedLibVlcBackend(it, LinuxLibVlcRenderMode.MEMORY)
                 }
-            "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-xwindow", "libvlc-x11" ->
+            "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-xwindow", "libvlc-x11" -> {
+                ensureLinuxNativeViewX11DisplayAvailable()
                 ExternalVlcLocator.findLibVlc()?.let {
                     LinuxResolvedLibVlcBackend(it, LinuxLibVlcRenderMode.NATIVE_VIEW)
                 } ?: throw missingLibVlcBackendException()
+            }
+            "libvlc-wayland", "wayland" -> unsupportedLibVlcWaylandBackend()
             "ffmpeg", "vlc" -> null
             else -> null
         }
@@ -596,6 +587,24 @@ class LinuxVideoPlayerState(
                 "Install VLC/libVLC for ${ExternalVlcLocator.currentProcessArchitecture() ?: "the current"} " +
                 "JVM architecture or set composemediaplayer.libvlc and composemediaplayer.libvlc.plugins. " +
                 "ComposeMediaPlayer does not bundle or link VLC.",
+        )
+
+    private fun ensureLinuxNativeViewX11DisplayAvailable() {
+        if (!System.getenv("DISPLAY").isNullOrBlank()) return
+        throw UnsupportedOperationException(
+            "The Linux libVLC native-view backend currently requires an X11/XWayland DISPLAY. " +
+                "This backend embeds VLC through an AWT/JAWT X11 drawable and libvlc_media_player_set_xwindow; " +
+                "native Wayland wl_surface embedding is not available in the supported libVLC API. " +
+                "DISPLAY is empty; WAYLAND_DISPLAY=${System.getenv("WAYLAND_DISPLAY") ?: "<unset>"}, " +
+                "XDG_SESSION_TYPE=${System.getenv("XDG_SESSION_TYPE") ?: "<unset>"}.",
+        )
+    }
+
+    private fun unsupportedLibVlcWaylandBackend(): LinuxResolvedLibVlcBackend =
+        throw UnsupportedOperationException(
+            "The Linux libVLC Wayland native-view backend is not implemented. " +
+                "Use libvlc-native-view with XWayland/X11 for direct libVLC rendering, " +
+                "or use the platform/memory backend until a stable libVLC wl_surface embedding API is available.",
         )
 
     private suspend fun prepareLibVlcPlayback(

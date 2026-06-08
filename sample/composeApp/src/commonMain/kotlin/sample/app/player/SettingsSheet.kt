@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.kdroidfilter.composemediaplayer.HdrCapabilities
 import io.github.kdroidfilter.composemediaplayer.HdrSupport
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
@@ -169,7 +170,7 @@ internal fun SettingsSheet(
                     InfoRow("HDR10", hdr.hdr10.label())
                     InfoRow("HLG", hdr.hlg.label())
                     InfoRow("Dolby Vision", hdr.dolbyVision.label())
-                    InfoRow("Native HDR", if (hdr.supportsNativeHdrPlayback) "Supported" else "Not supported")
+                    InfoRow("Native HDR", hdr.nativeHdrPlaybackLabel())
                     InfoRow("Tone map SDR", if (hdr.supportsToneMappingToSdr) "Supported" else "Not supported")
                     InfoRow(
                         "DV P7->8.1",
@@ -264,6 +265,13 @@ private fun HdrSupport.label(): String =
         HdrSupport.SUPPORTED -> "Supported"
         HdrSupport.UNSUPPORTED -> "Not supported"
         HdrSupport.UNKNOWN -> "Unknown"
+    }
+
+private fun HdrCapabilities.nativeHdrPlaybackLabel(): String =
+    when {
+        supportsNativeHdrPlayback -> "Supported"
+        hdr == HdrSupport.UNKNOWN -> "Unknown"
+        else -> "Not supported"
     }
 
 private fun formatTwoDecimals(value: Float): String {

@@ -98,7 +98,9 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 
 > macOS JVM also has an experimental opt-in HDR Metal rendering POC for AVFoundation-supported sources. Enable it with `-Dcomposemediaplayer.macos.hdrMetal=true` or `COMPOSE_MEDIA_PLAYER_MACOS_HDR_METAL=true`. See [macOS HDR Metal POC](docs/macos-hdr-metal-poc.md).
 
-> On Windows and Linux JVM, `VideoOutputMode.NATIVE_HDR` selects the libVLC native-view path in `DesktopVideoBackend.AUTO` mode. This avoids copying frames into Compose and is the intended best-effort path for HDR sources, but actual HDR passthrough depends on VLC, the OS compositor, GPU drivers, display mode, and an HDR-capable display.
+> On Windows and Linux JVM, `VideoOutputMode.NATIVE_HDR` selects the libVLC native-view path in `DesktopVideoBackend.AUTO` mode. This avoids copying frames into Compose and is the intended best-effort path for HDR sources, but actual HDR passthrough depends on VLC, the OS compositor, GPU drivers, display mode, and an HDR-capable display. `PlayerCapabilities.hdr` stays `UNKNOWN` there until a platform-specific HDR output detector is available.
+
+> Linux `libvlc-native-view` currently embeds VLC through an X11/XWayland xwindow. Native Wayland needs a separate `wl_surface` backend and is not implemented by this path.
 
 ## ✅ Media Support Preflight
 

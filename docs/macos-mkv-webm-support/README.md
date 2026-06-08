@@ -6,7 +6,11 @@ In `auto` mode, Compose Media Player treats a user-installed VLC/libVLC as the p
 
 The opt-in `libvlc-native-view` backend lets VLC render directly into a native desktop child window instead of copying decoded frames into Compose. It uses an NSView on macOS, an HWND on Windows, and an X11/XWayland xwindow on Linux. Compose controls render above it in a separate overlay layer, so the video path stays native while the UI stays Compose.
 
+The Linux native-view backend is deliberately X11/XWayland today. It is hosted by an AWT `Canvas`; JAWT exposes that surface as an X11 drawable, and the supported libVLC embedding call is `libvlc_media_player_set_xwindow`. A real native Wayland path needs a separate `wl_surface` host plus a stable libVLC Wayland embedding API, so it should be added as its own backend instead of pretending the X11 path is Wayland-compatible.
+
 For HDR sources on Windows and Linux, `VideoOutputMode.NATIVE_HDR` with `DesktopVideoBackend.AUTO` selects `libvlc-native-view` instead of the Compose SDR frame-copy path. This is a best-effort HDR-preserving path: actual HDR passthrough still depends on VLC, OS compositor behavior, GPU drivers, display mode, and the connected HDR display.
+
+`PlayerCapabilities.hdr` remains `UNKNOWN` on Windows and Linux unless a platform-specific detector is added. The native-view selection proves that Compose is not receiving copied SDR frames, but it does not prove that the OS display pipeline is outputting HDR.
 
 On macOS, ASS/SSA subtitle rendering in the memory-callback path can optionally load a user-installed `libass.dylib` dynamically, render ASS/SSA to pixels, and blend those pixels into the Compose/Skia video frame. Embedded ASS/SSA tracks are extracted with the built-in Matroska reader.
 
@@ -28,7 +32,7 @@ COMPOSE_MEDIA_PLAYER_LINUX_FALLBACK_BACKEND=libvlc
 -Dcomposemediaplayer.linux.fallbackBackend=libvlc
 ```
 
-To require direct native libVLC rendering, use `libvlc-native-view` instead of `libvlc` in the same environment variables or JVM properties. The aliases `libvlc-native`, `libvlc-view`, `libvlc-nsview`, `libvlc-hwnd`, and `libvlc-xwindow` are also accepted on their matching desktop targets.
+To require direct native libVLC rendering, use `libvlc-native-view` instead of `libvlc` in the same environment variables or JVM properties. The aliases `libvlc-native`, `libvlc-view`, `libvlc-nsview`, `libvlc-hwnd`, and `libvlc-xwindow` are also accepted on their matching desktop targets. On Linux, this path requires an X11/XWayland `DISPLAY`; `libvlc-wayland` is intentionally rejected until native Wayland embedding is implemented.
 
 The sample app can request that path with:
 

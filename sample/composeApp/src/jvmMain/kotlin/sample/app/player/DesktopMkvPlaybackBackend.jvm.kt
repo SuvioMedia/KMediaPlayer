@@ -130,7 +130,7 @@ private fun libVlcNativeOption(tools: JvmMediaToolAvailability): DesktopMkvPlayb
     val enabled = tools.libVlc.available
     val status =
         when {
-            enabled && isLinux() -> "Ready. VLC/libVLC detected. Uses an X11/XWayland native window."
+            enabled && isLinux() -> "Ready. VLC/libVLC detected. Uses an X11/XWayland native window, not native Wayland."
             enabled -> "Ready. VLC/libVLC detected."
             else -> "Requires VLC/libVLC."
         }
@@ -141,7 +141,7 @@ private fun libVlcNativeOption(tools: JvmMediaToolAvailability): DesktopMkvPlayb
         status = status,
         installHint =
             if (enabled) {
-                "VLC: ${tools.vlc.path ?: tools.libVlc.path}. Native-view is the Windows/Linux best-effort HDR path."
+                "VLC: ${tools.vlc.path ?: tools.libVlc.path}. Linux direct rendering requires X11/XWayland."
             } else {
                 "Install VLC from https://www.videolan.org/vlc/."
             },
