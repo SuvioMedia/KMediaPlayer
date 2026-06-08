@@ -46,6 +46,10 @@ add_library(NativeVideoPlayer SHARED
 
 target_include_directories(NativeVideoPlayer PRIVATE ${JNI_INCLUDE_DIRS})
 
+if(JAVA_AWT_INCLUDE_PATH)
+    target_include_directories(NativeVideoPlayer PRIVATE "${JAVA_AWT_INCLUDE_PATH}")
+endif()
+
 target_compile_definitions(NativeVideoPlayer PRIVATE
         WIN32_LEAN_AND_MEAN
         NOMINMAX
@@ -96,11 +100,15 @@ target_link_libraries(NativeVideoPlayer PRIVATE
         evr
 )
 
-if(NOT JNI_AWT_LIBRARY)
-        message(FATAL_ERROR "JNI AWT library is required for the libVLC native-view backend")
+if(TARGET JNI::AWT)
+    target_link_libraries(NativeVideoPlayer PRIVATE JNI::AWT)
+elseif(JAVA_AWT_LIBRARY)
+    target_link_libraries(NativeVideoPlayer PRIVATE "${JAVA_AWT_LIBRARY}")
+elseif(JNI_AWT_LIBRARY)
+    target_link_libraries(NativeVideoPlayer PRIVATE "${JNI_AWT_LIBRARY}")
+else()
+    message(FATAL_ERROR "JNI AWT library is required for the libVLC native-view backend. JAVA_HOME='$ENV{JAVA_HOME}'")
 endif()
-
-target_link_libraries(NativeVideoPlayer PRIVATE ${JNI_AWT_LIBRARY})
 
 set_target_properties(NativeVideoPlayer PROPERTIES
         OUTPUT_NAME "NativeVideoPlayer"

@@ -2,4 +2,4 @@ jdk:
   - openjdk17
 
 install:
-  - ./gradlew :mediaplayer:publishKotlinMultiplatformPublicationToMavenLocal :mediaplayer:publishAndroidReleasePublicationToMavenLocal :mediaplayer:publishJsPublicationToMavenLocal :mediaplayer:publishWasmJsPublicationToMavenLocal --no-daemon --stacktrace
+  - ./gradlew :mediaplayer:publishKotlinMultiplatformPublicationToMavenLocal :mediaplayer:publishAndroidPublicationToMavenLocal :mediaplayer:publishWasmJsPublicationToMavenLocal --no-daemon --stacktrace

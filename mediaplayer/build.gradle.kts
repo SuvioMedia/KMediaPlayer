@@ -281,8 +281,8 @@ mavenPublishing {
 
     publishToMavenCentral()
 
-    // Only sign publications in CI environments to avoid requiring local GPG signing setup.
-    if (System.getenv("CI") != null && githubPagesMavenRepository == null) {
+    // JitPack publishes to Maven Local and does not provide Maven Central signing credentials.
+    if (System.getenv("CI") != null && !isJitPack && githubPagesMavenRepository == null) {
         signAllPublications()
     }
 }
