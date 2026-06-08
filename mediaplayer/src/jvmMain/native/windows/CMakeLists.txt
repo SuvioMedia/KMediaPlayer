@@ -100,16 +100,6 @@ target_link_libraries(NativeVideoPlayer PRIVATE
         evr
 )
 
-if(TARGET JNI::AWT)
-    target_link_libraries(NativeVideoPlayer PRIVATE JNI::AWT)
-elseif(JAVA_AWT_LIBRARY)
-    target_link_libraries(NativeVideoPlayer PRIVATE "${JAVA_AWT_LIBRARY}")
-elseif(JNI_AWT_LIBRARY)
-    target_link_libraries(NativeVideoPlayer PRIVATE "${JNI_AWT_LIBRARY}")
-else()
-    message(FATAL_ERROR "JNI AWT library is required for the libVLC native-view backend. JAVA_HOME='$ENV{JAVA_HOME}'")
-endif()
-
 set_target_properties(NativeVideoPlayer PROPERTIES
         OUTPUT_NAME "NativeVideoPlayer"
         LIBRARY_OUTPUT_DIRECTORY "${OUTPUT_DIR}"

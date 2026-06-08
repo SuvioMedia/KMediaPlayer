@@ -8,6 +8,8 @@
 #include <jawt_md.h>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <windows.h>
 
 // ---------------------------------------------------------------------------
 // Utility
@@ -22,12 +24,78 @@ static inline LibVlcCanvasPlayer* toLibVlc(jlong handle) {
 
 static constexpr double HUNDRED_NANOSECOND_TICKS_PER_SECOND = 10000000.0;
 
+using JawtGetAwtFn = jboolean(JNICALL*)(JNIEnv*, JAWT*);
+
+static std::wstring javaHome(JNIEnv* env) {
+    jclass systemClass = env->FindClass("java/lang/System");
+    if (!systemClass) {
+        env->ExceptionClear();
+        return {};
+    }
+
+    jmethodID getProperty = env->GetStaticMethodID(
+        systemClass,
+        "getProperty",
+        "(Ljava/lang/String;)Ljava/lang/String;");
+    if (!getProperty) {
+        env->DeleteLocalRef(systemClass);
+        env->ExceptionClear();
+        return {};
+    }
+
+    jstring key = env->NewStringUTF("java.home");
+    if (!key) {
+        env->DeleteLocalRef(systemClass);
+        env->ExceptionClear();
+        return {};
+    }
+
+    auto value = static_cast<jstring>(env->CallStaticObjectMethod(systemClass, getProperty, key));
+    env->DeleteLocalRef(systemClass);
+    env->DeleteLocalRef(key);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return {};
+    }
+    if (!value) return {};
+
+    const jchar* chars = env->GetStringChars(value, nullptr);
+    if (!chars) {
+        env->DeleteLocalRef(value);
+        return {};
+    }
+
+    std::wstring home(reinterpret_cast<const wchar_t*>(chars), env->GetStringLength(value));
+    env->ReleaseStringChars(value, chars);
+    env->DeleteLocalRef(value);
+    return home;
+}
+
+static JawtGetAwtFn resolveJawtGetAwt(JNIEnv* env) {
+    HMODULE jawt = GetModuleHandleW(L"jawt.dll");
+    if (!jawt) {
+        const std::wstring home = javaHome(env);
+        if (!home.empty()) {
+            jawt = LoadLibraryW((home + L"\\bin\\jawt.dll").c_str());
+        }
+    }
+    if (!jawt) {
+        jawt = LoadLibraryW(L"jawt.dll");
+    }
+    if (!jawt) return nullptr;
+
+    return reinterpret_cast<JawtGetAwtFn>(GetProcAddress(jawt, "JAWT_GetAWT"));
+}
+
 static HWND awtComponentHwnd(JNIEnv* env, jobject component) {
     if (!component) return nullptr;
 
+    JawtGetAwtFn getAwt = resolveJawtGetAwt(env);
+    if (!getAwt) return nullptr;
+
     JAWT awt{};
     awt.version = JAWT_VERSION_1_4;
-    if (JAWT_GetAWT(env, &awt) == JNI_FALSE) return nullptr;
+    if (getAwt(env, &awt) == JNI_FALSE) return nullptr;
 
     JAWT_DrawingSurface* surface = awt.GetDrawingSurface(env, component);
     if (!surface) return nullptr;
