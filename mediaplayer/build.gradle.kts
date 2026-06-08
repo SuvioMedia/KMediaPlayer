@@ -193,7 +193,8 @@ kotlin {
 
 val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources/composemediaplayer/native")
 val skipNativeBuild =
-    providers.gradleProperty("composeMediaPlayer.skipNativeBuild")
+    providers
+        .gradleProperty("composeMediaPlayer.skipNativeBuild")
         .orElse(providers.environmentVariable("COMPOSE_MEDIA_PLAYER_SKIP_NATIVE_BUILD"))
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
