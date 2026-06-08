@@ -192,11 +192,16 @@ kotlin {
 }
 
 val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources/composemediaplayer/native")
+val skipNativeBuild =
+    providers.gradleProperty("composeMediaPlayer.skipNativeBuild")
+        .orElse(providers.environmentVariable("COMPOSE_MEDIA_PLAYER_SKIP_NATIVE_BUILD"))
+        .map { it.equals("true", ignoreCase = true) }
+        .getOrElse(false)
 
 val buildNativeMacOs by tasks.registering(Exec::class) {
     description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
     group = "build"
-    enabled = Os.isFamily(Os.FAMILY_MAC)
+    enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_MAC)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/macos")
     inputs.dir(nativeDir)
@@ -208,7 +213,7 @@ val buildNativeMacOs by tasks.registering(Exec::class) {
 val buildNativeWindows by tasks.registering(Exec::class) {
     description = "Compiles the C++ native library into Windows DLLs (x64 + ARM64)"
     group = "build"
-    enabled = Os.isFamily(Os.FAMILY_WINDOWS)
+    enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_WINDOWS)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/windows")
     inputs.dir(nativeDir)
@@ -220,7 +225,7 @@ val buildNativeWindows by tasks.registering(Exec::class) {
 val buildNativeLinux by tasks.registering(Exec::class) {
     description = "Compiles the C native library into Linux .so (GStreamer + JNI)"
     group = "build"
-    enabled = Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC)
+    enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/linux")
     inputs.dir(nativeDir)

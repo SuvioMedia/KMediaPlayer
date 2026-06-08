@@ -60,6 +60,8 @@ jobs:
 
       - name: Build and test JVM
         run: ./gradlew :mediaplayer:compileKotlinJvm :mediaplayer:jvmTest --no-daemon --continue
+        env:
+          COMPOSE_MEDIA_PLAYER_SKIP_NATIVE_BUILD: 'true'
 
       - name: Upload test reports
         uses: actions/upload-artifact@v7
