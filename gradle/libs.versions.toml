@@ -11,7 +11,7 @@ compose = "1.11.1"
 androidx-activityCompose = "1.13.0"
 androidx-core = "1.18.0"
 media3Exoplayer = "1.10.1"
-detekt = "2.0.0-alpha.3"
+detekt = "2.0.0-alpha.4"
 ktlint = "14.2.0"
 androidx-lifecycle-runtime-ktx = "2.10.0"
 
