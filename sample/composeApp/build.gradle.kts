@@ -16,7 +16,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(25)
 
     android {
         namespace = "sample.app.shared"
@@ -27,10 +27,14 @@ kotlin {
                 .toInt()
 
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_17)
+            jvmTarget.set(JvmTarget.JVM_25)
         }
     }
-    jvm()
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_25)
+        }
+    }
     wasmJs {
         outputModuleName.set("composeApp")
         browser {

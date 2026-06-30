@@ -108,6 +108,9 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
                 )
             }
         },
+        onTracksChangedError = { message ->
+            webVideoLogger.e { "HLS track sync callback failed: $message" }
+        },
     )
     playerState.applyHlsQualityCallback = { variantId ->
         applySelectedHlsQuality(variantId)
@@ -124,6 +127,7 @@ private fun setupHlsSource(
     useCredentials: Boolean,
     onTracksChanged: () -> Unit,
     onError: (String, String?, String?, Boolean) -> Unit,
+    onTracksChangedError: (String) -> Unit,
 ): Unit =
     js(
         """
@@ -178,7 +182,12 @@ private fun setupHlsSource(
 
                 const sync = function() {
                     if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;
-                    try { onTracksChanged(); } catch (error) { console.error(error); }
+                    try {
+                        onTracksChanged();
+                    } catch (error) {
+                        const message = error && error.stack ? error.stack : (error && error.message ? error.message : String(error));
+                        try { onTracksChangedError(String(message)); } catch (_) {}
+                    }
                 };
 
                 const parseAttributes = function(value) {
@@ -283,7 +292,7 @@ private fun destroyHlsController(video: HTMLVideoElement): Unit =
         """,
     )
 
-private data class HlsQualitySnapshot(
+internal data class HlsQualitySnapshot(
     val variants: List<HlsQualityVariant>,
     val selectedId: String?,
     val autoMode: Boolean,
@@ -302,7 +311,7 @@ internal fun HTMLVideoElement.applySelectedHlsQuality(variantId: String?) {
     selectHlsQualityById(video = this, selectedId = variantId)
 }
 
-private fun parseHlsQualityRows(rows: String): HlsQualitySnapshot {
+internal fun parseHlsQualityRows(rows: String): HlsQualitySnapshot {
     var selectedId: String? = null
     var autoMode = true
     val variants =
@@ -314,15 +323,17 @@ private fun parseHlsQualityRows(rows: String): HlsQualitySnapshot {
                 if (columns.size < 8) return@mapNotNull null
 
                 val id = columns[0]
+                val label = columns[1]
+                if (id.isBlank() || label.isBlank()) return@mapNotNull null
                 if (columns[6] == "1") selectedId = id
                 autoMode = columns[7] == "1"
 
                 HlsQualityVariant(
                     id = id,
-                    label = columns[1],
-                    width = columns[2].toIntOrNull(),
-                    height = columns[3].toIntOrNull(),
-                    bitrate = columns[4].toIntOrNull(),
+                    label = label,
+                    width = columns[2].toPositiveIntOrNull(),
+                    height = columns[3].toPositiveIntOrNull(),
+                    bitrate = columns[4].toPositiveIntOrNull(),
                     codecs = columns[5].ifBlank { null },
                 )
             }.toList()
@@ -333,6 +344,8 @@ private fun parseHlsQualityRows(rows: String): HlsQualitySnapshot {
         autoMode = autoMode,
     )
 }
+
+private fun String.toPositiveIntOrNull(): Int? = toIntOrNull()?.takeIf { it > 0 }
 
 @Suppress("UNUSED_PARAMETER")
 private fun readHlsQualityRows(video: HTMLVideoElement): String =

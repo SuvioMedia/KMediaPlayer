@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.common
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -15,11 +16,10 @@ class VideoPlayerErrorTest {
      */
     @Test
     fun testCodecError() {
-        val error = VideoPlayerError.CodecError("Unsupported codec")
+        val error: VideoPlayerError = VideoPlayerError.CodecError("Unsupported codec")
 
         // Verify the error is initialized correctly
-        assertTrue(error is VideoPlayerError.CodecError)
-        assertEquals("Unsupported codec", error.message)
+        assertEquals("Unsupported codec", assertIs<VideoPlayerError.CodecError>(error).message)
 
         // Test equality
         val sameError = VideoPlayerError.CodecError("Unsupported codec")
@@ -34,11 +34,10 @@ class VideoPlayerErrorTest {
      */
     @Test
     fun testNetworkError() {
-        val error = VideoPlayerError.NetworkError("Connection timeout")
+        val error: VideoPlayerError = VideoPlayerError.NetworkError("Connection timeout")
 
         // Verify the error is initialized correctly
-        assertTrue(error is VideoPlayerError.NetworkError)
-        assertEquals("Connection timeout", error.message)
+        assertEquals("Connection timeout", assertIs<VideoPlayerError.NetworkError>(error).message)
 
         // Test equality
         val sameError = VideoPlayerError.NetworkError("Connection timeout")
@@ -53,11 +52,10 @@ class VideoPlayerErrorTest {
      */
     @Test
     fun testSourceError() {
-        val error = VideoPlayerError.SourceError("File not found")
+        val error: VideoPlayerError = VideoPlayerError.SourceError("File not found")
 
         // Verify the error is initialized correctly
-        assertTrue(error is VideoPlayerError.SourceError)
-        assertEquals("File not found", error.message)
+        assertEquals("File not found", assertIs<VideoPlayerError.SourceError>(error).message)
 
         // Test equality
         val sameError = VideoPlayerError.SourceError("File not found")
@@ -72,11 +70,10 @@ class VideoPlayerErrorTest {
      */
     @Test
     fun testUnknownError() {
-        val error = VideoPlayerError.UnknownError("Unexpected error")
+        val error: VideoPlayerError = VideoPlayerError.UnknownError("Unexpected error")
 
         // Verify the error is initialized correctly
-        assertTrue(error is VideoPlayerError.UnknownError)
-        assertEquals("Unexpected error", error.message)
+        assertEquals("Unexpected error", assertIs<VideoPlayerError.UnknownError>(error).message)
 
         // Test equality
         val sameError = VideoPlayerError.UnknownError("Unexpected error")

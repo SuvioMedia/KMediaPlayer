@@ -25,6 +25,13 @@ data class HdrCapabilities(
     val supportsDolbyVisionProfile7To8Transcoding: Boolean = false,
     val maxExtendedDynamicRange: Float = 1f,
 ) {
+    init {
+        require(maxExtendedDynamicRange.isFinite()) { "maxExtendedDynamicRange must be finite." }
+        require(maxExtendedDynamicRange >= MINIMUM_EXTENDED_DYNAMIC_RANGE) {
+            "maxExtendedDynamicRange must be at least $MINIMUM_EXTENDED_DYNAMIC_RANGE."
+        }
+    }
+
     val hasHdrDisplay: Boolean
         get() = maxExtendedDynamicRange > 1f
 }
@@ -34,6 +41,7 @@ data class PlayerCapabilities(
     val supportsMkv: Boolean = false,
     val supportsPiP: Boolean = false,
     val hdr: HdrCapabilities = HdrCapabilities(),
+    val supportedUriSchemes: Set<String> = DEFAULT_SUPPORTED_URI_SCHEMES,
 ) {
     fun canPlaySource(
         uri: String,
@@ -44,8 +52,8 @@ data class PlayerCapabilities(
         val trimmedUri = source.uri.trim()
         if (trimmedUri.isEmpty()) return false
 
-        val scheme = trimmedUri.substringBefore(':', missingDelimiterValue = "").lowercase()
-        if (scheme.isNotEmpty() && scheme !in DEFAULT_SUPPORTED_URI_SCHEMES) return false
+        val scheme = trimmedUri.sourceScheme()
+        if (scheme.isNotEmpty() && !supportsUriScheme(scheme)) return false
 
         val normalizedMimeType =
             source.mimeType
@@ -57,11 +65,30 @@ data class PlayerCapabilities(
 
         return true
     }
+
+    private fun supportsUriScheme(scheme: String): Boolean =
+        supportedUriSchemes.any { it.trim().equals(scheme, ignoreCase = true) }
 }
 
 internal expect fun platformPlayerCapabilities(): PlayerCapabilities
 
 private val DEFAULT_SUPPORTED_URI_SCHEMES = setOf("asset", "blob", "content", "data", "file", "http", "https")
+private const val MINIMUM_EXTENDED_DYNAMIC_RANGE = 1f
+private const val WINDOWS_DRIVE_PATH_MIN_LENGTH = 3
+
+private fun String.sourceScheme(): String =
+    when {
+        isWindowsDrivePath() || isWindowsUncPath() -> "file"
+        else -> substringBefore(':', missingDelimiterValue = "").lowercase()
+    }
+
+private fun String.isWindowsDrivePath(): Boolean =
+    length >= WINDOWS_DRIVE_PATH_MIN_LENGTH &&
+        this[0].isLetter() &&
+        this[1] == ':' &&
+        (this[2] == '\\' || this[2] == '/')
+
+private fun String.isWindowsUncPath(): Boolean = startsWith("\\\\")
 
 private fun String?.isHlsMimeType(): Boolean =
     this == "application/vnd.apple.mpegurl" ||

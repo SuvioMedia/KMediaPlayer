@@ -2,6 +2,8 @@ package io.github.kdroidfilter.composemediaplayer
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import org.junit.Assume
+import org.junit.Before
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -14,195 +16,166 @@ import kotlin.time.Duration.Companion.milliseconds
  * Tests for the JVM implementation of VideoPlayerState
  */
 class VideoPlayerStateTest {
-    /**
-     * Checks if the native video player library is available.
-     * On Linux, this requires the native GStreamer JNI library.
-     * On macOS, this requires the AVFoundation JNI library.
-     * On Windows, this requires the Media Foundation JNI library.
-     */
-    private fun isNativePlayerAvailable(): Boolean =
+    @Before
+    fun setup() {
+        assumeNativePlayerAvailable()
+    }
+
+    private fun assumeNativePlayerAvailable() {
         try {
-            val state = createVideoPlayerState()
-            state.dispose()
-            true
-        } catch (e: Exception) {
-            println("Native player not available: ${e.message}")
-            false
+            createVideoPlayerState().dispose()
+        } catch (e: Throwable) {
+            if (e.isNativeLibraryUnavailable()) {
+                Assume.assumeTrue("Native player not available: ${e.message}", false)
+            }
+            throw e
         }
+    }
+
+    private fun Throwable.isNativeLibraryUnavailable(): Boolean =
+        when (this) {
+            is UnsatisfiedLinkError -> true
+            is NoClassDefFoundError -> message?.contains("NativeBridge") == true
+            is ExceptionInInitializerError -> cause?.isNativeLibraryUnavailable() == true
+            else -> false
+        }
+
+    private fun withPlayerState(block: (VideoPlayerState) -> Unit) {
+        val playerState = createVideoPlayerState()
+        try {
+            block(playerState)
+        } finally {
+            playerState.dispose()
+        }
+    }
 
     @Test
     fun testCreateVideoPlayerState() {
-        if (!isNativePlayerAvailable()) {
-            println("Skipping test: Native player not available")
-            return
+        withPlayerState { playerState ->
+            assertNotNull(playerState)
+            assertFalse(playerState.hasMedia)
+            assertFalse(playerState.isPlaying)
+            assertEquals(0f, playerState.sliderPos)
+            assertEquals(1f, playerState.volume)
+            assertFalse(playerState.loop)
+            assertEquals("00:00", playerState.positionText)
+            assertEquals("00:00", playerState.durationText)
+            assertFalse(playerState.isFullscreen)
         }
-
-        val playerState = createVideoPlayerState()
-
-        assertNotNull(playerState)
-        assertFalse(playerState.hasMedia)
-        assertFalse(playerState.isPlaying)
-        assertEquals(0f, playerState.sliderPos)
-        assertEquals(1f, playerState.volume)
-        assertFalse(playerState.loop)
-        assertEquals("00:00", playerState.positionText)
-        assertEquals("00:00", playerState.durationText)
-        assertFalse(playerState.isFullscreen)
-
-        playerState.dispose()
     }
 
     @Test
     fun testVolumeControl() {
-        if (!isNativePlayerAvailable()) {
-            println("Skipping test: Native player not available")
-            return
+        withPlayerState { playerState ->
+            assertEquals(1f, playerState.volume)
+
+            playerState.volume = 0.5f
+            assertEquals(0.5f, playerState.volume)
+
+            playerState.volume = -0.1f
+            assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
+
+            playerState.volume = 1.5f
+            assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
         }
-
-        val playerState = createVideoPlayerState()
-
-        assertEquals(1f, playerState.volume)
-
-        playerState.volume = 0.5f
-        assertEquals(0.5f, playerState.volume)
-
-        playerState.volume = -0.1f
-        assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
-
-        playerState.volume = 1.5f
-        assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
-
-        playerState.dispose()
     }
 
     @Test
     fun testLoopSetting() {
-        if (!isNativePlayerAvailable()) {
-            println("Skipping test: Native player not available")
-            return
+        withPlayerState { playerState ->
+            assertFalse(playerState.loop)
+
+            playerState.loop = true
+            assertTrue(playerState.loop)
+
+            playerState.loop = false
+            assertFalse(playerState.loop)
         }
-
-        val playerState = createVideoPlayerState()
-
-        assertFalse(playerState.loop)
-
-        playerState.loop = true
-        assertTrue(playerState.loop)
-
-        playerState.loop = false
-        assertFalse(playerState.loop)
-
-        playerState.dispose()
     }
 
     @Test
     fun testFullscreenToggle() {
-        if (!isNativePlayerAvailable()) {
-            println("Skipping test: Native player not available")
-            return
+        withPlayerState { playerState ->
+            assertFalse(playerState.isFullscreen)
+
+            playerState.toggleFullscreen()
+            assertTrue(playerState.isFullscreen)
+
+            playerState.toggleFullscreen()
+            assertFalse(playerState.isFullscreen)
         }
-
-        val playerState = createVideoPlayerState()
-
-        assertFalse(playerState.isFullscreen)
-
-        playerState.toggleFullscreen()
-        assertTrue(playerState.isFullscreen)
-
-        playerState.toggleFullscreen()
-        assertFalse(playerState.isFullscreen)
-
-        playerState.dispose()
     }
 
     @Test
     fun testDefaultStateReflectsDelegateSubtitleState() {
-        if (!isNativePlayerAvailable()) {
-            println("Skipping test: Native player not available")
-            return
+        withPlayerState { playerState ->
+            val defaultState =
+                playerState as? DefaultVideoPlayerState
+                    ?: error("createVideoPlayerState() should return DefaultVideoPlayerState on JVM")
+
+            val subtitleTrack =
+                SubtitleTrack(
+                    label = "ASS sample",
+                    language = "en",
+                    src = "/tmp/sample.ass",
+                    format = SubtitleFormat.ASS,
+                    isEmbedded = false,
+                )
+
+            defaultState.delegate.currentSubtitleTrack = subtitleTrack
+            defaultState.delegate.subtitlesEnabled = true
+            assertEquals(subtitleTrack, defaultState.currentSubtitleTrack)
+            assertTrue(defaultState.subtitlesEnabled)
+
+            defaultState.currentSubtitleTrack = null
+            defaultState.subtitlesEnabled = false
+            assertNull(defaultState.delegate.currentSubtitleTrack)
+            assertFalse(defaultState.delegate.subtitlesEnabled)
         }
-
-        val playerState = createVideoPlayerState()
-        val defaultState = playerState as? DefaultVideoPlayerState
-        if (defaultState == null) {
-            playerState.dispose()
-            return
-        }
-
-        val subtitleTrack =
-            SubtitleTrack(
-                label = "ASS sample",
-                language = "en",
-                src = "/tmp/sample.ass",
-                format = SubtitleFormat.ASS,
-                isEmbedded = false,
-            )
-
-        defaultState.delegate.currentSubtitleTrack = subtitleTrack
-        defaultState.delegate.subtitlesEnabled = true
-        assertEquals(subtitleTrack, defaultState.currentSubtitleTrack)
-        assertTrue(defaultState.subtitlesEnabled)
-
-        defaultState.currentSubtitleTrack = null
-        defaultState.subtitlesEnabled = false
-        assertNull(defaultState.delegate.currentSubtitleTrack)
-        assertFalse(defaultState.delegate.subtitlesEnabled)
-
-        playerState.dispose()
     }
 
     @Test
     fun testExternalSubtitleTrackApiUpdatesAvailableTracks() {
-        if (!isNativePlayerAvailable()) {
-            println("Skipping test: Native player not available")
-            return
-        }
+        withPlayerState { playerState ->
+            val subtitleTrack =
+                SubtitleTrack(
+                    label = "External VTT",
+                    language = "en",
+                    src = "/tmp/external.vtt",
+                    format = SubtitleFormat.WEBVTT,
+                )
 
-        val playerState = createVideoPlayerState()
-        val subtitleTrack =
-            SubtitleTrack(
-                label = "External VTT",
-                language = "en",
-                src = "/tmp/external.vtt",
-                format = SubtitleFormat.WEBVTT,
+            playerState.addSubtitleTrack(subtitleTrack)
+
+            assertEquals(
+                subtitleTrack,
+                playerState.availableSubtitleTracks.single { it.id == subtitleTrack.id },
             )
 
-        playerState.addSubtitleTrack(subtitleTrack)
+            playerState.currentSubtitleTrack = subtitleTrack
+            playerState.subtitlesEnabled = true
+            playerState.removeSubtitleTrack(subtitleTrack.id)
 
-        assertEquals(subtitleTrack, playerState.availableSubtitleTracks.single { it.id == subtitleTrack.id })
-
-        playerState.currentSubtitleTrack = subtitleTrack
-        playerState.subtitlesEnabled = true
-        playerState.removeSubtitleTrack(subtitleTrack.id)
-
-        assertTrue(playerState.availableSubtitleTracks.none { it.id == subtitleTrack.id })
-        assertNull(playerState.currentSubtitleTrack)
-        assertFalse(playerState.subtitlesEnabled)
-
-        playerState.dispose()
+            assertTrue(playerState.availableSubtitleTracks.none { it.id == subtitleTrack.id })
+            assertNull(playerState.currentSubtitleTrack)
+            assertFalse(playerState.subtitlesEnabled)
+        }
     }
 
     @Test
     fun testErrorHandling() {
-        if (!isNativePlayerAvailable()) {
-            println("Skipping test: Native player not available")
-            return
+        withPlayerState { playerState ->
+            assertEquals(null, playerState.error)
+
+            runBlocking {
+                playerState.openUri("non_existent_file.mp4")
+                delay(500.milliseconds)
+            }
+
+            assertNotNull(playerState.error)
+
+            playerState.clearError()
+            assertEquals(null, playerState.error)
         }
-
-        val playerState = createVideoPlayerState()
-
-        assertEquals(null, playerState.error)
-
-        runBlocking {
-            playerState.openUri("non_existent_file.mp4")
-            delay(500.milliseconds)
-        }
-
-        assertNotNull(playerState.error)
-
-        playerState.clearError()
-        assertEquals(null, playerState.error)
-
-        playerState.dispose()
     }
 }

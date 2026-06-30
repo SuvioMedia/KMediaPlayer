@@ -23,14 +23,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.io.IOException
-import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
@@ -39,12 +34,13 @@ actual fun createVideoPlayerState(
     audioMode: AudioMode,
     cacheConfig: CacheConfig,
     playbackOptions: VideoPlaybackOptions,
-): VideoPlayerState = DefaultVideoPlayerState()
+): VideoPlayerState = DefaultVideoPlayerState(playbackOptions)
 
 internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
     PlayerCapabilities(
         supportsMkv = canPlayWebMimeType(MATROSKA_MIME_TYPE),
         supportsPiP = isWebPictureInPictureSupported(),
+        supportedUriSchemes = WEB_SUPPORTED_URI_SCHEMES,
     )
 
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
@@ -60,7 +56,36 @@ internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean
  * and error handling.
  */
 @Stable
-open class DefaultVideoPlayerState : VideoPlayerState {
+open class DefaultVideoPlayerState(
+    private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+) : VideoPlayerState {
+    private var projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
+    private var _projection by mutableStateOf(playbackOptions.projection.normalized())
+    override var projection: VideoProjectionSettings
+        get() = _projection
+        set(value) {
+            projectionAutoDetectionEnabled = false
+            applyProjectionSettings(value)
+        }
+    private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
+    override var projectionView: VideoProjectionViewSettings
+        get() = _projectionView
+        set(value) {
+            _projectionView = value.normalized()
+        }
+    private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
+    override var projectionViewControlMode: VideoProjectionViewControlMode
+        get() = _projectionViewControlMode
+        set(value) {
+            _projectionViewControlMode = value
+        }
+    private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
+    override var projectionTextureCrop: VideoTextureCrop
+        get() = _projectionTextureCrop
+        set(value) {
+            _projectionTextureCrop = value.normalized()
+        }
+
     // Variable to store the last opened URI for potential replay
     private var lastUri: String? = null
     private var lastRequestHeaders: Map<String, String> = emptyMap()
@@ -68,15 +93,9 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     // Coroutine scope for managing async operations
     private val playerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var lastUpdateTime = TimeSource.Monotonic.markNow()
-    private var _mediaSessionId by mutableStateOf(0L)
-    override val mediaSessionId: Long get() = _mediaSessionId
-    private val _playbackEvents =
-        MutableSharedFlow<PlaybackEvent>(
-            replay = 0,
-            extraBufferCapacity = 64,
-            onBufferOverflow = BufferOverflow.DROP_OLDEST,
-        )
-    override val playbackEvents: SharedFlow<PlaybackEvent> = _playbackEvents.asSharedFlow()
+    private val playbackEventDispatcher = PlaybackEventDispatcher()
+    override val mediaSessionId: Long get() = playbackEventDispatcher.mediaSessionId
+    override val playbackEvents = playbackEventDispatcher.events
 
     // Throttling for control changes
     private var lastVolumeChangeTime = TimeSource.Monotonic.markNow()
@@ -117,6 +136,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             videoDecoder = "Browser native decoder",
             videoRenderer = "HTMLVideoElement",
             audioRenderer = "Browser native audio",
+            videoProjection = projection.renderingInfoLabel(),
         )
     private var _diagnostics by mutableStateOf(PlaybackDiagnostics())
     override val diagnostics: PlaybackDiagnostics get() = _diagnostics
@@ -129,7 +149,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     internal var applyHlsQualityCallback: ((String?) -> Unit)? = null
     override val capabilities: PlayerCapabilities
         get() = platformPlayerCapabilities()
-    override val aspectRatio: Float = 16f / 9f // TO DO: Get from video source
+    private var _aspectRatio by mutableStateOf(DEFAULT_ASPECT_RATIO)
+    override val aspectRatio: Float get() = _aspectRatio
 
     // Subtitle management
     override var subtitlesEnabled by mutableStateOf(false)
@@ -237,23 +258,30 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         positionRecalculationCallback?.invoke()
     }
 
-    internal fun isCurrentMediaSession(sessionId: Long): Boolean = sessionId == _mediaSessionId
+    internal fun isCurrentMediaSession(sessionId: Long): Boolean = sessionId == mediaSessionId
 
     internal fun emitPlaybackEvent(factory: (Long, Long) -> PlaybackEvent) {
-        _playbackEvents.tryEmit(factory(_mediaSessionId, Clock.System.now().toEpochMilliseconds()))
+        playbackEventDispatcher.emit(factory)
     }
 
     private fun emitPlaybackEventForSession(
         sessionId: Long,
         factory: (Long, Long) -> PlaybackEvent,
     ) {
-        _playbackEvents.tryEmit(factory(sessionId, Clock.System.now().toEpochMilliseconds()))
+        playbackEventDispatcher.emitForSession(sessionId, factory)
     }
 
-    private fun nextMediaSessionId(): Long {
-        _mediaSessionId += 1
-        return _mediaSessionId
+    private fun emitSourceReleasedForSession(sessionId: Long) {
+        if (sessionId == 0L) return
+        emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+            PlaybackEvent.SourceReleased(
+                mediaSessionId = eventSessionId,
+                sampledAtMs = sampledAtMs,
+            )
+        }
     }
+
+    private fun nextMediaSessionId(): Long = playbackEventDispatcher.nextMediaSessionId()
 
     /**
      * Applies volume changes with throttling to prevent performance issues
@@ -310,27 +338,42 @@ open class DefaultVideoPlayerState : VideoPlayerState {
      *
      * @param track The subtitle track to select, or null to disable subtitles
      */
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
+        if (track == null) return disableSubtitles()
+        if (track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+
         currentSubtitleTrack = track
-        subtitlesEnabled = (track != null)
+        subtitlesEnabled = true
         applySubtitleTrackCallback?.invoke(track)
         emitPlaybackEvent { sessionId, sampledAtMs ->
             PlaybackEvent.TrackChanged(
                 mediaSessionId = sessionId,
                 sampledAtMs = sampledAtMs,
                 kind = TrackKind.SUBTITLE,
-                trackId = track?.id,
+                trackId = track.id,
             )
         }
+        return TrackSelectionResult.Selected(track.id)
     }
 
     /**
      * Disables subtitles by clearing the current track and setting subtitlesEnabled to false.
      */
-    override fun disableSubtitles() {
+    override fun disableSubtitles(): TrackSelectionResult {
         currentSubtitleTrack = null
         subtitlesEnabled = false
         applySubtitleTrackCallback?.invoke(null)
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.TrackChanged(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                kind = TrackKind.SUBTITLE,
+                trackId = null,
+            )
+        }
+        return TrackSelectionResult.Disabled
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
@@ -355,7 +398,11 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         }
     }
 
-    override fun selectAudioTrack(track: AudioTrack?) {
+    override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        if (track != null && availableAudioTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+
         currentAudioTrack = track
         applyAudioTrackCallback?.invoke(track)
         emitPlaybackEvent { sessionId, sampledAtMs ->
@@ -366,16 +413,20 @@ open class DefaultVideoPlayerState : VideoPlayerState {
                 trackId = track?.id,
             )
         }
+        return track.audioTrackSelectionResult()
     }
 
-    override fun selectHlsQuality(variantId: String?) {
-        _hlsQualityMode = if (variantId == null) HlsQualityMode.AUTO else HlsQualityMode.MANUAL
-        _currentHlsQuality =
-            if (variantId == null) {
-                null
-            } else {
-                _availableHlsQualities.firstOrNull { it.id == variantId }
+    override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
+        if (_availableHlsQualities.isEmpty() && applyHlsQualityCallback == null) {
+            return HlsQualitySelectionResult.NotSupported
+        }
+        val selectedQuality =
+            variantId?.let { id ->
+                _availableHlsQualities.firstOrNull { it.id == id }
+                    ?: return HlsQualitySelectionResult.NotFound(id)
             }
+        _hlsQualityMode = if (variantId == null) HlsQualityMode.AUTO else HlsQualityMode.MANUAL
+        _currentHlsQuality = selectedQuality
         applyHlsQualityCallback?.invoke(variantId)
         emitPlaybackEvent { sessionId, sampledAtMs ->
             PlaybackEvent.TrackChanged(
@@ -385,6 +436,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
                 trackId = variantId,
             )
         }
+        return selectedQuality?.let(HlsQualitySelectionResult::Selected) ?: HlsQualitySelectionResult.Auto
     }
 
     internal fun replaceAvailableAudioTracks(tracks: List<AudioTrack>) {
@@ -432,6 +484,13 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             )
     }
 
+    private fun clearHlsQualityState() {
+        applyHlsQualityCallback = null
+        _availableHlsQualities.clear()
+        _currentHlsQuality = null
+        _hlsQualityMode = HlsQualityMode.AUTO
+    }
+
     /**
      * Opens a media source from the given URI.
      *
@@ -444,6 +503,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         requestHeaders: Map<String, String>,
     ) {
         playerScope.coroutineContext.cancelChildren()
+        val previousSessionId = mediaSessionId
+        val hadPreviousSource = _hasMedia || _sourceUri != null
         val sessionId = nextMediaSessionId()
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
 
@@ -453,6 +514,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
         _sourceUri = uri
         _requestHeaders = sanitizedHeaders
+        resetProjectionForSource(uri)
         _hasMedia = true
         _isLoading = true // Set initial loading state
         _error = null
@@ -461,9 +523,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         clearPendingSeekRequest()
         _bufferedRanges.clear()
         _diagnostics = PlaybackDiagnostics()
-        _availableHlsQualities.clear()
-        _currentHlsQuality = null
-        _hlsQualityMode = HlsQualityMode.AUTO
+        _aspectRatio = DEFAULT_ASPECT_RATIO
+        clearHlsQualityState()
         renderingInfo.update(
             backend = "HTML5 video",
             container = null,
@@ -472,6 +533,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             audioRenderer = "Browser native audio",
             subtitleRenderer = null,
             subtitleSource = null,
+            videoProjection = projection.renderingInfoLabel(),
             notes = null,
         )
         currentAudioTrack = null
@@ -481,6 +543,9 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             subtitlesEnabled = false
         }
         _availableSubtitleTracks.removeAll { it.isEmbedded }
+        if (hadPreviousSource) {
+            emitSourceReleasedForSession(previousSessionId)
+        }
         emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
             PlaybackEvent.SourcePreparing(
                 mediaSessionId = eventSessionId,
@@ -524,6 +589,35 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         openUri(fileUri, initializePlayerState)
     }
 
+    internal fun updateAutoDetectedProjectionFromMetadata() {
+        if (!projectionAutoDetectionEnabled) return
+        applyProjectionSettings(
+            playbackOptions.detectProjectionForSource(
+                uri = sourceUri.orEmpty(),
+                title = metadata.title,
+                metadata = listOfNotNull(metadata.mimeType),
+                videoSizes =
+                    listOfNotNull(
+                        metadata.width?.let { width ->
+                            metadata.height?.let { height ->
+                                VideoProjectionVideoSize(width, height)
+                            }
+                        },
+                    ),
+            ),
+        )
+    }
+
+    private fun resetProjectionForSource(uri: String) {
+        projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
+        applyProjectionSettings(playbackOptions.detectProjectionForSource(uri))
+    }
+
+    private fun applyProjectionSettings(value: VideoProjectionSettings) {
+        _projection = value.normalized()
+        renderingInfo.videoProjection = projection.renderingInfoLabel()
+    }
+
     /**
      * Starts or resumes playback of the current media.
      * If no media is loaded but a previous URI exists, reopens that media.
@@ -531,9 +625,22 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override fun play() {
         if (_hasMedia && !_isPlaying) {
             _isPlaying = true
-        } else if (!_hasMedia && lastUri != null) {
+        } else if (!_hasMedia) {
             // If we have a stored URI but no media, reopen the media
-            openUri(lastUri!!, requestHeaders = lastRequestHeaders)
+            lastUri?.let { uri -> openUri(uri, requestHeaders = lastRequestHeaders) }
+        }
+    }
+
+    override fun restart() {
+        val hadSource = _hasMedia || _sourceUri != null
+        if (!hadSource) return
+        seekTo(Duration.ZERO)
+        play()
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.PlaybackRestarted(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+            )
         }
     }
 
@@ -551,8 +658,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
      * Note: lastUri is preserved for potential replay.
      */
     override fun stop() {
-        val releasedSessionId = _mediaSessionId
-        nextMediaSessionId()
+        val releasedSessionId = playbackEventDispatcher.mediaSessionId
+        val hadSource = _hasMedia || _sourceUri != null
         _isPlaying = false
         _sourceUri = null
         _hasMedia = false
@@ -564,18 +671,12 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _currentDuration = Duration.ZERO
         _bufferedRanges.clear()
         _diagnostics = PlaybackDiagnostics()
-        _availableHlsQualities.clear()
-        _currentHlsQuality = null
-        _hlsQualityMode = HlsQualityMode.AUTO
+        clearHlsQualityState()
         seekingState = false
         clearPendingSeekRequest()
-        if (releasedSessionId != 0L) {
-            emitPlaybackEventForSession(releasedSessionId) { eventSessionId, sampledAtMs ->
-                PlaybackEvent.SourceReleased(
-                    mediaSessionId = eventSessionId,
-                    sampledAtMs = sampledAtMs,
-                )
-            }
+        if (hadSource) {
+            emitSourceReleasedForSession(releasedSessionId)
+            nextMediaSessionId()
         }
         // Note: We don't clear lastUri, so it can be used to replay the video
     }
@@ -728,12 +829,8 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             rows
                 .lineSequence()
                 .filter { it.isNotBlank() }
-                .mapNotNull { row ->
-                    val parts = row.split('|')
-                    val start = parts.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
-                    val end = parts.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-                    BufferedRange(start = start.secondsAsDuration(), end = end.secondsAsDuration())
-                }.toList(),
+                .mapNotNull { row -> row.toBufferedRangeOrNull() }
+                .toList(),
         )
     }
 
@@ -743,6 +840,12 @@ open class DefaultVideoPlayerState : VideoPlayerState {
                 currentHlsQuality = diagnostics.currentHlsQuality ?: currentHlsQuality,
                 bufferedRanges = diagnostics.bufferedRanges.ifEmpty { bufferedRanges },
             )
+    }
+
+    internal fun updateAspectRatio(value: Float) {
+        if (value > 0f && !value.isNaN() && value.isFinite()) {
+            _aspectRatio = value
+        }
     }
 
     /**
@@ -793,14 +896,23 @@ open class DefaultVideoPlayerState : VideoPlayerState {
      * Disposes of resources used by the player.
      */
     override fun dispose() {
+        val releasedSessionId = mediaSessionId
+        val hadMedia = _hasMedia || _sourceUri != null
         preciseCurrentTimeProvider = null
         durationProvider = null
-        applyHlsQualityCallback = null
+        clearHlsQualityState()
+        _sourceUri = null
+        _hasMedia = false
+        _isPlaying = false
+        _isLoading = false
         _bufferedRanges.clear()
         seekingState = false
         clearPendingSeekRequest()
         pendingVolumeChange?.cancel()
         pendingSpeedChange?.cancel()
+        if (hadMedia) {
+            emitSourceReleasedForSession(releasedSessionId)
+        }
         playerScope.cancel()
     }
 
@@ -809,7 +921,26 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     }
 }
 
+private fun String.toBufferedRangeOrNull(): BufferedRange? {
+    val parts = split('|')
+    val start =
+        parts
+            .getOrNull(0)
+            ?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it >= 0.0 }
+            ?: return null
+    val end =
+        parts
+            .getOrNull(1)
+            ?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it >= start }
+            ?: return null
+    return BufferedRange(start = start.secondsAsDuration(), end = end.secondsAsDuration())
+}
+
 private const val MATROSKA_MIME_TYPE = "video/x-matroska"
+private const val DEFAULT_ASPECT_RATIO = 16f / 9f
+private val WEB_SUPPORTED_URI_SCHEMES = setOf("blob", "data", "http", "https")
 
 private fun canPlayWebSource(
     uri: String,

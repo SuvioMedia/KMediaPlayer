@@ -3,6 +3,8 @@ package io.github.kdroidfilter.composemediaplayer.mac
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import org.junit.Assume
+import org.junit.Before
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -18,33 +20,41 @@ import kotlin.time.Duration.Companion.milliseconds
  * the tests will be skipped.
  */
 class MacVideoPlayerStateTest {
+    @Before
+    fun setup() {
+        Assume.assumeTrue(
+            "Skipping Mac-specific test on non-Mac platform",
+            CurrentPlatform.os == CurrentPlatform.OS.MAC,
+        )
+    }
+
+    private fun withMacPlayerState(block: (MacVideoPlayerState) -> Unit) {
+        val playerState = MacVideoPlayerState()
+        try {
+            block(playerState)
+        } finally {
+            playerState.dispose()
+        }
+    }
+
     /**
      * Test the creation of MacVideoPlayerState
      */
     @Test
     fun testCreateMacVideoPlayerState() {
-        // Skip test if not running on Mac
-        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
-            println("Skipping Mac-specific test on non-Mac platform")
-            return
+        withMacPlayerState { playerState ->
+            // Verify the player state is initialized correctly
+            assertNotNull(playerState)
+            assertFalse(playerState.hasMedia)
+            assertFalse(playerState.isPlaying)
+            assertEquals(0f, playerState.sliderPos)
+            assertEquals(1f, playerState.volume)
+            assertFalse(playerState.loop)
+            assertEquals("00:00", playerState.positionText)
+            assertEquals("00:00", playerState.durationText)
+            assertFalse(playerState.isFullscreen)
+            assertNull(playerState.error)
         }
-
-        val playerState = MacVideoPlayerState()
-
-        // Verify the player state is initialized correctly
-        assertNotNull(playerState)
-        assertFalse(playerState.hasMedia)
-        assertFalse(playerState.isPlaying)
-        assertEquals(0f, playerState.sliderPos)
-        assertEquals(1f, playerState.volume)
-        assertFalse(playerState.loop)
-        assertEquals("00:00", playerState.positionText)
-        assertEquals("00:00", playerState.durationText)
-        assertFalse(playerState.isFullscreen)
-        assertNull(playerState.error)
-
-        // Clean up
-        playerState.dispose()
     }
 
     /**
@@ -52,30 +62,21 @@ class MacVideoPlayerStateTest {
      */
     @Test
     fun testVolumeControl() {
-        // Skip test if not running on Mac
-        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
-            println("Skipping Mac-specific test on non-Mac platform")
-            return
+        withMacPlayerState { playerState ->
+            // Test initial volume
+            assertEquals(1f, playerState.volume)
+
+            // Test setting volume
+            playerState.volume = 0.5f
+            assertEquals(0.5f, playerState.volume)
+
+            // Test volume bounds
+            playerState.volume = -0.1f
+            assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
+
+            playerState.volume = 1.5f
+            assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
         }
-
-        val playerState = MacVideoPlayerState()
-
-        // Test initial volume
-        assertEquals(1f, playerState.volume)
-
-        // Test setting volume
-        playerState.volume = 0.5f
-        assertEquals(0.5f, playerState.volume)
-
-        // Test volume bounds
-        playerState.volume = -0.1f
-        assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
-
-        playerState.volume = 1.5f
-        assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
-
-        // Clean up
-        playerState.dispose()
     }
 
     /**
@@ -83,26 +84,17 @@ class MacVideoPlayerStateTest {
      */
     @Test
     fun testLoopSetting() {
-        // Skip test if not running on Mac
-        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
-            println("Skipping Mac-specific test on non-Mac platform")
-            return
+        withMacPlayerState { playerState ->
+            // Test initial loop setting
+            assertFalse(playerState.loop)
+
+            // Test setting loop
+            playerState.loop = true
+            assertTrue(playerState.loop)
+
+            playerState.loop = false
+            assertFalse(playerState.loop)
         }
-
-        val playerState = MacVideoPlayerState()
-
-        // Test initial loop setting
-        assertFalse(playerState.loop)
-
-        // Test setting loop
-        playerState.loop = true
-        assertTrue(playerState.loop)
-
-        playerState.loop = false
-        assertFalse(playerState.loop)
-
-        // Clean up
-        playerState.dispose()
     }
 
     /**
@@ -110,26 +102,17 @@ class MacVideoPlayerStateTest {
      */
     @Test
     fun testFullscreenToggle() {
-        // Skip test if not running on Mac
-        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
-            println("Skipping Mac-specific test on non-Mac platform")
-            return
+        withMacPlayerState { playerState ->
+            // Test initial fullscreen state
+            assertFalse(playerState.isFullscreen)
+
+            // Test toggling fullscreen
+            playerState.toggleFullscreen()
+            assertTrue(playerState.isFullscreen)
+
+            playerState.toggleFullscreen()
+            assertFalse(playerState.isFullscreen)
         }
-
-        val playerState = MacVideoPlayerState()
-
-        // Test initial fullscreen state
-        assertFalse(playerState.isFullscreen)
-
-        // Test toggling fullscreen
-        playerState.toggleFullscreen()
-        assertTrue(playerState.isFullscreen)
-
-        playerState.toggleFullscreen()
-        assertFalse(playerState.isFullscreen)
-
-        // Clean up
-        playerState.dispose()
     }
 
     /**
@@ -137,57 +120,39 @@ class MacVideoPlayerStateTest {
      */
     @Test
     fun testErrorHandling() {
-        // Skip test if not running on Mac
-        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
-            println("Skipping Mac-specific test on non-Mac platform")
-            return
+        withMacPlayerState { playerState ->
+            // Initially there should be no error
+            assertNull(playerState.error)
+
+            // Test opening a non-existent file (should cause an error)
+            runBlocking {
+                playerState.openUri("non_existent_file.mp4")
+                delay(500.milliseconds) // Give some time for the error to be set
+            }
+
+            // There should be an error now
+            assertNotNull(playerState.error)
+
+            // Test clearing the error
+            playerState.clearError()
+            assertNull(playerState.error)
         }
-
-        val playerState = MacVideoPlayerState()
-
-        // Initially there should be no error
-        assertNull(playerState.error)
-
-        // Test opening a non-existent file (should cause an error)
-        runBlocking {
-            playerState.openUri("non_existent_file.mp4")
-            delay(500.milliseconds) // Give some time for the error to be set
-        }
-
-        // There should be an error now
-        assertNotNull(playerState.error)
-
-        // Test clearing the error
-        playerState.clearError()
-        assertNull(playerState.error)
-
-        // Clean up
-        playerState.dispose()
     }
 
     private fun testOpenLocalFile(file: String) {
-        // Skip test if not running on Mac
-        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
-            println("Skipping Mac-specific test on non-Mac platform")
-            return
+        withMacPlayerState { playerState ->
+            // Initially there should be no error
+            assertNull(playerState.error)
+
+            // Test opening a non-existent file (should cause an error)
+            runBlocking {
+                playerState.openUri(file)
+                delay(500.milliseconds) // Give some time for the error to be set
+            }
+
+            // There should be no error
+            assertNull(playerState.error)
         }
-
-        val playerState = MacVideoPlayerState()
-
-        // Initially there should be no error
-        assertNull(playerState.error)
-
-        // Test opening a non-existent file (should cause an error)
-        runBlocking {
-            playerState.openUri(file)
-            delay(500.milliseconds) // Give some time for the error to be set
-        }
-
-        // There should be no error
-        assertNull(playerState.error)
-
-        // Clean up
-        playerState.dispose()
     }
 
     @Test
@@ -209,32 +174,23 @@ class MacVideoPlayerStateTest {
     }
 
     private fun testMalformedUri(uri: String) {
-        // Skip test if not running on Mac
-        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
-            println("Skipping Mac-specific test on non-Mac platform")
-            return
+        withMacPlayerState { playerState ->
+            // Initially there should be no error
+            assertNull(playerState.error)
+
+            // Test opening a non-existent file (should cause an error)
+            runBlocking {
+                playerState.openUri(uri)
+                delay(500.milliseconds) // Give some time for the error to be set
+            }
+
+            // There should be an error now
+            assertNotNull(playerState.error)
+
+            // Test clearing the error
+            playerState.clearError()
+            assertNull(playerState.error)
         }
-
-        val playerState = MacVideoPlayerState()
-
-        // Initially there should be no error
-        assertNull(playerState.error)
-
-        // Test opening a non-existent file (should cause an error)
-        runBlocking {
-            playerState.openUri(uri)
-            delay(500.milliseconds) // Give some time for the error to be set
-        }
-
-        // There should be an error now
-        assertNotNull(playerState.error)
-
-        // Test clearing the error
-        playerState.clearError()
-        assertNull(playerState.error)
-
-        // Clean up
-        playerState.dispose()
     }
 
     @Test

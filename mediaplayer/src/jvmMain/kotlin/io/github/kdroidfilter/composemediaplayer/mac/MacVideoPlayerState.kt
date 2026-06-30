@@ -30,17 +30,26 @@ import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoOutputMode
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
+import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.requestHeadersJsonObjectString
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
+import io.github.kdroidfilter.composemediaplayer.subtitleTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
@@ -94,6 +103,33 @@ private data class MacLibVlcRuntimeTrackDescription(
 class MacVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
+    private var _projection by mutableStateOf(playbackOptions.projection.normalized())
+    override var projection: VideoProjectionSettings
+        get() = _projection
+        set(value) {
+            _projection = value.normalized()
+            updateProjectionRenderingInfo()
+        }
+    private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
+    override var projectionView: VideoProjectionViewSettings
+        get() = _projectionView
+        set(value) {
+            _projectionView = value.normalized()
+        }
+    private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
+    override var projectionViewControlMode: VideoProjectionViewControlMode
+        get() = _projectionViewControlMode
+        set(value) {
+            _projectionViewControlMode = value
+        }
+    private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
+    override var projectionTextureCrop: VideoTextureCrop
+        get() = _projectionTextureCrop
+        set(value) {
+            _projectionTextureCrop = value.normalized()
+            updateProjectionRenderingInfo()
+        }
+
     // Main state variables
     // AtomicLong allows lock-free reads of the native pointer from the frame hot path
     private val playerPtrAtomic = AtomicLong(0L)
@@ -197,7 +233,10 @@ class MacVideoPlayerState(
     override val metadata: VideoMetadata = VideoMetadata()
     override val capabilities: PlayerCapabilities
         get() = jvmPlayerCapabilities(playbackOptions)
-    override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo()
+    override val renderingInfo: VideoRenderingInfo =
+        VideoRenderingInfo(
+            videoProjection = projection.renderingInfoLabel(),
+        )
     override var isFullscreen: Boolean by mutableStateOf(false)
     internal var usesLibAssSubtitleOverlay: Boolean by mutableStateOf(false)
         private set
@@ -655,11 +694,40 @@ class MacVideoPlayerState(
         return normalizeLocalFileUriForPlayback(uri)
     }
 
+    private fun updateProjectionRenderingInfo() {
+        renderingInfo.videoProjection = projection.renderingInfoLabel()
+        macJvmCanvasVideoRenderer()?.let { renderer ->
+            renderingInfo.videoRenderer = renderer
+        }
+    }
+
+    private fun macJvmCanvasVideoRenderer(): String? =
+        when {
+            shouldUseNativeVideoSurface() -> null
+            libVlcBackendActive && libVlcRenderMode == MacLibVlcRenderMode.MEMORY ->
+                libVlcVideoRenderer(MacLibVlcRenderMode.MEMORY)
+            ffmpegHlsFallback != null ->
+                projection.jvmCanvasRendererLabel(
+                    baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
+                    textureCrop = projectionTextureCrop,
+                )
+            hasMedia -> avFoundationVideoRenderer()
+            else -> null
+        }
+
     private fun avFoundationVideoRenderer(): String =
         when {
-            hdrMetalRequested -> "AVPlayerLayer native HDR/EDR"
-            hdrToneMappingRequested -> "AVPlayerItemVideoOutput tone-mapped BT.709 -> Compose Canvas"
-            else -> "CVPixelBuffer -> Compose Canvas (Skia)"
+            shouldUseHdrMetalSurface() -> "AVPlayerLayer native HDR/EDR"
+            hdrToneMappingRequested ->
+                projection.jvmCanvasRendererLabel(
+                    baseRenderer = "AVPlayerItemVideoOutput tone-mapped BT.709 -> Compose Canvas",
+                    textureCrop = projectionTextureCrop,
+                )
+            else ->
+                projection.jvmCanvasRendererLabel(
+                    baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
+                    textureCrop = projectionTextureCrop,
+                )
         }
 
     private fun avFoundationNotes(): String =
@@ -706,7 +774,11 @@ class MacVideoPlayerState(
                 backend = "${backend.displayName} HLS fallback",
                 container = "Matroska/WebM remuxed by external ${backend.displayName}",
                 videoDecoder = "AVFoundation from generated HLS",
-                videoRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
+                videoRenderer =
+                    projection.jvmCanvasRendererLabel(
+                        baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
+                        textureCrop = projectionTextureCrop,
+                    ),
                 audioRenderer = "AVFoundation / CoreAudio",
                 subtitleRenderer =
                     hlsSource.selectedSubtitleStreamIndex?.let {
@@ -739,11 +811,7 @@ class MacVideoPlayerState(
                     },
                 container = "Source through user-installed libVLC",
                 videoDecoder = "libVLC",
-                videoRenderer =
-                    when (renderMode) {
-                        MacLibVlcRenderMode.MEMORY -> "libVLC vmem -> Compose Canvas (Skia)"
-                        MacLibVlcRenderMode.NATIVE_VIEW -> "libVLC native NSView"
-                    },
+                videoRenderer = libVlcVideoRenderer(renderMode),
                 audioRenderer = "libVLC / AUHAL",
                 subtitleRenderer = null,
                 subtitleSource = null,
@@ -761,6 +829,16 @@ class MacVideoPlayerState(
         updateLibVlcTracks(trackInfo)
         return uri
     }
+
+    private fun libVlcVideoRenderer(renderMode: MacLibVlcRenderMode): String =
+        when (renderMode) {
+            MacLibVlcRenderMode.MEMORY ->
+                projection.jvmCanvasRendererLabel(
+                    baseRenderer = "libVLC vmem -> Compose Canvas (Skia)",
+                    textureCrop = projectionTextureCrop,
+                )
+            MacLibVlcRenderMode.NATIVE_VIEW -> "libVLC native NSView"
+        }
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
         withContext(Dispatchers.Main) {
@@ -1554,7 +1632,7 @@ class MacVideoPlayerState(
                             nextSkiaBitmapA = true
                         }
 
-                        val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+                        val targetBitmap = (if (nextSkiaBitmapA) skiaBitmapA else skiaBitmapB) ?: return@withContext
                         nextSkiaBitmapA = !nextSkiaBitmapA
 
                         val pixmap = targetBitmap.peekPixels() ?: return@withContext
@@ -1647,8 +1725,9 @@ class MacVideoPlayerState(
             }
 
             // Handle seek in progress
-            if (seekInProgress && targetSeekTime != null) {
-                if (abs(current - targetSeekTime!!) < 0.3) {
+            val seekTarget = targetSeekTime
+            if (seekInProgress && seekTarget != null) {
+                if (abs(current - seekTarget) < 0.3) {
                     seekInProgress = false
                     targetSeekTime = null
                     withContext(Dispatchers.Main) {
@@ -1707,9 +1786,10 @@ class MacVideoPlayerState(
     override fun play() {
         macLogger.d { "play() - Starting playback" }
         ioScope.launch {
-            if (!hasMedia && lastUri != null) {
+            val uri = lastUri
+            if (!hasMedia && uri != null) {
                 // Reload the media using the saved URI
-                openUri(lastUri!!, requestHeaders = lastRequestHeaders)
+                openUri(uri, requestHeaders = lastRequestHeaders)
                 // The openUri method will start reading if the opening is successful
             } else if (hasMedia) {
                 // If the media is already loaded, start playing in the background
@@ -2104,7 +2184,11 @@ class MacVideoPlayerState(
         }
     }
 
-    override fun selectAudioTrack(track: AudioTrack?) {
+    override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        if (track != null && availableAudioTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+
         val selectedLibVlcStreamIndex =
             track
                 ?.id
@@ -2115,7 +2199,7 @@ class MacVideoPlayerState(
             ioScope.launch {
                 selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         val selectedStreamIndex =
@@ -2128,7 +2212,7 @@ class MacVideoPlayerState(
             ioScope.launch {
                 switchFfmpegAudioTrack(track, selectedStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         ioScope.launch {
@@ -2136,6 +2220,7 @@ class MacVideoPlayerState(
                 currentAudioTrack = track
             }
         }
+        return track.audioTrackSelectionResult()
     }
 
     private suspend fun selectLibVlcAudioTrack(
@@ -2257,14 +2342,17 @@ class MacVideoPlayerState(
         }
     }
 
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
         if (track == null && libVlcBackendActive) {
             val selectionToken = libAssSelectionToken.incrementAndGet()
             ioScope.launch {
                 clearLibAssSubtitleRenderer(selectionToken)
                 disableLibVlcSubtitles()
             }
-            return
+            return TrackSelectionResult.Disabled
+        }
+        if (track != null && track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
         }
 
         val selectedLibVlcStreamIndex =
@@ -2277,7 +2365,7 @@ class MacVideoPlayerState(
             ioScope.launch {
                 selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         val selectedStreamIndex =
@@ -2291,7 +2379,7 @@ class MacVideoPlayerState(
             ioScope.launch {
                 switchFfmpegSubtitleTrack(track, selectedStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         if (track != null && isAssLikeTrack(track)) {
@@ -2313,7 +2401,7 @@ class MacVideoPlayerState(
                     }
                 }
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         val selectionToken = libAssSelectionToken.incrementAndGet()
@@ -2324,6 +2412,7 @@ class MacVideoPlayerState(
                 subtitlesEnabled = track != null
             }
         }
+        return track.subtitleTrackSelectionResult()
     }
 
     private suspend fun selectLibVlcSubtitleTrack(
@@ -2567,7 +2656,7 @@ class MacVideoPlayerState(
         }
     }
 
-    override fun disableSubtitles() {
+    override fun disableSubtitles(): TrackSelectionResult {
         val selectionToken = libAssSelectionToken.incrementAndGet()
         val selectedTrack = currentSubtitleTrack
         subtitlesEnabled = false
@@ -2589,7 +2678,7 @@ class MacVideoPlayerState(
                     }
                 }
             }
-            return
+            return TrackSelectionResult.Disabled
         }
 
         if (libVlcBackendActive && selectedTrack?.id?.let(::isMacLibVlcSubtitleTrackId) == true) {
@@ -2597,15 +2686,16 @@ class MacVideoPlayerState(
                 clearLibAssSubtitleRenderer(selectionToken)
                 disableLibVlcSubtitles()
             }
-            return
+            return TrackSelectionResult.Disabled
         }
 
         if (ffmpegHlsSourceUri != null && ffmpegHlsSelectedSubtitleStreamIndex != null) {
             ioScope.launch {
                 switchFfmpegSubtitleTrack(track = null, streamIndex = null)
             }
-            return
+            return TrackSelectionResult.Disabled
         }
+        return TrackSelectionResult.Disabled
     }
 
     override fun clearError() {

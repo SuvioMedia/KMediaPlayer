@@ -3,10 +3,10 @@
 // players are alive.
 
 #include "MediaFoundationManager.h"
+#include "NativeLogging.h"
 #include <mfreadwrite.h>
 #include <dxgi.h>
 #include <atomic>
-#include <cstdio>
 #include <wrl/client.h>
 
 using Microsoft::WRL::ComPtr;
@@ -98,10 +98,10 @@ HRESULT Shutdown() {
         // Misuse signal: a caller invoked ShutdownMediaFoundation() while
         // players are still alive. The shutdown proceeds anyway (JVM-exit
         // semantics) but any surviving instance will crash on its next call.
-        fprintf(stderr,
-                "[ComposeMediaPlayer] ShutdownMediaFoundation called with %d "
-                "live instance(s). Dispose all players before shutdown.\n",
-                live);
+        ComposeMediaPlayer::NativeLogging::Logf(
+            "[ComposeMediaPlayer] ShutdownMediaFoundation called with %d "
+            "live instance(s). Dispose all players before shutdown.\n",
+            live);
     }
 
     g_enumerator.Reset();

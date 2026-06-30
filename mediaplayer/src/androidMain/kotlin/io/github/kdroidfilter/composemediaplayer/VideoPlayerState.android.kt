@@ -10,12 +10,19 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.util.Rational
+import android.view.Surface
+import android.view.View
 import androidx.annotation.OptIn
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.Color
@@ -33,6 +40,7 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import com.kdroid.androidcontextprovider.ContextProvider
@@ -55,38 +63,118 @@ actual fun createVideoPlayerState(
     cacheConfig: CacheConfig,
     playbackOptions: VideoPlaybackOptions,
 ): VideoPlayerState =
-    try {
+    createAndroidVideoPlayerState {
         DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions)
-    } catch (e: IllegalStateException) {
-        PreviewableVideoPlayerState(
-            hasMedia = false,
-            isPlaying = false,
-            isLoading = false,
-            volume = 1f,
-            sliderPos = 0f,
-            userDragging = false,
-            loop = false,
-            playbackSpeed = 1f,
-            positionText = "00:00",
-            durationText = "00:00",
-            currentTime = Duration.ZERO,
-            duration = Duration.ZERO,
-            isFullscreen = false,
-            aspectRatio = 16f / 9f,
-            error =
-                VideoPlayerError.UnknownError(
-                    "Android context is not available (preview or missing ContextProvider initialization).",
-                ),
-            metadata = VideoMetadata(),
-            subtitlesEnabled = false,
-            currentSubtitleTrack = null,
-            availableSubtitleTracks = mutableListOf(),
-            subtitleTextStyle = TextStyle.Default,
-            subtitleBackgroundColor = Color.Transparent,
+    }
+
+@UnstableApi
+fun interface AndroidMediaSourceProvider {
+    fun createMediaSource(request: AndroidMediaSourceRequest): MediaSource?
+}
+
+@UnstableApi
+data class AndroidMediaSourceRequest(
+    val mediaItem: MediaItem,
+    val requestHeaders: Map<String, String>,
+)
+
+@Composable
+@UnstableApi
+fun rememberVideoPlayerState(
+    audioMode: AudioMode = AudioMode(),
+    cacheConfig: CacheConfig = CacheConfig(),
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+    androidMediaSourceProvider: AndroidMediaSourceProvider,
+): VideoPlayerState {
+    val currentAndroidMediaSourceProvider = rememberUpdatedState(androidMediaSourceProvider)
+    val playerState =
+        remember(audioMode, cacheConfig, playbackOptions) {
+            createConfiguredVideoPlayerState(
+                audioMode = audioMode,
+                cacheConfig = cacheConfig,
+                playbackOptions = playbackOptions,
+                androidMediaSourceProvider = currentAndroidMediaSourceProvider,
+            )
+        }
+    DisposableEffect(playerState) {
+        onDispose {
+            playerState.dispose()
+        }
+    }
+    return playerState
+}
+
+@UnstableApi
+private fun createConfiguredVideoPlayerState(
+    audioMode: AudioMode = AudioMode(),
+    cacheConfig: CacheConfig = CacheConfig(),
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+    androidMediaSourceProvider: State<AndroidMediaSourceProvider>,
+): VideoPlayerState =
+    createAndroidVideoPlayerState {
+        ConfiguredAndroidVideoPlayerState(
+            audioMode = audioMode,
+            cacheConfig = cacheConfig,
+            playbackOptions = playbackOptions,
+            androidMediaSourceProvider = androidMediaSourceProvider,
         )
     }
 
+private inline fun createAndroidVideoPlayerState(createState: () -> VideoPlayerState): VideoPlayerState =
+    try {
+        createState()
+    } catch (e: IllegalStateException) {
+        missingAndroidContextPlayerState()
+    }
+
+private fun missingAndroidContextPlayerState(): VideoPlayerState =
+    PreviewableVideoPlayerState(
+        hasMedia = false,
+        isPlaying = false,
+        isLoading = false,
+        volume = 1f,
+        sliderPos = 0f,
+        userDragging = false,
+        loop = false,
+        playbackSpeed = 1f,
+        positionText = "00:00",
+        durationText = "00:00",
+        currentTime = Duration.ZERO,
+        duration = Duration.ZERO,
+        isFullscreen = false,
+        aspectRatio = 16f / 9f,
+        error =
+            VideoPlayerError.UnknownError(
+                "Android context is not available (preview or missing ContextProvider initialization).",
+            ),
+        metadata = VideoMetadata(),
+        subtitlesEnabled = false,
+        currentSubtitleTrack = null,
+        availableSubtitleTracks = mutableListOf(),
+        subtitleTextStyle = TextStyle.Default,
+        subtitleBackgroundColor = Color.Transparent,
+    )
+
 internal val androidVideoLogger = TaggedLogger("AndroidVideoPlayerSurface")
+
+@UnstableApi
+private class ConfiguredAndroidVideoPlayerState(
+    audioMode: AudioMode,
+    cacheConfig: CacheConfig,
+    playbackOptions: VideoPlaybackOptions,
+    private val androidMediaSourceProvider: State<AndroidMediaSourceProvider>,
+) : DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions) {
+    override fun createMediaSource(
+        mediaItem: MediaItem,
+        requestHeaders: Map<String, String>,
+    ): MediaSource? =
+        androidMediaSourceProvider.value.createMediaSource(
+            AndroidMediaSourceRequest(
+                mediaItem = mediaItem,
+                requestHeaders = requestHeaders,
+            ),
+        ) ?: super.createMediaSource(mediaItem, requestHeaders)
+}
 
 private object AndroidPlayerActivityRegistry {
     private val activities = WeakHashMap<DefaultVideoPlayerState, WeakReference<Activity>>()
@@ -135,7 +223,7 @@ private fun shouldUseConservativeAndroidCodecHandling(): Boolean =
         Build.MODEL in conservativeCodecHandlingDevices ||
         Build.MANUFACTURER.equals("mediatek", ignoreCase = true)
 
-@Suppress("LargeClass")
+@Suppress("LargeClass", "TooManyFunctions")
 @UnstableApi
 @Stable
 open class DefaultVideoPlayerState(
@@ -151,11 +239,16 @@ open class DefaultVideoPlayerState(
     internal var exoPlayer: ExoPlayer? = null
     private var updateJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val playbackEventDispatcher = PlaybackEventDispatcher()
+    override val mediaSessionId: Long get() = playbackEventDispatcher.mediaSessionId
+    override val playbackEvents = playbackEventDispatcher.events
 
     // Protection against race conditions
     private var isPlayerReleased = false
     private val playerInitializationLock = Any()
     private var playerListener: Player.Listener? = null
+    private var sourceLoadedSessionId = 0L
+    private var wasStalled = false
 
     // Screen lock detection
     private var screenLockReceiver: BroadcastReceiver? = null
@@ -180,11 +273,39 @@ open class DefaultVideoPlayerState(
 
     private var _metadata = VideoMetadata()
     override val metadata: VideoMetadata get() = _metadata
+    private var projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
+    private var _projection by mutableStateOf(playbackOptions.projection.normalized())
+    override var projection: VideoProjectionSettings
+        get() = _projection
+        set(value) {
+            projectionAutoDetectionEnabled = false
+            applyProjectionSettings(value)
+        }
+    private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
+    override var projectionView: VideoProjectionViewSettings
+        get() = _projectionView
+        set(value) {
+            _projectionView = value.normalized()
+        }
+    private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
+    override var projectionViewControlMode: VideoProjectionViewControlMode
+        get() = _projectionViewControlMode
+        set(value) {
+            _projectionViewControlMode = value
+        }
+    private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
+    override var projectionTextureCrop: VideoTextureCrop
+        get() = _projectionTextureCrop
+        set(value) {
+            _projectionTextureCrop = value.normalized()
+            applyProjectionSettings(projection)
+        }
     override val renderingInfo: VideoRenderingInfo =
         VideoRenderingInfo(
             backend = "Media3 ExoPlayer",
-            videoRenderer = "MediaCodec surface",
+            videoRenderer = projection.androidVideoRendererLabel(),
             audioRenderer = "AudioTrack",
+            videoProjection = projection.renderingInfoLabel(),
         )
 
     // Subtitle state
@@ -212,73 +333,115 @@ open class DefaultVideoPlayerState(
         get() = _availableAudioTracks
 
     private var playerView: PlayerView? = null
+    private var projectionVideoSurface: Surface? = null
 
-    override fun selectAudioTrack(track: AudioTrack?) {
-        currentAudioTrack = track
-
-        exoPlayer?.let { player ->
-            if (track == null) {
-                player.trackSelectionParameters =
-                    player.trackSelectionParameters
+    override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        val player = exoPlayer
+        if (track == null) {
+            currentAudioTrack = null
+            player?.let {
+                it.trackSelectionParameters =
+                    it.trackSelectionParameters
                         .buildUpon()
                         .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                         .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
                         .build()
-                return@let
             }
-
-            val trackSelectionOverride = track.toAndroidTrackSelectionOverride(player, C.TRACK_TYPE_AUDIO)
-            if (trackSelectionOverride != null) {
-                player.trackSelectionParameters =
-                    player.trackSelectionParameters
-                        .buildUpon()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
-                        .setOverrideForType(trackSelectionOverride)
-                        .build()
+            emitPlaybackEvent { sessionId, sampledAtMs ->
+                PlaybackEvent.TrackChanged(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    kind = TrackKind.AUDIO,
+                    trackId = null,
+                )
             }
+            return TrackSelectionResult.Auto
         }
+
+        if (availableAudioTracks.none { it.id == track.id }) return TrackSelectionResult.NotFound(track.id)
+        if (player == null) return TrackSelectionResult.NotSupported
+
+        val trackSelectionOverride =
+            track.toAndroidTrackSelectionOverride(player, C.TRACK_TYPE_AUDIO)
+                ?: return TrackSelectionResult.NotFound(track.id)
+
+        currentAudioTrack = track
+        player.trackSelectionParameters =
+            player.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                .setOverrideForType(trackSelectionOverride)
+                .build()
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.TrackChanged(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                kind = TrackKind.AUDIO,
+                trackId = track.id,
+            )
+        }
+        return TrackSelectionResult.Selected(track.id)
     }
 
     // Select an external subtitle track
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
         if (track == null) {
-            disableSubtitles()
-            return
+            return disableSubtitles()
         }
+
+        if (track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+        val player = exoPlayer
+        if (track.isEmbedded && player == null) return TrackSelectionResult.NotSupported
+        val embeddedTrackSelectionOverride =
+            if (player != null && track.isEmbedded) {
+                track.toAndroidTrackSelectionOverride(player, C.TRACK_TYPE_TEXT)
+                    ?: return TrackSelectionResult.NotFound(track.id)
+            } else {
+                null
+            }
 
         currentSubtitleTrack = track
         subtitlesEnabled = true
 
-        exoPlayer?.let { player ->
-            if (track.isEmbedded) {
-                val trackSelectionOverride = track.toAndroidTrackSelectionOverride(player, C.TRACK_TYPE_TEXT)
-                if (trackSelectionOverride != null) {
-                    player.trackSelectionParameters =
-                        player.trackSelectionParameters
-                            .buildUpon()
-                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                            .setOverrideForType(trackSelectionOverride)
-                            .build()
+        if (player != null && track.isEmbedded) {
+            val trackSelectionOverride =
+                embeddedTrackSelectionOverride ?: return TrackSelectionResult.NotFound(track.id)
+            player.trackSelectionParameters =
+                player.trackSelectionParameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .setOverrideForType(trackSelectionOverride)
+                    .build()
 
-                    playerView?.subtitleView?.visibility = android.view.View.VISIBLE
-                }
-            } else {
-                val trackParameters =
-                    player.trackSelectionParameters
-                        .buildUpon()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                        .build()
-                player.trackSelectionParameters = trackParameters
+            playerView?.subtitleView?.visibility = android.view.View.VISIBLE
+        } else if (player != null) {
+            val trackParameters =
+                player.trackSelectionParameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .build()
+            player.trackSelectionParameters = trackParameters
 
-                playerView?.subtitleView?.visibility = android.view.View.GONE
-            }
+            playerView?.subtitleView?.visibility = android.view.View.GONE
         }
+        updateNativeSubtitleVisibility()
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.TrackChanged(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                kind = TrackKind.SUBTITLE,
+                trackId = track.id,
+            )
+        }
+        return TrackSelectionResult.Selected(track.id)
     }
 
-    override fun disableSubtitles() {
+    override fun disableSubtitles(): TrackSelectionResult {
         currentSubtitleTrack = null
         subtitlesEnabled = false
 
@@ -294,6 +457,16 @@ open class DefaultVideoPlayerState(
 
             playerView?.subtitleView?.visibility = android.view.View.GONE
         }
+        updateNativeSubtitleVisibility()
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.TrackChanged(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                kind = TrackKind.SUBTITLE,
+                trackId = null,
+            )
+        }
+        return TrackSelectionResult.Disabled
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
@@ -331,10 +504,89 @@ open class DefaultVideoPlayerState(
             try {
                 view.player = player
                 view.subtitleView?.setStyle(CaptionStyleCompat.DEFAULT)
+                updateNativeSubtitleVisibility()
             } catch (e: Exception) {
                 androidVideoLogger.e { "Error attaching player to view: ${e.message}" }
             }
         }
+    }
+
+    internal fun attachProjectionVideoSurface(surface: Surface?) {
+        if (surface == null) {
+            projectionVideoSurface?.let { oldSurface ->
+                runCatching { exoPlayer?.clearVideoSurface(oldSurface) }
+                    .onFailure { e ->
+                        androidVideoLogger.e { "Error clearing projection surface: ${e.message}" }
+                    }
+            }
+            projectionVideoSurface = null
+            return
+        }
+
+        if (projectionVideoSurface == surface) return
+        projectionVideoSurface?.let { oldSurface ->
+            runCatching { exoPlayer?.clearVideoSurface(oldSurface) }
+                .onFailure { e ->
+                    androidVideoLogger.e { "Error clearing previous projection surface: ${e.message}" }
+                }
+        }
+        playerView?.player = null
+        playerView = null
+        projectionVideoSurface = surface
+        exoPlayer?.let { player ->
+            runCatching {
+                player.setVideoSurface(surface)
+            }.onFailure { e ->
+                androidVideoLogger.e { "Error attaching projection surface: ${e.message}" }
+            }
+        }
+    }
+
+    private fun nextMediaSessionId(): Long = playbackEventDispatcher.nextMediaSessionId()
+
+    private fun emitPlaybackEvent(factory: (Long, Long) -> PlaybackEvent) {
+        playbackEventDispatcher.emit(factory)
+    }
+
+    private fun emitPlaybackEventForSession(
+        sessionId: Long,
+        factory: (Long, Long) -> PlaybackEvent,
+    ) {
+        playbackEventDispatcher.emitForSession(sessionId, factory)
+    }
+
+    private fun setError(error: VideoPlayerError) {
+        _error = error
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.Error(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                error = error,
+            )
+        }
+    }
+
+    private fun clearErrorState() {
+        _error = null
+    }
+
+    private fun emitSourceReleasedForSession(sessionId: Long) {
+        if (sessionId == 0L) return
+        emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+            PlaybackEvent.SourceReleased(
+                mediaSessionId = eventSessionId,
+                sampledAtMs = sampledAtMs,
+            )
+        }
+    }
+
+    private fun updateNativeSubtitleVisibility() {
+        playerView?.subtitleView?.visibility =
+            if (subtitlesEnabled && currentSubtitleTrack?.isEmbedded == true) {
+                View.VISIBLE
+            } else {
+                View.GONE
+            }
     }
 
     // Volume control
@@ -565,9 +817,11 @@ open class DefaultVideoPlayerState(
                 playerBuilder
                     .build()
                     .apply {
-                        playerListener = createPlayerListener()
-                        addListener(playerListener!!)
+                        val listener = createPlayerListener()
+                        playerListener = listener
+                        addListener(listener)
                         volume = _volume
+                        projectionVideoSurface?.let(::setVideoSurface)
                     }
         }
     }
@@ -580,6 +834,15 @@ open class DefaultVideoPlayerState(
 
                 when (playbackState) {
                     Player.STATE_BUFFERING -> {
+                        if (sourceLoadedSessionId == mediaSessionId && !wasStalled) {
+                            wasStalled = true
+                            emitPlaybackEvent { sessionId, sampledAtMs ->
+                                PlaybackEvent.Stalled(
+                                    mediaSessionId = sessionId,
+                                    sampledAtMs = sampledAtMs,
+                                )
+                            }
+                        }
                         _isLoading = true
                     }
 
@@ -592,6 +855,25 @@ open class DefaultVideoPlayerState(
                                 _isPlaying = player.isPlaying
                                 if (player.isPlaying) startPositionUpdates()
                                 extractFormatMetadata(player)
+                                if (sourceLoadedSessionId != mediaSessionId && mediaSessionId != 0L && _hasMedia) {
+                                    sourceLoadedSessionId = mediaSessionId
+                                    emitPlaybackEvent { sessionId, sampledAtMs ->
+                                        PlaybackEvent.SourceLoaded(
+                                            mediaSessionId = sessionId,
+                                            sampledAtMs = sampledAtMs,
+                                            duration = _duration,
+                                        )
+                                    }
+                                }
+                                if (wasStalled) {
+                                    wasStalled = false
+                                    emitPlaybackEvent { sessionId, sampledAtMs ->
+                                        PlaybackEvent.Recovered(
+                                            mediaSessionId = sessionId,
+                                            sampledAtMs = sampledAtMs,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -601,6 +883,12 @@ open class DefaultVideoPlayerState(
                         _isSeeking = false
                         stopPositionUpdates()
                         _isPlaying = false
+                        emitPlaybackEvent { sessionId, sampledAtMs ->
+                            PlaybackEvent.PlaybackEnded(
+                                mediaSessionId = sessionId,
+                                sampledAtMs = sampledAtMs,
+                            )
+                        }
                         onPlaybackEnded?.invoke()
                     }
 
@@ -628,10 +916,23 @@ open class DefaultVideoPlayerState(
                 reason: Int,
             ) {
                 if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION && _loop) {
+                    emitPlaybackEvent { sessionId, sampledAtMs ->
+                        PlaybackEvent.PlaybackRestarted(
+                            mediaSessionId = sessionId,
+                            sampledAtMs = sampledAtMs,
+                        )
+                    }
                     onRestart?.invoke()
                 }
                 if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                     _isSeeking = false
+                    emitPlaybackEvent { sessionId, sampledAtMs ->
+                        PlaybackEvent.SeekCompleted(
+                            mediaSessionId = sessionId,
+                            sampledAtMs = sampledAtMs,
+                            position = newPosition.positionMs.millisecondsAsDuration(),
+                        )
+                    }
                 }
             }
 
@@ -640,6 +941,15 @@ open class DefaultVideoPlayerState(
                     _aspectRatio = videoSize.width.toFloat() / videoSize.height.toFloat()
                     _metadata.width = videoSize.width
                     _metadata.height = videoSize.height
+                    updateAutoDetectedProjection(
+                        exoPlayer
+                            ?.currentMediaItem
+                            ?.localConfiguration
+                            ?.uri
+                            ?.toString()
+                            .orEmpty(),
+                    )
+                    updateRenderingInfo()
                 }
             }
 
@@ -676,22 +986,22 @@ open class DefaultVideoPlayerState(
                     PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
                     PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
                     -> {
-                        _error = VideoPlayerError.CodecError("Decoder error: ${error.message}")
+                        setError(VideoPlayerError.CodecError("Decoder error: ${error.message}"))
                         // Attempt recovery for codec errors
                         attemptPlayerRecovery()
                     }
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
                     -> {
-                        _error = VideoPlayerError.NetworkError("Network error: ${error.message}")
+                        setError(VideoPlayerError.NetworkError("Network error: ${error.message}"))
                     }
                     PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
                     PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
                     -> {
-                        _error = VideoPlayerError.SourceError("Invalid media source: ${error.message}")
+                        setError(VideoPlayerError.SourceError("Invalid media source: ${error.message}"))
                     }
                     else -> {
-                        _error = VideoPlayerError.UnknownError("Playback error: ${error.message}")
+                        setError(VideoPlayerError.UnknownError("Playback error: ${error.message}"))
                     }
                 }
                 _isPlaying = false
@@ -737,7 +1047,7 @@ open class DefaultVideoPlayerState(
                             }
                         } catch (e: Exception) {
                             androidVideoLogger.e { "Error during player recovery: ${e.message}" }
-                            _error = VideoPlayerError.UnknownError("Recovery failed: ${e.message}")
+                            setError(VideoPlayerError.UnknownError("Recovery failed: ${e.message}"))
                         }
                     }
                 }
@@ -778,6 +1088,7 @@ open class DefaultVideoPlayerState(
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
+        resetProjectionForSource(uri)
         val mediaItemBuilder = MediaItem.Builder().setUri(uri)
         val mediaItem = mediaItemBuilder.build()
         openFromMediaItem(mediaItem, initializePlayerState, requestHeaders)
@@ -795,6 +1106,7 @@ open class DefaultVideoPlayerState(
             }
         mediaItemBuilder.setUri(videoUri)
         val mediaItem = mediaItemBuilder.build()
+        resetProjectionForSource(videoUri.toString())
         openFromMediaItem(mediaItem, initializePlayerState)
     }
 
@@ -802,7 +1114,7 @@ open class DefaultVideoPlayerState(
         fileName: String,
         initializePlayerState: InitialPlayerState,
     ) {
-        openUri("asset:///$fileName", initializePlayerState)
+        openUri(fileName.normalizedAssetUri(), initializePlayerState)
     }
 
     private fun openFromMediaItem(
@@ -814,20 +1126,43 @@ open class DefaultVideoPlayerState(
             if (isPlayerReleased) return
 
             exoPlayer?.let { player ->
+                val previousSessionId = mediaSessionId
+                val hadPreviousSource = _hasMedia
+                val sessionId = nextMediaSessionId()
+                val sourceUri =
+                    mediaItem
+                        .localConfiguration
+                        ?.uri
+                        ?.toString()
+                        ?.takeIf { it.isNotBlank() }
+                        ?: mediaItem.mediaId
+                sourceLoadedSessionId = 0L
+                wasStalled = false
+                if (hadPreviousSource) {
+                    emitSourceReleasedForSession(previousSessionId)
+                }
+                emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+                    PlaybackEvent.SourcePreparing(
+                        mediaSessionId = eventSessionId,
+                        sampledAtMs = sampledAtMs,
+                        uri = sourceUri,
+                    )
+                }
                 player.stop()
                 player.clearMediaItems()
                 try {
-                    _error = null
+                    clearErrorState()
                     resetStates(keepMedia = true)
                     updateRenderingInfo()
 
                     // Extract metadata before preparing the player
                     extractMediaItemMetadata(mediaItem)
 
-                    if (requestHeaders.isEmpty()) {
+                    val mediaSource = createMediaSource(mediaItem, requestHeaders)
+                    if (mediaSource == null) {
                         player.setMediaItem(mediaItem)
                     } else {
-                        player.setMediaSource(requestHeaders.mediaSourceFactory().createMediaSource(mediaItem))
+                        player.setMediaSource(mediaSource)
                     }
                     player.prepare()
                     player.volume = volume
@@ -846,11 +1181,27 @@ open class DefaultVideoPlayerState(
                     androidVideoLogger.d { "Error opening media: ${e.message}" }
                     _isPlaying = false
                     _hasMedia = false
-                    _error = VideoPlayerError.SourceError("Failed to load media: ${e.message}")
+                    setError(VideoPlayerError.SourceError("Failed to load media: ${e.message}"))
                 }
             }
         }
     }
+
+    /**
+     * Creates the Android Media3 source used by [openUri] and [openFile].
+     *
+     * Override this in Android subclasses when a source needs a custom [MediaSource], for example a custom
+     * [androidx.media3.datasource.DataSource.Factory]. Return `null` to let ExoPlayer handle [mediaItem] through
+     * `setMediaItem`.
+     */
+    protected open fun createMediaSource(
+        mediaItem: MediaItem,
+        requestHeaders: Map<String, String>,
+    ): MediaSource? =
+        requestHeaders
+            .takeIf { it.isNotEmpty() }
+            ?.mediaSourceFactory()
+            ?.createMediaSource(mediaItem)
 
     private fun Map<String, String>.mediaSourceFactory(): DefaultMediaSourceFactory {
         val httpFactory =
@@ -864,14 +1215,15 @@ open class DefaultVideoPlayerState(
         synchronized(playerInitializationLock) {
             if (!isPlayerReleased) {
                 exoPlayer?.let { player ->
+                    if (player.mediaItemCount == 0) return@let
                     if (player.playbackState == Player.STATE_IDLE) {
                         player.prepare()
                     } else if (player.playbackState == Player.STATE_ENDED) {
                         player.seekTo(0)
                     }
                     player.play()
+                    _hasMedia = true
                 }
-                _hasMedia = true
             }
         }
     }
@@ -880,11 +1232,18 @@ open class DefaultVideoPlayerState(
         synchronized(playerInitializationLock) {
             if (!isPlayerReleased) {
                 exoPlayer?.let { player ->
+                    if (player.mediaItemCount == 0) return@let
                     if (player.playbackState == Player.STATE_IDLE) {
                         player.prepare()
                     }
                     player.seekTo(0)
                     player.play()
+                    emitPlaybackEvent { sessionId, sampledAtMs ->
+                        PlaybackEvent.PlaybackRestarted(
+                            mediaSessionId = sessionId,
+                            sampledAtMs = sampledAtMs,
+                        )
+                    }
                 }
             }
         }
@@ -901,12 +1260,20 @@ open class DefaultVideoPlayerState(
     override fun stop() {
         synchronized(playerInitializationLock) {
             if (!isPlayerReleased) {
+                val releasedSessionId = mediaSessionId
+                val hadMedia = _hasMedia
                 exoPlayer?.let { player ->
                     player.stop()
                     player.seekTo(0)
                 }
                 _hasMedia = false
                 resetStates(keepMedia = true)
+                sourceLoadedSessionId = 0L
+                wasStalled = false
+                if (hadMedia) {
+                    emitSourceReleasedForSession(releasedSessionId)
+                    nextMediaSessionId()
+                }
             }
         }
     }
@@ -951,6 +1318,8 @@ open class DefaultVideoPlayerState(
 
     override fun seekTo(time: Duration) {
         if (!isPlayerReleased) {
+            val player = exoPlayer ?: return
+            if (player.mediaItemCount == 0) return
             val targetTime =
                 when {
                     time < Duration.ZERO -> Duration.ZERO
@@ -958,7 +1327,14 @@ open class DefaultVideoPlayerState(
                     else -> time
                 }
             _isSeeking = true
-            exoPlayer?.seekTo(targetTime.inWholeMilliseconds)
+            emitPlaybackEvent { sessionId, sampledAtMs ->
+                PlaybackEvent.SeekStarted(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    target = targetTime,
+                )
+            }
+            player.seekTo(targetTime.inWholeMilliseconds)
             coroutineScope.launch {
                 delay(250.milliseconds)
                 _isSeeking = false
@@ -982,14 +1358,20 @@ open class DefaultVideoPlayerState(
     }
 
     override fun clearError() {
-        _error = null
+        clearErrorState()
     }
 
-    override fun clearCache() {
-        if (cacheConfig.enabled) {
-            VideoCache.clear(context, cacheConfig.maxCacheSizeBytes)
+    override fun clearCache(): CacheClearResult =
+        if (!cacheConfig.enabled) {
+            CacheClearResult.Disabled
+        } else {
+            try {
+                VideoCache.clear(context, cacheConfig.maxCacheSizeBytes)
+                CacheClearResult.Cleared
+            } catch (e: Exception) {
+                CacheClearResult.Failed(e.message ?: "Failed to clear Android video cache.")
+            }
         }
-    }
 
     override fun toggleFullscreen() {
         _isFullscreen = !_isFullscreen
@@ -1041,6 +1423,13 @@ open class DefaultVideoPlayerState(
             }
 
             extractMediaItemMetadata(player.currentMediaItem)
+            updateAutoDetectedProjection(
+                player.currentMediaItem
+                    ?.localConfiguration
+                    ?.uri
+                    ?.toString()
+                    .orEmpty(),
+            )
             updateRenderingInfo(selectedVideoFormat)
 
             androidVideoLogger.d { "Metadata extracted: $_metadata" }
@@ -1058,11 +1447,49 @@ open class DefaultVideoPlayerState(
             backend = "Media3 ExoPlayer",
             container = videoFormat?.containerMimeType,
             videoDecoder = sampleMimeType?.let { "MediaCodec ($it)" },
-            videoRenderer = "MediaCodec surface",
+            videoRenderer = projection.androidVideoRendererLabel(),
             audioRenderer = "AudioTrack",
+            videoProjection = projection.renderingInfoLabel(),
             notes = dolbyVisionPlaybackNote(isDolbyVision),
         )
     }
+
+    private fun resetProjectionForSource(uri: String) {
+        projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
+        applyProjectionSettings(playbackOptions.detectProjectionForSource(uri))
+    }
+
+    private fun updateAutoDetectedProjection(uri: String) {
+        if (!projectionAutoDetectionEnabled) return
+        applyProjectionSettings(
+            playbackOptions.detectProjectionForSource(
+                uri = uri,
+                title = metadata.title,
+                metadata = listOfNotNull(metadata.mimeType),
+                videoSizes =
+                    listOfNotNull(
+                        metadata.width?.let { width ->
+                            metadata.height?.let { height ->
+                                VideoProjectionVideoSize(width, height)
+                            }
+                        },
+                    ),
+            ),
+        )
+    }
+
+    private fun applyProjectionSettings(value: VideoProjectionSettings) {
+        _projection = value.normalized()
+        renderingInfo.videoProjection = projection.renderingInfoLabel()
+        renderingInfo.videoRenderer = projection.androidVideoRendererLabel()
+    }
+
+    private fun VideoProjectionSettings.androidVideoRendererLabel(): String =
+        when {
+            usesMedia3SphericalProjection(projectionTextureCrop) -> "MediaCodec spherical GL surface"
+            usesAndroidCustomProjectionRenderer(projectionTextureCrop) -> "MediaCodec -> OpenGL projection shader"
+            else -> "MediaCodec surface"
+        }
 
     private fun dolbyVisionPlaybackNote(isDolbyVisionStream: Boolean): String? =
         when (playbackOptions.dolbyVisionMode) {
@@ -1121,6 +1548,8 @@ open class DefaultVideoPlayerState(
     private fun syncAvailableMediaTracks(player: Player) {
         val audioTracks = mutableListOf<AudioTrack>()
         val embeddedSubtitleTracks = mutableListOf<SubtitleTrack>()
+        val previousAudioTrackId = currentAudioTrack?.id
+        val previousSubtitleTrackId = currentSubtitleTrack?.id
         var selectedAudioTrackId: String? = null
         var selectedSubtitleTrackId: String? = null
         var audioGroupIndex = 0
@@ -1198,6 +1627,27 @@ open class DefaultVideoPlayerState(
             currentSubtitleTrack = embeddedSubtitleTracks.firstOrNull { it.id == selectedSubtitleTrackId }
             subtitlesEnabled = currentSubtitleTrack != null
         }
+        updateNativeSubtitleVisibility()
+        if (previousAudioTrackId != currentAudioTrack?.id) {
+            emitPlaybackEvent { sessionId, sampledAtMs ->
+                PlaybackEvent.TrackChanged(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    kind = TrackKind.AUDIO,
+                    trackId = currentAudioTrack?.id,
+                )
+            }
+        }
+        if (previousSubtitleTrackId != currentSubtitleTrack?.id) {
+            emitPlaybackEvent { sessionId, sampledAtMs ->
+                PlaybackEvent.TrackChanged(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    kind = TrackKind.SUBTITLE,
+                    trackId = currentSubtitleTrack?.id,
+                )
+            }
+        }
     }
 
     private fun AudioTrack.toAndroidTrackSelectionOverride(
@@ -1259,7 +1709,8 @@ open class DefaultVideoPlayerState(
         _isPlaying = false
         _isLoading = false
         _isSeeking = false
-        _error = null
+        clearErrorState()
+        wasStalled = false
         _aspectRatio = 16f / 9f
         _playbackSpeed = 1.0f
         _metadata = VideoMetadata()
@@ -1272,18 +1723,23 @@ open class DefaultVideoPlayerState(
             subtitlesEnabled = false
         }
         _availableSubtitleTracks.removeAll { it.isEmbedded }
+        updateNativeSubtitleVisibility()
         if (!keepMedia) {
             _hasMedia = false
+            sourceLoadedSessionId = 0L
         }
     }
 
     override fun dispose() {
         synchronized(playerInitializationLock) {
+            val releasedSessionId = mediaSessionId
+            val hadMedia = _hasMedia
             isPlayerReleased = true
             stopPositionUpdates()
             coroutineScope.cancel()
             playerView?.player = null
             playerView = null
+            projectionVideoSurface = null
 
             try {
                 exoPlayer?.let { player ->
@@ -1303,6 +1759,9 @@ open class DefaultVideoPlayerState(
             exoPlayer = null
             unregisterScreenLockReceiver()
             resetStates()
+            if (hadMedia) {
+                emitSourceReleasedForSession(releasedSessionId)
+            }
         }
     }
 }

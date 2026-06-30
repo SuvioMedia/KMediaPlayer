@@ -29,15 +29,24 @@ import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
+import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
+import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
+import io.github.kdroidfilter.composemediaplayer.subtitleTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.hundredNanosecondsAsDuration
@@ -61,19 +70,24 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import java.awt.Component
+import java.awt.EventQueue
 import java.io.Closeable
 import java.io.File
+import java.net.URI
 import java.nio.ByteBuffer
+import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -83,6 +97,30 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
+
+internal fun normalizeWindowsLocalFileUriForPlayback(uri: String): String {
+    if (!uri.startsWith("file:", ignoreCase = true)) return uri
+
+    runCatching { URI(uri) }
+        .getOrNull()
+        ?.takeIf { it.scheme.equals("file", ignoreCase = true) }
+        ?.let { parsedUri ->
+            val authority = parsedUri.authority
+            val path = parsedUri.path
+            if (!authority.isNullOrBlank() && !authority.equals("localhost", ignoreCase = true)) {
+                return "\\\\$authority${path.orEmpty().replace('/', '\\')}"
+            }
+            runCatching { Path.of(parsedUri).toString() }.getOrNull()?.let { return it }
+            if (!path.isNullOrEmpty()) return File(path).path
+        }
+
+    return when {
+        uri.startsWith("file://localhost/", ignoreCase = true) ->
+            File.separator + uri.substring("file://localhost/".length)
+        uri.startsWith("file://", ignoreCase = true) -> uri.substring("file://".length)
+        else -> uri.substring("file:".length)
+    }
+}
 
 private enum class WindowsLibVlcRenderMode {
     MEMORY,
@@ -107,8 +145,38 @@ private data class WindowsLibVlcRuntimeTrackDescription(
 class WindowsVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
+    private var _projection by mutableStateOf(playbackOptions.projection.normalized())
+    override var projection: VideoProjectionSettings
+        get() = _projection
+        set(value) {
+            _projection = value.normalized()
+            updateProjectionRenderingInfo()
+        }
+    private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
+    override var projectionView: VideoProjectionViewSettings
+        get() = _projectionView
+        set(value) {
+            _projectionView = value.normalized()
+        }
+    private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
+    override var projectionViewControlMode: VideoProjectionViewControlMode
+        get() = _projectionViewControlMode
+        set(value) {
+            _projectionViewControlMode = value
+        }
+    private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
+    override var projectionTextureCrop: VideoTextureCrop
+        get() = _projectionTextureCrop
+        set(value) {
+            _projectionTextureCrop = value.normalized()
+            updateProjectionRenderingInfo()
+        }
+
     companion object {
         private const val HUNDRED_NANOSECOND_TICKS_PER_SECOND = 10_000_000.0
+        private const val DISPOSE_JOIN_TIMEOUT_MS = 500L
+        private const val DISPOSE_EDT_POLL_INTERVAL_MS = 10L
+        private const val NANOSECONDS_PER_MILLISECOND = 1_000_000L
         private val isMfBootstrapped = AtomicBoolean(false)
 
         /** Map to store volume settings for each player instance */
@@ -276,7 +344,23 @@ class WindowsVideoPlayerState(
     // Metadata and UI state
     private var _metadata by mutableStateOf(VideoMetadata())
     override val metadata: VideoMetadata get() = _metadata
-    override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo()
+    override val renderingInfo: VideoRenderingInfo =
+        VideoRenderingInfo(
+            videoProjection = projection.renderingInfoLabel(),
+        )
+
+    private fun updateProjectionRenderingInfo() {
+        renderingInfo.videoProjection = projection.renderingInfoLabel()
+        if (!shouldUseLibVlcNativeSurface()) {
+            renderingInfo.videoRenderer =
+                if (libVlcBackendActive && nativeBackendLibVlcRenderMode == WindowsLibVlcRenderMode.MEMORY) {
+                    libVlcVideoRenderer(WindowsLibVlcRenderMode.MEMORY)
+                } else {
+                    projection.jvmCanvasRendererLabel(projectionTextureCrop)
+                }
+        }
+    }
+
     override var subtitlesEnabled by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
     private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
@@ -454,34 +538,7 @@ class WindowsVideoPlayerState(
         // (exit 2170). Doing it here blocks the caller briefly (<500 ms for
         // StopAudioThread + MF teardown) but guarantees a clean shutdown.
         if (instance != 0L) {
-            if (jobToJoin != null) {
-                // Avoid runBlocking on the AWT Event Dispatch Thread: if any
-                // child coroutine of `scope` ever chains on Dispatchers.Main
-                // (even indirectly, e.g. Compose effects), joining here would
-                // deadlock. Fall back to a plain Thread.join on EDT — the
-                // 500 ms cap keeps the UI from hanging if the native side
-                // stalls.
-                val deadlineNs = System.nanoTime() + 500_000_000L
-                if (java.awt.EventQueue.isDispatchThread()) {
-                    while (jobToJoin.isActive && System.nanoTime() < deadlineNs) {
-                        try {
-                            Thread.sleep(10)
-                        } catch (_: InterruptedException) {
-                            break
-                        }
-                    }
-                } else {
-                    try {
-                        kotlinx.coroutines.runBlocking {
-                            kotlinx.coroutines.withTimeoutOrNull(500) {
-                                jobToJoin.join()
-                            }
-                        }
-                    } catch (_: Exception) {
-                        // ignore
-                    }
-                }
-            }
+            waitForVideoJobToFinish(jobToJoin)
 
             try {
                 nativeSetPlaybackState(instance, false, stop = true, usesLibVlc = wasLibVlc)
@@ -505,6 +562,39 @@ class WindowsVideoPlayerState(
         }
 
         scope.cancel()
+    }
+
+    private fun waitForVideoJobToFinish(job: Job?) {
+        if (job == null) return
+
+        // Avoid runBlocking on the AWT Event Dispatch Thread: if any child
+        // coroutine of `scope` ever chains on Dispatchers.Main, joining here
+        // could deadlock. Poll briefly on EDT; use structured join elsewhere.
+        if (EventQueue.isDispatchThread()) {
+            waitForVideoJobOnEventDispatchThread(job)
+        } else {
+            try {
+                runBlocking {
+                    withTimeoutOrNull(DISPOSE_JOIN_TIMEOUT_MS) {
+                        job.join()
+                    }
+                }
+            } catch (_: Exception) {
+                // Cleanup is best effort; native teardown below still runs.
+            }
+        }
+    }
+
+    private fun waitForVideoJobOnEventDispatchThread(job: Job) {
+        val deadlineNs = System.nanoTime() + DISPOSE_JOIN_TIMEOUT_MS * NANOSECONDS_PER_MILLISECOND
+        while (job.isActive && System.nanoTime() < deadlineNs) {
+            try {
+                Thread.sleep(DISPOSE_EDT_POLL_INTERVAL_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            }
+        }
     }
 
     private fun releaseAllResources() {
@@ -605,7 +695,8 @@ class WindowsVideoPlayerState(
                 try {
                     isLoading = true
 
-                    val libVlcBackend = resolveLibVlcBackendForUri(uri, requestHeaders)
+                    val normalizedUri = normalizeWindowsLocalFileUriForPlayback(uri)
+                    val libVlcBackend = resolveLibVlcBackendForUri(normalizedUri, requestHeaders)
 
                     // Stop playback and release existing resources
                     val wasPlaying = _isPlaying
@@ -617,7 +708,7 @@ class WindowsVideoPlayerState(
                         delay(50.milliseconds)
                     }
 
-                    val preserveExternalHlsSelection = uri == externalHlsSourceUri
+                    val preserveExternalHlsSelection = normalizedUri == externalHlsSourceUri
                     val requestedExternalAudioStreamIndex =
                         externalHlsSelectedAudioStreamIndex.takeIf { preserveExternalHlsSelection }
                     val requestedExternalSubtitleStreamIndex =
@@ -655,20 +746,20 @@ class WindowsVideoPlayerState(
                     initialFrameRead.set(false)
 
                     // Check if the file or URL is valid
-                    if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
+                    if (!normalizedUri.startsWith("http", ignoreCase = true) && !File(normalizedUri).exists()) {
                         setError("File not found: $uri")
                         return@withLock
                     }
 
                     val playbackUri =
                         if (libVlcBackend != null) {
-                            prepareLibVlcPlayback(uri, requestHeaders, libVlcBackend.renderMode)
-                        } else if (shouldUseExternalHlsFallback(uri, requestHeaders)) {
-                            prepareExternalHlsPlayback(uri, requestHeaders)
+                            prepareLibVlcPlayback(normalizedUri, requestHeaders, libVlcBackend.renderMode)
+                        } else if (shouldUseExternalHlsFallback(normalizedUri, requestHeaders)) {
+                            prepareExternalHlsPlayback(normalizedUri, requestHeaders)
                         } else {
-                            uri
+                            normalizedUri
                         }
-                    val playbackRequestHeaders = if (playbackUri == uri) requestHeaders else emptyMap()
+                    val playbackRequestHeaders = if (playbackUri == normalizedUri) requestHeaders else emptyMap()
 
                     // Always open media in paused state to avoid starting the native
                     // playback clock before we've finished setup (SetOutputSize, metadata, etc.).
@@ -776,6 +867,7 @@ class WindowsVideoPlayerState(
 
                     // Set _hasMedia to true only if everything succeeded
                     _hasMedia = true
+                    updateProjectionRenderingInfo()
 
                     if (!isDisposing.get()) {
                         // Restore the volume setting BEFORE starting playback
@@ -968,7 +1060,11 @@ class WindowsVideoPlayerState(
 
     private fun libVlcVideoRenderer(renderMode: WindowsLibVlcRenderMode): String =
         when (renderMode) {
-            WindowsLibVlcRenderMode.MEMORY -> "libVLC vmem -> Compose Canvas (Skia)"
+            WindowsLibVlcRenderMode.MEMORY ->
+                projection.jvmCanvasRendererLabel(
+                    baseRenderer = "libVLC vmem -> Compose Canvas (Skia)",
+                    textureCrop = projectionTextureCrop,
+                )
             WindowsLibVlcRenderMode.NATIVE_VIEW -> "libVLC native HWND"
         }
 
@@ -1510,7 +1606,9 @@ class WindowsVideoPlayerState(
 
             drainPendingCloseBitmaps()
 
-            val targetBitmap = skiaBitmaps[nextBitmapIndex]!!
+            val targetBitmap =
+                skiaBitmaps[nextBitmapIndex]
+                    ?: return ProduceOutcome.SkipIteration
             nextBitmapIndex = (nextBitmapIndex + 1) % skiaBitmaps.size
 
             val pixmap = targetBitmap.peekPixels()
@@ -2267,12 +2365,15 @@ class WindowsVideoPlayerState(
         }
     }
 
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
         if (track == null && libVlcBackendActive) {
             scope.launch {
                 disableLibVlcSubtitles()
             }
-            return
+            return TrackSelectionResult.Disabled
+        }
+        if (track != null && track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
         }
 
         val selectedLibVlcStreamIndex =
@@ -2285,7 +2386,7 @@ class WindowsVideoPlayerState(
             scope.launch {
                 selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         val selectedStreamIndex =
@@ -2298,7 +2399,7 @@ class WindowsVideoPlayerState(
             scope.launch {
                 switchExternalHlsSubtitleTrack(track, selectedStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         scope.launch {
@@ -2307,9 +2408,14 @@ class WindowsVideoPlayerState(
                 subtitlesEnabled = track != null
             }
         }
+        return track.subtitleTrackSelectionResult()
     }
 
-    override fun selectAudioTrack(track: AudioTrack?) {
+    override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        if (track != null && availableAudioTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+
         val selectedLibVlcStreamIndex =
             track
                 ?.id
@@ -2320,7 +2426,7 @@ class WindowsVideoPlayerState(
             scope.launch {
                 selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         val selectedStreamIndex =
@@ -2333,7 +2439,7 @@ class WindowsVideoPlayerState(
             scope.launch {
                 switchExternalHlsAudioTrack(track, selectedStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         scope.launch {
@@ -2341,6 +2447,7 @@ class WindowsVideoPlayerState(
                 currentAudioTrack = track
             }
         }
+        return track.audioTrackSelectionResult()
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
@@ -2365,7 +2472,7 @@ class WindowsVideoPlayerState(
         }
     }
 
-    override fun disableSubtitles() {
+    override fun disableSubtitles(): TrackSelectionResult {
         val selectedTrack = currentSubtitleTrack
         subtitlesEnabled = false
         currentSubtitleTrack = null
@@ -2373,15 +2480,16 @@ class WindowsVideoPlayerState(
             scope.launch {
                 disableLibVlcSubtitles()
             }
-            return
+            return TrackSelectionResult.Disabled
         }
 
         if (externalHlsSourceUri != null && externalHlsSelectedSubtitleStreamIndex != null) {
             scope.launch {
                 switchExternalHlsSubtitleTrack(track = null, streamIndex = null)
             }
-            return
+            return TrackSelectionResult.Disabled
         }
+        return TrackSelectionResult.Disabled
     }
 
     private suspend fun selectLibVlcAudioTrack(

@@ -10,7 +10,6 @@ import java.io.InputStream
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 import java.net.URLConnection
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -834,7 +833,7 @@ internal object MacMatroskaAssExtractor {
             when {
                 uri.startsWith("http://", ignoreCase = true) ||
                     uri.startsWith("https://", ignoreCase = true) -> {
-                    val connection = URL(uri).openConnection()
+                    val connection = URI.create(uri).toURL().openConnection()
                     connection.connectTimeout = 15_000
                     connection.readTimeout = 300_000
                     connection.applyRequestHeaders(headers)
@@ -1136,7 +1135,7 @@ private class HttpMatroskaRangeSource(
         val expectedSize = endInclusive - start + 1L
         if (expectedSize > Int.MAX_VALUE) return null
 
-        val connection = URL(uri).openConnection() as HttpURLConnection
+        val connection = URI.create(uri).toURL().openConnection() as HttpURLConnection
         connection.connectTimeout = 15_000
         connection.readTimeout = 60_000
         connection.instanceFollowRedirects = true
@@ -1154,7 +1153,7 @@ private class HttpMatroskaRangeSource(
     override fun close() = Unit
 
     private fun readLength(): Long? {
-        val connection = URL(uri).openConnection() as HttpURLConnection
+        val connection = URI.create(uri).toURL().openConnection() as HttpURLConnection
         connection.requestMethod = "HEAD"
         connection.connectTimeout = 15_000
         connection.readTimeout = 15_000

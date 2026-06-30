@@ -1,6 +1,5 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -10,11 +9,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.IntSize
+import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.common.JvmNativeVideoHost
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
-import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
 /**
@@ -74,20 +72,19 @@ fun WindowsVideoPlayerSurface(
                 val currentFrame by remember(playerState) { playerState.currentFrameState }
 
                 currentFrame?.let { frame ->
-                    Canvas(
+                    JvmProjectedVideoCanvas(
+                        frame = frame,
+                        projection = playerState.projection,
+                        projectionView = playerState.projectionView,
+                        textureCrop = playerState.projectionTextureCrop,
+                        contentScale = contentScale,
                         modifier =
                             contentScale.toCanvasModifier(
                                 playerState.aspectRatio,
                                 playerState.metadata.width,
                                 playerState.metadata.height,
                             ),
-                    ) {
-                        drawScaledImage(
-                            image = frame,
-                            dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-                            contentScale = contentScale,
-                        )
-                    }
+                    )
                 }
 
                 WindowsVideoOverlayContent(playerState, overlay)

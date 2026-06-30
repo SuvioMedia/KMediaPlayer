@@ -14,7 +14,6 @@ import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URI
-import java.net.URL
 import java.net.URLDecoder
 import java.nio.file.Files
 import java.nio.file.Path
@@ -130,7 +129,7 @@ internal object JvmExternalFallbackContainerSupport {
         requestHeaders: Map<String, String>,
     ): RemoteHeaders? =
         runCatching {
-            (URL(uri).openConnection() as? HttpURLConnection)?.run {
+            (URI.create(uri).toURL().openConnection() as? HttpURLConnection)?.run {
                 instanceFollowRedirects = true
                 requestMethod = "HEAD"
                 connectTimeout = REMOTE_PROBE_TIMEOUT_MS
@@ -153,7 +152,7 @@ internal object JvmExternalFallbackContainerSupport {
         requestHeaders: Map<String, String>,
     ): ByteArray? =
         runCatching {
-            (URL(uri).openConnection() as? HttpURLConnection)?.run {
+            (URI.create(uri).toURL().openConnection() as? HttpURLConnection)?.run {
                 instanceFollowRedirects = true
                 requestMethod = "GET"
                 connectTimeout = REMOTE_PROBE_TIMEOUT_MS

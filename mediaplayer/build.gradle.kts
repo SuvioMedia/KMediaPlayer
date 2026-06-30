@@ -1,6 +1,7 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
@@ -52,14 +53,14 @@ val projectGroup =
         ?: if (isJitPack) {
             listOfNotNull(System.getenv("GROUP"), System.getenv("ARTIFACT")).joinToString(".")
         } else {
-            "io.github.kdroidfilter"
+            "io.github.shusek"
         }
 val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
 
 group = projectGroup
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(25)
     android {
         namespace = "io.github.kdroidfilter.composemediaplayer"
         compileSdk = 37
@@ -75,10 +76,14 @@ kotlin {
         }
 
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_17)
+            jvmTarget.set(JvmTarget.JVM_25)
         }
     }
-    jvm()
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_25)
+        }
+    }
 
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
@@ -92,7 +97,7 @@ kotlin {
     ).forEach { target ->
         target.compilations.getByName("main") {
             // The default file path is src/nativeInterop/cinterop/<interop-name>.def
-            val nskeyvalueobserving by cinterops.creating
+            cinterops.create("nskeyvalueobserving")
         }
     }
 
@@ -199,44 +204,51 @@ val skipNativeBuild =
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
 
-val buildNativeMacOs by tasks.registering(Exec::class) {
-    description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
-    group = "build"
-    enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_MAC)
+val buildNativeMacOs =
+    tasks.register<Exec>("buildNativeMacOs") {
+        description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
+        group = "build"
+        enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_MAC)
 
-    val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/macos")
-    inputs.dir(nativeDir)
-    outputs.dir(nativeResourceDir)
-    workingDir(nativeDir)
-    commandLine("bash", "build.sh")
-}
+        val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/macos")
+        inputs.dir(nativeDir)
+        outputs.dir(nativeResourceDir)
+        workingDir(nativeDir)
+        commandLine("bash", "build.sh")
+    }
 
-val buildNativeWindows by tasks.registering(Exec::class) {
-    description = "Compiles the C++ native library into Windows DLLs (x64 + ARM64)"
-    group = "build"
-    enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_WINDOWS)
+val buildNativeWindows =
+    tasks.register<Exec>("buildNativeWindows") {
+        description = "Compiles the C++ native library into Windows DLLs (x64 + ARM64)"
+        group = "build"
+        enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_WINDOWS)
 
-    val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/windows")
-    inputs.dir(nativeDir)
-    outputs.dir(nativeResourceDir)
-    workingDir(nativeDir)
-    commandLine("cmd", "/c", nativeDir.file("build.bat").asFile.absolutePath)
-}
+        val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/windows")
+        inputs.dir(nativeDir)
+        outputs.dir(nativeResourceDir)
+        workingDir(nativeDir)
+        commandLine("cmd", "/c", nativeDir.file("build.bat").asFile.absolutePath)
+    }
 
-val buildNativeLinux by tasks.registering(Exec::class) {
-    description = "Compiles the C native library into Linux .so (GStreamer + JNI)"
-    group = "build"
-    enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC)
+val buildNativeLinux =
+    tasks.register<Exec>("buildNativeLinux") {
+        description = "Compiles the C native library into Linux .so (GStreamer + JNI)"
+        group = "build"
+        enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC)
 
-    val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/linux")
-    inputs.dir(nativeDir)
-    outputs.dir(nativeResourceDir)
-    workingDir(nativeDir)
-    commandLine("bash", "build.sh")
-}
+        val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/linux")
+        inputs.dir(nativeDir)
+        outputs.dir(nativeResourceDir)
+        workingDir(nativeDir)
+        commandLine("bash", "build.sh")
+    }
 
 tasks.named("jvmProcessResources") {
     dependsOn(buildNativeMacOs, buildNativeWindows, buildNativeLinux)
+}
+
+tasks.withType<Test>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
 publishing {

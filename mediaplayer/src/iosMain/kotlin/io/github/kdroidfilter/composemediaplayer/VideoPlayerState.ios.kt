@@ -63,12 +63,50 @@ actual fun createVideoPlayerState(
 
 private val iosLogger = TaggedLogger("iOSVideoPlayerState")
 
+@Suppress("LargeClass")
 @Stable
 open class DefaultVideoPlayerState(
     private val audioMode: AudioMode = AudioMode(),
     private val cacheConfig: CacheConfig = CacheConfig(),
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
+    private var projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
+    private var projectionSourceUri: String = ""
+    private var _projection by mutableStateOf(playbackOptions.projection.normalized())
+    override var projection: VideoProjectionSettings
+        get() = _projection
+        set(value) {
+            projectionAutoDetectionEnabled = false
+            applyProjectionSettings(value)
+        }
+    private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
+    override var projectionView: VideoProjectionViewSettings
+        get() = _projectionView
+        set(value) {
+            _projectionView = value.normalized()
+        }
+    private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
+    override var projectionViewControlMode: VideoProjectionViewControlMode
+        get() = _projectionViewControlMode
+        set(value) {
+            _projectionViewControlMode = value
+        }
+    private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
+    override var projectionTextureCrop: VideoTextureCrop
+        get() = _projectionTextureCrop
+        set(value) {
+            _projectionTextureCrop = value.normalized()
+            applyProjectionSettings(projection)
+        }
+    override val renderingInfo: VideoRenderingInfo =
+        VideoRenderingInfo(
+            backend = "AVFoundation AVPlayer",
+            videoRenderer = projection.iosVideoRendererLabel(projectionTextureCrop),
+            audioRenderer = "AVAudioSession",
+            videoProjection = projection.renderingInfoLabel(),
+            notes = null,
+        )
+
     // Base states
     private var _volume = mutableStateOf(1.0f)
     override var volume: Float
@@ -163,8 +201,8 @@ open class DefaultVideoPlayerState(
     private var timeObserverToken: Any? = null
 
     // KVO Observers
-    private var timeControlStatusObserver: NSObject? = null
-    private var statusObserver: NSObject? = null
+    private var timeControlStatusObserver: KVOObservation? = null
+    private var statusObserver: KVOObservation? = null
 
     // End-of-playback notification observer
     private var endObserver: Any? = null
@@ -178,6 +216,11 @@ open class DefaultVideoPlayerState(
 
     // Flag to track if the state has been disposed
     private var isDisposed = false
+    private val playbackEventDispatcher = PlaybackEventDispatcher()
+    override val mediaSessionId: Long get() = playbackEventDispatcher.mediaSessionId
+    override val playbackEvents = playbackEventDispatcher.events
+    private var sourceLoadedSessionId = 0L
+    private var wasStalled = false
 
     init {
         if (cacheConfig.enabled) {
@@ -311,6 +354,44 @@ open class DefaultVideoPlayerState(
         return PipResult.Success
     }
 
+    private fun nextMediaSessionId(): Long = playbackEventDispatcher.nextMediaSessionId()
+
+    private fun emitPlaybackEvent(factory: (Long, Long) -> PlaybackEvent) {
+        playbackEventDispatcher.emit(factory)
+    }
+
+    private fun emitPlaybackEventForSession(
+        sessionId: Long,
+        factory: (Long, Long) -> PlaybackEvent,
+    ) {
+        playbackEventDispatcher.emitForSession(sessionId, factory)
+    }
+
+    private fun setError(error: VideoPlayerError) {
+        _error = error
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.Error(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                error = error,
+            )
+        }
+    }
+
+    private fun clearErrorState() {
+        _error = null
+    }
+
+    private fun emitSourceReleasedForSession(sessionId: Long) {
+        if (sessionId == 0L) return
+        emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+            PlaybackEvent.SourceReleased(
+                mediaSessionId = eventSessionId,
+                sampledAtMs = sampledAtMs,
+            )
+        }
+    }
+
     private fun setupObservers(
         player: AVPlayer,
         item: AVPlayerItem,
@@ -326,12 +407,30 @@ open class DefaultVideoPlayerState(
                         AVPlayerTimeControlStatusPlaying -> {
                             _isPlaying = true
                             _isLoading = false
+                            if (wasStalled) {
+                                wasStalled = false
+                                emitPlaybackEvent { sessionId, sampledAtMs ->
+                                    PlaybackEvent.Recovered(
+                                        mediaSessionId = sessionId,
+                                        sampledAtMs = sampledAtMs,
+                                    )
+                                }
+                            }
                         }
                         AVPlayerTimeControlStatusPaused -> {
                             _isPlaying = false
                             _isLoading = false
                         }
                         AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate -> {
+                            if (sourceLoadedSessionId == mediaSessionId && !wasStalled) {
+                                wasStalled = true
+                                emitPlaybackEvent { sessionId, sampledAtMs ->
+                                    PlaybackEvent.Stalled(
+                                        mediaSessionId = sessionId,
+                                        sampledAtMs = sampledAtMs,
+                                    )
+                                }
+                            }
                             _isLoading = true
                         }
                     }
@@ -351,12 +450,28 @@ open class DefaultVideoPlayerState(
                             _hasMedia = true
                             _isLoading = false
                             extractMetadata(item)
+                            _metadata.duration?.let { duration ->
+                                if (duration > Duration.ZERO) {
+                                    _duration = duration
+                                    _durationText = formatTime(duration)
+                                }
+                            }
+                            if (sourceLoadedSessionId != mediaSessionId && mediaSessionId != 0L) {
+                                sourceLoadedSessionId = mediaSessionId
+                                emitPlaybackEvent { sessionId, sampledAtMs ->
+                                    PlaybackEvent.SourceLoaded(
+                                        mediaSessionId = sessionId,
+                                        sampledAtMs = sampledAtMs,
+                                        duration = _duration,
+                                    )
+                                }
+                            }
                             iosLogger.d { "Player Item Ready" }
                         }
                         AVPlayerItemStatusFailed -> {
                             _isLoading = false
                             _isPlaying = false
-                            _error = VideoPlayerError.SourceError("Playback failed")
+                            setError(VideoPlayerError.SourceError("Playback failed"))
                             iosLogger.e { "Player Item Failed" }
                         }
                     }
@@ -383,6 +498,12 @@ open class DefaultVideoPlayerState(
                         if (finished) {
                             dispatch_async(dispatch_get_main_queue()) {
                                 player.playImmediatelyAtRate(_playbackSpeed)
+                                emitPlaybackEvent { sessionId, sampledAtMs ->
+                                    PlaybackEvent.PlaybackRestarted(
+                                        mediaSessionId = sessionId,
+                                        sampledAtMs = sampledAtMs,
+                                    )
+                                }
                                 onRestart?.invoke()
                             }
                         }
@@ -390,6 +511,12 @@ open class DefaultVideoPlayerState(
                 } else {
                     player.pause()
                     _isPlaying = false
+                    emitPlaybackEvent { sessionId, sampledAtMs ->
+                        PlaybackEvent.PlaybackEnded(
+                            mediaSessionId = sessionId,
+                            sampledAtMs = sampledAtMs,
+                        )
+                    }
                     onPlaybackEnded?.invoke()
                 }
             }
@@ -482,6 +609,7 @@ open class DefaultVideoPlayerState(
                         _metadata.width = width.toInt()
                         _metadata.height = height.toInt()
                         _videoAspectRatio = width / height
+                        updateAutoDetectedProjection()
                         iosLogger.d { "Video resolution: ${width.toInt()}x${height.toInt()}" }
                     }
                 }
@@ -509,15 +637,11 @@ open class DefaultVideoPlayerState(
 
     private fun removeObservers() {
         // Remove KVOs
-        timeControlStatusObserver?.let {
-            player?.removeObserver(it, forKeyPath = "timeControlStatus")
-            timeControlStatusObserver = null
-        }
+        timeControlStatusObserver?.invalidate()
+        timeControlStatusObserver = null
 
-        statusObserver?.let {
-            player?.currentItem?.removeObserver(it, forKeyPath = "status")
-            statusObserver = null
-        }
+        statusObserver?.invalidate()
+        statusObserver = null
 
         endObserver?.let {
             NSNotificationCenter.defaultCenter.removeObserver(it)
@@ -557,13 +681,23 @@ open class DefaultVideoPlayerState(
         requestHeaders: Map<String, String>,
     ) {
         iosLogger.d { "openUri called with uri: $uri, initializePlayerState: $initializePlayerState" }
-        val nsUrl =
-            NSURL.URLWithString(uri) ?: run {
-                iosLogger.d { "Failed to create NSURL from uri: $uri" }
-                return
-            }
-
-        _error = null
+        val previousSessionId = mediaSessionId
+        val hadPreviousSource = _hasMedia || player != null
+        val sessionId = nextMediaSessionId()
+        sourceLoadedSessionId = 0L
+        wasStalled = false
+        if (hadPreviousSource) {
+            emitSourceReleasedForSession(previousSessionId)
+        }
+        emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+            PlaybackEvent.SourcePreparing(
+                mediaSessionId = eventSessionId,
+                sampledAtMs = sampledAtMs,
+                uri = uri,
+            )
+        }
+        clearErrorState()
+        resetProjectionForSource(uri)
 
         stopPositionUpdates()
         removeObservers()
@@ -578,6 +712,14 @@ open class DefaultVideoPlayerState(
 
         cleanupCurrentPlayer()
 
+        val nsUrl =
+            NSURL.URLWithString(uri) ?: run {
+                iosLogger.d { "Failed to create NSURL from uri: $uri" }
+                _isLoading = false
+                setError(VideoPlayerError.SourceError("Invalid media source: $uri"))
+                return
+            }
+
         // AVPlayer handles async loading internally — metadata is extracted
         // safely in the KVO readyToPlay callback, avoiding ObjC exceptions
         // from accessing track properties on an unloaded/failed asset.
@@ -585,6 +727,7 @@ open class DefaultVideoPlayerState(
         val playerItem = AVPlayerItem(asset)
 
         nsUrl.lastPathComponent?.let { _metadata.title = it }
+        updateAutoDetectedProjection()
 
         val newPlayer =
             AVPlayer(playerItem = playerItem).apply {
@@ -657,6 +800,12 @@ open class DefaultVideoPlayerState(
             if (finished) {
                 dispatch_async(dispatch_get_main_queue()) {
                     currentPlayer.playImmediatelyAtRate(_playbackSpeed)
+                    emitPlaybackEvent { sessionId, sampledAtMs ->
+                        PlaybackEvent.PlaybackRestarted(
+                            mediaSessionId = sessionId,
+                            sampledAtMs = sampledAtMs,
+                        )
+                    }
                 }
             }
         }
@@ -670,6 +819,8 @@ open class DefaultVideoPlayerState(
 
     override fun stop() {
         iosLogger.d { "stop called" }
+        val releasedSessionId = mediaSessionId
+        val hadMedia = _hasMedia
         player?.pause()
         player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
         _isPlaying = false
@@ -683,6 +834,12 @@ open class DefaultVideoPlayerState(
 
         // Reset metadata
         _metadata = VideoMetadata(audioChannels = 2)
+        sourceLoadedSessionId = 0L
+        wasStalled = false
+        if (hadMedia) {
+            emitSourceReleasedForSession(releasedSessionId)
+            nextMediaSessionId()
+        }
     }
 
     override fun seekTo(time: Duration) {
@@ -722,6 +879,13 @@ open class DefaultVideoPlayerState(
         if (_duration > Duration.ZERO) {
             _isLoading = true
             _isSeeking = true
+            emitPlaybackEvent { sessionId, sampledAtMs ->
+                PlaybackEvent.SeekStarted(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    target = targetTime.secondsAsDuration(),
+                )
+            }
 
             val seekTime = CMTimeMakeWithSeconds(targetTime, NSEC_PER_SEC.toInt())
             val wasPlaying = _isPlaying
@@ -738,6 +902,13 @@ open class DefaultVideoPlayerState(
                     dispatch_async(dispatch_get_main_queue()) {
                         _isLoading = false
                         _isSeeking = false
+                        emitPlaybackEvent { sessionId, sampledAtMs ->
+                            PlaybackEvent.SeekCompleted(
+                                mediaSessionId = sessionId,
+                                sampledAtMs = sampledAtMs,
+                                position = targetTime.secondsAsDuration(),
+                            )
+                        }
                         if (wasPlaying) {
                             currentPlayer.playImmediatelyAtRate(_playbackSpeed)
                         }
@@ -749,14 +920,20 @@ open class DefaultVideoPlayerState(
 
     override fun clearError() {
         iosLogger.d { "clearError called" }
-        _error = null
+        clearErrorState()
     }
 
-    override fun clearCache() {
-        if (cacheConfig.enabled) {
-            IosVideoCache.clear()
+    override fun clearCache(): CacheClearResult =
+        if (!cacheConfig.enabled) {
+            CacheClearResult.Disabled
+        } else {
+            try {
+                IosVideoCache.clear()
+                CacheClearResult.Cleared
+            } catch (e: Exception) {
+                CacheClearResult.Failed(e.message ?: "Failed to clear iOS video cache.")
+            }
         }
-    }
 
     /**
      * Toggles the fullscreen state of the video player
@@ -768,10 +945,17 @@ open class DefaultVideoPlayerState(
 
     override fun dispose() {
         iosLogger.d { "dispose called" }
+        val releasedSessionId = mediaSessionId
+        val hadMedia = _hasMedia
         isDisposed = true
         cleanupCurrentPlayer()
         _hasMedia = false
         _isPlaying = false
+        sourceLoadedSessionId = 0L
+        wasStalled = false
+        if (hadMedia) {
+            emitSourceReleasedForSession(releasedSessionId)
+        }
 
         // Reset metadata
         _metadata = VideoMetadata(audioChannels = 2)
@@ -791,17 +975,56 @@ open class DefaultVideoPlayerState(
         fileName: String,
         initializePlayerState: InitialPlayerState,
     ) {
-        val name = fileName.substringBeforeLast(".")
-        val ext = fileName.substringAfterLast(".", "")
+        val assetPath = fileName.normalizedAssetPath()
+        val directory = assetPath.substringBeforeLast("/", missingDelimiterValue = "").ifEmpty { null }
+        val leafName = assetPath.substringAfterLast("/")
+        val name = leafName.substringBeforeLast(".")
+        val ext = leafName.substringAfterLast(".", "")
+        val bundle = platform.Foundation.NSBundle.mainBundle
         val path =
-            platform.Foundation.NSBundle.mainBundle
-                .pathForResource(name, ext.ifEmpty { null })
+            if (directory == null) {
+                bundle.pathForResource(name, ext.ifEmpty { null })
+            } else {
+                bundle.pathForResource(name, ext.ifEmpty { null }, directory)
+            }
                 ?: throw IllegalArgumentException("Asset not found in app bundle: $fileName")
         openUri("file://$path", initializePlayerState)
     }
 
     override val metadata: VideoMetadata
         get() = _metadata
+
+    private fun resetProjectionForSource(uri: String) {
+        projectionSourceUri = uri
+        projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
+        applyProjectionSettings(playbackOptions.detectProjectionForSource(uri))
+    }
+
+    private fun updateAutoDetectedProjection() {
+        if (!projectionAutoDetectionEnabled) return
+        applyProjectionSettings(
+            playbackOptions.detectProjectionForSource(
+                uri = projectionSourceUri,
+                title = metadata.title,
+                metadata = emptyList(),
+                videoSizes =
+                    listOfNotNull(
+                        metadata.width?.let { width ->
+                            metadata.height?.let { height ->
+                                VideoProjectionVideoSize(width, height)
+                            }
+                        },
+                    ),
+            ),
+        )
+    }
+
+    private fun applyProjectionSettings(value: VideoProjectionSettings) {
+        _projection = value.normalized()
+        renderingInfo.videoProjection = projection.renderingInfoLabel()
+        renderingInfo.videoRenderer = projection.iosVideoRendererLabel(projectionTextureCrop)
+        renderingInfo.notes = null
+    }
 
     // Audio track state. Native AVFoundation track selection can be added here later;
     // for now the common API exposes an empty list on iOS.
@@ -816,8 +1039,19 @@ open class DefaultVideoPlayerState(
     override val availableAudioTracks: List<AudioTrack>
         get() = _availableAudioTracks
 
-    override fun selectAudioTrack(track: AudioTrack?) {
+    override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        if (track != null) return TrackSelectionResult.NotSupported
+
         _currentAudioTrack = track
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.TrackChanged(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                kind = TrackKind.AUDIO,
+                trackId = null,
+            )
+        }
+        return TrackSelectionResult.Auto
     }
 
     // Subtitle state
@@ -856,19 +1090,30 @@ open class DefaultVideoPlayerState(
      *
      * @param track The subtitle track to select, or null to disable subtitles
      */
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
         iosLogger.d { "selectSubtitleTrack called with track: $track" }
         if (track == null) {
-            disableSubtitles()
-            return
+            return disableSubtitles()
+        }
+        if (track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
         }
 
         // Update current track and enable flag
         currentSubtitleTrack = track
         subtitlesEnabled = true
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.TrackChanged(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                kind = TrackKind.SUBTITLE,
+                trackId = track.id,
+            )
+        }
 
         // iOS uses Compose-based subtitles, so we don't need to configure
         // the native player for subtitle display
+        return TrackSelectionResult.Selected(track.id)
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
@@ -896,14 +1141,23 @@ open class DefaultVideoPlayerState(
     /**
      * Disables subtitle display.
      */
-    override fun disableSubtitles() {
+    override fun disableSubtitles(): TrackSelectionResult {
         iosLogger.d { "disableSubtitles called" }
         // Update state
         currentSubtitleTrack = null
         subtitlesEnabled = false
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.TrackChanged(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                kind = TrackKind.SUBTITLE,
+                trackId = null,
+            )
+        }
 
         // iOS uses Compose-based subtitles, so we don't need to configure
         // the native player for subtitle display
+        return TrackSelectionResult.Disabled
     }
 }
 
@@ -922,12 +1176,26 @@ private class KVOObserver(
     }
 }
 
+private class KVOObservation(
+    private val observedObject: NSObject,
+    private val observer: NSObject,
+    private val keyPath: String,
+) {
+    private var invalidated = false
+
+    fun invalidate() {
+        if (invalidated) return
+        observedObject.removeObserver(observer, forKeyPath = keyPath)
+        invalidated = true
+    }
+}
+
 @OptIn(ExperimentalForeignApi::class)
 private fun NSObject.observe(
     keyPath: String,
     options: NSKeyValueObservingOptions = NSKeyValueObservingOptionNew,
     block: (Any?) -> Unit,
-): NSObject {
+): KVOObservation {
     val observer = KVOObserver(block)
     this.addObserver(
         observer,
@@ -935,5 +1203,9 @@ private fun NSObject.observe(
         options = options,
         context = null,
     )
-    return observer
+    return KVOObservation(
+        observedObject = this,
+        observer = observer,
+        keyPath = keyPath,
+    )
 }

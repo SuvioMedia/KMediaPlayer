@@ -2,29 +2,17 @@ package io.github.kdroidfilter.composemediaplayer.util
 
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlin.jvm.JvmField
 import kotlin.time.Clock
 
 /**
  * Logging level hierarchy for ComposeMediaPlayer internal logging.
  */
-class ComposeMediaPlayerLoggingLevel private constructor(
-    private val priority: Int,
-) : Comparable<ComposeMediaPlayerLoggingLevel> {
-    override fun compareTo(other: ComposeMediaPlayerLoggingLevel): Int = priority.compareTo(other.priority)
-
-    companion object {
-        @JvmField
-        val VERBOSE = ComposeMediaPlayerLoggingLevel(0)
-
-        @JvmField val DEBUG = ComposeMediaPlayerLoggingLevel(1)
-
-        @JvmField val INFO = ComposeMediaPlayerLoggingLevel(2)
-
-        @JvmField val WARN = ComposeMediaPlayerLoggingLevel(3)
-
-        @JvmField val ERROR = ComposeMediaPlayerLoggingLevel(4)
-    }
+enum class ComposeMediaPlayerLoggingLevel {
+    VERBOSE,
+    DEBUG,
+    INFO,
+    WARN,
+    ERROR,
 }
 
 /** Global switch — set to `true` to enable ComposeMediaPlayer internal logging. */
@@ -34,9 +22,12 @@ var allowComposeMediaPlayerLogging: Boolean = false
 var composeMediaPlayerLoggingLevel: ComposeMediaPlayerLoggingLevel =
     ComposeMediaPlayerLoggingLevel.VERBOSE
 
+/** Receives formatted ComposeMediaPlayer log lines. Override to forward logs to an app logger. */
+var composeMediaPlayerLogSink: (String) -> Unit = { line -> println(line) }
+
 private fun getCurrentTimestamp(): String {
     val now =
-        kotlin.time.Clock.System
+        Clock.System
             .now()
             .toLocalDateTime(TimeZone.currentSystemDefault())
     return "${now.date} ${now.hour.pad()}:${now.minute.pad()}:${now.second.pad()}" +
@@ -63,42 +54,30 @@ internal class TaggedLogger(
 
 // -- Top-level logging functions --------------------------------------------
 
-internal fun verboseln(message: () -> String) {
-    if (allowComposeMediaPlayerLogging &&
-        composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.VERBOSE
-    ) {
-        println("[${getCurrentTimestamp()}] V: ${message()}")
-    }
+internal fun verboseln(message: () -> String) = logln(ComposeMediaPlayerLoggingLevel.VERBOSE, message)
+
+internal fun debugln(message: () -> String) = logln(ComposeMediaPlayerLoggingLevel.DEBUG, message)
+
+internal fun infoln(message: () -> String) = logln(ComposeMediaPlayerLoggingLevel.INFO, message)
+
+internal fun warnln(message: () -> String) = logln(ComposeMediaPlayerLoggingLevel.WARN, message)
+
+internal fun errorln(message: () -> String) = logln(ComposeMediaPlayerLoggingLevel.ERROR, message)
+
+private fun logln(
+    level: ComposeMediaPlayerLoggingLevel,
+    message: () -> String,
+) {
+    if (!allowComposeMediaPlayerLogging || composeMediaPlayerLoggingLevel > level) return
+    composeMediaPlayerLogSink("[${getCurrentTimestamp()}] ${level.marker}: ${message()}")
 }
 
-internal fun debugln(message: () -> String) {
-    if (allowComposeMediaPlayerLogging &&
-        composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.DEBUG
-    ) {
-        println("[${getCurrentTimestamp()}] D: ${message()}")
-    }
-}
-
-internal fun infoln(message: () -> String) {
-    if (allowComposeMediaPlayerLogging &&
-        composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.INFO
-    ) {
-        println("[${getCurrentTimestamp()}] I: ${message()}")
-    }
-}
-
-internal fun warnln(message: () -> String) {
-    if (allowComposeMediaPlayerLogging &&
-        composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.WARN
-    ) {
-        println("[${getCurrentTimestamp()}] W: ${message()}")
-    }
-}
-
-internal fun errorln(message: () -> String) {
-    if (allowComposeMediaPlayerLogging &&
-        composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.ERROR
-    ) {
-        println("[${getCurrentTimestamp()}] E: ${message()}")
-    }
-}
+private val ComposeMediaPlayerLoggingLevel.marker: String
+    get() =
+        when (this) {
+            ComposeMediaPlayerLoggingLevel.VERBOSE -> "V"
+            ComposeMediaPlayerLoggingLevel.DEBUG -> "D"
+            ComposeMediaPlayerLoggingLevel.INFO -> "I"
+            ComposeMediaPlayerLoggingLevel.WARN -> "W"
+            ComposeMediaPlayerLoggingLevel.ERROR -> "E"
+        }

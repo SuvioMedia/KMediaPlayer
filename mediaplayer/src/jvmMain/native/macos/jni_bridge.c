@@ -6,7 +6,7 @@
 #include <dlfcn.h>
 #include <limits.h>
 #include <pthread.h>
-#include <stdio.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +66,30 @@ extern int32_t consumeDidPlayToEnd(void* ctx);
 
 static inline void* toCtx(jlong h) {
     return (void*)(uintptr_t)(uint64_t)h;
+}
+
+static int native_logging_enabled(void) {
+    static int initialized = 0;
+    static int enabled = 0;
+    if (!initialized) {
+        const char* value = getenv("COMPOSE_MEDIA_PLAYER_NATIVE_LOGGING");
+        enabled = value && value[0] && (
+            strcasecmp(value, "1") == 0 ||
+            strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 ||
+            strcasecmp(value, "on") == 0
+        );
+        initialized = 1;
+    }
+    return enabled;
+}
+
+static void native_logf(const char* format, ...) {
+    if (!native_logging_enabled()) return;
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
 }
 
 typedef enum {
@@ -272,7 +296,7 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
 
     JAWT_GetAWT_Fn get_awt = resolve_jawt_get_awt();
     if (!get_awt) {
-        if (layer) fprintf(stderr, "HDR Metal: JAWT_GetAWT unavailable\n");
+        if (layer) native_logf("HDR Metal: JAWT_GetAWT unavailable\n");
         if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
         if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
         if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
@@ -283,7 +307,7 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
     memset(&awt, 0, sizeof(awt));
     awt.version = JAWT_VERSION_1_4 | JAWT_MACOSX_USE_CALAYER;
     if (get_awt(env, &awt) == JNI_FALSE) {
-        if (layer) fprintf(stderr, "HDR Metal: JAWT_GetAWT returned false\n");
+        if (layer) native_logf("HDR Metal: JAWT_GetAWT returned false\n");
         if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
         if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
         if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
@@ -292,7 +316,7 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
 
     JAWT_DrawingSurface* ds = awt.GetDrawingSurface(env, component);
     if (!ds) {
-        if (layer) fprintf(stderr, "HDR Metal: GetDrawingSurface returned null\n");
+        if (layer) native_logf("HDR Metal: GetDrawingSurface returned null\n");
         if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
         if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
         if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
@@ -358,15 +382,15 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
                     }
                 }
             } else if (layer) {
-                fprintf(stderr, "HDR Metal: platformInfo does not accept setLayer:\n");
+                native_logf("HDR Metal: platformInfo does not accept setLayer:\n");
             }
         } else if (layer) {
-            fprintf(stderr, "HDR Metal: drawing surface info missing platformInfo\n");
+            native_logf("HDR Metal: drawing surface info missing platformInfo\n");
         }
         if (dsi) ds->FreeDrawingSurfaceInfo(dsi);
         ds->Unlock(ds);
     } else if (layer) {
-        fprintf(stderr, "HDR Metal: drawing surface lock error %d\n", lock);
+        native_logf("HDR Metal: drawing surface lock error %d\n", lock);
     }
     awt.FreeDrawingSurface(ds);
     if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
@@ -423,7 +447,7 @@ static NSView* attach_awt_component_native_view(
 
     NSView* content_view = [window contentView];
     if (!content_view || width <= 0 || height <= 0) {
-        if (log_prefix) fprintf(stderr, "%s: missing content view or invalid size\n", log_prefix);
+        if (log_prefix) native_logf("%s: missing content view or invalid size\n", log_prefix);
         if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
         if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
         if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
@@ -575,7 +599,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     api->core_dylib = dlopen_libvlccore_next_to_libvlc(libvlc_path);
     void* dylib = dlopen(libvlc_path, RTLD_NOW | RTLD_LOCAL);
     if (!dylib) {
-        fprintf(stderr, "Failed to dlopen libVLC: %s\n", dlerror());
+        native_logf("Failed to dlopen libVLC: %s\n", dlerror());
         if (api->core_dylib) dlclose(api->core_dylib);
         return 0;
     }
@@ -618,7 +642,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
         !api->video_set_format_callbacks || !api->audio_get_track_description ||
         !api->audio_set_track || !api->video_get_spu_description || !api->video_set_spu ||
         !api->track_description_list_release) {
-        fprintf(stderr, "libVLC is missing required API symbols\n");
+        native_logf("libVLC is missing required API symbols\n");
         dlclose(dylib);
         if (api->core_dylib) dlclose(api->core_dylib);
         memset(api, 0, sizeof(*api));
@@ -1113,7 +1137,7 @@ static int load_libass_api(const char* libass_path, LibAssApi* api) {
 
     void* dylib = dlopen(libass_path, RTLD_NOW | RTLD_LOCAL);
     if (!dylib) {
-        fprintf(stderr, "Failed to dlopen libass: %s\n", dlerror());
+        native_logf("Failed to dlopen libass: %s\n", dlerror());
         return 0;
     }
 
@@ -1133,7 +1157,7 @@ static int load_libass_api(const char* libass_path, LibAssApi* api) {
     if (!api->library_init || !api->library_done || !api->renderer_init || !api->renderer_done ||
         !api->set_frame_size || !api->set_fonts || !api->new_track || !api->free_track ||
         !api->process_data || !api->render_frame) {
-        fprintf(stderr, "libass is missing required API symbols\n");
+        native_logf("libass is missing required API symbols\n");
         dlclose(dylib);
         memset(api, 0, sizeof(*api));
         return 0;
@@ -1611,7 +1635,7 @@ static jboolean JNICALL jni_AttachHdrMetalView(JNIEnv* env, jclass cls, jlong ha
 
     CALayer* layer = (CALayer*)getHdrMetalLayer(ctx);
     if (!layer) {
-        fprintf(stderr, "HDR Metal: native layer is null\n");
+        native_logf("HDR Metal: native layer is null\n");
         return JNI_FALSE;
     }
     jint width = call_component_int(env, component, "getWidth");
@@ -1621,7 +1645,7 @@ static jboolean JNICALL jni_AttachHdrMetalView(JNIEnv* env, jclass cls, jlong ha
 
     jboolean attached = set_awt_component_layer(env, component, layer);
     if (!attached) {
-        fprintf(stderr, "HDR Metal: JAWT layer attach failed\n");
+        native_logf("HDR Metal: JAWT layer attach failed\n");
     }
     return attached;
 }

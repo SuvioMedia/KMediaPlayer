@@ -5,6 +5,7 @@
 #include "MediaFoundationManager.h"
 #include "AudioManager.h"
 #include "HLSPlayer.h"
+#include "NativeLogging.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdint>
@@ -43,11 +44,8 @@ static constexpr double kFrameAheadMinMs        = 1.0;
 // ---------------------------------------------------------------------------
 // Debug printing
 // ---------------------------------------------------------------------------
-#ifdef _DEBUG
-  #define PrintHR(msg, hr) fprintf(stderr, "%s (hr=0x%08x)\n", msg, static_cast<unsigned int>(hr))
-#else
-  #define PrintHR(msg, hr) ((void)0)
-#endif
+#define PrintHR(msg, hr) \
+    ComposeMediaPlayer::NativeLogging::Logf("%s (hr=0x%08x)\n", msg, static_cast<unsigned int>(hr))
 
 
 // ---------------------------------------------------------------------------

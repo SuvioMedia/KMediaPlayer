@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.subtitle
 
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -7,7 +8,8 @@ import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
+
+private val jvmSubtitleLogger = TaggedLogger("JvmSubtitleLoader")
 
 /**
  * JVM implementation of the loadSubtitleContent function.
@@ -22,7 +24,7 @@ actual suspend fun loadSubtitleContent(src: String): String =
             when {
                 // Handle HTTP/HTTPS URLs
                 src.startsWith("http://") || src.startsWith("https://") -> {
-                    val url = URL(src)
+                    val url = URI.create(src).toURL()
                     val connection = url.openConnection() as HttpURLConnection
                     connection.connectTimeout = 10000
                     connection.readTimeout = 10000
@@ -51,14 +53,14 @@ actual suspend fun loadSubtitleContent(src: String): String =
                             val uriFile = File(uri)
                             uriFile.readText()
                         } catch (e: Exception) {
-                            println("Error loading subtitle file: ${e.message}")
+                            jvmSubtitleLogger.e { "Error loading subtitle file: ${e.message}" }
                             ""
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            println("Error loading subtitle content: ${e.message}")
+            jvmSubtitleLogger.e { "Error loading subtitle content: ${e.message}" }
             ""
         }
     }

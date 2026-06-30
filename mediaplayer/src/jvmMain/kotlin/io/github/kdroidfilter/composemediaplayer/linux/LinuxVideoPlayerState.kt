@@ -25,15 +25,24 @@ import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
+import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
+import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
+import io.github.kdroidfilter.composemediaplayer.subtitleTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
@@ -83,6 +92,33 @@ private data class LinuxLibVlcRuntimeTrackDescription(
 class LinuxVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
+    private var _projection by mutableStateOf(playbackOptions.projection.normalized())
+    override var projection: VideoProjectionSettings
+        get() = _projection
+        set(value) {
+            _projection = value.normalized()
+            updateProjectionRenderingInfo()
+        }
+    private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
+    override var projectionView: VideoProjectionViewSettings
+        get() = _projectionView
+        set(value) {
+            _projectionView = value.normalized()
+        }
+    private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
+    override var projectionViewControlMode: VideoProjectionViewControlMode
+        get() = _projectionViewControlMode
+        set(value) {
+            _projectionViewControlMode = value
+        }
+    private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
+    override var projectionTextureCrop: VideoTextureCrop
+        get() = _projectionTextureCrop
+        set(value) {
+            _projectionTextureCrop = value.normalized()
+            updateProjectionRenderingInfo()
+        }
+
     // Native player pointer (AtomicLong for lock-free reads from the frame hot path)
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
@@ -167,7 +203,23 @@ class LinuxVideoPlayerState(
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
     override var subtitleOffset: Duration by mutableStateOf(Duration.ZERO)
     override val metadata: VideoMetadata = VideoMetadata()
-    override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo()
+    override val renderingInfo: VideoRenderingInfo =
+        VideoRenderingInfo(
+            videoProjection = projection.renderingInfoLabel(),
+        )
+
+    private fun updateProjectionRenderingInfo() {
+        renderingInfo.videoProjection = projection.renderingInfoLabel()
+        if (!shouldUseLibVlcNativeSurface()) {
+            renderingInfo.videoRenderer =
+                if (libVlcBackendActive && nativeBackendLibVlcRenderMode == LinuxLibVlcRenderMode.MEMORY) {
+                    libVlcVideoRenderer(LinuxLibVlcRenderMode.MEMORY)
+                } else {
+                    projection.jvmCanvasRendererLabel(projectionTextureCrop)
+                }
+        }
+    }
+
     override val capabilities: PlayerCapabilities
         get() = jvmPlayerCapabilities(playbackOptions)
     override var isFullscreen: Boolean by mutableStateOf(false)
@@ -354,6 +406,7 @@ class LinuxVideoPlayerState(
 
                     withContext(Dispatchers.Main) {
                         hasMedia = true
+                        updateProjectionRenderingInfo()
                         isLoading = false
                         isPlaying = startPlayback
                     }
@@ -642,7 +695,11 @@ class LinuxVideoPlayerState(
 
     private fun libVlcVideoRenderer(renderMode: LinuxLibVlcRenderMode): String =
         when (renderMode) {
-            LinuxLibVlcRenderMode.MEMORY -> "libVLC vmem -> Compose Canvas (Skia)"
+            LinuxLibVlcRenderMode.MEMORY ->
+                projection.jvmCanvasRendererLabel(
+                    baseRenderer = "libVLC vmem -> Compose Canvas (Skia)",
+                    textureCrop = projectionTextureCrop,
+                )
             LinuxLibVlcRenderMode.NATIVE_VIEW -> "libVLC native X11/XWayland xwindow"
         }
 
@@ -1109,7 +1166,7 @@ class LinuxVideoPlayerState(
                             nextSkiaBitmapA = true
                         }
 
-                        val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+                        val targetBitmap = (if (nextSkiaBitmapA) skiaBitmapA else skiaBitmapB) ?: return@withContext
                         nextSkiaBitmapA = !nextSkiaBitmapA
 
                         val pixmap = targetBitmap.peekPixels() ?: return@withContext
@@ -1160,8 +1217,9 @@ class LinuxVideoPlayerState(
                 _durationText.value = formatTime(duration)
             }
 
-            if (seekInProgress && targetSeekTime != null) {
-                if (abs(current.toSecondsDouble() - targetSeekTime!!.toSecondsDouble()) < 0.3) {
+            val seekTarget = targetSeekTime
+            if (seekInProgress && seekTarget != null) {
+                if (abs(current.toSecondsDouble() - seekTarget.toSecondsDouble()) < 0.3) {
                     seekInProgress = false
                     targetSeekTime = null
                     withContext(Dispatchers.Main) { isLoading = false }
@@ -1203,8 +1261,9 @@ class LinuxVideoPlayerState(
 
     override fun play() {
         ioScope.launch {
-            if (!hasMedia && lastUri != null) {
-                openUri(lastUri!!, requestHeaders = lastRequestHeaders)
+            val uri = lastUri
+            if (!hasMedia && uri != null) {
+                openUri(uri, requestHeaders = lastRequestHeaders)
             } else if (hasMedia) {
                 playInBackground()
             } else {
@@ -1428,7 +1487,11 @@ class LinuxVideoPlayerState(
     }
 
     // --- Subtitle stubs ---
-    override fun selectAudioTrack(track: AudioTrack?) {
+    override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        if (track != null && availableAudioTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+
         val selectedLibVlcStreamIndex =
             track
                 ?.id
@@ -1439,7 +1502,7 @@ class LinuxVideoPlayerState(
             ioScope.launch {
                 selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         val selectedStreamIndex =
@@ -1452,7 +1515,7 @@ class LinuxVideoPlayerState(
             ioScope.launch {
                 switchExternalHlsAudioTrack(track, selectedStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         ioScope.launch {
@@ -1460,14 +1523,18 @@ class LinuxVideoPlayerState(
                 currentAudioTrack = track
             }
         }
+        return track.audioTrackSelectionResult()
     }
 
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
         if (track == null && libVlcBackendActive) {
             ioScope.launch {
                 disableLibVlcSubtitles()
             }
-            return
+            return TrackSelectionResult.Disabled
+        }
+        if (track != null && track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
         }
 
         val selectedLibVlcStreamIndex =
@@ -1480,7 +1547,7 @@ class LinuxVideoPlayerState(
             ioScope.launch {
                 selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         val selectedStreamIndex =
@@ -1493,7 +1560,7 @@ class LinuxVideoPlayerState(
             ioScope.launch {
                 switchExternalHlsSubtitleTrack(track, selectedStreamIndex)
             }
-            return
+            return TrackSelectionResult.Selected(track.id)
         }
 
         ioScope.launch {
@@ -1502,6 +1569,7 @@ class LinuxVideoPlayerState(
                 subtitlesEnabled = track != null
             }
         }
+        return track.subtitleTrackSelectionResult()
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
@@ -1526,7 +1594,7 @@ class LinuxVideoPlayerState(
         }
     }
 
-    override fun disableSubtitles() {
+    override fun disableSubtitles(): TrackSelectionResult {
         val selectedTrack = currentSubtitleTrack
         subtitlesEnabled = false
         currentSubtitleTrack = null
@@ -1534,15 +1602,16 @@ class LinuxVideoPlayerState(
             ioScope.launch {
                 disableLibVlcSubtitles()
             }
-            return
+            return TrackSelectionResult.Disabled
         }
 
         if (externalHlsSourceUri != null && externalHlsSelectedSubtitleStreamIndex != null) {
             ioScope.launch {
                 switchExternalHlsSubtitleTrack(track = null, streamIndex = null)
             }
-            return
+            return TrackSelectionResult.Disabled
         }
+        return TrackSelectionResult.Disabled
     }
 
     private suspend fun selectLibVlcAudioTrack(
@@ -1724,6 +1793,7 @@ class LinuxVideoPlayerState(
 
             withContext(Dispatchers.Main) {
                 hasMedia = true
+                updateProjectionRenderingInfo()
                 isLoading = false
                 isPlaying = shouldResumePlayback
             }

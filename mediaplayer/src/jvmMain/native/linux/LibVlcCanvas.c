@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,6 +87,31 @@ struct LibVlcCanvasPlayer {
     int did_play_to_end;
 };
 
+static int native_logging_enabled(void) {
+    static int initialized = 0;
+    static int enabled = 0;
+    if (!initialized) {
+        const char* value = getenv("COMPOSE_MEDIA_PLAYER_NATIVE_LOGGING");
+        enabled = value && value[0] && (
+            strcasecmp(value, "1") == 0 ||
+            strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 ||
+            strcasecmp(value, "on") == 0
+        );
+        initialized = 1;
+    }
+    return enabled;
+}
+
+static void native_logf(const char* format, ...) {
+    if (!native_logging_enabled()) return;
+
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+}
+
 static void* vlc_sym(void* dylib, const char* name) {
     return dlsym(dylib, name);
 }
@@ -113,7 +139,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     api->core_dylib = dlopen_libvlccore_next_to_libvlc(libvlc_path);
     api->dylib = dlopen(libvlc_path, RTLD_NOW | RTLD_LOCAL);
     if (!api->dylib) {
-        fprintf(stderr, "Failed to dlopen libVLC: %s\n", dlerror());
+        native_logf("Failed to dlopen libVLC: %s\n", dlerror());
         if (api->core_dylib) dlclose(api->core_dylib);
         memset(api, 0, sizeof(*api));
         return 0;
@@ -157,7 +183,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
         !api->video_set_callbacks || !api->video_set_format_callbacks || !api->audio_get_track_description ||
         !api->audio_set_track || !api->video_get_spu_description || !api->video_set_spu ||
         !api->track_description_list_release) {
-        fprintf(stderr, "libVLC is missing required API symbols\n");
+        native_logf("libVLC is missing required API symbols\n");
         dlclose(api->dylib);
         if (api->core_dylib) dlclose(api->core_dylib);
         memset(api, 0, sizeof(*api));

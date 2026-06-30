@@ -5,15 +5,12 @@
 // player API.
 
 #include "HLSPlayer.h"
+#include "NativeLogging.h"
 #include <mferror.h>
 #include <algorithm>
 #include <new>
 
-#ifdef _DEBUG
-#define HLS_LOG(msg, ...) fprintf(stderr, "[HLS] " msg "\n", ##__VA_ARGS__)
-#else
-#define HLS_LOG(msg, ...) ((void)0)
-#endif
+#define HLS_LOG(msg, ...) ComposeMediaPlayer::NativeLogging::Logf("[HLS] " msg "\n", ##__VA_ARGS__)
 
 using Microsoft::WRL::ComPtr;
 

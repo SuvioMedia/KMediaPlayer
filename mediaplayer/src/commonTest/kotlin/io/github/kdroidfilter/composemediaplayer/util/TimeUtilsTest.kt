@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer.util
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.nanoseconds
 import kotlin.time.Duration.Companion.seconds
@@ -51,5 +52,17 @@ class TimeUtilsTest {
         assertEquals(1.seconds, 1_000_000_000L.nanosecondsAsDuration())
         assertEquals(1.seconds, 10_000_000L.hundredNanosecondsAsDuration())
         assertEquals(10_000_000L, 1.seconds.inWhole100NanosecondTicks())
+    }
+
+    @Test
+    fun testDurationConversionsClampInvalidPlatformValues() {
+        assertEquals(Duration.ZERO, Double.NaN.secondsAsDuration())
+        assertEquals(Duration.ZERO, Double.POSITIVE_INFINITY.secondsAsDuration())
+        assertEquals(Duration.ZERO, Double.NEGATIVE_INFINITY.secondsAsDuration())
+        assertEquals(Duration.ZERO, (-1.0).secondsAsDuration())
+        assertEquals(Duration.ZERO, (-1f).secondsAsDuration())
+        assertEquals(Duration.ZERO, (-1L).millisecondsAsDuration())
+        assertEquals(Duration.ZERO, (-1L).nanosecondsAsDuration())
+        assertEquals(Duration.ZERO, (-1L).hundredNanosecondsAsDuration())
     }
 }

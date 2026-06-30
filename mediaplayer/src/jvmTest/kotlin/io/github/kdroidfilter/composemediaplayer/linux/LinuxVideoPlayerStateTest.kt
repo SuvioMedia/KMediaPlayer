@@ -41,88 +41,87 @@ class LinuxVideoPlayerStateTest {
         }
     }
 
+    private fun withLinuxPlayerState(block: (LinuxVideoPlayerState) -> Unit) {
+        val playerState = LinuxVideoPlayerState()
+        try {
+            block(playerState)
+        } finally {
+            playerState.dispose()
+        }
+    }
+
     @Test
     fun testCreateLinuxVideoPlayerState() {
-        val playerState = LinuxVideoPlayerState()
-
-        assertNotNull(playerState)
-        assertFalse(playerState.hasMedia)
-        assertFalse(playerState.isPlaying)
-        assertEquals(0f, playerState.sliderPos)
-        assertEquals(1f, playerState.volume)
-        assertFalse(playerState.loop)
-        assertEquals("00:00", playerState.positionText)
-        assertEquals("00:00", playerState.durationText)
-        assertFalse(playerState.isFullscreen)
-        assertNull(playerState.error)
-
-        playerState.dispose()
+        withLinuxPlayerState { playerState ->
+            assertNotNull(playerState)
+            assertFalse(playerState.hasMedia)
+            assertFalse(playerState.isPlaying)
+            assertEquals(0f, playerState.sliderPos)
+            assertEquals(1f, playerState.volume)
+            assertFalse(playerState.loop)
+            assertEquals("00:00", playerState.positionText)
+            assertEquals("00:00", playerState.durationText)
+            assertFalse(playerState.isFullscreen)
+            assertNull(playerState.error)
+        }
     }
 
     @Test
     fun testVolumeControl() {
-        val playerState = LinuxVideoPlayerState()
+        withLinuxPlayerState { playerState ->
+            assertEquals(1f, playerState.volume)
 
-        assertEquals(1f, playerState.volume)
+            playerState.volume = 0.5f
+            assertEquals(0.5f, playerState.volume)
 
-        playerState.volume = 0.5f
-        assertEquals(0.5f, playerState.volume)
+            playerState.volume = -0.1f
+            assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
 
-        playerState.volume = -0.1f
-        assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
-
-        playerState.volume = 1.5f
-        assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
-
-        playerState.dispose()
+            playerState.volume = 1.5f
+            assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
+        }
     }
 
     @Test
     fun testLoopSetting() {
-        val playerState = LinuxVideoPlayerState()
+        withLinuxPlayerState { playerState ->
+            assertFalse(playerState.loop)
 
-        assertFalse(playerState.loop)
+            playerState.loop = true
+            assertTrue(playerState.loop)
 
-        playerState.loop = true
-        assertTrue(playerState.loop)
-
-        playerState.loop = false
-        assertFalse(playerState.loop)
-
-        playerState.dispose()
+            playerState.loop = false
+            assertFalse(playerState.loop)
+        }
     }
 
     @Test
     fun testFullscreenToggle() {
-        val playerState = LinuxVideoPlayerState()
+        withLinuxPlayerState { playerState ->
+            assertFalse(playerState.isFullscreen)
 
-        assertFalse(playerState.isFullscreen)
+            playerState.toggleFullscreen()
+            assertTrue(playerState.isFullscreen)
 
-        playerState.toggleFullscreen()
-        assertTrue(playerState.isFullscreen)
-
-        playerState.toggleFullscreen()
-        assertFalse(playerState.isFullscreen)
-
-        playerState.dispose()
+            playerState.toggleFullscreen()
+            assertFalse(playerState.isFullscreen)
+        }
     }
 
     @Test
     fun testErrorHandling() {
-        val playerState = LinuxVideoPlayerState()
+        withLinuxPlayerState { playerState ->
+            assertNull(playerState.error)
 
-        assertNull(playerState.error)
+            runBlocking {
+                playerState.openUri("non_existent_file.mp4")
+                delay(500.milliseconds)
+            }
 
-        runBlocking {
-            playerState.openUri("non_existent_file.mp4")
-            delay(500.milliseconds)
+            assertNotNull(playerState.error)
+
+            playerState.clearError()
+            assertNull(playerState.error)
         }
-
-        assertNotNull(playerState.error)
-
-        playerState.clearError()
-        assertNull(playerState.error)
-
-        playerState.dispose()
     }
 }

@@ -11,10 +11,14 @@ internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
         supportsMkv = true,
         supportsPiP = isAndroidPictureInPictureSupported(),
         hdr = queryAndroidHdrCapabilities(),
+        supportedUriSchemes = ANDROID_SUPPORTED_URI_SCHEMES,
     )
 
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
     platformPlayerCapabilities().canPlaySource(source)
+
+private val ANDROID_SUPPORTED_URI_SCHEMES =
+    setOf("android.resource", "asset", "content", "data", "file", "http", "https", "rawresource")
 
 private fun isAndroidPictureInPictureSupported(): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false

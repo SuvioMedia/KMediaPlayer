@@ -350,10 +350,10 @@ internal fun VideoContentLayout(
     }
 }
 
-internal fun HTMLVideoElement.applyInteropBehindCanvas() {
+internal fun HTMLVideoElement.applyInteropBehindCanvas(hiddenForProjection: Boolean = false) {
     val wrapper = parentElement as? HTMLElement ?: return
     wrapper.style.apply {
-        setProperty("z-index", "-2", "important")
+        setProperty("z-index", if (hiddenForProjection) "-3" else "-2", "important")
         setProperty("pointer-events", "none")
         setProperty("contain", "layout paint style", "important")
         setProperty("overflow", "hidden", "important")
@@ -368,9 +368,11 @@ internal fun HTMLVideoElement.applyInteropBehindCanvas() {
 internal fun HTMLVideoElement.applyContentScale(
     contentScale: ContentScale,
     videoRatio: Float?,
+    hiddenForProjection: Boolean = false,
 ) {
     style.apply {
         backgroundColor = "black"
+        opacity = if (hiddenForProjection) "0" else "1"
         setProperty("pointer-events", "none")
         setProperty("contain", "strict", "important")
         setProperty("transform", "translateZ(0)", "important")
@@ -855,7 +857,8 @@ internal fun HTMLVideoElement.setupMetadataListener(
         val width = videoWidth
         val height = videoHeight
         if (height != 0) {
-            onVideoRatioChange(width.toFloat() / height.toFloat())
+            val aspectRatio = width.toFloat() / height.toFloat()
+            onVideoRatioChange(aspectRatio)
 
             with(playerState.metadata) {
                 this.width = width
@@ -889,11 +892,19 @@ internal fun HTMLVideoElement.setupMetadataListener(
             }
 
             if (playerState is DefaultVideoPlayerState) {
+                playerState.updateAspectRatio(aspectRatio)
+                playerState.updateAutoDetectedProjectionFromMetadata()
                 playerState.renderingInfo.update(
                     container = playerState.metadata.mimeType,
                     videoDecoder = "Browser native decoder (${width}x$height)",
-                    videoRenderer = "HTMLVideoElement + browser compositor",
+                    videoRenderer =
+                        if (playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)) {
+                            "HTMLVideoElement -> WebGL projection canvas"
+                        } else {
+                            "HTMLVideoElement + browser compositor"
+                        },
                     audioRenderer = "Browser native audio",
+                    videoProjection = playerState.projection.renderingInfoLabel(),
                 )
             }
         }

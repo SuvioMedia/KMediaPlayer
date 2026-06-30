@@ -1,3 +1,4 @@
+import com.android.build.api.variant.HostTestBuilder
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -7,27 +8,35 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(25)
 
     target {
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_17)
+            jvmTarget.set(JvmTarget.JVM_25)
         }
     }
+}
 
-    dependencies {
-        implementation(project(":sample:composeApp"))
-        implementation(project(":mediaplayer"))
-        implementation(libs.androidx.activityCompose)
-        implementation(libs.androidx.core)
-        implementation(libs.filekit.dialogs.compose)
-        debugImplementation(libs.compose.ui.tooling)
+androidComponents {
+    beforeVariants(selector().all()) { variant ->
+        variant.androidTestEnabled = false
+        variant.hostTests[HostTestBuilder.UNIT_TEST_TYPE]?.enable = false
     }
+}
+
+dependencies {
+    implementation(project(":sample:composeApp"))
+    implementation(project(":mediaplayer"))
+    implementation(libs.androidx.activityCompose)
+    implementation(libs.androidx.core)
+    implementation(libs.filekit.dialogs.compose)
+    debugImplementation(libs.compose.ui.tooling)
 }
 
 android {
     namespace = "sample.app"
     compileSdk = 37
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         minSdk =

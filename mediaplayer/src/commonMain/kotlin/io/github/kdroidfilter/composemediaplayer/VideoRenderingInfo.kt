@@ -15,6 +15,7 @@ class VideoRenderingInfo(
     subtitleRenderer: String? = null,
     subtitleSource: String? = null,
     notes: String? = null,
+    videoProjection: String? = null,
 ) {
     var backend: String? by mutableStateOf(backend)
     var container: String? by mutableStateOf(container)
@@ -24,6 +25,7 @@ class VideoRenderingInfo(
     var subtitleRenderer: String? by mutableStateOf(subtitleRenderer)
     var subtitleSource: String? by mutableStateOf(subtitleSource)
     var notes: String? by mutableStateOf(notes)
+    var videoProjection: String? by mutableStateOf(videoProjection)
 
     fun isAllNull(): Boolean =
         backend == null &&
@@ -33,7 +35,8 @@ class VideoRenderingInfo(
             audioRenderer == null &&
             subtitleRenderer == null &&
             subtitleSource == null &&
-            notes == null
+            notes == null &&
+            videoProjection == null
 
     fun update(
         backend: String? = this.backend,
@@ -44,6 +47,7 @@ class VideoRenderingInfo(
         subtitleRenderer: String? = this.subtitleRenderer,
         subtitleSource: String? = this.subtitleSource,
         notes: String? = this.notes,
+        videoProjection: String? = this.videoProjection,
     ) {
         this.backend = backend
         this.container = container
@@ -53,5 +57,6 @@ class VideoRenderingInfo(
         this.subtitleRenderer = subtitleRenderer
         this.subtitleSource = subtitleSource
         this.notes = notes
+        this.videoProjection = videoProjection
     }
 }

@@ -8,6 +8,11 @@ data class BufferedRange(
     val start: Duration,
     val end: Duration,
 ) {
+    init {
+        require(start >= Duration.ZERO) { "Buffered range start must not be negative." }
+        require(end >= start) { "Buffered range end must be greater than or equal to start." }
+    }
+
     val duration: Duration
         get() = end - start
 }

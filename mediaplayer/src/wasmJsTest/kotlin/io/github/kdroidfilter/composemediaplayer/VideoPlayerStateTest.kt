@@ -1,5 +1,12 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.js
 import kotlin.test.Test
@@ -13,6 +20,7 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * Tests for the WebAssembly implementation of VideoPlayerState
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class VideoPlayerStateTest {
     /**
      * Test the creation of VideoPlayerState
@@ -311,15 +319,165 @@ class VideoPlayerStateTest {
     }
 
     @Test
+    fun testOpenUriReleasesPreviousMediaSession() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val events = collectEvents(playerState)
+
+            playerState.openUri("file:///first.mp4")
+            playerState.openUri("file:///second.mp4")
+            runCurrent()
+
+            val firstPreparing = events[0] as PlaybackEvent.SourcePreparing
+            assertEquals(1L, firstPreparing.mediaSessionId)
+            assertEquals("file:///first.mp4", firstPreparing.uri)
+
+            val firstReleased = events[1] as PlaybackEvent.SourceReleased
+            assertEquals(1L, firstReleased.mediaSessionId)
+
+            val secondPreparing = events[2] as PlaybackEvent.SourcePreparing
+            assertEquals(2L, secondPreparing.mediaSessionId)
+            assertEquals("file:///second.mp4", secondPreparing.uri)
+            assertEquals(3, events.size)
+
+            playerState.dispose()
+        }
+
+    @Test
+    fun testRepeatedStopDoesNotReleaseEmptyMediaSession() {
+        val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+
+        playerState.openUri("file:///video.mp4")
+        playerState.stop()
+        val stoppedSessionId = playerState.mediaSessionId
+
+        playerState.stop()
+
+        assertEquals(stoppedSessionId, playerState.mediaSessionId)
+        playerState.dispose()
+    }
+
+    @Test
+    fun testRestartEmitsPlaybackRestartedForActiveMedia() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val events = collectEvents(playerState)
+
+            playerState.openUri("file:///video.mp4")
+            runCurrent()
+            events.clear()
+
+            playerState.restart()
+            runCurrent()
+
+            assertTrue(playerState.isPlaying)
+            assertTrue(events.any { it is PlaybackEvent.PlaybackRestarted && it.mediaSessionId == 1L })
+
+            playerState.dispose()
+        }
+
+    @Test
+    fun testAutoHlsQualityWithoutHlsSourceIsNotSupported() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val events = collectEvents(playerState)
+
+            val result = playerState.selectAutoHlsQuality()
+            runCurrent()
+
+            assertEquals(HlsQualitySelectionResult.NotSupported, result)
+            assertEquals(emptyList(), events)
+
+            playerState.dispose()
+        }
+
+    @Test
+    fun testStopClearsStaleHlsQualityCallback() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val events = collectEvents(playerState)
+            var callbackCalls = 0
+            playerState.applyHlsQualityCallback = { callbackCalls += 1 }
+
+            playerState.stop()
+            val result = playerState.selectAutoHlsQuality()
+            runCurrent()
+
+            assertEquals(HlsQualitySelectionResult.NotSupported, result)
+            assertEquals(0, callbackCalls)
+            assertEquals(emptyList(), events)
+
+            playerState.dispose()
+        }
+
+    @Test
+    fun testHlsQualityRowsIgnoreInvalidVariantsAndMetrics() {
+        val snapshot =
+            parseHlsQualityRows(
+                listOf(
+                    "hls:good|720p|1280|720|2500000|avc1|1|0",
+                    "|Missing id|1920|1080|5000000|avc1|0|0",
+                    "hls:missing-label||1920|1080|5000000|avc1|0|0",
+                    "hls:partial|Partial|-1|0|-500|avc1|0|0",
+                ).joinToString("\n"),
+            )
+
+        assertEquals(2, snapshot.variants.size)
+        assertEquals("hls:good", snapshot.selectedId)
+        assertFalse(snapshot.autoMode)
+        assertEquals(HlsQualityVariant("hls:good", "720p", 1280, 720, 2500000, "avc1"), snapshot.variants[0])
+        assertEquals(HlsQualityVariant("hls:partial", "Partial", codecs = "avc1"), snapshot.variants[1])
+    }
+
+    @Test
+    fun testBufferedRangeRowsIgnoreInvalidRanges() {
+        val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+
+        playerState.updateBufferedRanges(
+            listOf(
+                "0|5",
+                "5|1",
+                "-1|3",
+                "NaN|4",
+                "8|12",
+            ).joinToString("\n"),
+        )
+
+        assertEquals(
+            listOf(
+                BufferedRange(0.seconds, 5.seconds),
+                BufferedRange(8.seconds, 12.seconds),
+            ),
+            playerState.bufferedRanges.toList(),
+        )
+
+        playerState.dispose()
+    }
+
+    @Test
     fun testWebCapabilitiesClassifySources() {
         val playerState = createVideoPlayerState()
 
         assertFalse(playerState.canPlaySource(""))
         assertTrue(playerState.canPlaySource("blob:https://example.test/video"))
+        assertTrue(playerState.canPlaySource("data:video/mp4;base64,AAA"))
         assertTrue(playerState.canPlaySource("https://example.test/playlist.m3u8"))
-        assertEquals(playerState.capabilities.supportsMkv, playerState.canPlaySource("file:///movie.mkv"))
+        assertFalse(playerState.canPlaySource("file:///movie.mp4"))
+        assertFalse(playerState.canPlaySource("file:///movie.mkv"))
+        assertFalse(playerState.canPlaySource("""C:\Videos\movie.mp4"""))
+        assertFalse(playerState.canPlaySource("""\\server\share\movie.mp4"""))
 
         playerState.dispose()
+    }
+
+    private fun TestScope.collectEvents(state: VideoPlayerState): MutableList<PlaybackEvent> {
+        val events = mutableListOf<PlaybackEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            state.playbackEvents.collect { event ->
+                events += event
+            }
+        }
+        return events
     }
 }
 

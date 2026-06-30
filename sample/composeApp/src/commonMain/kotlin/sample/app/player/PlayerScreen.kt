@@ -58,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
@@ -69,6 +70,7 @@ import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.name
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
 
@@ -82,7 +84,6 @@ fun PlayerScreen(
 ) {
     // Pause when leaving the screen, resume when coming back
     DisposableEffect(playerState) {
-        val wasPlaying = playerState.isPlaying
         onDispose {
             if (playerState.isPlaying) {
                 playerState.pause()
@@ -110,18 +111,21 @@ fun PlayerScreen(
     var pendingPickVideo by remember { mutableStateOf(false) }
     var pendingPickSubtitle by remember { mutableStateOf(false) }
     var demoLoaded by remember { mutableStateOf(false) }
+    var playbackEndedVisible by remember { mutableStateOf(false) }
 
     fun applyDesktopMkvBackend() {
         applyDesktopMkvPlaybackBackend(selectedDesktopMkvBackend)
     }
 
     fun openVideoUrl(url: String) {
+        playbackEndedVisible = false
         applyDesktopMkvBackend()
         playerState.openUri(url, initialPlayerState)
     }
 
     val videoFileLauncher = rememberFilePickerLauncher(type = FileKitType.Video) { file ->
         file?.let {
+            playbackEndedVisible = false
             applyDesktopMkvBackend()
             playerState.openFile(it, initialPlayerState)
         }
@@ -182,9 +186,17 @@ fun PlayerScreen(
         }
     }
 
-    // Example: detect when playback reaches the end
-    playerState.onPlaybackEnded = {
-        println("Playback ended")
+    LaunchedEffect(playerState) {
+        playerState.playbackEvents.collect { event ->
+            when (event) {
+                is PlaybackEvent.PlaybackEnded -> playbackEndedVisible = true
+                is PlaybackEvent.SourcePreparing,
+                is PlaybackEvent.SourceReleased,
+                -> playbackEndedVisible = false
+
+                else -> Unit
+            }
+        }
     }
 
     Box(modifier = modifier.background(Color.Black)) {
@@ -270,6 +282,26 @@ fun PlayerScreen(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+
+        if (playbackEndedVisible && playerState.hasMedia && playerState.error == null) {
+            Snackbar(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+                action = {
+                    TextButton(
+                        onClick = {
+                            playbackEndedVisible = false
+                            playerState.restart()
+                        },
+                    ) {
+                        Text("Replay")
+                    }
+                },
+            ) {
+                Text("Playback ended")
             }
         }
     }

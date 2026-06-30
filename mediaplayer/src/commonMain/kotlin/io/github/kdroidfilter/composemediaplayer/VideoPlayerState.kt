@@ -8,11 +8,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.vinceglb.filekit.PlatformFile
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlin.time.Clock
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -190,10 +189,24 @@ interface VideoPlayerState {
     }
 
     /**
+     * Seeks to a specific playback time in milliseconds.
+     */
+    fun seekToMs(timeMs: Long) {
+        seekTo(timeMs.coerceAtLeast(0L).milliseconds)
+    }
+
+    /**
      * Seeks by a signed time delta.
      */
     fun seekBy(delta: Duration) {
         seekTo(preciseCurrentTime + delta)
+    }
+
+    /**
+     * Seeks by a signed millisecond delta.
+     */
+    fun seekByMs(deltaMs: Long) {
+        seekBy(deltaMs.milliseconds)
     }
 
     /**
@@ -291,6 +304,18 @@ interface VideoPlayerState {
     val metadata: VideoMetadata
     val renderingInfo: VideoRenderingInfo
         get() = VideoRenderingInfo()
+    var projection: VideoProjectionSettings
+        get() = VideoProjectionSettings()
+        set(_) = Unit
+    var projectionView: VideoProjectionViewSettings
+        get() = VideoProjectionViewSettings()
+        set(_) = Unit
+    var projectionViewControlMode: VideoProjectionViewControlMode
+        get() = VideoProjectionViewControlMode.AUTO
+        set(_) = Unit
+    var projectionTextureCrop: VideoTextureCrop
+        get() = VideoTextureCrop()
+        set(_) = Unit
 
     fun playbackSnapshot(): PlaybackSnapshot =
         PlaybackSnapshot(
@@ -313,11 +338,17 @@ interface VideoPlayerState {
     var currentAudioTrack: AudioTrack?
     val availableAudioTracks: List<AudioTrack>
 
-    fun selectAudioTrack(track: AudioTrack?)
+    fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult
 
-    fun selectAudioTrack(trackId: String?) {
-        selectAudioTrack(trackId?.let { id -> availableAudioTracks.firstOrNull { it.id == id } })
-    }
+    fun selectAudioTrack(trackId: String?): TrackSelectionResult =
+        trackId
+            ?.let { id ->
+                availableAudioTracks
+                    .firstOrNull { it.id == id }
+                    ?.let { track -> selectAudioTrack(track) }
+                    ?: TrackSelectionResult.NotFound(id)
+            }
+            ?: selectAudioTrack(null as AudioTrack?)
 
     // Subtitle management
     var subtitlesEnabled: Boolean
@@ -329,11 +360,17 @@ interface VideoPlayerState {
         get() = Duration.ZERO
         set(value) {}
 
-    fun selectSubtitleTrack(track: SubtitleTrack?)
+    fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult
 
-    fun selectSubtitleTrack(trackId: String?) {
-        selectSubtitleTrack(trackId?.let { id -> availableSubtitleTracks.firstOrNull { it.id == id } })
-    }
+    fun selectSubtitleTrack(trackId: String?): TrackSelectionResult =
+        trackId
+            ?.let { id ->
+                availableSubtitleTracks
+                    .firstOrNull { it.id == id }
+                    ?.let { track -> selectSubtitleTrack(track) }
+                    ?: TrackSelectionResult.NotFound(id)
+            }
+            ?: selectSubtitleTrack(null as SubtitleTrack?)
 
     fun addSubtitleTrack(track: SubtitleTrack)
 
@@ -345,7 +382,29 @@ interface VideoPlayerState {
 
     fun clearExternalSubtitleTracks()
 
-    fun disableSubtitles()
+    /**
+     * Replaces only app-provided subtitle tracks while preserving embedded tracks discovered by the platform backend.
+     *
+     * Tracks passed here are treated as external even if their [SubtitleTrack.isEmbedded] flag is set. If the
+     * currently selected external track is present in the replacement list with the same id, it is selected again.
+     * Otherwise external subtitle selection is cleared by [clearExternalSubtitleTracks].
+     */
+    fun replaceExternalSubtitleTracks(tracks: List<SubtitleTrack>) {
+        val previouslySelectedExternalTrackId = currentSubtitleTrack?.takeIf { it.isExternal }?.id
+        clearExternalSubtitleTracks()
+        tracks.forEach(::addSubtitleTrack)
+        if (previouslySelectedExternalTrackId != null) {
+            val replacementTrack =
+                availableSubtitleTracks.firstOrNull { track ->
+                    track.id == previouslySelectedExternalTrackId && track.isExternal
+                }
+            if (replacementTrack != null) {
+                selectSubtitleTrack(replacementTrack)
+            }
+        }
+    }
+
+    fun disableSubtitles(): TrackSelectionResult
 
     // HLS quality management
     val availableHlsQualities: List<HlsQualityVariant>
@@ -355,21 +414,22 @@ interface VideoPlayerState {
     val hlsQualityMode: HlsQualityMode
         get() = HlsQualityMode.AUTO
 
-    fun selectHlsQuality(variantId: String?) {}
+    /**
+     * Selects a concrete HLS variant by id, or automatic variant selection when [variantId] is null.
+     */
+    fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult = HlsQualitySelectionResult.NotSupported
 
-    fun selectAutoHlsQuality() {
-        selectHlsQuality(null)
-    }
+    fun selectAutoHlsQuality(): HlsQualitySelectionResult = selectHlsQuality(null)
 
     // Cache management
 
     /**
      * Clears the shared video cache, removing all cached media data from disk.
      *
-     * This is a no-op on platforms that do not support caching or when caching
-     * is not enabled.
+     * Returns [CacheClearResult.NotSupported] on platforms without a shared video cache and
+     * [CacheClearResult.Disabled] when the platform supports caching but this player was created with caching disabled.
      */
-    fun clearCache() {}
+    fun clearCache(): CacheClearResult = CacheClearResult.NotSupported
 
     // Cleanup
 
@@ -412,12 +472,7 @@ interface VideoPlayerState {
 }
 
 private object EmptyPlaybackEvents {
-    val events: SharedFlow<PlaybackEvent> =
-        MutableSharedFlow(
-            replay = 0,
-            extraBufferCapacity = 1,
-            onBufferOverflow = BufferOverflow.DROP_OLDEST,
-        )
+    val events: SharedFlow<PlaybackEvent> = PlaybackEventDispatcher().events
 }
 
 /**
@@ -496,11 +551,15 @@ data class PreviewableVideoPlayerState(
     override val error: VideoPlayerError? = null,
     override val metadata: VideoMetadata = VideoMetadata(),
     override val renderingInfo: VideoRenderingInfo = VideoRenderingInfo(),
+    override var projection: VideoProjectionSettings = VideoProjectionSettings(),
+    override var projectionView: VideoProjectionViewSettings = VideoProjectionViewSettings(),
+    override var projectionViewControlMode: VideoProjectionViewControlMode = VideoProjectionViewControlMode.AUTO,
+    override var projectionTextureCrop: VideoTextureCrop = VideoTextureCrop(),
     override var currentAudioTrack: AudioTrack? = null,
     override val availableAudioTracks: List<AudioTrack> = emptyList(),
     override var subtitlesEnabled: Boolean = false,
     override var currentSubtitleTrack: SubtitleTrack? = null,
-    override val availableSubtitleTracks: List<SubtitleTrack> = emptyList(),
+    override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableListOf(),
     override var subtitleTextStyle: TextStyle = TextStyle.Default,
     override var subtitleBackgroundColor: Color = Color.Transparent,
     override val isPipSupported: Boolean = false,
@@ -533,20 +592,61 @@ data class PreviewableVideoPlayerState(
 
     override fun clearError() {}
 
-    override fun selectAudioTrack(track: AudioTrack?) {}
+    override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        if (track != null && availableAudioTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+        currentAudioTrack = track
+        return track.audioTrackSelectionResult()
+    }
 
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {}
+    override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
+        if (track != null && track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+        currentSubtitleTrack = track
+        subtitlesEnabled = track != null
+        return track.subtitleTrackSelectionResult()
+    }
 
-    override fun addSubtitleTrack(track: SubtitleTrack) {}
+    override fun addSubtitleTrack(track: SubtitleTrack) {
+        val externalTrack = track.copy(isEmbedded = false)
+        availableSubtitleTracks.removeAll { it.id == externalTrack.id }
+        availableSubtitleTracks.add(externalTrack)
+    }
 
-    override fun removeSubtitleTrack(trackId: String) {}
+    override fun removeSubtitleTrack(trackId: String) {
+        val selectedTrack = currentSubtitleTrack
+        availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
+        if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
+            disableSubtitles()
+        }
+    }
 
-    override fun clearExternalSubtitleTracks() {}
+    override fun clearExternalSubtitleTracks() {
+        val selectedTrack = currentSubtitleTrack
+        availableSubtitleTracks.removeAll { it.isExternal }
+        if (selectedTrack?.isExternal == true) {
+            disableSubtitles()
+        }
+    }
 
-    override fun disableSubtitles() {}
+    override fun disableSubtitles(): TrackSelectionResult {
+        currentSubtitleTrack = null
+        subtitlesEnabled = false
+        return TrackSelectionResult.Disabled
+    }
 
     override fun dispose() {}
 }
+
+internal fun String.normalizedAssetPath(): String {
+    val normalized = trim().trimStart('/', '\\')
+    require(normalized.isNotEmpty()) { "Asset file name must not be blank." }
+    return normalized
+}
+
+internal fun String.normalizedAssetUri(): String = "asset:///${normalizedAssetPath()}"
 
 internal fun Map<String, String>.sanitizedRequestHeaders(): Map<String, String> =
     mapNotNull { (name, value) ->

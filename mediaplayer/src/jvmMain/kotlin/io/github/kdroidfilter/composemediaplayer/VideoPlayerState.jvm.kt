@@ -44,10 +44,33 @@ open class DefaultVideoPlayerState(
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
     val delegate: VideoPlayerState =
-        when (CurrentPlatform.os) {
-            CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState(playbackOptions)
-            CurrentPlatform.OS.MAC -> MacVideoPlayerState(playbackOptions)
-            CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState(playbackOptions)
+        EventingVideoPlayerState(
+            when (CurrentPlatform.os) {
+                CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState(playbackOptions)
+                CurrentPlatform.OS.MAC -> MacVideoPlayerState(playbackOptions)
+                CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState(playbackOptions)
+            },
+        )
+
+    override var projection: VideoProjectionSettings
+        get() = delegate.projection
+        set(value) {
+            delegate.projection = value
+        }
+    override var projectionView: VideoProjectionViewSettings
+        get() = delegate.projectionView
+        set(value) {
+            delegate.projectionView = value
+        }
+    override var projectionViewControlMode: VideoProjectionViewControlMode
+        get() = delegate.projectionViewControlMode
+        set(value) {
+            delegate.projectionViewControlMode = value
+        }
+    override var projectionTextureCrop: VideoTextureCrop
+        get() = delegate.projectionTextureCrop
+        set(value) {
+            delegate.projectionTextureCrop = value
         }
 
     override val hasMedia: Boolean get() = delegate.hasMedia
@@ -105,7 +128,7 @@ open class DefaultVideoPlayerState(
         }
     override val availableAudioTracks = delegate.availableAudioTracks
 
-    override fun selectAudioTrack(track: AudioTrack?) = delegate.selectAudioTrack(track)
+    override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult = delegate.selectAudioTrack(track)
 
     override var subtitlesEnabled: Boolean
         get() = delegate.subtitlesEnabled
@@ -129,7 +152,7 @@ open class DefaultVideoPlayerState(
             delegate.subtitleBackgroundColor = value
         }
 
-    override fun selectSubtitleTrack(track: SubtitleTrack?) = delegate.selectSubtitleTrack(track)
+    override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult = delegate.selectSubtitleTrack(track)
 
     override fun addSubtitleTrack(track: SubtitleTrack) = delegate.addSubtitleTrack(track)
 
@@ -137,7 +160,7 @@ open class DefaultVideoPlayerState(
 
     override fun clearExternalSubtitleTracks() = delegate.clearExternalSubtitleTracks()
 
-    override fun disableSubtitles() = delegate.disableSubtitles()
+    override fun disableSubtitles(): TrackSelectionResult = delegate.disableSubtitles()
 
     override val positionText: String get() = delegate.positionText
     override val durationText: String get() = delegate.durationText
@@ -170,7 +193,7 @@ open class DefaultVideoPlayerState(
     override fun openFile(
         file: PlatformFile,
         initializePlayerState: InitialPlayerState,
-    ) = delegate.openUri(file.file.path, initializePlayerState)
+    ) = delegate.openFile(file, initializePlayerState)
 
     override fun play() = delegate.play()
 
@@ -194,7 +217,7 @@ open class DefaultVideoPlayerState(
         mimeType: String?,
     ) = delegate.canPlaySource(uri, mimeType)
 
-    override fun selectHlsQuality(variantId: String?) = delegate.selectHlsQuality(variantId)
+    override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult = delegate.selectHlsQuality(variantId)
 
     override fun releaseSource() = delegate.releaseSource()
 

@@ -9,6 +9,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
     when (CurrentPlatform.os) {
         CurrentPlatform.OS.WINDOWS ->
             PlayerCapabilities(
+                supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(
                         playbackOptions = playbackOptions,
@@ -18,6 +19,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
             )
         CurrentPlatform.OS.MAC ->
             PlayerCapabilities(
+                supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(
                         playbackOptions = playbackOptions,
@@ -28,6 +30,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
             )
         CurrentPlatform.OS.LINUX ->
             PlayerCapabilities(
+                supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(
                         playbackOptions = playbackOptions,
@@ -36,6 +39,8 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                     ),
             )
     }
+
+private val JVM_SUPPORTED_URI_SCHEMES = setOf("file", "http", "https")
 
 private fun supportsDesktopMkvPlayback(
     playbackOptions: VideoPlaybackOptions,

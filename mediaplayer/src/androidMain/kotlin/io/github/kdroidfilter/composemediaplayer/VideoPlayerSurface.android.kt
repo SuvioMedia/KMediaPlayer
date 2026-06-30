@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MonotonicFrameClock
+import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,7 +30,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.video.spherical.SphericalGLSurfaceView
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
@@ -53,7 +56,7 @@ actual fun VideoPlayerSurface(
         modifier = modifier,
         contentScale = contentScale,
         overlay = overlay,
-        surfaceType = SurfaceType.TextureView,
+        surfaceType = SurfaceType.Auto,
     )
 }
 
@@ -63,7 +66,7 @@ fun VideoPlayerSurface(
     playerState: VideoPlayerState,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
-    surfaceType: SurfaceType = SurfaceType.TextureView,
+    surfaceType: SurfaceType = SurfaceType.Auto,
     overlay: @Composable () -> Unit = {},
 ) {
     VideoPlayerSurfaceInternal(
@@ -167,82 +170,25 @@ private fun VideoPlayerContent(
         contentAlignment = Alignment.Center,
     ) {
         if (playerState.hasMedia) {
-            AndroidView(
-                modifier =
-                    contentScale.toCanvasModifier(
-                        playerState.aspectRatio,
-                        playerState.metadata.width,
-                        playerState.metadata.height,
-                    ),
-                factory = { context ->
-                    try {
-                        // Create PlayerView with the appropriate surface type
-
-                        createPlayerViewWithSurfaceType(context, surfaceType).apply {
-                            if (playerState is DefaultVideoPlayerState) {
-                                // Attach this view to the player state
-                                playerState.attachPlayerView(this)
-
-                                if (playerState.exoPlayer != null) {
-                                    // Attach the player from the state
-                                    player = playerState.exoPlayer
-                                }
-                            }
-
-                            useController = false
-                            defaultArtwork = null
-                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-
-                            // Map ContentScale to ExoPlayer resize modes
-                            resizeMode = mapContentScaleToResizeMode(contentScale)
-
-                            // Disable the native subtitle view since we use Compose-based subtitles
-                            subtitleView?.visibility = android.view.View.GONE
-                        }
-                    } catch (e: Exception) {
-                        androidVideoLogger.e { "Error creating PlayerView: ${e.message}" }
-                        // Return an empty view in case of error
-                        PlayerView(context).apply {
-                            setBackgroundColor(android.graphics.Color.BLACK)
-                        }
-                    }
-                },
-                update = { playerView ->
-                    try {
-                        val state = playerState as? DefaultVideoPlayerState
-                        if (state?.exoPlayer != null) {
-                            // Re-attach after LazyList recycle: onReset nulls playerView.player
-                            // and calls onPause(). Without this, the surface stays blank until
-                            // the user navigates away and back.
-                            if (playerView.player == null) {
-                                state.attachPlayerView(playerView)
-                                playerView.onResume()
-                            }
-                            playerView.resizeMode = mapContentScaleToResizeMode(contentScale)
-                        }
-                    } catch (e: Exception) {
-                        androidVideoLogger.e { "Error updating PlayerView: ${e.message}" }
-                    }
-                },
-                onReset = { playerView ->
-                    try {
-                        // Clean up resources when the view is recycled in a LazyList
-                        playerView.player = null
-                        playerView.onPause()
-                    } catch (e: Exception) {
-                        androidVideoLogger.e { "Error resetting PlayerView: ${e.message}" }
-                    }
-                },
-                onRelease = { playerView ->
-                    try {
-                        // Fully clean up the view on release
-                        playerView.player = null
-                    } catch (e: Exception) {
-                        androidVideoLogger.e { "Error releasing PlayerView: ${e.message}" }
-                    }
-                },
-            )
+            val resolvedSurfaceType =
+                surfaceType.resolveFor(
+                    projection = playerState.projection,
+                    textureCrop = playerState.projectionTextureCrop,
+                )
+            key(resolvedSurfaceType) {
+                if (resolvedSurfaceType == SurfaceType.ProjectedGlSurfaceView) {
+                    AndroidProjectionSurface(
+                        playerState = playerState,
+                        contentScale = contentScale,
+                    )
+                } else {
+                    AndroidPlayerViewSurface(
+                        playerState = playerState,
+                        contentScale = contentScale,
+                        resolvedSurfaceType = resolvedSurfaceType,
+                    )
+                }
+            }
 
             // Add a Compose-based subtitle layer
             if (playerState.subtitlesEnabled &&
@@ -277,6 +223,167 @@ private fun VideoPlayerContent(
     }
 }
 
+@Composable
+private fun AndroidProjectionSurface(
+    playerState: VideoPlayerState,
+    contentScale: ContentScale,
+) {
+    AndroidProjectionDeviceMotionEffect(playerState)
+
+    AndroidView(
+        modifier =
+            contentScale.toCanvasModifier(
+                playerState.aspectRatio,
+                playerState.metadata.width,
+                playerState.metadata.height,
+            ),
+        factory = { context ->
+            AndroidProjectionGlSurfaceView(context).apply {
+                setBackgroundColor(android.graphics.Color.BLACK)
+                callback =
+                    object : AndroidProjectionGlSurfaceView.Callback {
+                        override fun onVideoSurfaceCreated(surface: android.view.Surface) {
+                            (playerState as? DefaultVideoPlayerState)?.attachProjectionVideoSurface(surface)
+                        }
+
+                        override fun onProjectionRendererError(message: String) {
+                            androidVideoLogger.e { message }
+                        }
+                    }
+                configure(
+                    projection = playerState.projection,
+                    projectionView = playerState.projectionView,
+                    textureCrop = playerState.projectionTextureCrop,
+                )
+            }
+        },
+        update = { projectionView ->
+            (playerState as? DefaultVideoPlayerState)?.let { state ->
+                state.attachPlayerView(null)
+                projectionView.videoSurface?.let(state::attachProjectionVideoSurface)
+            }
+            projectionView.onResume()
+            projectionView.configure(
+                projection = playerState.projection,
+                projectionView = playerState.projectionView,
+                textureCrop = playerState.projectionTextureCrop,
+            )
+        },
+        onReset = { projectionView ->
+            (playerState as? DefaultVideoPlayerState)?.attachProjectionVideoSurface(null)
+            projectionView.onPause()
+        },
+        onRelease = { projectionView ->
+            (playerState as? DefaultVideoPlayerState)?.attachProjectionVideoSurface(null)
+            projectionView.releaseRenderer()
+        },
+    )
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun AndroidPlayerViewSurface(
+    playerState: VideoPlayerState,
+    contentScale: ContentScale,
+    resolvedSurfaceType: SurfaceType,
+) {
+    AndroidView(
+        modifier =
+            contentScale.toCanvasModifier(
+                playerState.aspectRatio,
+                playerState.metadata.width,
+                playerState.metadata.height,
+            ),
+        factory = { context ->
+            try {
+                // Create PlayerView with the appropriate surface type
+
+                createPlayerViewWithSurfaceType(context, resolvedSurfaceType).apply {
+                    if (playerState is DefaultVideoPlayerState) {
+                        playerState.attachProjectionVideoSurface(null)
+                        // Attach this view to the player state
+                        playerState.attachPlayerView(this)
+
+                        if (playerState.exoPlayer != null) {
+                            // Attach the player from the state
+                            player = playerState.exoPlayer
+                        }
+                    }
+
+                    useController = false
+                    defaultArtwork = null
+                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+
+                    // Map ContentScale to ExoPlayer resize modes
+                    resizeMode = mapContentScaleToResizeMode(contentScale)
+                    applyProjectionDefaults(
+                        projection = playerState.projection,
+                        controlMode = playerState.projectionViewControlMode,
+                        textureCrop = playerState.projectionTextureCrop,
+                    )
+
+                    subtitleView?.visibility = playerState.nativeSubtitleVisibility()
+                }
+            } catch (e: Exception) {
+                androidVideoLogger.e { "Error creating PlayerView: ${e.message}" }
+                // Return an empty view in case of error
+                PlayerView(context).apply {
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                }
+            }
+        },
+        update = { playerView ->
+            try {
+                val state = playerState as? DefaultVideoPlayerState
+                if (state?.exoPlayer != null) {
+                    state.attachProjectionVideoSurface(null)
+                    // Re-attach after LazyList recycle: onReset nulls playerView.player
+                    // and calls onPause(). Without this, the surface stays blank until
+                    // the user navigates away and back.
+                    if (playerView.player == null) {
+                        state.attachPlayerView(playerView)
+                        playerView.onResume()
+                    }
+                    playerView.resizeMode = mapContentScaleToResizeMode(contentScale)
+                    playerView.applyProjectionDefaults(
+                        projection = playerState.projection,
+                        controlMode = playerState.projectionViewControlMode,
+                        textureCrop = playerState.projectionTextureCrop,
+                    )
+                    playerView.subtitleView?.visibility = playerState.nativeSubtitleVisibility()
+                }
+            } catch (e: Exception) {
+                androidVideoLogger.e { "Error updating PlayerView: ${e.message}" }
+            }
+        },
+        onReset = { playerView ->
+            try {
+                // Clean up resources when the view is recycled in a LazyList
+                playerView.player = null
+                playerView.onPause()
+            } catch (e: Exception) {
+                androidVideoLogger.e { "Error resetting PlayerView: ${e.message}" }
+            }
+        },
+        onRelease = { playerView ->
+            try {
+                // Fully clean up the view on release
+                playerView.player = null
+            } catch (e: Exception) {
+                androidVideoLogger.e { "Error releasing PlayerView: ${e.message}" }
+            }
+        },
+    )
+}
+
+private fun VideoPlayerState.nativeSubtitleVisibility(): Int =
+    if (subtitlesEnabled && currentSubtitleTrack?.isEmbedded == true) {
+        View.VISIBLE
+    } else {
+        View.GONE
+    }
+
 @OptIn(UnstableApi::class)
 private fun mapContentScaleToResizeMode(contentScale: ContentScale): Int =
     when (contentScale) {
@@ -297,8 +404,11 @@ private fun createPlayerViewWithSurfaceType(
         // First try to inflate the custom layouts
         val layoutId =
             when (surfaceType) {
+                SurfaceType.Auto -> R.layout.player_view_texture
                 SurfaceType.SurfaceView -> R.layout.player_view_surface
                 SurfaceType.TextureView -> R.layout.player_view_texture
+                SurfaceType.SphericalGlSurfaceView -> R.layout.player_view_spherical
+                SurfaceType.ProjectedGlSurfaceView -> R.layout.player_view_texture
             }
 
         LayoutInflater.from(context).inflate(layoutId, null) as PlayerView
@@ -313,7 +423,9 @@ private fun createPlayerViewWithSurfaceType(
 
                 // Configure the surface type programmatically
                 when (surfaceType) {
-                    SurfaceType.TextureView -> {
+                    SurfaceType.Auto,
+                    SurfaceType.TextureView,
+                    -> {
                         // Use TextureView if available
                         videoSurfaceView?.let { view ->
                             if (view is TextureView) {
@@ -325,6 +437,14 @@ private fun createPlayerViewWithSurfaceType(
                     SurfaceType.SurfaceView -> {
                         // SurfaceView is the default
                         androidVideoLogger.d { "Using SurfaceView" }
+                    }
+
+                    SurfaceType.SphericalGlSurfaceView -> {
+                        androidVideoLogger.d { "Using spherical GLSurfaceView" }
+                    }
+
+                    SurfaceType.ProjectedGlSurfaceView -> {
+                        androidVideoLogger.d { "Using projection GLSurfaceView" }
                     }
                 }
 
@@ -338,6 +458,45 @@ private fun createPlayerViewWithSurfaceType(
             // Last resort: create an empty view to avoid crashing
             throw e2
         }
+    }
+
+private fun SurfaceType.resolveFor(
+    projection: VideoProjectionSettings,
+    textureCrop: VideoTextureCrop,
+): SurfaceType =
+    when (this) {
+        SurfaceType.Auto -> {
+            when {
+                projection.usesAndroidCustomProjectionRenderer(textureCrop) -> SurfaceType.ProjectedGlSurfaceView
+                projection.usesMedia3SphericalProjection(textureCrop) -> SurfaceType.SphericalGlSurfaceView
+                else -> SurfaceType.TextureView
+            }
+        }
+        SurfaceType.TextureView,
+        SurfaceType.SurfaceView,
+        SurfaceType.SphericalGlSurfaceView,
+        SurfaceType.ProjectedGlSurfaceView,
+        -> this
+    }
+
+private fun PlayerView.applyProjectionDefaults(
+    projection: VideoProjectionSettings,
+    controlMode: VideoProjectionViewControlMode,
+    textureCrop: VideoTextureCrop,
+) {
+    val sphericalSurface = videoSurfaceView as? SphericalGLSurfaceView ?: return
+    sphericalSurface.setDefaultStereoMode(projection.toMedia3StereoMode())
+    sphericalSurface.setUseSensorRotation(
+        projection.usesMedia3SphericalProjection(textureCrop) &&
+            controlMode.usesDeviceMotionFor(projection),
+    )
+}
+
+private fun VideoProjectionSettings.toMedia3StereoMode(): Int =
+    when (stereoLayout) {
+        VideoStereoLayout.Mono -> C.STEREO_MODE_MONO
+        VideoStereoLayout.SideBySide -> C.STEREO_MODE_LEFT_RIGHT
+        VideoStereoLayout.OverUnder -> C.STEREO_MODE_TOP_BOTTOM
     }
 
 @Composable

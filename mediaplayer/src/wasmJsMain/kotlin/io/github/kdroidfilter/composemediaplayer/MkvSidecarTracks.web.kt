@@ -57,6 +57,12 @@ internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
                 }
             }
         },
+        onTracksChangedError = { message ->
+            webVideoLogger.e { "MKV track sync callback failed: $message" }
+        },
+        onWarning = { message ->
+            webVideoLogger.w { message }
+        },
     )
 }
 
@@ -119,12 +125,24 @@ private fun startMkvSidecarProbe(
     requestHeadersJson: String,
     useCredentials: Boolean,
     onTracksChanged: () -> Unit,
+    onTracksChangedError: (String) -> Unit,
+    onWarning: (String) -> Unit,
 ): Unit =
     js(
         """
         {
+            const describeError = function(error) {
+                return error && error.stack ? error.stack : (error && error.message ? error.message : String(error));
+            };
+            const warn = function(context, error) {
+                try { onWarning(context + ": " + describeError(error)); } catch (_) {}
+            };
             const notify = function() {
-                try { onTracksChanged(); } catch (error) { console.error(error); }
+                try {
+                    onTracksChanged();
+                } catch (error) {
+                    try { onTracksChangedError(String(describeError(error))); } catch (_) {}
+                }
             };
             const requestHeaders = (function() {
                 try { return JSON.parse(requestHeadersJson || "{}") || {}; } catch (_) { return {}; }
@@ -344,7 +362,7 @@ private fun startMkvSidecarProbe(
                     ).sort(function(left, right) { return left - right; });
                     return cues;
                 }).catch(function(error) {
-                    if (error && error.name !== "AbortError") console.warn("[compose-media-player] MKV cue probe", error);
+                    if (error && error.name !== "AbortError") warn("MKV cue probe failed", error);
                     video.__composeMediaPlayerMkvCues = [];
                     video.__composeMediaPlayerMkvCueClusters = [];
                     return [];
@@ -449,7 +467,7 @@ private fun startMkvSidecarProbe(
             };
 
             probeContainerTracks().catch(function(error) {
-                if (error && error.name !== "AbortError") console.warn("[compose-media-player] MKV track probe", error);
+                if (error && error.name !== "AbortError") warn("MKV track probe failed", error);
             });
         }
         """,
@@ -474,6 +492,12 @@ internal suspend fun HTMLVideoElement.extractMkvSubtitleTrack(
                 playerState.syncWebMediaTracks(this@extractMkvSubtitleTrack)
             }
         },
+        onTracksChangedError = { message ->
+            webVideoLogger.e { "MKV subtitle extraction sync callback failed: $message" }
+        },
+        onWarning = { message ->
+            webVideoLogger.w { message }
+        },
     )
 }
 
@@ -482,12 +506,24 @@ private fun startMkvSubtitleExtraction(
     video: HTMLVideoElement,
     selectedId: String,
     onTracksChanged: () -> Unit,
+    onTracksChangedError: (String) -> Unit,
+    onWarning: (String) -> Unit,
 ): Unit =
     js(
         """
         {
+            const describeError = function(error) {
+                return error && error.stack ? error.stack : (error && error.message ? error.message : String(error));
+            };
+            const warn = function(context, error) {
+                try { onWarning(context + ": " + describeError(error)); } catch (_) {}
+            };
             const notify = function() {
-                try { onTracksChanged(); } catch (error) { console.error(error); }
+                try {
+                    onTracksChanged();
+                } catch (error) {
+                    try { onTracksChangedError(String(describeError(error))); } catch (_) {}
+                }
             };
             const sourceUri = video.__composeMediaPlayerMkvSourceUri || "";
             const tracks = video.__composeMediaPlayerMkvSubtitleTrackData || [];
@@ -756,7 +792,7 @@ private fun startMkvSubtitleExtraction(
                     });
                 }).catch(function(error) {
                     if (error && error.name !== "AbortError") {
-                        console.warn("[compose-media-player] MKV fast subtitle extraction", error);
+                        warn("MKV fast subtitle extraction failed", error);
                     }
                 });
             };
@@ -818,7 +854,7 @@ private fun startMkvSubtitleExtraction(
                 video.__composeMediaPlayerMkvExtractingSubtitleTrackId = "";
             });
             parser.on("error", function(error) {
-                console.warn("[compose-media-player] MKV selected subtitle parser", error);
+                warn("MKV selected subtitle parser failed", error);
             });
 
             fetch(
@@ -845,7 +881,7 @@ private fun startMkvSubtitleExtraction(
                 return pump();
             }).catch(function(error) {
                 if (error && error.name !== "AbortError") {
-                    console.warn("[compose-media-player] MKV selected subtitle fetch", error);
+                    warn("MKV selected subtitle fetch failed", error);
                 }
             });
         }

@@ -23,4 +23,20 @@ package io.github.kdroidfilter.composemediaplayer
 data class CacheConfig(
     val enabled: Boolean = false,
     val maxCacheSizeBytes: Long = 100L * 1024L * 1024L,
-)
+) {
+    init {
+        require(maxCacheSizeBytes > 0L) { "maxCacheSizeBytes must be greater than 0." }
+    }
+}
+
+sealed class CacheClearResult {
+    data object Cleared : CacheClearResult()
+
+    data object Disabled : CacheClearResult()
+
+    data object NotSupported : CacheClearResult()
+
+    data class Failed(
+        val message: String,
+    ) : CacheClearResult()
+}

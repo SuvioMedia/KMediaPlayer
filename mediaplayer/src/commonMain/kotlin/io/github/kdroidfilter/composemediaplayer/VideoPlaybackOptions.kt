@@ -89,9 +89,29 @@ enum class DesktopVideoBackend {
     LIBVLC_NATIVE,
 }
 
+/**
+ * Controls whether the player should infer 3D/VR projection metadata from source names and media dimensions.
+ */
+enum class VideoProjectionDetectionMode {
+    /**
+     * Infer projection only when [VideoPlaybackOptions.projection] is left at its default flat 2D value.
+     */
+    AUTO,
+
+    /**
+     * Never infer projection. The configured [VideoPlaybackOptions.projection] is used as-is.
+     */
+    DISABLED,
+}
+
 @Stable
 data class VideoPlaybackOptions(
     val videoOutputMode: VideoOutputMode = VideoOutputMode.AUTO,
     val dolbyVisionMode: DolbyVisionMode = DolbyVisionMode.AUTO,
     val desktopVideoBackend: DesktopVideoBackend = DesktopVideoBackend.AUTO,
+    val projection: VideoProjectionSettings = VideoProjectionSettings(),
+    val projectionView: VideoProjectionViewSettings = VideoProjectionViewSettings(),
+    val projectionViewControlMode: VideoProjectionViewControlMode = VideoProjectionViewControlMode.AUTO,
+    val projectionTextureCrop: VideoTextureCrop = VideoTextureCrop(),
+    val projectionDetectionMode: VideoProjectionDetectionMode = VideoProjectionDetectionMode.AUTO,
 )

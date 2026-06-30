@@ -20,6 +20,8 @@ actual fun VideoPlayerSurface(
     if (playerState.hasMedia) {
         var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
         var videoRatio by remember { mutableStateOf<Float?>(null) }
+        val usesProjectionRenderer =
+            playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)
         val sourceKind =
             (playerState as? DefaultVideoPlayerState)
                 ?.sourceUri
@@ -27,6 +29,8 @@ actual fun VideoPlayerSurface(
                 ?: WebMediaSourceKind.EMPTY
         var useCors by remember(sourceKind) { mutableStateOf(sourceKind.shouldUseCors) }
         val scope = rememberCoroutineScope()
+
+        WebProjectionDeviceMotionEffect(playerState = playerState, enabled = usesProjectionRenderer)
 
         // State for CORS mode changes
         var lastPosition by remember { mutableStateOf(0.0) }
@@ -87,8 +91,8 @@ actual fun VideoPlayerSurface(
                     modifier = Modifier.fillMaxSize(),
                     update = { video ->
                         videoElement = video
-                        video.applyInteropBehindCanvas()
-                        video.applyContentScale(contentScale, videoRatio)
+                        video.applyInteropBehindCanvas(hiddenForProjection = usesProjectionRenderer)
+                        video.applyContentScale(contentScale, videoRatio, hiddenForProjection = usesProjectionRenderer)
                     },
                     onRelease = { video ->
                         if (!video.currentTime.isNaN() && video.currentTime > 0.0) {
@@ -102,6 +106,11 @@ actual fun VideoPlayerSurface(
                         videoElement = null
                     },
                 )
+                WebProjectionCanvas(
+                    playerState = playerState,
+                    videoElement = videoElement,
+                    modifier = Modifier.fillMaxSize(),
+                )
                 AssSubtitleCanvas(
                     playerState = playerState,
                     videoElement = videoElement,
@@ -110,4 +119,48 @@ actual fun VideoPlayerSurface(
             }
         }
     }
+}
+
+@Composable
+private fun WebProjectionCanvas(
+    playerState: VideoPlayerState,
+    videoElement: HTMLVideoElement?,
+    modifier: Modifier,
+) {
+    if (!playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)) return
+
+    HtmlElementView(
+        factory = { createWebProjectionCanvasElement() },
+        modifier = modifier,
+        update = { canvas ->
+            canvas.applyWebProjectionCanvasStyle()
+            val video = videoElement
+            if (video != null) {
+                canvas.configureWebProjectionRenderer(
+                    video = video,
+                    projection = playerState.projection,
+                    projectionView = playerState.projectionView,
+                    textureCrop = playerState.projectionTextureCrop,
+                    onError = { message ->
+                        if (playerState is DefaultVideoPlayerState) {
+                            playerState.renderingInfo.update(
+                                videoRenderer = "HTMLVideoElement + browser compositor",
+                                notes = message,
+                                videoProjection = playerState.projection.renderingInfoLabel(),
+                            )
+                        }
+                    },
+                )
+                if (playerState is DefaultVideoPlayerState) {
+                    playerState.renderingInfo.update(
+                        videoRenderer = "HTMLVideoElement -> WebGL projection canvas",
+                        videoProjection = playerState.projection.renderingInfoLabel(),
+                    )
+                }
+            }
+        },
+        onRelease = { canvas ->
+            canvas.disposeWebProjectionRenderer()
+        },
+    )
 }

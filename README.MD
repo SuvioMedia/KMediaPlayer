@@ -35,11 +35,14 @@ This repository is a personal fork maintained for my own projects and integratio
   - [Displaying the Video Surface](#displaying-the-video-surface)
     - [Content Scaling](#content-scaling)
     - [Surface type](#surface-type)
+    - [3D and VR projection](#3d-and-vr-projection)
     - [Custom Overlay UI](#custom-overlay-ui)
   - [Video Playback via URL or Local Files](#video-playback-via-url-or-local-files)
+  - [HLS Quality Selection](#hls-quality-selection)
   - [Full Controls](#full-controls)
   - [Progress Indicators](#progress-indicators)
   - [Error Handling](#error-handling)
+  - [Diagnostics and Logging](#diagnostics-and-logging)
   - [Loading Indicator](#loading-indicator)
   - [Using Subtitles](#using-subtitles)
     - [Supported Formats](#-supported-formats)
@@ -73,6 +76,7 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
 - **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
 - **Video Caching**: Opt-in disk caching for video data on Android and iOS, ideal for scroll-based UIs.
+- **3D/VR Projection**: Configure and auto-detect flat 3D, VR180, VR360, fisheye, and EAC projection modes. Android renders VR360 through Media3's spherical GL surface and other projected modes through an OpenGL shader surface, iOS renders projected modes through SceneKit, Web renders projected sources through WebGL, and desktop JVM canvas paths use a Skia shader renderer.
 - **Error handling** Simple error handling for network or playback issues.
 
 ## ✨ Supported Video Formats
@@ -110,6 +114,7 @@ The library exposes a single suspendable preflight query so apps can check playe
 val mediaSupport = MediaSupport.query()
 
 val mkvSupported = mediaSupport.capabilities.supportsMkv
+val supportedSchemes = mediaSupport.capabilities.supportedUriSchemes
 val canOpenSource = mediaSupport.canPlaySource(
     uri = "file:///movie.mkv",
     mimeType = "video/x-matroska",
@@ -212,16 +217,112 @@ Available content scale options:
 > Surface type parameter is supported only for Android target.
 
 Available surface type options:
+- `SurfaceType.Auto` (default): uses TextureView for normal videos, Media3's spherical GL surface for equirectangular 360 Android playback, and the OpenGL projection surface for flat stereo, VR180, fisheye, and EAC playback.
 - `SurfaceType.SurfaceView`: uses SurfaceView for the player view, which is more performant for video playback but has limitations in terms of composability and animations.
-- `SurfaceType.TextureView` (default): uses TextureView for the player view, which allows for more complex composable layouts and animations.
+- `SurfaceType.TextureView`: uses TextureView for the player view, which allows for more complex composable layouts and animations.
+- `SurfaceType.SphericalGlSurfaceView`: uses Media3's spherical GL surface explicitly. This is intended for equirectangular 360 projection on Android.
+- `SurfaceType.ProjectedGlSurfaceView`: uses the Android OpenGL projection shader explicitly. This supports flat stereo, equirectangular, fisheye and EAC projection.
 
 ```kotlin
 VideoPlayerSurface(
     playerState = playerState,
     modifier = Modifier.fillMaxSize(),
-    surfaceType = SurfaceType.SurfaceView // Default is SurfaceType.TextureView
+    surfaceType = SurfaceType.SurfaceView // Default is SurfaceType.Auto
 )
 ```
+
+#### 3D and VR projection
+
+Projection settings live in `VideoPlaybackOptions`. By default, the player auto-detects common projection tokens from filenames, URLs and metadata when the configured projection is left as flat 2D:
+
+```kotlin
+val playerState = rememberVideoPlayerState()
+
+// Example_VR180_SBS.mp4 is detected as equirectangular 180 side-by-side.
+playerState.openUri("https://example.com/Example_VR180_SBS.mp4")
+```
+
+Apps can pass a known mode when creating the player state:
+
+```kotlin
+val playerState = rememberVideoPlayerState(
+    playbackOptions = VideoPlaybackOptions(
+        projection = VideoProjectionSettings(
+            projectionType = VideoProjectionType.Equirect180,
+            stereoLayout = VideoStereoLayout.SideBySide,
+            eyeOrder = VideoEyeOrder.LeftRight,
+        )
+    )
+)
+```
+
+The projection can also be changed while the player is alive, which is useful for manual projection controls:
+
+```kotlin
+playerState.projection = playerState.projection.nextVideoProjectionPreset().projection
+```
+
+For sources that include padded or misaligned active video, `projectionTextureCrop` crops the source texture before
+stereo splitting and projection. This is separate from `contentScale`, which scales the final surface, and from
+`projectionView.zoom`, which changes the projected viewport:
+
+```kotlin
+val playerState = rememberVideoPlayerState(
+    playbackOptions = VideoPlaybackOptions(
+        projection = VideoProjectionSettings(
+            projectionType = VideoProjectionType.Equirect180,
+            stereoLayout = VideoStereoLayout.SideBySide,
+        ),
+        projectionTextureCrop = VideoTextureCrop(
+            left = 0.02f,
+            top = 0.01f,
+            right = 0.02f,
+            bottom = 0.01f,
+        ),
+    )
+)
+
+playerState.projectionTextureCrop = playerState.projectionTextureCrop.copy(left = 0.03f)
+```
+
+For projected renderers, apps can steer the viewport independently from the source projection:
+
+```kotlin
+playerState.projectionView = playerState.projectionView.copy(
+    yawDegrees = playerState.projectionView.yawDegrees + 15f,
+    pitchDegrees = 0f,
+    zoom = 1.2f,
+)
+```
+
+By default, `VideoProjectionViewControlMode.AUTO` uses device motion on platforms where it is available for surround projections. It uses Android rotation vector sensors, iOS CoreMotion device motion, and browser `DeviceOrientationEvent`; this is more stable than using the accelerometer alone. Apps can force or disable sensor control:
+
+```kotlin
+val playerState = rememberVideoPlayerState(
+    playbackOptions = VideoPlaybackOptions(
+        projectionViewControlMode = VideoProjectionViewControlMode.DEVICE_MOTION,
+    )
+)
+
+playerState.projectionViewControlMode = VideoProjectionViewControlMode.MANUAL
+```
+
+The common API includes presets and detection helpers:
+
+```kotlin
+val detection = detectVideoProjection(
+    VideoProjectionDetectionInput(
+        title = "Example_VR180_SBS.mp4",
+        videoSizes = listOf(VideoProjectionVideoSize(width = 7680, height = 3840)),
+    )
+)
+
+val nextPreset = playerState.projection.nextVideoProjectionPreset()
+```
+
+Supported projection metadata includes flat 2D/3D, equirectangular 180/360, fisheye 180/190/200/220, and EAC 360 with mono, side-by-side, and over-under stereo layouts. A non-default `projectionTextureCrop` switches `SurfaceType.Auto` and canvas paths to projection renderers so the crop can be applied.
+
+On Android, `SurfaceType.Auto` switches equirectangular 360 sources with default texture crop to Media3's spherical GL surface and maps mono/SBS/OU stereo modes into Media3. Flat stereo, equirectangular 180, fisheye, EAC and cropped sources use the Android OpenGL projection surface. Android projected surfaces can use device rotation automatically unless `projectionViewControlMode` is set to `MANUAL`. iOS uses a SceneKit projection view for flat stereo, equirectangular, fisheye, EAC and cropped sources, with CoreMotion-backed viewport control in `AUTO`/`DEVICE_MOTION` modes. Web uses a WebGL projection canvas for flat stereo, equirectangular, fisheye, EAC and cropped sources, rendering stereo material as side-by-side output and reading `DeviceOrientationEvent` when the browser allows it. Remote web videos must be served with CORS headers when WebGL projection is enabled, because browsers block cross-origin video texture sampling otherwise. Some mobile browsers, especially iOS Safari, require a user permission gesture before device orientation events are delivered; the web renderer requests that permission on the first click, tap, or pointer release while device-motion projection control is active. Desktop JVM uses the same common projection settings, detection and presets; macOS, Windows and Linux Compose Canvas frame paths render flat stereo, equirectangular, fisheye, EAC and cropped sources through a Skia shader. Native desktop surfaces such as libVLC native-view and macOS HDR/EDR Metal remain native renderer paths and report that limitation through diagnostics.
 
 #### Custom Overlay UI
 
@@ -301,7 +402,41 @@ The `initializePlayerState` parameter controls whether the video automatically s
 - `InitialPlayerState.PLAY` (default): The video will automatically start playing after opening
 - `InitialPlayerState.PAUSE`: The video will be loaded but remain paused until you call `play()`
 
+On Android, apps that need a custom Media3 source can pass an `AndroidMediaSourceProvider`. The normal player state
+reset, metadata extraction, repeat mode, volume and initial play/pause handling stay inside the library:
+
+```kotlin
+@OptIn(UnstableApi::class)
+val playerState = rememberVideoPlayerState(
+    androidMediaSourceProvider = AndroidMediaSourceProvider { request ->
+        val uri = request.mediaItem.localConfiguration?.uri?.toString().orEmpty()
+        if (uri.contains("example-cdn.com")) {
+            customMediaSourceFactory(request.requestHeaders).createMediaSource(request.mediaItem)
+        } else {
+            null
+        }
+    },
+)
+```
+
 Check the [sample project](sample/composeApp/src/commonMain/kotlin/sample/app/App.kt) for a complete example.
+
+### HLS Quality Selection
+
+Browser playback exposes HLS quality variants when the source is handled through `hls.js`. The list is populated after the HLS manifest has been loaded, so custom controls should render quality options from `availableHlsQualities` and handle an empty list as "not available yet" or "not supported by this backend".
+
+```kotlin
+val quality = playerState.availableHlsQualities.firstOrNull { it.height == 720 }
+
+when (val result = quality?.let { playerState.selectHlsQuality(it.id) } ?: playerState.selectAutoHlsQuality()) {
+    is HlsQualitySelectionResult.Selected -> println("HLS quality selected: ${result.quality.label}")
+    HlsQualitySelectionResult.Auto -> println("Automatic HLS quality selection enabled")
+    is HlsQualitySelectionResult.NotFound -> println("HLS quality not found: ${result.variantId}")
+    HlsQualitySelectionResult.NotSupported -> println("HLS quality selection is not supported here")
+}
+```
+
+Use `currentHlsQuality` and `hlsQualityMode` to reflect the current state in custom controls. `Selected` and `Auto` mean the request was applied; `NotFound` means the variant id was stale or from another source; `NotSupported` means the current platform or source does not expose HLS variants. Android, iOS and desktop targets currently report `NotSupported` for this API.
 
 ### Full Controls
 
@@ -395,11 +530,11 @@ Slider(
 - `seekStart(value)` updates the slider position visually without performing the actual seek, allowing smooth dragging.
 - `seekFinished()` commits the seek to the player and ends the drag interaction.
 
-For programmatic seeking (e.g. skip forward/backward), use `seekTo` directly:
+For programmatic seeking (e.g. skip forward/backward), use `seekTo`, `seekToMs`, `seekBy` or `seekByMs`:
 
 ```kotlin
-// Seek to the middle of the video
-playerState.seekTo(500f)
+playerState.seekToMs(60_000)
+playerState.seekByMs(10_000)
 ```
 
 ### Error Handling
@@ -413,15 +548,30 @@ playerState.error?.let { error ->
 }
 ```
 
+### Diagnostics and Logging
+
+Compose Media Player internal logging is disabled by default. Enable it only while diagnosing playback behavior:
+
+```kotlin
+import io.github.kdroidfilter.composemediaplayer.util.ComposeMediaPlayerLoggingLevel
+import io.github.kdroidfilter.composemediaplayer.util.allowComposeMediaPlayerLogging
+import io.github.kdroidfilter.composemediaplayer.util.composeMediaPlayerLoggingLevel
+
+allowComposeMediaPlayerLogging = true
+composeMediaPlayerLoggingLevel = ComposeMediaPlayerLoggingLevel.DEBUG
+```
+
+JVM native backends keep their own diagnostic output disabled by default. Set `COMPOSE_MEDIA_PLAYER_NATIVE_LOGGING=true` before starting the app to enable native messages from the macOS, Windows and Linux backends.
+
 ### Loading Indicator
 
 To detect if the video is buffering:
 
-```kotlin 
+```kotlin
 if (playerState.isLoading) {
     CircularProgressIndicator()
 }
-````
+```
 
 ### Using Subtitles
 
@@ -442,7 +592,14 @@ val track = SubtitleTrack(
     src = "https://example.com/subtitles.vtt" // Works with .srt, .vtt, .ass and .ssa files
 )
 playerState.addSubtitleTrack(track)
-playerState.selectSubtitleTrack(track)
+when (val result = playerState.selectSubtitleTrack(track)) {
+    is TrackSelectionResult.Selected -> println("Subtitle track selected: ${result.trackId}")
+    TrackSelectionResult.Disabled -> println("Subtitles disabled")
+    is TrackSelectionResult.NotFound -> println("Subtitle track not found: ${result.trackId}")
+    TrackSelectionResult.NotSupported -> println("Subtitle track selection is not supported")
+    is TrackSelectionResult.Failed -> println("Failed to select subtitle track: ${result.message}")
+    TrackSelectionResult.Auto -> println("Automatic track selection restored")
+}
 ```
 
 #### Browser ASS/SSA subtitles with JASSUB/libass
@@ -466,7 +623,7 @@ LaunchedEffect(Unit) {
 }
 ```
 
-If you use `VideoPlayerControls`, the selected track is rendered automatically by `VideoPlayerSurface`. If you build custom controls, keep using the same `playerState.selectSubtitleTrack(...)` and `playerState.disableSubtitles()` APIs.
+If you use `VideoPlayerControls`, the selected track is rendered automatically by `VideoPlayerSurface`. If you build custom controls, keep using the same `playerState.selectSubtitleTrack(...)` and `playerState.disableSubtitles()` APIs and inspect the returned `TrackSelectionResult` when you need to handle unsupported or missing tracks.
 
 You can configure the renderer once in your browser entry point before rendering your Compose app:
 
@@ -518,7 +675,14 @@ When the backend exposes tracks from the media container, they are available thr
 ```kotlin
 val audioTrack = playerState.availableAudioTracks.firstOrNull()
 if (audioTrack != null) {
-    playerState.selectAudioTrack(audioTrack)
+    when (val result = playerState.selectAudioTrack(audioTrack)) {
+        is TrackSelectionResult.Selected -> println("Audio track selected: ${result.trackId}")
+        TrackSelectionResult.Auto -> println("Automatic audio track selection restored")
+        is TrackSelectionResult.NotFound -> println("Audio track not found: ${result.trackId}")
+        TrackSelectionResult.NotSupported -> println("Audio track selection is not supported")
+        is TrackSelectionResult.Failed -> println("Failed to select audio track: ${result.message}")
+        TrackSelectionResult.Disabled -> Unit
+    }
 }
 
 val subtitleTrack = playerState.availableSubtitleTracks.firstOrNull { it.isEmbedded }
@@ -527,7 +691,9 @@ if (subtitleTrack != null) {
 }
 ```
 
-`availableSubtitleTracks` can contain both external tracks added by your app through `addSubtitleTrack(...)` and embedded tracks discovered from the current media. Use `removeSubtitleTrack(...)` or `clearExternalSubtitleTracks()` to remove app-managed tracks.
+`availableSubtitleTracks` can contain both external tracks added by your app through `addSubtitleTrack(...)` and embedded tracks discovered from the current media. Use `replaceExternalSubtitleTracks(...)` to replace app-managed tracks while preserving embedded tracks, or `removeSubtitleTrack(...)` / `clearExternalSubtitleTracks()` to remove app-managed tracks.
+
+`selectAudioTrack(...)`, `selectSubtitleTrack(...)` and `disableSubtitles()` return `TrackSelectionResult`. `Selected`, `Auto` and `Disabled` mean the request was applied; `NotFound`, `NotSupported` and `Failed` mean the player state was not changed.
 
 #### 🎨 Customizing Subtitle Appearance
 
@@ -551,7 +717,10 @@ playerState.subtitleBackgroundColor = Color.Black.copy(alpha = 0.7f)
 To disable subtitles:
 
 ```kotlin
-playerState.disableSubtitles()
+when (playerState.disableSubtitles()) {
+    TrackSelectionResult.Disabled -> println("Subtitles disabled")
+    else -> println("Subtitles were not disabled")
+}
 ```
 
 ### 🖥️ Fullscreen Mode
@@ -694,15 +863,20 @@ val playerState = rememberVideoPlayerState(
 To clear the cache programmatically:
 
 ```kotlin
-playerState.clearCache()
+when (val result = playerState.clearCache()) {
+    CacheClearResult.Cleared -> println("Video cache cleared")
+    CacheClearResult.Disabled -> println("Video cache is disabled")
+    CacheClearResult.NotSupported -> println("Video cache is not supported on this platform")
+    is CacheClearResult.Failed -> println("Failed to clear video cache: ${result.message}")
+}
 ```
 
 | Platform | Status | Implementation |
 | :--- | :---: | :--- |
 | **Android** | ✅ | Media3 `SimpleCache` with `LeastRecentlyUsedCacheEvictor` |
 | **iOS** | ✅ | `NSURLCache` with increased disk capacity |
-| **Desktop** | ❌ | No-op (config accepted but ignored) |
-| **Web** | ❌ | No-op (browser manages its own HTTP cache) |
+| **Desktop** | ❌ | Returns `CacheClearResult.NotSupported` |
+| **Web** | ❌ | Returns `CacheClearResult.NotSupported`; browser manages its own HTTP cache |
 
 > [!NOTE]
 > Caching only applies to URIs opened via `openUri()`. Local files and assets are not cached. The cache is shared across all player instances, so multiple players benefit from the same cached data.
