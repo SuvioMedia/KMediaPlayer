@@ -8,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assume
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -43,12 +44,17 @@ class WindowsVideoPlayerStateTest {
 
     @Test
     fun testNormalizeLocalFileUriForPlaybackAcceptsFileSchemeVariants() {
-        val path = assertNotNull(javaClass.classLoader.getResource("existing_file.mp4")).toURI().path
+        val resourceUri =
+            assertNotNull(javaClass.classLoader.getResource("existing_file.mp4"))
+                .toURI()
+        val uriPath = resourceUri.rawPath
+        val nativePath = Path.of(resourceUri)
+        val expectedPath = nativePath.toString()
 
-        assertEquals(path, normalizeWindowsLocalFileUriForPlayback(path))
-        assertEquals(path, normalizeWindowsLocalFileUriForPlayback("file:$path"))
-        assertEquals(path, normalizeWindowsLocalFileUriForPlayback("file://$path"))
-        assertEquals(path, normalizeWindowsLocalFileUriForPlayback("file://localhost$path"))
+        assertEquals(expectedPath, normalizeWindowsLocalFileUriForPlayback(expectedPath))
+        assertEquals(expectedPath, normalizeWindowsLocalFileUriForPlayback("file:$uriPath"))
+        assertEquals(expectedPath, normalizeWindowsLocalFileUriForPlayback("file://$uriPath"))
+        assertEquals(expectedPath, normalizeWindowsLocalFileUriForPlayback("file://localhost$uriPath"))
     }
 
     @Test

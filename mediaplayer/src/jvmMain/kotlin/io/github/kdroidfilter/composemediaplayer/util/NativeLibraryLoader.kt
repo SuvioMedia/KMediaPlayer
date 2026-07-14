@@ -245,6 +245,9 @@ private fun installVerifiedNative(
             setOwnerOnlyFilePermissions(cachedFile, executable = true)
             return cachedFile
         }
+        // A cache created by an older Windows build can carry the DOS read-only flag.
+        // Restore owner write access before replacing the verified-as-corrupt entry.
+        setOwnerOnlyFilePermissions(cachedFile, executable = false)
         Files.delete(cachedFile)
     }
 
@@ -322,10 +325,12 @@ private fun setOwnerOnlyFilePermissions(
             setWritable(false, false)
             setExecutable(false, false)
             setReadable(true, true)
+            // Removing write access on Windows sets the DOS read-only attribute. Native DLLs
+            // do not rely on POSIX executable-only permissions, and retaining owner write
+            // access allows a corrupted cache entry to be replaced on the next extraction.
+            setWritable(true, true)
             if (executable) {
                 setExecutable(true, true)
-            } else {
-                setWritable(true, true)
             }
         }
     }

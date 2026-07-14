@@ -69,6 +69,23 @@ dependencyResolutionManagement {
         }
         exclusiveContent {
             forRepository {
+                ivy {
+                    name = "binaryenDistributions"
+                    url = uri("https://github.com/WebAssembly/binaryen/releases/download")
+                    patternLayout {
+                        artifact("version_[revision]/[artifact]-version_[revision]-[classifier].[ext]")
+                    }
+                    metadataSources {
+                        artifact()
+                    }
+                }
+            }
+            filter {
+                includeModule("com.github.webassembly", "binaryen")
+            }
+        }
+        exclusiveContent {
+            forRepository {
                 maven {
                     name = "consumerSmoke"
                     url = uri(rootDir.resolve("build/consumer-repository"))

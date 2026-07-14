@@ -67,6 +67,7 @@ class NativeLibraryLoaderTest {
             val cached = extract()
             Files.delete(cached)
             Files.write(cached, "tampered".encodeToByteArray())
+            assertTrue(cached.toFile().setReadOnly())
 
             assertEquals(cached, extract())
             assertContentEquals(bytes, cached.readBytes())

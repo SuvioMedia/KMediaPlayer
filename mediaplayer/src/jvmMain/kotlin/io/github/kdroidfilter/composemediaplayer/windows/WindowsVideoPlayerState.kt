@@ -118,7 +118,13 @@ internal fun normalizeWindowsLocalFileUriForPlayback(uri: String): String {
             if (!authority.isNullOrBlank() && !authority.equals("localhost", ignoreCase = true)) {
                 return "\\\\$authority${path.orEmpty().replace('/', '\\')}"
             }
-            runCatching { Path.of(parsedUri).toString() }.getOrNull()?.let { return it }
+            val localUri =
+                if (authority.equals("localhost", ignoreCase = true)) {
+                    URI(parsedUri.scheme, null, path, parsedUri.query, parsedUri.fragment)
+                } else {
+                    parsedUri
+                }
+            runCatching { Path.of(localUri).toString() }.getOrNull()?.let { return it }
             if (!path.isNullOrEmpty()) return File(path).path
         }
 

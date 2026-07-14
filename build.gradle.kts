@@ -1,7 +1,11 @@
+@file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnLockMismatchReport
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnPlugin
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnRootEnvSpec
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnRootExtension
+import org.jetbrains.kotlin.gradle.targets.wasm.binaryen.BinaryenEnvSpec
+import org.jetbrains.kotlin.gradle.targets.wasm.binaryen.BinaryenPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootExtension
 import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnPlugin
@@ -87,6 +91,13 @@ ktlint {
 }
 
 subprojects {
+    plugins.withType<BinaryenPlugin> {
+        extensions.configure<BinaryenEnvSpec> {
+            // Binaryen distributions are resolved through the restricted repository declared in settings.
+            downloadBaseUrl.set(null as String?)
+        }
+    }
+
     if (name == "composeApp") return@subprojects
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
 
