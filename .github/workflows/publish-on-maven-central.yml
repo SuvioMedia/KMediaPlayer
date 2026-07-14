@@ -129,10 +129,6 @@ jobs:
           -PgithubPagesMavenRepository="$RUNNER_TEMP/gh-pages/maven"
           -PcomposeMediaPlayer.skipNativeBuild=true
           --no-configuration-cache --no-daemon
-        env:
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNINGINMEMORYKEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNINGKEYID }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNINGPASSWORD }}
 
       - name: Rebuild complete GitHub Pages Maven metadata
         shell: bash
@@ -182,19 +178,27 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish the verified release to Maven Central
+      - name: Detect optional Maven Central credentials
+        id: maven_central
         shell: bash
-        run: >-
-          ./gradlew :mediaplayer:publishAndReleaseToMavenCentral
-          -PpublicationVersion="$RELEASE_VERSION"
-          -PcomposeMediaPlayer.skipNativeBuild=true
-          --no-configuration-cache --no-daemon
         env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVENCENTRALUSERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVENCENTRALPASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNINGINMEMORYKEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNINGKEYID }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNINGPASSWORD }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVENCENTRALUSERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVENCENTRALPASSWORD }}
+          SIGNING_IN_MEMORY_KEY: ${{ secrets.SIGNINGINMEMORYKEY }}
+          SIGNING_KEY_ID: ${{ secrets.SIGNINGKEYID }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNINGPASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$MAVEN_CENTRAL_USERNAME" &&
+                -n "$MAVEN_CENTRAL_PASSWORD" &&
+                -n "$SIGNING_IN_MEMORY_KEY" &&
+                -n "$SIGNING_KEY_ID" &&
+                -n "$SIGNING_PASSWORD" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Maven Central credentials are not fully configured; publishing the release to GitHub Pages only."
+          fi
 
       - name: Publish staged repository to GitHub Pages
         shell: bash
@@ -233,5 +237,20 @@ jobs:
             fi
             sleep $((attempt * 5))
           done
-          echo "GitHub Pages push failed. Recover from the immutable Maven release delta artifact; do not republish Maven Central." >&2
+          echo "GitHub Pages push failed. Recover from the immutable Maven release delta artifact." >&2
           exit 1
+
+      - name: Publish the verified release to Maven Central
+        if: steps.maven_central.outputs.configured == 'true'
+        shell: bash
+        run: >-
+          ./gradlew :mediaplayer:publishAndReleaseToMavenCentral
+          -PpublicationVersion="$RELEASE_VERSION"
+          -PcomposeMediaPlayer.skipNativeBuild=true
+          --no-configuration-cache --no-daemon
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVENCENTRALUSERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVENCENTRALPASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNINGINMEMORYKEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNINGKEYID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNINGPASSWORD }}
