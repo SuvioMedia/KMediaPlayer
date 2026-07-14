@@ -328,8 +328,15 @@ class MacVideoPlayer {
     private var bufferEmptyObserver: NSKeyValueObservation?
     private var bufferLikelyToKeepUpObserver: NSKeyValueObservation?
     private var bufferFullObserver: NSKeyValueObservation?
+    private var presentationSizeObserver: NSKeyValueObservation?
+
+    // AVFoundation applies clean aperture and pixel aspect ratio to presentationSize. Cache the
+    // resulting display ratio from KVO so frame readers never touch AVPlayerItem off-main.
+    private let aspectLock = NSLock()
+    private var cachedDisplayAspectRatio: Double = 0.0
 
     // End-of-playback flag (set by AVPlayerItemDidPlayToEndTime, consumed once by the Kotlin side)
+    private let playbackEndLock = NSLock()
     private var didPlayToEnd: Bool = false
     private var playbackEndObserver: NSObjectProtocol?
 
@@ -1179,13 +1186,17 @@ class MacVideoPlayer {
             self?.handleTimeControlStatus(player.timeControlStatus)
         }
 
+        presentationSizeObserver = item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
+            self?.updateCachedDisplayAspectRatio(from: item.presentationSize)
+        }
+
         // Observe end of playback for all media types
         playbackEndObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: nil
         ) { [weak self] _ in
-            self?.didPlayToEnd = true
+            self?.markDidPlayToEnd()
         }
 
         // Configure player for HLS
@@ -1463,6 +1474,20 @@ class MacVideoPlayer {
     /// Returns the height of the video frame in pixels
     func getFrameHeight() -> Int { return frameHeight }
 
+    private func updateCachedDisplayAspectRatio(from size: CGSize) {
+        let ratio = size.width > 0 && size.height > 0 ? Double(size.width) / Double(size.height) : 0.0
+        aspectLock.lock()
+        cachedDisplayAspectRatio = ratio
+        aspectLock.unlock()
+    }
+
+    /// Display width / height with clean aperture and non-square pixels already applied.
+    func getDisplayAspectRatio() -> Double {
+        aspectLock.lock()
+        defer { aspectLock.unlock() }
+        return cachedDisplayAspectRatio
+    }
+
     /// Scales the output to fit within (width, height) while preserving the native aspect ratio.
     /// Never upscales beyond the native resolution. Recreates the pixel buffer output at the new size.
     /// Returns true if dimensions actually changed.
@@ -1573,36 +1598,60 @@ class MacVideoPlayer {
     func seekTo(time: Double) {
         guard let player = player else { return }
         let newTime = CMTime(seconds: time, preferredTimescale: 600)
+        let completion: (Bool) -> Void = { [weak self] finished in
+            guard finished else { return }
+            self?.capturePausedFrameAfterSeek()
+        }
 
         // For HLS, use tolerance for more efficient seeking
         if isHLSStream {
             let tolerance = CMTime(seconds: 1.0, preferredTimescale: 600)
-            player.seek(to: newTime, toleranceBefore: tolerance, toleranceAfter: tolerance)
+            player.seek(
+                to: newTime,
+                toleranceBefore: tolerance,
+                toleranceAfter: tolerance,
+                completionHandler: completion
+            )
         } else {
-            player.seek(to: newTime)
+            player.seek(to: newTime, completionHandler: completion)
+        }
+    }
 
-            // Update frame at the new position if paused
-            if !isPlaying, let output = videoOutput {
-                if output.hasNewPixelBuffer(forItemTime: newTime),
-                   let pixelBuffer = output.copyPixelBuffer(
-                       forItemTime: newTime, itemTimeForDisplay: nil)
-                {
-                    retainLatestPixelBuffer(pixelBuffer)
-                }
-            }
-            if !isPlaying {
-                hdrMetalRenderer?.renderCurrentFrame()
+    /// AVPlayer seek is asynchronous. Capture only after it completes so paused canvas/HLS
+    /// playback exposes the frame at the destination instead of retaining the pre-seek bitmap.
+    private func capturePausedFrameAfterSeek() {
+        guard !isPlaying else { return }
+        if let output = videoOutput, let item = player?.currentItem {
+            let currentTime = item.currentTime()
+            if output.hasNewPixelBuffer(forItemTime: currentTime),
+               let pixelBuffer = output.copyPixelBuffer(
+                   forItemTime: currentTime, itemTimeForDisplay: nil)
+            {
+                retainLatestPixelBuffer(pixelBuffer)
             }
         }
+        hdrMetalRenderer?.renderCurrentFrame()
     }
 
     /// Consumes the end-of-playback flag. Returns true once per playback completion.
     func consumeDidPlayToEnd() -> Bool {
-        if didPlayToEnd {
-            didPlayToEnd = false
-            return true
-        }
-        return false
+        playbackEndLock.lock()
+        defer { playbackEndLock.unlock() }
+        let ended = didPlayToEnd
+        didPlayToEnd = false
+        return ended
+    }
+
+    private func markDidPlayToEnd() {
+        playbackEndLock.lock()
+        didPlayToEnd = true
+        playbackEndLock.unlock()
+    }
+
+    private func resetDidPlayToEnd() {
+        playbackEndLock.lock()
+        didPlayToEnd = false
+        playbackEndLock.unlock()
     }
 
     /// Clean up observers
@@ -1613,12 +1662,18 @@ class MacVideoPlayer {
         bufferEmptyObserver?.invalidate()
         bufferLikelyToKeepUpObserver?.invalidate()
         bufferFullObserver?.invalidate()
+        presentationSizeObserver?.invalidate()
+        presentationSizeObserver = nil
+
+        aspectLock.lock()
+        cachedDisplayAspectRatio = 0.0
+        aspectLock.unlock()
 
         if let observer = playbackEndObserver {
             NotificationCenter.default.removeObserver(observer)
             playbackEndObserver = nil
         }
-        didPlayToEnd = false
+        resetDidPlayToEnd()
 
         NotificationCenter.default.removeObserver(self)
     }
@@ -1851,6 +1906,13 @@ public func getFrameHeight(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getFrameHeight())
+}
+
+@_cdecl("getDisplayAspectRatio")
+public func getDisplayAspectRatio(_ context: UnsafeMutableRawPointer?) -> Double {
+    guard let context = context else { return 0.0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.getDisplayAspectRatio()
 }
 
 @_cdecl("setOutputSize")

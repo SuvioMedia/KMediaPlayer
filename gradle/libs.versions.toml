@@ -1,7 +1,7 @@
 [versions]
 
 androidcontextprovider = "1.0.1"
-filekit = "0.14.1"
+filekit = "0.14.2"
 kotlin = "2.4.0"
 agp = "9.2.1"
 kotlinx-coroutines = "1.11.0"
@@ -9,11 +9,11 @@ kotlinxBrowserWasmJs = "0.5.0"
 kotlinxDatetime = "0.8.0"
 compose = "1.11.1"
 androidx-activityCompose = "1.13.0"
-androidx-core = "1.18.0"
+androidx-core = "1.19.0"
 media3Exoplayer = "1.10.1"
 detekt = "2.0.0-alpha.3"
 ktlint = "14.2.0"
-androidx-lifecycle-runtime-ktx = "2.10.0"
+androidx-lifecycle-runtime-ktx = "2.11.0"
 robolectric = "4.16"
 
 # minSdk = 21 failed to compile because the project indirectly depends on the library [androidx.navigationevent:navigationevent-android:1.0.1] which requires minSdk = 23
@@ -58,7 +58,7 @@ android-multiplatform-library = { id = "com.android.kotlin.multiplatform.library
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 android-application = { id = "com.android.application", version.ref = "agp" }
-vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.36.0"}
+vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.37.0"}
 dokka = { id = "org.jetbrains.dokka" , version = "2.2.0"}
 detekt = { id = "dev.detekt", version.ref = "detekt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }

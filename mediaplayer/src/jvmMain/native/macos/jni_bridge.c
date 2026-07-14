@@ -35,6 +35,7 @@ extern void*  lockLatestFrame(void* ctx, int32_t* outInfo);
 extern void   unlockLatestFrame(void* ctx);
 extern int32_t getFrameWidth(void* ctx);
 extern int32_t getFrameHeight(void* ctx);
+extern double  getDisplayAspectRatio(void* ctx);
 extern int32_t setOutputSize(void* ctx, int32_t width, int32_t height);
 extern void*   getHdrMetalLayer(void* ctx);
 extern void    setHdrMetalLayerSize(void* ctx, int32_t width, int32_t height, double scale);
@@ -1598,6 +1599,13 @@ static jint JNICALL jni_GetFrameHeight(JNIEnv* env, jclass cls, jlong handle) {
     return ctx ? (jint)getFrameHeight(ctx) : 0;
 }
 
+static jdouble JNICALL jni_GetDisplayAspectRatio(JNIEnv* env, jclass cls, jlong handle) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return 0.0;
+    void* ctx = avCtx(native);
+    return ctx ? (jdouble)getDisplayAspectRatio(ctx) : 0.0;
+}
+
 static jint JNICALL jni_SetOutputSize(JNIEnv* env, jclass cls, jlong handle, jint width, jint height) {
     NativePlayerHandle* native = toHandle(handle);
     if (vlcCtx(native)) return 0;
@@ -1911,6 +1919,7 @@ static const JNINativeMethod g_methods[] = {
     { "nWrapPointer",            "(JJ)Ljava/nio/ByteBuffer;",   (void*)jni_WrapPointer },
     { "nGetFrameWidth",          "(J)I",                        (void*)jni_GetFrameWidth },
     { "nGetFrameHeight",         "(J)I",                        (void*)jni_GetFrameHeight },
+    { "nGetDisplayAspectRatio",  "(J)D",                        (void*)jni_GetDisplayAspectRatio },
     { "nSetOutputSize",          "(JII)I",                      (void*)jni_SetOutputSize },
     { "nSetHdrMetalPreferred",   "(JZ)V",                       (void*)jni_SetHdrMetalPreferred },
     { "nSetHdrToneMappingEnabled", "(JZ)V",                     (void*)jni_SetHdrToneMappingEnabled },

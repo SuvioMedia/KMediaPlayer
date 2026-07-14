@@ -58,7 +58,10 @@ import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
@@ -74,6 +77,13 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 internal val macLogger = TaggedLogger("MacVideoPlayerState")
+
+private const val SKIA_FRAME_BUFFER_COUNT = 3
+private const val PENDING_BITMAP_CLOSE_GRACE_FRAMES = 4
+private const val BGRA_BYTES_PER_PIXEL = 4
+private const val ASPECT_RATIO_CHANGE_EPSILON = 0.001f
+private const val PAUSED_SEEK_FRAME_ATTEMPTS = 10
+private const val PAUSED_SEEK_FRAME_RETRY_DELAY_MS = 25L
 
 private enum class MacLibVlcRenderMode {
     MEMORY,
@@ -141,15 +151,46 @@ class MacVideoPlayerState(
     /** Serializes native-player replacement/destruction with AWT surface attachment. */
     private val nativeInstanceLock = Any()
 
-    // Serial dispatcher for frame processing — ensures only one frame is processed at a time
+    // Serial dispatcher for frame processing — ensures only one frame is processed at a time.
     private val frameDispatcher = Dispatchers.Default.limitedParallelism(1)
-    private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
+
+    private data class RenderedFrame(
+        val bitmap: Bitmap,
+        val imageBitmap: ImageBitmap,
+        val displayAspectRatio: Float,
+        val width: Int,
+        val height: Int,
+        val epoch: Long,
+    )
+
+    // A StateFlow is a one-slot conflated producer/consumer hand-off: slow UI consumers simply
+    // skip stale frames instead of making frame capture wait for the main thread.
+    private val _currentFrameState = MutableStateFlow<RenderedFrame?>(null)
     internal val currentFrameState: State<ImageBitmap?> = mutableStateOf(null)
+    private val frameEpoch = AtomicLong(0L)
+
+    // Three buffers are required because the UI can still be drawing one bitmap while another is
+    // waiting in the conflated hand-off. The producer excludes both and writes to the third.
+    private val skiaBitmaps = arrayOfNulls<Bitmap>(SKIA_FRAME_BUFFER_COUNT)
     private var skiaBitmapWidth: Int = 0
     private var skiaBitmapHeight: Int = 0
-    private var skiaBitmapA: Bitmap? = null
-    private var skiaBitmapB: Bitmap? = null
-    private var nextSkiaBitmapA: Boolean = true
+    private var nextSkiaBitmapIndex: Int = 0
+    private var lastSentSkiaBitmap: Bitmap? = null
+    private val displayedSkiaBitmap = AtomicReference<Bitmap?>(null)
+    private val pendingUiSkiaBitmap = AtomicReference<Bitmap?>(null)
+
+    @Volatile
+    private var lastFrameHash: Int = Int.MIN_VALUE
+
+    private data class PendingCloseBitmap(
+        val bitmap: Bitmap,
+        var framesLeft: Int,
+    )
+
+    private val pendingCloseBitmaps = ArrayDeque<PendingCloseBitmap>()
+
+    // A seek/output resize must never race a native CVPixelBuffer read.
+    private val videoReaderMutex = Mutex()
 
     // Surface display size (pixels) — used to scale native output resolution
     private var surfaceWidth = 0
@@ -206,6 +247,20 @@ class MacVideoPlayerState(
     private var lastFrameUpdateTime: Long = 0
     private var seekInProgress = false
     private var targetSeekTime: Double? = null
+    private val seekCompletionToken = AtomicLong(0L)
+
+    private sealed interface PendingSeekRequest {
+        data class Time(
+            val time: Duration,
+        ) : PendingSeekRequest
+
+        data class Slider(
+            val value: Float,
+        ) : PendingSeekRequest
+    }
+
+    private val pendingSeekRequest = AtomicReference<PendingSeekRequest?>(null)
+    private val seekDrainActive = AtomicBoolean(false)
     private var videoFrameRate: Float = 0.0f
     private var screenRefreshRate: Float = 0.0f
     private var captureFrameRate: Float = 0.0f
@@ -334,10 +389,32 @@ class MacVideoPlayerState(
         uiUpdateJob?.cancel()
         uiUpdateJob =
             ioScope.launch {
-                _currentFrameState.debounce(1).collect { newFrame ->
+                _currentFrameState.debounce(1).collectLatest { newFrame ->
                     ensureActive() // Checks that the coroutine is still active
-                    withContext(Dispatchers.Main) {
-                        (currentFrameState as MutableState).value = newFrame
+                    if (newFrame != null && newFrame.epoch != frameEpoch.get()) {
+                        return@collectLatest
+                    }
+                    val pendingBitmap = newFrame?.bitmap
+                    pendingUiSkiaBitmap.set(pendingBitmap)
+                    try {
+                        withContext(Dispatchers.Main) {
+                            if (newFrame != null && newFrame.epoch != frameEpoch.get()) {
+                                return@withContext
+                            }
+                            (currentFrameState as MutableState).value = newFrame?.imageBitmap
+                            displayedSkiaBitmap.set(pendingBitmap)
+                            newFrame?.displayAspectRatio?.let { frameAspectRatio ->
+                                if (abs(_aspectRatio.value - frameAspectRatio) > ASPECT_RATIO_CHANGE_EPSILON) {
+                                    _aspectRatio.value = frameAspectRatio
+                                }
+                            }
+                            newFrame?.let { frame ->
+                                if (metadata.width != frame.width) metadata.width = frame.width
+                                if (metadata.height != frame.height) metadata.height = frame.height
+                            }
+                        }
+                    } finally {
+                        pendingUiSkiaBitmap.compareAndSet(pendingBitmap, null)
                     }
                 }
             }
@@ -435,6 +512,8 @@ class MacVideoPlayerState(
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
         lifecycle.launchSourceOperation(
             onScheduled = {
+                clearPendingSeekRequests()
+                frameEpoch.incrementAndGet()
                 lastUri = uri
                 lastRequestHeaders = sanitizedHeaders
                 invalidateLibAssSelection()
@@ -605,6 +684,7 @@ class MacVideoPlayerState(
         bufferingCheckJob = null
         seekInProgress = false
         targetSeekTime = null
+        lastFrameHash = Int.MIN_VALUE
         if (recreate && !lifecycle.isDisposed) {
             playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         }
@@ -1564,10 +1644,12 @@ class MacVideoPlayerState(
             val duration = durationSeconds.secondsAsDuration()
             val frameRate = MacNativeBridge.nGetVideoFrameRate(ptr)
 
-            // Calculate aspect ratio
+            // AVFoundation's presentationSize includes clean-aperture and pixel-aspect-ratio
+            // corrections. Raw CVPixelBuffer dimensions do not, so anamorphic/HLS video would
+            // otherwise be displayed with the wrong geometry.
             val newAspectRatio =
                 if (width > 0 && height > 0) {
-                    width.toFloat() / height.toFloat()
+                    displayAspectRatio(ptr, width, height)
                 } else {
                     // Instead of forcing 16f/9f, don’t change the aspect if the video is not ready yet.
                     // For example, we can keep the previous aspect ratio:
@@ -1603,6 +1685,23 @@ class MacVideoPlayerState(
             if (e is CancellationException) throw e
             macLogger.e { "Error updating metadata: ${e.message}" }
         }
+    }
+
+    private fun displayAspectRatio(
+        ptr: Long,
+        width: Int,
+        height: Int,
+    ): Float {
+        val rawAspectRatio = width.toFloat() / height.toFloat()
+        if (nativeBackendUsesLibVlc) return rawAspectRatio
+
+        val nativeAspectRatio =
+            runCatching { MacNativeBridge.nGetDisplayAspectRatio(ptr) }
+                .getOrDefault(0.0)
+        return nativeAspectRatio
+            .takeIf { it.isFinite() && it > 0.0 }
+            ?.toFloat()
+            ?: rawAspectRatio
     }
 
     /** Starts periodic frame updates on a background thread. */
@@ -1693,50 +1792,57 @@ class MacVideoPlayerState(
                 if (shouldUseNativeVideoSurface()) return@withContext
                 val ptr = playerPtr
                 if (ptr == 0L) return@withContext
-
-                // Lock the CVPixelBuffer directly — eliminates the Swift-side memcpy.
-                // outInfo = [width, height, bytesPerRow]
-                val outInfo = IntArray(3)
-                val frameAddress = MacNativeBridge.nLockFrame(ptr, outInfo)
-                if (frameAddress == 0L) return@withContext
-
-                val width = outInfo[0]
-                val height = outInfo[1]
-                val srcBytesPerRow = outInfo[2]
-
-                if (width <= 0 || height <= 0) {
-                    MacNativeBridge.nUnlockFrame(ptr)
-                    return@withContext
-                }
-
-                val frameSizeBytes = srcBytesPerRow.toLong() * height.toLong()
+                val publicationEpoch = frameEpoch.get()
                 var framePublished = false
 
-                try {
-                    withContext(Dispatchers.Default) {
-                        val srcBuf =
-                            MacNativeBridge.nWrapPointer(frameAddress, frameSizeBytes)
-                                ?: return@withContext
+                videoReaderMutex.withLock {
+                    // Lock the CVPixelBuffer directly — eliminates the Swift-side memcpy.
+                    // outInfo = [width, height, bytesPerRow]
+                    val outInfo = IntArray(3)
+                    val frameAddress = MacNativeBridge.nLockFrame(ptr, outInfo)
+                    if (frameAddress == 0L) return@withLock
 
-                        // Allocate/reuse two bitmaps (double-buffering) to avoid writing while the UI draws.
-                        if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
-                            skiaBitmapA?.close()
-                            skiaBitmapB?.close()
-
-                            val imageInfo = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
-                            skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
-                            skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
-                            skiaBitmapWidth = width
-                            skiaBitmapHeight = height
-                            nextSkiaBitmapA = true
+                    try {
+                        val width = outInfo[0]
+                        val height = outInfo[1]
+                        val srcBytesPerRow = outInfo[2]
+                        if (
+                            width <= 0 ||
+                            height <= 0 ||
+                            srcBytesPerRow.toLong() < width.toLong() * BGRA_BYTES_PER_PIXEL
+                        ) {
+                            return@withLock
                         }
 
-                        val targetBitmap = (if (nextSkiaBitmapA) skiaBitmapA else skiaBitmapB) ?: return@withContext
-                        nextSkiaBitmapA = !nextSkiaBitmapA
+                        val frameSizeBytes = srcBytesPerRow.toLong() * height.toLong()
+                        val srcBuf =
+                            MacNativeBridge.nWrapPointer(frameAddress, frameSizeBytes)
+                                ?: return@withLock
 
-                        val pixmap = targetBitmap.peekPixels() ?: return@withContext
+                        val frameBuffersChanged =
+                            skiaBitmaps[0] == null || skiaBitmapWidth != width || skiaBitmapHeight != height
+                        if (frameBuffersChanged) ensureSkiaFrameBuffers(width, height)
+                        drainPendingCloseBitmaps()
+
+                        val frameHash =
+                            if (usesLibAssSubtitleOverlay && subtitlesEnabled) {
+                                // The video pixels can be unchanged while the subtitle overlay
+                                // changes. Force publication and make the first subtitle-free frame
+                                // publish too.
+                                null
+                            } else {
+                                srcBuf.rewind()
+                                calculateFrameHash(srcBuf, width, height, srcBytesPerRow)
+                            }
+                        if (!frameBuffersChanged && frameHash != null && frameHash == lastFrameHash) {
+                            return@withLock
+                        }
+
+                        val targetBitmap = selectWritableSkiaBitmap() ?: return@withLock
+
+                        val pixmap = targetBitmap.peekPixels() ?: return@withLock
                         val pixelsAddr = pixmap.addr
-                        if (pixelsAddr == 0L) return@withContext
+                        if (pixelsAddr == 0L) return@withLock
 
                         // Single copy: CVPixelBuffer → Skia bitmap pixels (no intermediate buffer)
                         srcBuf.rewind()
@@ -1744,7 +1850,7 @@ class MacVideoPlayerState(
                         val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
                         val destBuf =
                             MacNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
-                                ?: return@withContext
+                                ?: return@withLock
                         copyBgraFrame(srcBuf, destBuf, width, height, srcBytesPerRow, dstRowBytes)
 
                         if (usesLibAssSubtitleOverlay && subtitlesEnabled) {
@@ -1776,11 +1882,21 @@ class MacVideoPlayerState(
                             }
                         }
 
-                        _currentFrameState.value = targetBitmap.asComposeImageBitmap()
+                        lastSentSkiaBitmap = targetBitmap
+                        lastFrameHash = frameHash ?: Int.MIN_VALUE
+                        _currentFrameState.value =
+                            RenderedFrame(
+                                bitmap = targetBitmap,
+                                imageBitmap = targetBitmap.asComposeImageBitmap(),
+                                displayAspectRatio = displayAspectRatio(ptr, width, height),
+                                width = width,
+                                height = height,
+                                epoch = publicationEpoch,
+                            )
                         framePublished = true
+                    } finally {
+                        MacNativeBridge.nUnlockFrame(ptr)
                     }
-                } finally {
-                    MacNativeBridge.nUnlockFrame(ptr)
                 }
 
                 if (framePublished) {
@@ -1800,6 +1916,84 @@ class MacVideoPlayerState(
         }
     }
 
+    private fun ensureSkiaFrameBuffers(
+        width: Int,
+        height: Int,
+    ) {
+        if (skiaBitmaps[0] != null && skiaBitmapWidth == width && skiaBitmapHeight == height) return
+
+        skiaBitmaps.indices.forEach { index ->
+            skiaBitmaps[index]?.let { bitmap ->
+                pendingCloseBitmaps.addLast(PendingCloseBitmap(bitmap, PENDING_BITMAP_CLOSE_GRACE_FRAMES))
+            }
+            skiaBitmaps[index] = null
+        }
+
+        val imageInfo = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+        skiaBitmaps.indices.forEach { index ->
+            skiaBitmaps[index] = Bitmap().apply { allocPixels(imageInfo) }
+        }
+        skiaBitmapWidth = width
+        skiaBitmapHeight = height
+        nextSkiaBitmapIndex = 0
+        lastSentSkiaBitmap = null
+    }
+
+    private fun selectWritableSkiaBitmap(): Bitmap? {
+        val displayedBitmap = displayedSkiaBitmap.get()
+        val pendingUiBitmap = pendingUiSkiaBitmap.get()
+
+        repeat(skiaBitmaps.size) {
+            val candidateIndex = nextSkiaBitmapIndex
+            nextSkiaBitmapIndex = (nextSkiaBitmapIndex + 1) % skiaBitmaps.size
+            val candidate = skiaBitmaps[candidateIndex]
+            if (
+                candidate != null &&
+                candidate !== displayedBitmap &&
+                candidate !== pendingUiBitmap &&
+                candidate !== lastSentSkiaBitmap
+            ) {
+                return candidate
+            }
+        }
+        return null
+    }
+
+    private fun drainPendingCloseBitmaps() {
+        val displayedBitmap = displayedSkiaBitmap.get()
+        val pendingUiBitmap = pendingUiSkiaBitmap.get()
+        val queuedBitmap = _currentFrameState.value?.bitmap
+
+        repeat(pendingCloseBitmaps.size) {
+            val pending = pendingCloseBitmaps.removeFirst()
+            pending.framesLeft--
+            if (
+                pending.framesLeft <= 0 &&
+                pending.bitmap !== displayedBitmap &&
+                pending.bitmap !== pendingUiBitmap &&
+                pending.bitmap !== queuedBitmap
+            ) {
+                runCatching { pending.bitmap.close() }
+                    .onFailure { error -> macLogger.e { "Error releasing old frame bitmap: ${error.message}" } }
+            } else {
+                pendingCloseBitmaps.addLast(pending)
+            }
+        }
+    }
+
+    private fun abandonSkiaFrameBuffers() {
+        // ImageBitmap is a zero-copy view over Bitmap pixels. Compose may still retain the last
+        // image during teardown, so closing here can free memory while the renderer reads it.
+        // Dropping our references lets Skia clean each bitmap after all ImageBitmap holders do.
+        skiaBitmaps.indices.forEach { index -> skiaBitmaps[index] = null }
+        pendingCloseBitmaps.clear()
+        skiaBitmapWidth = 0
+        skiaBitmapHeight = 0
+        nextSkiaBitmapIndex = 0
+        lastSentSkiaBitmap = null
+        lastFrameHash = Int.MIN_VALUE
+    }
+
     /**
      * Updates the playback position, slider, and audio levels on a background
      * thread.
@@ -1808,6 +2002,7 @@ class MacVideoPlayerState(
         if (!hasMedia || userDragging) return
 
         try {
+            if (shouldUseNativeVideoSurface()) refreshNativeSurfaceAspectRatio()
             val duration = getDurationSafely()
             if (duration <= 0) return
 
@@ -1857,8 +2052,30 @@ class MacVideoPlayerState(
         }
     }
 
+    private suspend fun refreshNativeSurfaceAspectRatio() {
+        val ptr = playerPtr
+        if (ptr == 0L || nativeBackendUsesLibVlc) return
+        val width = MacNativeBridge.nGetFrameWidth(ptr)
+        val height = MacNativeBridge.nGetFrameHeight(ptr)
+        if (width <= 0 || height <= 0) return
+
+        val refreshedAspectRatio = displayAspectRatio(ptr, width, height)
+        if (abs(_aspectRatio.value - refreshedAspectRatio) <= ASPECT_RATIO_CHANGE_EPSILON) return
+        withContext(Dispatchers.Main) {
+            _aspectRatio.value = refreshedAspectRatio
+        }
+    }
+
     /** Checks if playback has ended and triggers loop or stop accordingly. */
     private suspend fun checkLoopingAsync() {
+        if (
+            userDragging ||
+            seekInProgress ||
+            seekDrainActive.get() ||
+            pendingSeekRequest.get() != null
+        ) {
+            return
+        }
         val ptr = playerPtr
         if (ptr == 0L) return
 
@@ -1866,7 +2083,11 @@ class MacVideoPlayerState(
         // file and HLS playback. A position-based fallback (current >= duration - x)
         // is dangerous because it stops playback x seconds early — the slider
         // freezes at (duration - x) / duration instead of reaching 100%.
-        if (!MacNativeBridge.nConsumeDidPlayToEnd(ptr)) return
+        val didPlayToEnd =
+            videoReaderMutex.withLock {
+                ptr == playerPtr && MacNativeBridge.nConsumeDidPlayToEnd(ptr)
+            }
+        if (!didPlayToEnd) return
 
         if (loop) {
             macLogger.d { "checkLoopingAsync() - Loop enabled, restarting video" }
@@ -1967,7 +2188,11 @@ class MacVideoPlayerState(
         lifecycle.ensureUsable()
         macLogger.d { "stop() - Stopping playback" }
         lifecycle.launchSourceOperation(
-            onScheduled = { invalidateLibAssSelection() },
+            onScheduled = {
+                clearPendingSeekRequests()
+                frameEpoch.incrementAndGet()
+                invalidateLibAssSelection()
+            },
         ) { generation ->
             if (ffmpegHlsFallback != null) {
                 cleanupCurrentPlayback()
@@ -1991,6 +2216,8 @@ class MacVideoPlayerState(
         lifecycle.ensureUsable()
         lifecycle.launchSourceOperation(
             onScheduled = {
+                clearPendingSeekRequests()
+                frameEpoch.incrementAndGet()
                 lastUri = null
                 lastRequestHeaders = emptyMap()
                 invalidateLibAssSelection()
@@ -2006,11 +2233,7 @@ class MacVideoPlayerState(
     override fun seekTo(time: Duration) {
         lifecycle.ensureUsable()
         macLogger.d { "seekTo() - Seeking to time: $time" }
-        lifecycle.launchSourceBoundControlOperation { generation ->
-            delay(10.milliseconds) // Small delay to coalesce rapid seek events
-            lifecycle.ensureCurrentSource(generation)
-            seekToTimeAsync(time, generation)
-        }
+        enqueueSeek(PendingSeekRequest.Time(time))
     }
 
     override fun seekToProgress(progress: Float) {
@@ -2021,19 +2244,48 @@ class MacVideoPlayerState(
     override fun seekTo(value: Float) {
         lifecycle.ensureUsable()
         macLogger.d { "seekTo() - Seeking with slider value: $value" }
-        lifecycle.launchSourceBoundControlOperation { generation ->
-            delay(10.milliseconds) // Small delay to coalesce rapid seek events
-            lifecycle.ensureCurrentSource(generation)
-            val duration = getDurationSafely()
-            if (duration <= 0) {
-                commitCurrentSourceOnMain(generation) { isLoading = false }
-                return@launchSourceBoundControlOperation
+        enqueueSeek(PendingSeekRequest.Slider(value))
+    }
+
+    private fun enqueueSeek(request: PendingSeekRequest) {
+        pendingSeekRequest.set(request)
+        startSeekDrainIfNeeded()
+    }
+
+    private fun startSeekDrainIfNeeded() {
+        if (pendingSeekRequest.get() == null || lifecycle.isDisposed) return
+        if (!seekDrainActive.compareAndSet(false, true)) return
+
+        try {
+            val drainJob =
+                lifecycle.launchSourceBoundControlOperation { generation ->
+                    // Let slider bursts collapse into one native seek. Calls arriving while this
+                    // seek executes overwrite the slot and become at most one follow-up job.
+                    delay(10.milliseconds)
+                    val request = pendingSeekRequest.getAndSet(null) ?: return@launchSourceBoundControlOperation
+                    lifecycle.ensureCurrentSource(generation)
+                    when (request) {
+                        is PendingSeekRequest.Time -> seekToTimeAsync(request.time, generation)
+                        is PendingSeekRequest.Slider -> seekToAsync(request.value, generation)
+                    }
+                }
+            // A source change can cancel a lazy lifecycle job before its block starts, so cleanup
+            // must be attached to the Job rather than living only inside that block.
+            drainJob.invokeOnCompletion {
+                seekDrainActive.set(false)
+                if (pendingSeekRequest.get() != null && !lifecycle.isDisposed) {
+                    startSeekDrainIfNeeded()
+                }
             }
-            seekToSecondsAsync(
-                ((value / VideoPlayerState.SLIDER_SCALE).toDouble() * duration).coerceIn(0.0, duration),
-                generation,
-            )
+        } catch (error: IllegalStateException) {
+            seekDrainActive.set(false)
+            if (!lifecycle.isDisposed) throw error
         }
+    }
+
+    private fun clearPendingSeekRequests() {
+        pendingSeekRequest.set(null)
+        seekCompletionToken.incrementAndGet()
     }
 
     /** Seeks to a position on a background thread. */
@@ -2071,6 +2323,7 @@ class MacVideoPlayerState(
         seekTime: Double,
         sourceGeneration: Long? = null,
     ) {
+        val completionToken = seekCompletionToken.incrementAndGet()
         if (!commitSeekStateOnMain(sourceGeneration) { isLoading = true }) return
 
         try {
@@ -2084,6 +2337,8 @@ class MacVideoPlayerState(
             if (!commitSeekStateOnMain(sourceGeneration) {
                     seekInProgress = true
                     targetSeekTime = seekTime
+                    _currentTime.value = seekTime.secondsAsDuration()
+                    _positionText.value = formatTime(_currentTime.value)
                     sliderPos =
                         (seekTime / duration * VideoPlayerState.SLIDER_SCALE)
                             .toFloat()
@@ -2105,27 +2360,41 @@ class MacVideoPlayerState(
                 }
                 return
             }
-            MacNativeBridge.nSeekTo(ptr, seekTime)
+            val resumePlayback = isPlaying
+            videoReaderMutex.withLock {
+                lastFrameHash = Int.MIN_VALUE
+                MacNativeBridge.nSeekTo(ptr, seekTime)
+                // AVPlayer does not clear this one-shot flag when seeking away from the end.
+                // Any flag observed here belongs to the pre-seek timeline and must be drained.
+                MacNativeBridge.nConsumeDidPlayToEnd(ptr)
+                if (resumePlayback) MacNativeBridge.nPlay(ptr)
+            }
             sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
 
-            if (isPlaying) {
-                MacNativeBridge.nPlay(ptr)
-                // Reduce delay to update frame faster for local videos
-                delay(10.milliseconds)
-                sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
-                if (!shouldUseNativeVideoSurface()) {
-                    updateFrameAsync()
+            refreshFrameAfterSeek(resumePlayback, sourceGeneration)
+
+            if (!resumePlayback) {
+                commitSeekStateOnMain(sourceGeneration) {
+                    if (seekCompletionToken.get() == completionToken) {
+                        seekInProgress = false
+                        targetSeekTime = null
+                        isLoading = false
+                    }
                 }
-                // Reduced timeout delay from 2000ms to 300ms
-                playerScope.launch {
-                    delay(300.milliseconds)
-                    commitSeekStateOnMain(sourceGeneration) {
-                        if (seekInProgress) {
-                            macLogger.d { "seekToAsync() - Forcing end of seek after timeout" }
-                            seekInProgress = false
-                            targetSeekTime = null
-                            isLoading = false
-                        }
+                return
+            }
+
+            // The position poll normally completes the seek. This bounded fallback prevents a
+            // stalled/native-delayed seek from leaving loading state stuck; tokens stop an older
+            // timeout from completing a newer coalesced seek.
+            playerScope.launch {
+                delay(300.milliseconds)
+                commitSeekStateOnMain(sourceGeneration) {
+                    if (seekCompletionToken.get() == completionToken && seekInProgress) {
+                        macLogger.d { "seekToAsync() - Forcing end of seek after timeout" }
+                        seekInProgress = false
+                        targetSeekTime = null
+                        isLoading = false
                     }
                 }
             }
@@ -2133,10 +2402,31 @@ class MacVideoPlayerState(
             if (e is CancellationException) throw e
             macLogger.e { "Error in seekToAsync: ${e.message}" }
             commitSeekStateOnMain(sourceGeneration) {
-                isLoading = false
-                seekInProgress = false
-                targetSeekTime = null
+                if (seekCompletionToken.get() == completionToken) {
+                    isLoading = false
+                    seekInProgress = false
+                    targetSeekTime = null
+                }
             }
+        }
+    }
+
+    private suspend fun refreshFrameAfterSeek(
+        resumePlayback: Boolean,
+        sourceGeneration: Long?,
+    ) {
+        // AVPlayer completes seeks asynchronously. Active playback only needs one eager refresh
+        // because its regular producer keeps polling; paused playback gets a short bounded retry
+        // window so the native completion callback can publish the destination thumbnail.
+        delay(10.milliseconds)
+        sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
+        if (shouldUseNativeVideoSurface()) return
+
+        val frameAttempts = if (resumePlayback) 1 else PAUSED_SEEK_FRAME_ATTEMPTS
+        repeat(frameAttempts) { attempt ->
+            if (attempt > 0) delay(PAUSED_SEEK_FRAME_RETRY_DELAY_MS.milliseconds)
+            sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
+            updateFrameAsync()
         }
     }
 
@@ -2153,6 +2443,8 @@ class MacVideoPlayerState(
 
     override fun dispose() {
         macLogger.d { "dispose() - Releasing resources" }
+        clearPendingSeekRequests()
+        frameEpoch.incrementAndGet()
         val cleanupJob =
             lifecycle.dispose {
                 cancelAndResetPlayerScope(recreate = false)
@@ -2176,17 +2468,7 @@ class MacVideoPlayerState(
                 val ptrToDispose =
                     withContext(frameDispatcher) {
                         val ptr = synchronized(nativeInstanceLock) { playerPtrAtomic.getAndSet(0L) }
-                        try {
-                            skiaBitmapA?.close()
-                            skiaBitmapB?.close()
-                            skiaBitmapA = null
-                            skiaBitmapB = null
-                            skiaBitmapWidth = 0
-                            skiaBitmapHeight = 0
-                            nextSkiaBitmapA = true
-                        } catch (e: Exception) {
-                            macLogger.e { "Error releasing bitmaps: ${e.message}" }
-                        }
+                        abandonSkiaFrameBuffers()
                         ptr
                     }
 
@@ -2220,6 +2502,8 @@ class MacVideoPlayerState(
 
     /** Resets the player's state. */
     private suspend fun resetState() {
+        frameEpoch.incrementAndGet()
+        _currentFrameState.value = null
         withContext(Dispatchers.Main) {
             hasMedia = false
             isPlaying = false
@@ -2230,8 +2514,10 @@ class MacVideoPlayerState(
             _durationText.value = "00:00"
             _aspectRatio.value = 16f / 9f
             error = null
+            (currentFrameState as MutableState).value = null
+            displayedSkiaBitmap.set(null)
         }
-        _currentFrameState.value = null
+        pendingUiSkiaBitmap.set(null)
     }
 
     /**
@@ -3006,6 +3292,10 @@ class MacVideoPlayerState(
         val ptr = playerPtr
         if (ptr == 0L) return
 
-        MacNativeBridge.nSetOutputSize(ptr, sw, sh)
+        videoReaderMutex.withLock {
+            if (ptr != playerPtr) return@withLock
+            lastFrameHash = Int.MIN_VALUE
+            MacNativeBridge.nSetOutputSize(ptr, sw, sh)
+        }
     }
 }

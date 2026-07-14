@@ -9,25 +9,73 @@ import kotlin.test.assertNotEquals
 class MacFrameUtilsTest {
     @Test
     fun calculateFrameHash_returnsZeroWhenEmpty() {
-        assertEquals(0, calculateFrameHash(ByteBuffer.allocate(0), 0))
-        assertEquals(0, calculateFrameHash(ByteBuffer.allocate(0), -1))
+        assertEquals(0, calculateFrameHash(ByteBuffer.allocate(0), 0, 0, 0))
+        assertEquals(0, calculateFrameHash(ByteBuffer.allocate(0), -1, 1, 0))
+        assertEquals(0, calculateFrameHash(ByteBuffer.allocate(0), 1, -1, 0))
+        assertEquals(0, calculateFrameHash(ByteBuffer.allocate(16), 2, 2, 4))
+        assertEquals(0, calculateFrameHash(ByteBuffer.allocate(8), 2, 2, 8))
     }
 
     @Test
     fun calculateFrameHash_changesWhenSampledPixelChanges() {
-        val pixelCount = 1000
-        val buf = ByteBuffer.allocate(pixelCount * 4)
-        for (i in 0 until pixelCount) {
+        val width = 100
+        val height = 10
+        val rowBytes = width * 4
+        val buf = ByteBuffer.allocate(rowBytes * height)
+        for (i in 0 until width * height) {
             buf.putInt(i * 4, i)
         }
 
-        val hash1 = calculateFrameHash(buf, pixelCount)
+        val hash1 = calculateFrameHash(buf, width, height, rowBytes)
 
-        // With pixelCount=1000, step=5 => index 5 is sampled.
+        // With pixelCount=1000, step=5 => linear index 5 is sampled.
         buf.putInt(5 * 4, 123456)
-        val hash2 = calculateFrameHash(buf, pixelCount)
+        val hash2 = calculateFrameHash(buf, width, height, rowBytes)
 
         assertNotEquals(hash1, hash2)
+    }
+
+    @Test
+    fun calculateFrameHash_ignoresRowPaddingBytes() {
+        val width = 100
+        val height = 10
+        val rowBytes = width * 4 + 16
+
+        fun frame(padding: Byte): ByteBuffer {
+            val buffer = ByteBuffer.allocate(rowBytes * height)
+            for (index in 0 until buffer.capacity()) buffer.put(index, padding)
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    buffer.putInt(y * rowBytes + x * 4, y * width + x)
+                }
+            }
+            return buffer
+        }
+
+        assertEquals(
+            calculateFrameHash(frame(0x00), width, height, rowBytes),
+            calculateFrameHash(frame(0x55), width, height, rowBytes),
+        )
+    }
+
+    @Test
+    fun calculateFrameHash_doesNotSampleSingleColumnWhenStepIsMultipleOfWidth() {
+        val width = 10
+        val height = 400
+        val rowBytes = width * 4
+        val blank = ByteBuffer.allocate(rowBytes * height)
+        val changedOutsideFirstColumn = ByteBuffer.allocate(rowBytes * height)
+
+        for (y in 0 until height) {
+            for (x in 1 until width) {
+                changedOutsideFirstColumn.putInt(y * rowBytes + x * 4, 0xCAFE)
+            }
+        }
+
+        assertNotEquals(
+            calculateFrameHash(blank, width, height, rowBytes),
+            calculateFrameHash(changedOutsideFirstColumn, width, height, rowBytes),
+        )
     }
 
     @Test
