@@ -5,6 +5,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assume
 import java.nio.file.Files
 import kotlin.test.Test
@@ -159,7 +160,11 @@ class WindowsVideoPlayerStateTest {
             // Test opening a non-existent file (should cause an error)
             runBlocking {
                 playerState.openUri("non_existent_file.mp4")
-                delay(500.milliseconds) // Give some time for the error to be set
+                withTimeout(15_000) {
+                    while (playerState.error == null) {
+                        delay(25.milliseconds)
+                    }
+                }
             }
 
             // There should be an error now

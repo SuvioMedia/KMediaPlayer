@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.mac
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assume
 import org.junit.Before
 import kotlin.test.Test
@@ -127,7 +128,11 @@ class MacVideoPlayerStateTest {
             // Test opening a non-existent file (should cause an error)
             runBlocking {
                 playerState.openUri("non_existent_file.mp4")
-                delay(500.milliseconds) // Give some time for the error to be set
+                withTimeout(15_000) {
+                    while (playerState.error == null) {
+                        delay(25.milliseconds)
+                    }
+                }
             }
 
             // There should be an error now

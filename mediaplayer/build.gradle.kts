@@ -56,7 +56,10 @@ kotlin {
     jvmToolchain(25)
 
     @OptIn(ExperimentalAbiValidation::class)
-    abiValidation()
+    abiValidation {
+        // Unsupported-target inference can misclassify Wasm-only declarations on non-macOS hosts.
+        keepLocallyUnsupportedTargets.set(false)
+    }
 
     android {
         namespace = "io.github.kdroidfilter.composemediaplayer"

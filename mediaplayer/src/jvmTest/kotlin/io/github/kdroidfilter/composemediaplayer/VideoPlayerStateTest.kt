@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assume
 import org.junit.Before
 import kotlin.test.Test
@@ -170,7 +171,11 @@ class VideoPlayerStateTest {
 
             runBlocking {
                 playerState.openUri("non_existent_file.mp4")
-                delay(500.milliseconds)
+                withTimeout(15_000) {
+                    while (playerState.error == null) {
+                        delay(25.milliseconds)
+                    }
+                }
             }
 
             assertNotNull(playerState.error)

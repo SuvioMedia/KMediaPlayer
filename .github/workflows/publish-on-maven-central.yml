@@ -19,6 +19,8 @@ jobs:
   release:
     needs: verify
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - name: Checkout release tag
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -91,6 +93,22 @@ jobs:
           java-version: '25'
           distribution: temurin
           cache: gradle
+
+      - name: Verify Xcode 26.3 and iOS 26 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d "$DEVELOPER_DIR" ]; then
+            echo "Xcode 26.3 is required by the current Compose UIKit artifacts." >&2
+            exit 1
+          fi
+          xcodebuild -version
+          sdk_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          echo "iOS Simulator SDK $sdk_version"
+          case "$sdk_version" in
+            26.*) ;;
+            *) echo "An iOS 26 Simulator SDK is required." >&2; exit 1 ;;
+          esac
 
       - name: Install Android NDK
         shell: bash
