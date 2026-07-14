@@ -14,7 +14,7 @@ media3Exoplayer = "1.10.1"
 detekt = "2.0.0-alpha.3"
 ktlint = "14.2.0"
 androidx-lifecycle-runtime-ktx = "2.11.0"
-robolectric = "4.16"
+robolectric = "4.16.1"
 
 # minSdk = 21 failed to compile because the project indirectly depends on the library [androidx.navigationevent:navigationevent-android:1.0.1] which requires minSdk = 23
 android-minSdk="23"
