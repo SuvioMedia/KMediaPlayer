@@ -12,6 +12,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
@@ -43,6 +44,8 @@ internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
         supportedUriSchemes = WEB_SUPPORTED_URI_SCHEMES,
     )
 
+internal actual fun platformSupportsHls(): Boolean = isWebHlsPlaybackSupported()
+
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
     canPlayWebSource(
         uri = source.uri,
@@ -56,14 +59,18 @@ internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean
  * and error handling.
  */
 @Stable
+@Suppress("LargeClass", "TooManyFunctions")
 open class DefaultVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
+    private var disposed = false
+    internal val isDisposed: Boolean get() = disposed
     private var projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
     private var _projection by mutableStateOf(playbackOptions.projection.normalized())
     override var projection: VideoProjectionSettings
         get() = _projection
         set(value) {
+            checkNotDisposed()
             projectionAutoDetectionEnabled = false
             applyProjectionSettings(value)
         }
@@ -71,30 +78,30 @@ open class DefaultVideoPlayerState(
     override var projectionView: VideoProjectionViewSettings
         get() = _projectionView
         set(value) {
+            checkNotDisposed()
             _projectionView = value.normalized()
         }
     private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
     override var projectionViewControlMode: VideoProjectionViewControlMode
         get() = _projectionViewControlMode
         set(value) {
+            checkNotDisposed()
             _projectionViewControlMode = value
         }
     private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
     override var projectionTextureCrop: VideoTextureCrop
         get() = _projectionTextureCrop
         set(value) {
+            checkNotDisposed()
             _projectionTextureCrop = value.normalized()
         }
-
-    // Variable to store the last opened URI for potential replay
-    private var lastUri: String? = null
-    private var lastRequestHeaders: Map<String, String> = emptyMap()
 
     // Coroutine scope for managing async operations
     private val playerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var lastUpdateTime = TimeSource.Monotonic.markNow()
     private val playbackEventDispatcher = PlaybackEventDispatcher()
-    override val mediaSessionId: Long get() = playbackEventDispatcher.mediaSessionId
+    private var observableMediaSessionId by mutableStateOf(playbackEventDispatcher.mediaSessionId)
+    override val mediaSessionId: Long get() = observableMediaSessionId
     override val playbackEvents = playbackEventDispatcher.events
 
     // Throttling for control changes
@@ -122,8 +129,20 @@ open class DefaultVideoPlayerState(
     override val isSeeking: Boolean get() = seekingState
 
     // Error handling
-    override var onPlaybackEnded: (() -> Unit)? = null
-    override var onRestart: (() -> Unit)? = null
+    private var playbackEndedCallback: (() -> Unit)? = null
+    override var onPlaybackEnded: (() -> Unit)?
+        get() = playbackEndedCallback
+        set(value) {
+            checkNotDisposed()
+            playbackEndedCallback = value
+        }
+    private var restartCallback: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)?
+        get() = restartCallback
+        set(value) {
+            checkNotDisposed()
+            restartCallback = value
+        }
 
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     override val error: VideoPlayerError? get() = _error
@@ -153,12 +172,24 @@ open class DefaultVideoPlayerState(
     override val aspectRatio: Float get() = _aspectRatio
 
     // Subtitle management
-    override var subtitlesEnabled by mutableStateOf(false)
-    override var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
+    private var _subtitlesEnabled by mutableStateOf(false)
+    override var subtitlesEnabled: Boolean
+        get() = _subtitlesEnabled
+        set(value) {
+            checkNotDisposed()
+            _subtitlesEnabled = value
+        }
+    private var _currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
+    override var currentSubtitleTrack: SubtitleTrack?
+        get() = _currentSubtitleTrack
+        set(value) {
+            checkNotDisposed()
+            _currentSubtitleTrack = value
+        }
     private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
     override val availableSubtitleTracks: List<SubtitleTrack>
         get() = _availableSubtitleTracks
-    override var subtitleTextStyle by mutableStateOf(
+    private var _subtitleTextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
             fontSize = 18.sp,
@@ -166,23 +197,48 @@ open class DefaultVideoPlayerState(
             textAlign = TextAlign.Center,
         ),
     )
-    override var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
-    override var subtitleOffset by mutableStateOf(Duration.ZERO)
+    override var subtitleTextStyle: TextStyle
+        get() = _subtitleTextStyle
+        set(value) {
+            checkNotDisposed()
+            _subtitleTextStyle = value
+        }
+    private var _subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override var subtitleBackgroundColor: Color
+        get() = _subtitleBackgroundColor
+        set(value) {
+            checkNotDisposed()
+            _subtitleBackgroundColor = value
+        }
+    private var _subtitleOffset by mutableStateOf(Duration.ZERO)
+    override var subtitleOffset: Duration
+        get() = _subtitleOffset
+        set(value) {
+            checkNotDisposed()
+            _subtitleOffset = value
+        }
 
     // Audio track management
-    override var currentAudioTrack by mutableStateOf<AudioTrack?>(null)
+    private var _currentAudioTrack by mutableStateOf<AudioTrack?>(null)
+    override var currentAudioTrack: AudioTrack?
+        get() = _currentAudioTrack
+        set(value) {
+            checkNotDisposed()
+            _currentAudioTrack = value
+        }
     private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
     override val availableAudioTracks: List<AudioTrack>
         get() = _availableAudioTracks
 
-    var applyAudioTrackCallback: ((AudioTrack?) -> Unit)? = null
-    var applySubtitleTrackCallback: ((SubtitleTrack?) -> Unit)? = null
+    internal var applyAudioTrackCallback: ((AudioTrack?) -> Unit)? = null
+    internal var applySubtitleTrackCallback: ((SubtitleTrack?) -> Unit)? = null
 
     // Playback control properties
     private var _volume by mutableStateOf(1.0f)
     override var volume: Float
         get() = _volume
         set(value) {
+            checkNotDisposed()
             val newValue = value.coerceIn(0f, 1f)
             if (_volume != newValue) {
                 _volume = newValue
@@ -190,14 +246,33 @@ open class DefaultVideoPlayerState(
             }
         }
 
-    override var sliderPos by mutableStateOf(0.0f)
-    override var userDragging by mutableStateOf(false)
-    override var loop by mutableStateOf(false)
+    private var _sliderPos by mutableStateOf(0.0f)
+    override var sliderPos: Float
+        get() = _sliderPos
+        set(value) {
+            checkNotDisposed()
+            _sliderPos = value
+        }
+    private var _userDragging by mutableStateOf(false)
+    override var userDragging: Boolean
+        get() = _userDragging
+        set(value) {
+            checkNotDisposed()
+            _userDragging = value
+        }
+    private var _loop by mutableStateOf(false)
+    override var loop: Boolean
+        get() = _loop
+        set(value) {
+            checkNotDisposed()
+            _loop = value
+        }
 
     private var _playbackSpeed by mutableStateOf(1.0f)
     override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
+            checkNotDisposed()
             val newValue = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             if (_playbackSpeed != newValue) {
                 _playbackSpeed = newValue
@@ -205,7 +280,23 @@ open class DefaultVideoPlayerState(
             }
         }
 
-    override var isFullscreen by mutableStateOf(false)
+    private var _isFullscreen by mutableStateOf(false)
+    override var isFullscreen: Boolean
+        get() = _isFullscreen
+        set(value) {
+            checkNotDisposed()
+            _isFullscreen = value
+        }
+    override var isPipActive: Boolean
+        get() = false
+        set(value) {
+            checkNotDisposed()
+        }
+    override var isPipEnabled: Boolean
+        get() = false
+        set(value) {
+            checkNotDisposed()
+        }
 
     // Time display properties
     private var _positionText by mutableStateOf("00:00")
@@ -233,34 +324,42 @@ open class DefaultVideoPlayerState(
         private set
     private var pendingSeekRequest = false
     private var pendingSeekTime: Duration? = null
+    private var seekEventActive = false
+    private var stallEventActive = false
+    private var sourceLoadedForSession = false
+    private var suppressNextSeekEvents = false
 
     /**
      * Callback function to force recalculation of the HTML view position.
      * This is set by the VideoPlayerSurface when the HTML view is created.
      */
-    var positionRecalculationCallback: (() -> Unit)? = null
+    internal var positionRecalculationCallback: (() -> Unit)? = null
 
     /**
      * Callback to apply volume changes to the underlying media player
      */
-    var applyVolumeCallback: ((Float) -> Unit)? = null
+    internal var applyVolumeCallback: ((Float) -> Unit)? = null
 
     /**
      * Callback to apply playback speed changes to the underlying media player
      */
-    var applyPlaybackSpeedCallback: ((Float) -> Unit)? = null
+    internal var applyPlaybackSpeedCallback: ((Float) -> Unit)? = null
+
+    internal var resetPlaybackCallback: (() -> Unit)? = null
 
     /**
      * Forces recalculation of the HTML view position.
      * This is useful when the layout changes and the HTML view needs to be repositioned.
      */
     fun forcePositionRecalculation() {
+        checkNotDisposed()
         positionRecalculationCallback?.invoke()
     }
 
-    internal fun isCurrentMediaSession(sessionId: Long): Boolean = sessionId == mediaSessionId
+    internal fun isCurrentMediaSession(sessionId: Long): Boolean = !disposed && sessionId == mediaSessionId
 
     internal fun emitPlaybackEvent(factory: (Long, Long) -> PlaybackEvent) {
+        if (disposed) return
         playbackEventDispatcher.emit(factory)
     }
 
@@ -281,7 +380,124 @@ open class DefaultVideoPlayerState(
         }
     }
 
-    private fun nextMediaSessionId(): Long = playbackEventDispatcher.nextMediaSessionId()
+    private fun nextMediaSessionId(): Long =
+        playbackEventDispatcher.nextMediaSessionId().also { observableMediaSessionId = it }
+
+    private fun checkNotDisposed() {
+        check(!disposed) { "VideoPlayerState has been disposed" }
+    }
+
+    private fun beginSeekEvent(target: Duration) {
+        suppressNextSeekEvents = false
+        if (!_hasMedia || seekEventActive) return
+        seekEventActive = true
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.SeekStarted(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                target = target,
+            )
+        }
+    }
+
+    internal fun onWebSeeking() {
+        if (disposed || !_hasMedia) return
+        if (suppressNextSeekEvents) return
+        seekingState = true
+        _isLoading = true
+        beginSeekEvent(preciseCurrentTime)
+    }
+
+    internal fun onWebSeeked() {
+        if (disposed || !_hasMedia) return
+        if (suppressNextSeekEvents) {
+            suppressNextSeekEvents = false
+            seekingState = false
+            _isLoading = false
+            return
+        }
+        seekingState = false
+        _isLoading = false
+        if (seekEventActive) {
+            seekEventActive = false
+            emitPlaybackEvent { sessionId, sampledAtMs ->
+                PlaybackEvent.SeekCompleted(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    position = preciseCurrentTime,
+                )
+            }
+        }
+    }
+
+    internal fun onWebWaiting() {
+        if (disposed || !_hasMedia) return
+        _isLoading = true
+        if (stallEventActive) return
+        stallEventActive = true
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.Stalled(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+            )
+        }
+    }
+
+    internal fun onWebPlaybackReady() {
+        if (disposed || !_hasMedia) return
+        _isLoading = false
+        seekingState = false
+        if (!stallEventActive) return
+        stallEventActive = false
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.Recovered(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+            )
+        }
+    }
+
+    internal fun onWebSourceLoaded(duration: Duration) {
+        if (disposed || !_hasMedia || sourceLoadedForSession) return
+        sourceLoadedForSession = true
+        emitPlaybackEvent { sessionId, sampledAtMs ->
+            PlaybackEvent.SourceLoaded(
+                mediaSessionId = sessionId,
+                sampledAtMs = sampledAtMs,
+                duration = duration,
+            )
+        }
+    }
+
+    private fun resetSourceTracks() {
+        _currentAudioTrack = null
+        _availableAudioTracks.clear()
+        if (_currentSubtitleTrack?.isEmbedded != false) {
+            _currentSubtitleTrack = null
+            _subtitlesEnabled = false
+        }
+        _availableSubtitleTracks.removeAll { it.isEmbedded }
+    }
+
+    private fun clearAllTracks() {
+        _currentAudioTrack = null
+        _availableAudioTracks.clear()
+        _currentSubtitleTrack = null
+        _subtitlesEnabled = false
+        _availableSubtitleTracks.clear()
+    }
+
+    private fun clearMetadata() {
+        metadata.title = null
+        metadata.duration = null
+        metadata.width = null
+        metadata.height = null
+        metadata.bitrate = null
+        metadata.frameRate = null
+        metadata.mimeType = null
+        metadata.audioChannels = null
+        metadata.audioSampleRate = null
+    }
 
     /**
      * Applies volume changes with throttling to prevent performance issues
@@ -339,6 +555,7 @@ open class DefaultVideoPlayerState(
      * @param track The subtitle track to select, or null to disable subtitles
      */
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
+        checkNotDisposed()
         if (track == null) return disableSubtitles()
         if (track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
             return TrackSelectionResult.NotFound(track.id)
@@ -358,10 +575,23 @@ open class DefaultVideoPlayerState(
         return TrackSelectionResult.Selected(track.id)
     }
 
+    override fun selectSubtitleTrack(trackId: String?): TrackSelectionResult {
+        checkNotDisposed()
+        return trackId
+            ?.let { id ->
+                availableSubtitleTracks
+                    .firstOrNull { it.id == id }
+                    ?.let(::selectSubtitleTrack)
+                    ?: TrackSelectionResult.NotFound(id)
+            }
+            ?: selectSubtitleTrack(null as SubtitleTrack?)
+    }
+
     /**
      * Disables subtitles by clearing the current track and setting subtitlesEnabled to false.
      */
     override fun disableSubtitles(): TrackSelectionResult {
+        checkNotDisposed()
         currentSubtitleTrack = null
         subtitlesEnabled = false
         applySubtitleTrackCallback?.invoke(null)
@@ -377,12 +607,14 @@ open class DefaultVideoPlayerState(
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
+        checkNotDisposed()
         val externalTrack = track.copy(isEmbedded = false)
         _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
         _availableSubtitleTracks.add(externalTrack)
     }
 
     override fun removeSubtitleTrack(trackId: String) {
+        checkNotDisposed()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
         if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
@@ -391,6 +623,7 @@ open class DefaultVideoPlayerState(
     }
 
     override fun clearExternalSubtitleTracks() {
+        checkNotDisposed()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.isExternal }
         if (selectedTrack?.isExternal == true) {
@@ -399,6 +632,7 @@ open class DefaultVideoPlayerState(
     }
 
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        checkNotDisposed()
         if (track != null && availableAudioTracks.none { it.id == track.id }) {
             return TrackSelectionResult.NotFound(track.id)
         }
@@ -416,7 +650,20 @@ open class DefaultVideoPlayerState(
         return track.audioTrackSelectionResult()
     }
 
+    override fun selectAudioTrack(trackId: String?): TrackSelectionResult {
+        checkNotDisposed()
+        return trackId
+            ?.let { id ->
+                availableAudioTracks
+                    .firstOrNull { it.id == id }
+                    ?.let(::selectAudioTrack)
+                    ?: TrackSelectionResult.NotFound(id)
+            }
+            ?: selectAudioTrack(null as AudioTrack?)
+    }
+
     override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
+        checkNotDisposed()
         if (_availableHlsQualities.isEmpty() && applyHlsQualityCallback == null) {
             return HlsQualitySelectionResult.NotSupported
         }
@@ -502,15 +749,12 @@ open class DefaultVideoPlayerState(
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
+        checkNotDisposed()
         playerScope.coroutineContext.cancelChildren()
         val previousSessionId = mediaSessionId
         val hadPreviousSource = _hasMedia || _sourceUri != null
         val sessionId = nextMediaSessionId()
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
-
-        // Store the URI for potential replay after stop
-        lastUri = uri
-        lastRequestHeaders = sanitizedHeaders
 
         _sourceUri = uri
         _requestHeaders = sanitizedHeaders
@@ -520,11 +764,17 @@ open class DefaultVideoPlayerState(
         _error = null
         _isPlaying = false
         seekingState = false
+        seekEventActive = false
+        stallEventActive = false
+        sourceLoadedForSession = false
+        suppressNextSeekEvents = false
         clearPendingSeekRequest()
         _bufferedRanges.clear()
         _diagnostics = PlaybackDiagnostics()
         _aspectRatio = DEFAULT_ASPECT_RATIO
         clearHlsQualityState()
+        resetSourceTracks()
+        clearMetadata()
         renderingInfo.update(
             backend = "HTML5 video",
             container = null,
@@ -536,13 +786,6 @@ open class DefaultVideoPlayerState(
             videoProjection = projection.renderingInfoLabel(),
             notes = null,
         )
-        currentAudioTrack = null
-        _availableAudioTracks.clear()
-        if (currentSubtitleTrack?.isEmbedded == true) {
-            currentSubtitleTrack = null
-            subtitlesEnabled = false
-        }
-        _availableSubtitleTracks.removeAll { it.isEmbedded }
         if (hadPreviousSource) {
             emitSourceReleasedForSession(previousSessionId)
         }
@@ -585,8 +828,17 @@ open class DefaultVideoPlayerState(
         file: PlatformFile,
         initializePlayerState: InitialPlayerState,
     ) {
+        checkNotDisposed()
         val fileUri = file.getUri()
         openUri(fileUri, initializePlayerState)
+    }
+
+    override fun openAsset(
+        fileName: String,
+        initializePlayerState: InitialPlayerState,
+    ) {
+        checkNotDisposed()
+        throw UnsupportedOperationException("openAsset is not supported on this platform")
     }
 
     internal fun updateAutoDetectedProjectionFromMetadata() {
@@ -620,18 +872,16 @@ open class DefaultVideoPlayerState(
 
     /**
      * Starts or resumes playback of the current media.
-     * If no media is loaded but a previous URI exists, reopens that media.
      */
     override fun play() {
+        checkNotDisposed()
         if (_hasMedia && !_isPlaying) {
             _isPlaying = true
-        } else if (!_hasMedia) {
-            // If we have a stored URI but no media, reopen the media
-            lastUri?.let { uri -> openUri(uri, requestHeaders = lastRequestHeaders) }
         }
     }
 
     override fun restart() {
+        checkNotDisposed()
         val hadSource = _hasMedia || _sourceUri != null
         if (!hadSource) return
         seekTo(Duration.ZERO)
@@ -648,21 +898,19 @@ open class DefaultVideoPlayerState(
      * Pauses playback of the current media.
      */
     override fun pause() {
+        checkNotDisposed()
         if (_isPlaying) {
             _isPlaying = false
         }
     }
 
     /**
-     * Stops playback and resets the player state.
-     * Note: lastUri is preserved for potential replay.
+     * Stops playback and resets the position while keeping the current source reusable.
      */
     override fun stop() {
-        val releasedSessionId = playbackEventDispatcher.mediaSessionId
-        val hadSource = _hasMedia || _sourceUri != null
+        checkNotDisposed()
+        suppressNextSeekEvents = preciseCurrentTime > Duration.ZERO
         _isPlaying = false
-        _sourceUri = null
-        _hasMedia = false
         _isLoading = false
         sliderPos = 0.0f
         _positionText = "00:00"
@@ -670,30 +918,53 @@ open class DefaultVideoPlayerState(
         _currentTime = Duration.ZERO
         _currentDuration = Duration.ZERO
         _bufferedRanges.clear()
-        _diagnostics = PlaybackDiagnostics()
-        clearHlsQualityState()
         seekingState = false
+        seekEventActive = false
+        stallEventActive = false
         clearPendingSeekRequest()
+        resetPlaybackCallback?.invoke()
+    }
+
+    override fun releaseSource() {
+        checkNotDisposed()
+        val releasedSessionId = mediaSessionId
+        val hadSource = _hasMedia || _sourceUri != null
+        playerScope.coroutineContext.cancelChildren()
+        _isPlaying = false
+        _sourceUri = null
+        _hasMedia = false
+        _isLoading = false
+        sliderPos = 0f
+        _positionText = "00:00"
+        _durationText = "00:00"
+        _currentTime = Duration.ZERO
+        _currentDuration = Duration.ZERO
+        _bufferedRanges.clear()
+        _diagnostics = PlaybackDiagnostics()
+        seekingState = false
+        seekEventActive = false
+        stallEventActive = false
+        sourceLoadedForSession = false
+        suppressNextSeekEvents = false
+        clearPendingSeekRequest()
+        clearHlsQualityState()
+        resetSourceTracks()
+        clearMetadata()
+        resetPlaybackCallback?.invoke()
+        _requestHeaders = emptyMap()
         if (hadSource) {
             emitSourceReleasedForSession(releasedSessionId)
             nextMediaSessionId()
         }
-        // Note: We don't clear lastUri, so it can be used to replay the video
-    }
-
-    override fun releaseSource() {
-        stop()
-        lastUri = null
-        lastRequestHeaders = emptyMap()
-        _requestHeaders = emptyMap()
     }
 
     /**
      * Seeks to a specific position in the media.
      *
-     * @param value The position to seek to, as a percentage (0-1000)
+     * @param time The absolute media position to seek to.
      */
     override fun seekTo(time: Duration) {
+        checkNotDisposed()
         val targetTime =
             when {
                 time < Duration.ZERO -> Duration.ZERO
@@ -710,16 +981,11 @@ open class DefaultVideoPlayerState(
                     .coerceIn(0f, PERCENTAGE_MULTIPLIER)
         }
         seekJob?.cancel()
-        emitPlaybackEvent { sessionId, sampledAtMs ->
-            PlaybackEvent.SeekStarted(
-                mediaSessionId = sessionId,
-                sampledAtMs = sampledAtMs,
-                target = targetTime,
-            )
-        }
+        beginSeekEvent(targetTime)
     }
 
     override fun seekToProgress(progress: Float) {
+        checkNotDisposed()
         val safeProgress = progress.coerceIn(0f, 1f)
         sliderPos = safeProgress * PERCENTAGE_MULTIPLIER
         val targetTime = duration.takeIf { it > Duration.ZERO }?.let { it * safeProgress.toDouble() }
@@ -727,19 +993,12 @@ open class DefaultVideoPlayerState(
         pendingSeekTime = targetTime
         seekRequestId++
         seekJob?.cancel()
-        targetTime?.let { target ->
-            emitPlaybackEvent { sessionId, sampledAtMs ->
-                PlaybackEvent.SeekStarted(
-                    mediaSessionId = sessionId,
-                    sampledAtMs = sampledAtMs,
-                    target = target,
-                )
-            }
-        }
+        targetTime?.let(::beginSeekEvent)
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
+        checkNotDisposed()
         val targetTime =
             duration.takeIf { it > Duration.ZERO }?.let {
                 it * (value / PERCENTAGE_MULTIPLIER).toDouble().coerceIn(0.0, 1.0)
@@ -749,15 +1008,7 @@ open class DefaultVideoPlayerState(
         seekRequestId++
         sliderPos = value
         seekJob?.cancel()
-        targetTime?.let { target ->
-            emitPlaybackEvent { sessionId, sampledAtMs ->
-                PlaybackEvent.SeekStarted(
-                    mediaSessionId = sessionId,
-                    sampledAtMs = sampledAtMs,
-                    target = target,
-                )
-            }
-        }
+        targetTime?.let(::beginSeekEvent)
     }
 
     internal fun consumePendingSeekTime(videoDuration: Duration): Duration? {
@@ -785,21 +1036,36 @@ open class DefaultVideoPlayerState(
      * Clears any error state.
      */
     override fun clearError() {
+        checkNotDisposed()
         _error = null
     }
 
     override fun canPlaySource(
         uri: String,
         mimeType: String?,
-    ): Boolean = canPlayWebSource(uri = uri, mimeType = mimeType, capabilities = capabilities)
+    ): Boolean {
+        checkNotDisposed()
+        return canPlayWebSource(uri = uri, mimeType = mimeType, capabilities = capabilities)
+    }
 
     /**
      * Toggles the fullscreen state of the video player
      */
     override fun toggleFullscreen() {
+        checkNotDisposed()
         FullscreenManager.toggleFullscreen(isFullscreen) { newFullscreenState ->
-            isFullscreen = newFullscreenState
+            if (!disposed) _isFullscreen = newFullscreenState
         }
+    }
+
+    override suspend fun enterPip(): PipResult {
+        checkNotDisposed()
+        return PipResult.NotSupported
+    }
+
+    override fun clearCache(): CacheClearResult {
+        checkNotDisposed()
+        return CacheClearResult.NotSupported
     }
 
     /**
@@ -808,6 +1074,7 @@ open class DefaultVideoPlayerState(
      * @param error The error to set
      */
     fun setError(error: VideoPlayerError) {
+        checkNotDisposed()
         _error = error
         emitPlaybackEvent { sessionId, sampledAtMs ->
             PlaybackEvent.Error(
@@ -860,6 +1127,7 @@ open class DefaultVideoPlayerState(
         duration: Duration,
         forceUpdate: Boolean = false,
     ) {
+        checkNotDisposed()
         _currentTime = currentTime
         _currentDuration = duration
 
@@ -889,6 +1157,7 @@ open class DefaultVideoPlayerState(
         duration: Duration,
         forceUpdate: Boolean = false,
     ) {
+        checkNotDisposed()
         updatePosition(currentTime, duration, forceUpdate)
     }
 
@@ -896,23 +1165,49 @@ open class DefaultVideoPlayerState(
      * Disposes of resources used by the player.
      */
     override fun dispose() {
+        if (disposed) return
         val releasedSessionId = mediaSessionId
         val hadMedia = _hasMedia || _sourceUri != null
+        disposed = true
         preciseCurrentTimeProvider = null
         durationProvider = null
+        positionRecalculationCallback = null
+        applyVolumeCallback = null
+        applyPlaybackSpeedCallback = null
+        applyAudioTrackCallback = null
+        applySubtitleTrackCallback = null
+        resetPlaybackCallback = null
+        playbackEndedCallback = null
+        restartCallback = null
         clearHlsQualityState()
         _sourceUri = null
         _hasMedia = false
         _isPlaying = false
         _isLoading = false
+        _sliderPos = 0f
+        _userDragging = false
+        _isFullscreen = false
+        _positionText = "00:00"
+        _durationText = "00:00"
+        _currentTime = Duration.ZERO
+        _currentDuration = Duration.ZERO
         _bufferedRanges.clear()
+        _diagnostics = PlaybackDiagnostics()
         seekingState = false
+        seekEventActive = false
+        stallEventActive = false
+        sourceLoadedForSession = false
+        suppressNextSeekEvents = false
         clearPendingSeekRequest()
         pendingVolumeChange?.cancel()
         pendingSpeedChange?.cancel()
         if (hadMedia) {
             emitSourceReleasedForSession(releasedSessionId)
         }
+        _requestHeaders = emptyMap()
+        clearAllTracks()
+        clearMetadata()
+        nextMediaSessionId()
         playerScope.cancel()
     }
 

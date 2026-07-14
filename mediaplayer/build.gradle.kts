@@ -1,10 +1,15 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
+import dev.detekt.gradle.Detekt
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
+import java.io.DataInputStream
+import java.util.zip.ZipFile
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -25,17 +30,10 @@ detekt {
 }
 
 tasks.named("detekt") {
-    dependsOn(
-        "detektCommonMainSourceSet",
-        "detektAndroidMainSourceSet",
-        "detektJvmMainSourceSet",
-        "detektIosMainSourceSet",
-        "detektWasmJsMainSourceSet",
-    )
+    dependsOn(tasks.withType<Detekt>().matching { it.name.endsWith("SourceSet") })
 }
 
 val ref = System.getenv("GITHUB_REF") ?: ""
-val isJitPack = System.getenv("JITPACK") == "true"
 val tagVersion =
     if (ref.startsWith("refs/tags/")) {
         val tag = ref.removePrefix("refs/tags/")
@@ -48,19 +46,18 @@ val projectVersion =
         ?: System.getenv("VERSION")
         ?: tagVersion
         ?: "dev"
-val projectGroup =
-    providers.gradleProperty("publicationGroup").orNull
-        ?: if (isJitPack) {
-            listOfNotNull(System.getenv("GROUP"), System.getenv("ARTIFACT")).joinToString(".")
-        } else {
-            "io.github.shusek"
-        }
+val projectGroup = "io.github.shusek"
 val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
 
 group = projectGroup
+version = projectVersion
 
 kotlin {
     jvmToolchain(25)
+
+    @OptIn(ExperimentalAbiValidation::class)
+    abiValidation()
+
     android {
         namespace = "io.github.kdroidfilter.composemediaplayer"
         compileSdk = 37
@@ -121,9 +118,10 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.compose.runtime)
+            api(libs.compose.runtime)
+            api(libs.compose.ui)
             implementation(libs.compose.foundation)
-            implementation(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.coroutines.core)
             api(libs.filekit.core)
             implementation(libs.kotlinx.datetime)
         }
@@ -136,7 +134,8 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidcontextprovider)
             implementation(libs.kotlinx.coroutines.android)
-            implementation(libs.androidx.media3.exoplayer)
+            api(libs.androidx.media3.exoplayer)
+            implementation(libs.androidx.media3.exoplayer.hls)
             implementation(libs.androidx.media3.datasource)
             implementation(libs.androidx.media3.database)
             implementation(libs.androidx.media3.ui)
@@ -150,6 +149,7 @@ kotlin {
                 implementation(kotlin("test"))
                 implementation(kotlin("test-junit"))
                 implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.robolectric)
             }
         }
 
@@ -178,6 +178,7 @@ kotlin {
             implementation(libs.kotlinx.browser)
             implementation(libs.compose.ui)
             implementation(npm("jassub", "2.5.1"))
+            implementation(npm("hls.js", "1.6.16"))
         }
 
         wasmJsTest.dependencies {
@@ -251,8 +252,59 @@ tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
+val java25ClassFileVersion = 69
+
+val verifyJvm25Bytecode =
+    tasks.register("verifyJvm25Bytecode") {
+        group = "verification"
+        description = "Verifies that every class in the published JVM JAR targets Java 25 (classfile 69)."
+
+        val jvmJar = tasks.named<Jar>("jvmJar")
+        dependsOn(jvmJar)
+        val archiveFile = jvmJar.flatMap { it.archiveFile }
+        inputs.file(archiveFile)
+        inputs.property("expectedClassFileVersion", java25ClassFileVersion)
+
+        doLast {
+            val expectedClassFileVersion = inputs.properties.getValue("expectedClassFileVersion") as Int
+            var verifiedClasses = 0
+            ZipFile(inputs.files.singleFile).use { archive ->
+                archive
+                    .entries()
+                    .asSequence()
+                    .filter { !it.isDirectory && it.name.endsWith(".class") }
+                    .forEach { entry ->
+                        DataInputStream(archive.getInputStream(entry)).use { classFile ->
+                            check(classFile.readInt() == 0xCAFEBABE.toInt()) {
+                                "Invalid classfile header in ${entry.name}"
+                            }
+                            classFile.readUnsignedShort() // minor version
+                            val majorVersion = classFile.readUnsignedShort()
+                            check(majorVersion == expectedClassFileVersion) {
+                                "${entry.name} targets classfile $majorVersion; expected Java 25 " +
+                                    "(classfile $expectedClassFileVersion)."
+                            }
+                            verifiedClasses++
+                        }
+                    }
+            }
+            check(verifiedClasses > 0) { "The JVM publication JAR contains no class files." }
+            logger.lifecycle("Verified Java 25 bytecode for $verifiedClasses JVM classes.")
+        }
+    }
+
+tasks.named("check") {
+    dependsOn(verifyJvm25Bytecode)
+}
+
+val consumerSmokeRepository = rootProject.layout.buildDirectory.dir("consumer-repository")
+
 publishing {
     repositories {
+        maven {
+            name = "consumerSmoke"
+            url = uri(consumerSmokeRepository)
+        }
         githubPagesMavenRepository?.let { repositoryPath ->
             maven {
                 name = "githubPages"
@@ -299,8 +351,45 @@ mavenPublishing {
 
     publishToMavenCentral()
 
-    // JitPack publishes to Maven Local and does not provide Maven Central signing credentials.
-    if (System.getenv("CI") != null && !isJitPack && githubPagesMavenRepository == null) {
+    // Local/consumer publications stay unsigned. Release CI provides the in-memory key explicitly.
+    if (!System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey").isNullOrBlank()) {
         signAllPublications()
+    }
+}
+
+val validateReleaseVersion =
+    tasks.register("validateReleaseVersion") {
+        group = "verification"
+        description = "Rejects mutable or non-SemVer versions before publishing a remote release."
+        inputs.property("releaseVersion", projectVersion)
+        inputs.property("releaseGroup", projectGroup)
+
+        doLast {
+            val releaseVersion = inputs.properties.getValue("releaseVersion") as String
+            val releaseGroup = inputs.properties.getValue("releaseGroup") as String
+            val semverRegex =
+                Regex(
+                    "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
+                        "(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)" +
+                        "(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?" +
+                        "(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+                )
+            check(semverRegex.matches(releaseVersion)) {
+                "Release version '$releaseVersion' is not a valid immutable SemVer version. " +
+                    "Use -PpublicationVersion=<major.minor.patch>."
+            }
+            check(releaseGroup == "io.github.shusek") {
+                "Release group must remain 'io.github.shusek', but was '$releaseGroup'."
+            }
+        }
+    }
+
+tasks.configureEach {
+    val publishesRemoteRelease =
+        name.contains("MavenCentral", ignoreCase = true) ||
+            name.contains("GithubPages", ignoreCase = true) ||
+            name == "publishAndReleaseToMavenCentral"
+    if (publishesRemoteRelease) {
+        dependsOn(validateReleaseVersion)
     }
 }

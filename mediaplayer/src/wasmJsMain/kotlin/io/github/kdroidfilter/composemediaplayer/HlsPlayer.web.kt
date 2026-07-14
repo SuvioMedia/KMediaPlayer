@@ -1,65 +1,82 @@
 @file:OptIn(ExperimentalWasmJsInterop::class)
+@file:Suppress("TooManyFunctions")
 
 package io.github.kdroidfilter.composemediaplayer
 
-import kotlinx.browser.document
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import org.w3c.dom.HTMLScriptElement
 import org.w3c.dom.HTMLVideoElement
 import kotlin.js.ExperimentalWasmJsInterop
+import kotlin.js.JsAny
+import kotlin.js.JsModule
+import kotlin.js.JsName
 import kotlin.js.js
 
-private const val HLS_SCRIPT_ID = "compose-media-player-hls-js"
-private const val HLS_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"
+@JsModule("hls.js")
+@JsName("default")
+private external val bundledHls: JsAny
 
 internal const val HLS_AUDIO_TRACK_ID_PREFIX = "hls:audio:"
 private const val HLS_SUBTITLE_TRACK_ID_PREFIX = "hls:subtitle:"
 
-private var hlsScriptLoad: CompletableDeferred<Boolean>? = null
-
 internal fun String.isHlsSource(): Boolean = substringBefore('?').substringBefore('#').lowercase().endsWith(".m3u8")
 
-internal suspend fun ensureHlsScriptLoaded(): Boolean {
-    if (isHlsLoaded()) return true
+internal fun ensureHlsModuleLoaded(): Boolean = isBundledHlsModuleAvailable(bundledHls)
 
-    hlsScriptLoad?.let { return it.await() }
+internal fun isWebHlsPlaybackSupported(): Boolean =
+    combineWebHlsSupport(
+        nativeHlsSupported = canPlayNativeHls(),
+        bundledHlsSupported = ensureHlsModuleLoaded() && canUseBundledHlsModule(bundledHls),
+    )
 
-    val deferred = CompletableDeferred<Boolean>()
-    hlsScriptLoad = deferred
+internal fun combineWebHlsSupport(
+    nativeHlsSupported: Boolean,
+    bundledHlsSupported: Boolean,
+): Boolean = nativeHlsSupported || bundledHlsSupported
 
-    val script =
-        (document.getElementById(HLS_SCRIPT_ID) as? HTMLScriptElement)
-            ?: (document.createElement("script") as HTMLScriptElement).apply {
-                id = HLS_SCRIPT_ID
-                src = HLS_SCRIPT_URL
-                setAttribute("async", "true")
-            }
+private fun canPlayNativeHls(): Boolean =
+    js(
+        """
+        (function() {
+            if (typeof document === "undefined") return false;
+            const video = document.createElement("video");
+            if (!video || typeof video.canPlayType !== "function") return false;
+            const mimeTypes = [
+                "application/vnd.apple.mpegurl",
+                "application/x-mpegurl",
+                "audio/mpegurl",
+                "audio/x-mpegurl"
+            ];
+            return mimeTypes.some(function(mimeType) {
+                const result = video.canPlayType(mimeType);
+                return result === "probably" || result === "maybe";
+            });
+        })()
+        """,
+    )
 
-    if (script.getAttribute("data-loaded") == "true") {
-        deferred.complete(true)
-    } else {
-        script.addEventListener("load", {
-            script.setAttribute("data-loaded", "true")
-            deferred.complete(true)
-        })
-        script.addEventListener("error", {
-            webVideoLogger.e { "Failed to load $HLS_SCRIPT_URL" }
-            deferred.complete(false)
-        })
-    }
+@Suppress("UNUSED_PARAMETER")
+private fun canUseBundledHlsModule(module: JsAny): Boolean =
+    js(
+        """
+        (function() {
+            const Hls = module && (module.default || module.Hls || module);
+            if (!Hls || typeof Hls.isSupported !== "function") return false;
+            try { return !!Hls.isSupported(); } catch (_) { return false; }
+        })()
+        """,
+    )
 
-    if (script.parentNode == null) {
-        (document.head ?: document.body)?.appendChild(script)
-    }
-
-    val loaded = deferred.await()
-    if (!loaded) hlsScriptLoad = null
-    return loaded && isHlsLoaded()
-}
-
-private fun isHlsLoaded(): Boolean = js("typeof globalThis.Hls === 'function'")
+@Suppress("UNUSED_PARAMETER")
+private fun isBundledHlsModuleAvailable(module: JsAny): Boolean =
+    js(
+        """
+        (function() {
+            const Hls = module && (module.default || module.Hls || module);
+            return typeof Hls === "function";
+        })()
+        """,
+    )
 
 internal suspend fun HTMLVideoElement.configureHlsSource(
     playerState: DefaultVideoPlayerState,
@@ -70,9 +87,10 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
     mediaSessionId: Long,
 ): Boolean {
     if (!sourceUri.isHlsSource()) return false
-    if (!ensureHlsScriptLoaded()) return false
+    if (!ensureHlsModuleLoaded()) return false
 
     setupHlsSource(
+        hlsModule = bundledHls,
         video = this,
         sourceUri = sourceUri,
         requestHeadersJson = requestHeadersJson,
@@ -121,6 +139,7 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
 
 @Suppress("UNUSED_PARAMETER")
 private fun setupHlsSource(
+    hlsModule: JsAny,
     video: HTMLVideoElement,
     sourceUri: String,
     requestHeadersJson: String,
@@ -132,7 +151,7 @@ private fun setupHlsSource(
     js(
         """
         {
-            const Hls = globalThis.Hls;
+            const Hls = hlsModule && (hlsModule.default || hlsModule.Hls || hlsModule);
             const requestHeaders = (function() {
                 try { return JSON.parse(requestHeadersJson || "{}") || {}; } catch (_) { return {}; }
             })();

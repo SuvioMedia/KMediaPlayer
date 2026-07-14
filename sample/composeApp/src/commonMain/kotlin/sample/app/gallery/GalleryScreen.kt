@@ -39,14 +39,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
-import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 import sample.app.player.SAMPLE_VIDEOS
 
 @Composable
 fun GalleryScreen(modifier: Modifier = Modifier) {
-    val featuredState = rememberVideoPlayerState()
+    val featuredState = rememberRenderableVideoPlayerState()
     val featured = SAMPLE_VIDEOS.first()
 
     LaunchedEffect(Unit) {
@@ -92,7 +92,7 @@ fun GalleryScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun HeroCard(title: String, playerState: VideoPlayerState) {
+private fun HeroCard(title: String, playerState: RenderableVideoPlayerState) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -172,7 +172,7 @@ private fun HeroCard(title: String, playerState: VideoPlayerState) {
 
 @Composable
 private fun VideoCard(title: String, url: String) {
-    val playerState = rememberVideoPlayerState()
+    val playerState = rememberRenderableVideoPlayerState()
 
     LaunchedEffect(url) {
         playerState.openUri(url)

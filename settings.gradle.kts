@@ -1,3 +1,5 @@
+import org.gradle.api.initialization.resolve.RepositoriesMode
+
 pluginManagement {
     repositories {
         google {
@@ -20,6 +22,7 @@ plugins {
 rootProject.name = "Compose-Media-Player"
 
 dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google {
             content {
@@ -30,9 +33,54 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
-        maven("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+        exclusiveContent {
+            forRepository {
+                ivy {
+                    name = "nodeJsDistributions"
+                    url = uri("https://nodejs.org/dist")
+                    patternLayout {
+                        artifact("v[revision]/[artifact](-v[revision]-[classifier]).[ext]")
+                    }
+                    metadataSources {
+                        artifact()
+                    }
+                }
+            }
+            filter {
+                includeModule("org.nodejs", "node")
+            }
+        }
+        exclusiveContent {
+            forRepository {
+                ivy {
+                    name = "yarnDistributions"
+                    url = uri("https://github.com/yarnpkg/yarn/releases/download")
+                    patternLayout {
+                        artifact("v[revision]/[artifact](-v[revision]).[ext]")
+                    }
+                    metadataSources {
+                        artifact()
+                    }
+                }
+            }
+            filter {
+                includeModule("com.yarnpkg", "yarn")
+            }
+        }
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = "consumerSmoke"
+                    url = uri(rootDir.resolve("build/consumer-repository"))
+                }
+            }
+            filter {
+                includeGroup("io.github.shusek")
+            }
+        }
     }
 }
 include(":mediaplayer")
+include(":consumer-smoke")
 include(":sample:composeApp")
 include(":androidApp")

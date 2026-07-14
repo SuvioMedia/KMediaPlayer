@@ -9,22 +9,22 @@ on:
 permissions:
   contents: write
 
-# Prevents simultaneous deployments
+# Keep only the newest documentation deployment without blocking tagged releases.
 concurrency:
-  group: "pages"
+  group: "documentation-pages"
   cancel-in-progress: true
 
 jobs:
   # 1) Build Dokka Docs and the Compose Example
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Java (Temurin 25)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
           distribution: temurin
           java-version: 25
@@ -53,7 +53,7 @@ jobs:
           cp -r sample/composeApp/build/dist/wasmJs/productionExecutable/* build/final/sample
 
       - name: Upload documentation site artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: documentation-site
           path: build/final
@@ -62,16 +62,16 @@ jobs:
   # 2) GitHub Pages Deployment
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
       - name: Download documentation site artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: documentation-site
           path: build/final
@@ -87,7 +87,7 @@ jobs:
           pages_dir="$tmp_dir/pages"
 
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-            git fetch origin gh-pages
+            git fetch origin gh-pages:refs/remotes/origin/gh-pages
             git worktree add "$pages_dir" origin/gh-pages
           else
             git worktree add --detach "$pages_dir"
@@ -106,5 +106,20 @@ jobs:
             echo "No documentation or sample changes to publish."
           else
             git -C "$pages_dir" commit -m "Publish documentation and sample ${GITHUB_SHA}"
-            git -C "$pages_dir" push origin HEAD:gh-pages
+            for attempt in 1 2 3; do
+              if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+                git fetch origin gh-pages:refs/remotes/origin/gh-pages
+                if ! git -C "$pages_dir" rebase origin/gh-pages; then
+                  git -C "$pages_dir" rebase --abort
+                  echo "GitHub Pages changed with a conflicting documentation update." >&2
+                  exit 1
+                fi
+              fi
+              if git -C "$pages_dir" push origin HEAD:gh-pages; then
+                exit 0
+              fi
+              sleep $((attempt * 5))
+            done
+            echo "GitHub Pages documentation push failed after retries." >&2
+            exit 1
           fi

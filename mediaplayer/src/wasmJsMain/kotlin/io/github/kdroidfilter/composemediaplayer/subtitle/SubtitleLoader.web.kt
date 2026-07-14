@@ -7,6 +7,8 @@ import org.w3c.dom.url.URL
 import org.w3c.xhr.XMLHttpRequest
 import kotlin.coroutines.resume
 
+private val webSubtitleLogger = TaggedLogger("WebSubtitleLoader")
+
 /**
  * WASM implementation of the loadSubtitleContent function.
  * Loads subtitle content from a URL using XMLHttpRequest.
@@ -14,8 +16,6 @@ import kotlin.coroutines.resume
  * @param src The source URI of the subtitle file
  * @return The content of the subtitle file as a string
  */
-private val webSubtitleLogger = TaggedLogger("WebSubtitleLoader")
-
 actual suspend fun loadSubtitleContent(src: String): String =
     suspendCancellableCoroutine { continuation ->
         try {

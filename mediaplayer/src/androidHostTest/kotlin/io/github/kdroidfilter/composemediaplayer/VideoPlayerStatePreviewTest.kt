@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.setMain
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertIs
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class VideoPlayerStatePreviewTest {
@@ -25,7 +26,12 @@ class VideoPlayerStatePreviewTest {
 
     @Test
     fun createStateWithoutInitializedContextProviderDoesNotThrow() {
-        val playerState = createVideoPlayerState()
+        val playerState: VideoPlayerState =
+            createAndroidVideoPlayerState(
+                ensureContextAvailable = { error("ContextProvider unavailable") },
+                createState = { error("Player constructor must not run without context") },
+            )
+        assertIs<PreviewableVideoPlayerState>(playerState)
         playerState.dispose()
     }
 }

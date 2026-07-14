@@ -43,6 +43,10 @@ data class PlayerCapabilities(
     val hdr: HdrCapabilities = HdrCapabilities(),
     val supportedUriSchemes: Set<String> = DEFAULT_SUPPORTED_URI_SCHEMES,
 ) {
+    /** Whether this runtime can play HLS natively or through the library's bundled backend. */
+    val supportsHls: Boolean
+        get() = platformSupportsHls()
+
     fun canPlaySource(
         uri: String,
         mimeType: String? = null,
@@ -60,7 +64,7 @@ data class PlayerCapabilities(
                 ?.substringBefore(';')
                 ?.trim()
                 ?.lowercase()
-        if (normalizedMimeType.isHlsMimeType() || trimmedUri.isHlsUri()) return true
+        if (normalizedMimeType.isHlsMimeType() || trimmedUri.isHlsUri()) return supportsHls
         if (normalizedMimeType.isMkvMimeType() || trimmedUri.isMkvUri()) return supportsMkv
 
         return true
@@ -71,6 +75,8 @@ data class PlayerCapabilities(
 }
 
 internal expect fun platformPlayerCapabilities(): PlayerCapabilities
+
+internal expect fun platformSupportsHls(): Boolean
 
 private val DEFAULT_SUPPORTED_URI_SCHEMES = setOf("asset", "blob", "content", "data", "file", "http", "https")
 private const val MINIMUM_EXTENDED_DYNAMIC_RANGE = 1f

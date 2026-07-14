@@ -63,6 +63,10 @@ internal fun addWebMediaTrackListeners(
     attachWebMediaTrackListeners(video, onChange)
 }
 
+internal fun removeWebMediaTrackListeners(video: HTMLVideoElement) {
+    detachWebMediaTrackListeners(video)
+}
+
 private fun parseAudioTrackRows(rows: String): AudioTrackSnapshot {
     var selectedId: String? = null
     val tracks =
@@ -370,17 +374,39 @@ private fun attachWebMediaTrackListeners(
     js(
         """
         {
+            if (video.__composeMediaPlayerTrackListenerRecords) {
+                video.__composeMediaPlayerTrackListenerRecords.forEach(function(record) {
+                    try { record.list.removeEventListener(record.eventName, record.handler); } catch (_) {}
+                });
+            }
+            video.__composeMediaPlayerTrackListenerRecords = [];
+
             const attach = function(list) {
                 if (!list || typeof list.addEventListener !== "function") return;
-                if (list.__composeMediaPlayerTrackListenerAttached) return;
-                list.__composeMediaPlayerTrackListenerAttached = true;
                 ["addtrack", "removetrack", "change"].forEach(function(eventName) {
-                    list.addEventListener(eventName, function() { onChange(); });
+                    const handler = function() { onChange(); };
+                    list.addEventListener(eventName, handler);
+                    video.__composeMediaPlayerTrackListenerRecords.push({ list, eventName, handler });
                 });
             };
 
             attach(video.audioTracks);
             attach(video.textTracks);
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+private fun detachWebMediaTrackListeners(video: HTMLVideoElement): Unit =
+    js(
+        """
+        {
+            if (video.__composeMediaPlayerTrackListenerRecords) {
+                video.__composeMediaPlayerTrackListenerRecords.forEach(function(record) {
+                    try { record.list.removeEventListener(record.eventName, record.handler); } catch (_) {}
+                });
+            }
+            video.__composeMediaPlayerTrackListenerRecords = [];
         }
         """,
     )

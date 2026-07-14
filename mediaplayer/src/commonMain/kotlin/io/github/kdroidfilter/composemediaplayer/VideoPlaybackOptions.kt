@@ -53,7 +53,7 @@ enum class DolbyVisionMode {
     /**
      * Request realtime Dolby Vision Profile 7 to Profile 8.1 conversion.
      *
-     * This is only active on builds where [PlayerCapabilities.hdr.supportsDolbyVisionProfile7To8Transcoding]
+     * This is only active on builds where [HdrCapabilities.supportsDolbyVisionProfile7To8Transcoding]
      * is true. Other builds keep playback fail-safe and expose the unsupported request through diagnostics.
      */
     TRANSCODE_PROFILE_7_TO_8_1,

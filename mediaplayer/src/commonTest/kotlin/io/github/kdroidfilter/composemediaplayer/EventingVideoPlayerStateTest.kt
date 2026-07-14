@@ -6,6 +6,7 @@ import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
@@ -19,6 +20,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("MagicNumber")
 class EventingVideoPlayerStateTest {
     @Test
     fun sourceLifecycleEventsUseStableSessionIds() =
@@ -67,6 +69,28 @@ class EventingVideoPlayerStateTest {
             assertEquals(1L, released.mediaSessionId)
             assertEquals(2, events.size)
 
+            state.dispose()
+        }
+
+    @Test
+    fun stopKeepsTheSourceSessionUntilReleaseSource() =
+        runTest {
+            val delegate = FakeVideoPlayerState()
+            val state = EventingVideoPlayerState(delegate)
+            val events = collectEvents(state)
+
+            state.openUri("https://example.test/video.mp4")
+            state.stop()
+            runCurrent()
+
+            assertEquals(1L, state.mediaSessionId)
+            assertEquals(1, events.size)
+            assertIs<PlaybackEvent.SourcePreparing>(events.single())
+
+            state.releaseSource()
+            runCurrent()
+            assertEquals(2L, state.mediaSessionId)
+            assertIs<PlaybackEvent.SourceReleased>(events.last())
             state.dispose()
         }
 
@@ -250,6 +274,34 @@ class EventingVideoPlayerStateTest {
         }
 
     @Test
+    fun acceptedAsyncTrackSelectionIsEmittedOnlyAfterConfirmation() =
+        runTest {
+            val audioTrack = AudioTrack(id = "audio-en", label = "English")
+            val delegate =
+                FakeVideoPlayerState().apply {
+                    audioTrackSelectionResult = TrackSelectionResult.Selected(audioTrack.id)
+                }
+            val state = EventingVideoPlayerState(delegate, StandardTestDispatcher(testScheduler))
+            val events = collectEvents(state)
+
+            val result = state.selectAudioTrack(audioTrack)
+            runCurrent()
+
+            assertEquals(TrackSelectionResult.Selected("audio-en"), result)
+            assertEquals(emptyList(), events)
+
+            delegate.currentAudioTrack = audioTrack
+            testScheduler.advanceTimeBy(20)
+            runCurrent()
+
+            val changed = assertIs<PlaybackEvent.TrackChanged>(events.single())
+            assertEquals(TrackKind.AUDIO, changed.kind)
+            assertEquals(audioTrack.id, changed.trackId)
+
+            state.dispose()
+        }
+
+    @Test
     fun unsupportedHlsQualitySelectionDoesNotEmitTrackChangedEvent() =
         runTest {
             val delegate = FakeVideoPlayerState()
@@ -325,6 +377,31 @@ class EventingVideoPlayerStateTest {
             val errors = events.filterIsInstance<PlaybackEvent.Error>()
             assertEquals(2, errors.size)
             assertEquals(listOf(1L, 2L), errors.map { it.mediaSessionId })
+
+            state.dispose()
+        }
+
+    @Test
+    fun repeatedErrorIsEmittedAgainAfterBackendRecovery() =
+        runTest {
+            val repeatedError = VideoPlayerError.SourceError("Transient source failure")
+            val delegate = FakeVideoPlayerState()
+            val state = EventingVideoPlayerState(delegate)
+            val events = collectEvents(state)
+
+            state.openUri("https://example.test/video.mp4")
+            delegate.error = repeatedError
+            state.stop()
+            delegate.error = null
+            state.stop()
+            delegate.error = repeatedError
+            state.stop()
+            runCurrent()
+
+            val errors = events.filterIsInstance<PlaybackEvent.Error>()
+            assertEquals(2, errors.size)
+            assertEquals(listOf(repeatedError, repeatedError), errors.map { it.error })
+            assertEquals(listOf(1L, 1L), errors.map { it.mediaSessionId })
 
             state.dispose()
         }

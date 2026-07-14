@@ -218,7 +218,7 @@ interface VideoPlayerState {
     }
 
     /**
-     * Legacy slider-scale seek. The [value] should be between 0.0 and 1000.0.
+     * Legacy slider-scale seek. The value should be between 0.0 and 1000.0.
      * Prefer [seekTo] for time-based seeking or [seekToProgress] for normalized progress.
      */
     @Deprecated(
@@ -338,6 +338,10 @@ interface VideoPlayerState {
     var currentAudioTrack: AudioTrack?
     val availableAudioTracks: List<AudioTrack>
 
+    /**
+     * Requests an audio track. The result reports whether the backend accepted the request;
+     * observe [currentAudioTrack] or [playbackEvents] for asynchronous confirmation.
+     */
     fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult
 
     fun selectAudioTrack(trackId: String?): TrackSelectionResult =
@@ -360,6 +364,10 @@ interface VideoPlayerState {
         get() = Duration.ZERO
         set(value) {}
 
+    /**
+     * Requests a subtitle track. The result reports whether the backend accepted the request;
+     * observe [currentSubtitleTrack] or [playbackEvents] for asynchronous confirmation.
+     */
     fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult
 
     fun selectSubtitleTrack(trackId: String?): TrackSelectionResult =
@@ -476,19 +484,41 @@ private object EmptyPlaybackEvents {
 }
 
 /**
+ * A library-issued handle for a [VideoPlayerState] that can be passed to the strict
+ * [VideoPlayerSurface] overload.
+ *
+ * The constructor is internal so applications cannot mark an arbitrary custom state as platform-renderable.
+ */
+@Stable
+class RenderableVideoPlayerState internal constructor(
+    internal val platformState: VideoPlayerState,
+) : VideoPlayerState by platformState
+
+/**
  *  Create platform-specific video player state. Supported platforms include Windows,
  *  macOS, and Linux.
  *
  * @param audioMode The audio mode configuration for the player.
  * @param cacheConfig Optional caching configuration. When [CacheConfig.enabled] is `true`,
  *   video data fetched via [VideoPlayerState.openUri] is cached on disk so that subsequent
- *   plays of the same URI avoid a full re-download. Currently only effective on Android and iOS.
+ *   plays of the same URI avoid a full re-download. Currently only effective on Android.
  */
 expect fun createVideoPlayerState(
     audioMode: AudioMode = AudioMode(),
     cacheConfig: CacheConfig = CacheConfig(),
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ): VideoPlayerState
+
+/**
+ * Creates a platform-backed player state with a type that is accepted by the strict
+ * [VideoPlayerSurface] overload.
+ */
+fun createRenderableVideoPlayerState(
+    audioMode: AudioMode = AudioMode(),
+    cacheConfig: CacheConfig = CacheConfig(),
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+): RenderableVideoPlayerState =
+    createVideoPlayerState(audioMode, cacheConfig, playbackOptions).asRenderableVideoPlayerState()
 
 /**
  * Creates and remembers a [VideoPlayerState], automatically releasing all player resources
@@ -508,8 +538,8 @@ expect fun createVideoPlayerState(
  * @param audioMode The audio mode configuration for the player.
  * @param cacheConfig Optional caching configuration. When [CacheConfig.enabled] is `true`,
  *   video data fetched via [VideoPlayerState.openUri] is cached on disk so that subsequent
- *   plays of the same URI avoid a full re-download. Currently only effective on Android and iOS.
- * @return The remembered instance of [VideoPlayerState].
+ *   plays of the same URI avoid a full re-download. Currently only effective on Android.
+ * @return The remembered, platform-renderable player state.
  */
 @Composable
 fun rememberVideoPlayerState(
@@ -530,7 +560,29 @@ fun rememberVideoPlayerState(
 }
 
 /**
- * Helper to mock the [VideoPlayerState].
+ * Remembers a platform-backed player state with a type that is accepted by the strict
+ * [VideoPlayerSurface] overload.
+ */
+@Composable
+fun rememberRenderableVideoPlayerState(
+    audioMode: AudioMode = AudioMode(),
+    cacheConfig: CacheConfig = CacheConfig(),
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+): RenderableVideoPlayerState {
+    val playerState = rememberVideoPlayerState(audioMode, cacheConfig, playbackOptions)
+    return remember(playerState) { playerState.asRenderableVideoPlayerState() }
+}
+
+internal fun VideoPlayerState.asRenderableVideoPlayerState(): RenderableVideoPlayerState =
+    this as? RenderableVideoPlayerState ?: RenderableVideoPlayerState(this)
+
+/**
+ * Renderable state for previews, screenshots, and UI tests that do not create a native player.
+ *
+ * The mutable properties in the primary constructor are retained for binary compatibility with the published data
+ * class API. Consequently their generated setters, [copy], and mutable [availableSubtitleTracks] cannot participate
+ * in the runtime disposal guard without breaking that ABI. All player commands and properties implemented in the
+ * class body do reject use after [dispose].
  */
 data class PreviewableVideoPlayerState(
     override val hasMedia: Boolean = true,
@@ -568,31 +620,94 @@ data class PreviewableVideoPlayerState(
     override var onPlaybackEnded: (() -> Unit)? = null,
     override var onRestart: (() -> Unit)? = null,
 ) : VideoPlayerState {
-    override fun play() {}
+    private var disposed = false
+    private var previewSubtitleOffset = Duration.ZERO
 
-    override fun pause() {}
+    override var subtitleOffset: Duration
+        get() = previewSubtitleOffset
+        set(value) {
+            ensureNotDisposed()
+            previewSubtitleOffset = value
+        }
 
-    override fun stop() {}
+    private fun ensureNotDisposed() {
+        check(!disposed) { "VideoPlayerState has been disposed" }
+    }
+
+    override fun play() {
+        ensureNotDisposed()
+    }
+
+    override fun pause() {
+        ensureNotDisposed()
+    }
+
+    override fun stop() {
+        ensureNotDisposed()
+    }
+
+    override fun releaseSource() {
+        ensureNotDisposed()
+    }
+
+    override suspend fun enterPip(): PipResult {
+        ensureNotDisposed()
+        return PipResult.NotSupported
+    }
+
+    override fun seekTo(time: Duration) {
+        ensureNotDisposed()
+    }
 
     @Suppress("OVERRIDE_DEPRECATION")
-    override fun seekTo(value: Float) {}
+    override fun seekTo(value: Float) {
+        ensureNotDisposed()
+    }
 
-    override fun toggleFullscreen() {}
+    override fun seekStart(value: Float) {
+        ensureNotDisposed()
+        userDragging = true
+        sliderPos = value
+    }
+
+    override fun seekFinished() {
+        ensureNotDisposed()
+        userDragging = false
+    }
+
+    override fun toggleFullscreen() {
+        ensureNotDisposed()
+    }
 
     override fun openUri(
         uri: String,
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
-    ) {}
+    ) {
+        ensureNotDisposed()
+    }
 
     override fun openFile(
         file: PlatformFile,
         initializePlayerState: InitialPlayerState,
-    ) {}
+    ) {
+        ensureNotDisposed()
+    }
 
-    override fun clearError() {}
+    override fun openAsset(
+        fileName: String,
+        initializePlayerState: InitialPlayerState,
+    ) {
+        ensureNotDisposed()
+        throw UnsupportedOperationException("openAsset is not supported on this platform")
+    }
+
+    override fun clearError() {
+        ensureNotDisposed()
+    }
 
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        ensureNotDisposed()
         if (track != null && availableAudioTracks.none { it.id == track.id }) {
             return TrackSelectionResult.NotFound(track.id)
         }
@@ -600,7 +715,20 @@ data class PreviewableVideoPlayerState(
         return track.audioTrackSelectionResult()
     }
 
+    override fun selectAudioTrack(trackId: String?): TrackSelectionResult {
+        ensureNotDisposed()
+        return trackId
+            ?.let { id ->
+                availableAudioTracks
+                    .firstOrNull { it.id == id }
+                    ?.let(::selectAudioTrack)
+                    ?: TrackSelectionResult.NotFound(id)
+            }
+            ?: selectAudioTrack(null as AudioTrack?)
+    }
+
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
+        ensureNotDisposed()
         if (track != null && track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
             return TrackSelectionResult.NotFound(track.id)
         }
@@ -609,13 +737,27 @@ data class PreviewableVideoPlayerState(
         return track.subtitleTrackSelectionResult()
     }
 
+    override fun selectSubtitleTrack(trackId: String?): TrackSelectionResult {
+        ensureNotDisposed()
+        return trackId
+            ?.let { id ->
+                availableSubtitleTracks
+                    .firstOrNull { it.id == id }
+                    ?.let(::selectSubtitleTrack)
+                    ?: TrackSelectionResult.NotFound(id)
+            }
+            ?: selectSubtitleTrack(null as SubtitleTrack?)
+    }
+
     override fun addSubtitleTrack(track: SubtitleTrack) {
+        ensureNotDisposed()
         val externalTrack = track.copy(isEmbedded = false)
         availableSubtitleTracks.removeAll { it.id == externalTrack.id }
         availableSubtitleTracks.add(externalTrack)
     }
 
     override fun removeSubtitleTrack(trackId: String) {
+        ensureNotDisposed()
         val selectedTrack = currentSubtitleTrack
         availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
         if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
@@ -624,6 +766,7 @@ data class PreviewableVideoPlayerState(
     }
 
     override fun clearExternalSubtitleTracks() {
+        ensureNotDisposed()
         val selectedTrack = currentSubtitleTrack
         availableSubtitleTracks.removeAll { it.isExternal }
         if (selectedTrack?.isExternal == true) {
@@ -632,12 +775,26 @@ data class PreviewableVideoPlayerState(
     }
 
     override fun disableSubtitles(): TrackSelectionResult {
+        ensureNotDisposed()
         currentSubtitleTrack = null
         subtitlesEnabled = false
         return TrackSelectionResult.Disabled
     }
 
-    override fun dispose() {}
+    override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
+        ensureNotDisposed()
+        return HlsQualitySelectionResult.NotSupported
+    }
+
+    override fun clearCache(): CacheClearResult {
+        ensureNotDisposed()
+        return CacheClearResult.NotSupported
+    }
+
+    override fun dispose() {
+        if (disposed) return
+        disposed = true
+    }
 }
 
 internal fun String.normalizedAssetPath(): String {

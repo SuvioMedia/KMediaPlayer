@@ -9,6 +9,7 @@ import kotlin.time.Clock
 internal class PlaybackEventDispatcher(
     initialMediaSessionId: Long = 0L,
 ) {
+    private val stateLock = PlatformLock()
     private val _events =
         MutableSharedFlow<PlaybackEvent>(
             replay = 0,
@@ -18,23 +19,30 @@ internal class PlaybackEventDispatcher(
 
     val events: SharedFlow<PlaybackEvent> = _events.asSharedFlow()
 
-    var mediaSessionId: Long = initialMediaSessionId
-        private set
+    private var currentMediaSessionId: Long = initialMediaSessionId
 
-    fun nextMediaSessionId(): Long {
-        mediaSessionId += 1
-        return mediaSessionId
-    }
+    val mediaSessionId: Long
+        get() = stateLock.withLock { currentMediaSessionId }
+
+    fun nextMediaSessionId(): Long =
+        stateLock.withLock {
+            currentMediaSessionId += 1
+            currentMediaSessionId
+        }
 
     fun emit(factory: (Long, Long) -> PlaybackEvent) {
-        emitForSession(mediaSessionId, factory)
+        stateLock.withLock {
+            _events.tryEmit(factory(currentMediaSessionId, Clock.System.now().toEpochMilliseconds()))
+        }
     }
 
     fun emitForSession(
         sessionId: Long,
         factory: (Long, Long) -> PlaybackEvent,
     ) {
-        _events.tryEmit(factory(sessionId, Clock.System.now().toEpochMilliseconds()))
+        stateLock.withLock {
+            _events.tryEmit(factory(sessionId, Clock.System.now().toEpochMilliseconds()))
+        }
     }
 
     companion object {

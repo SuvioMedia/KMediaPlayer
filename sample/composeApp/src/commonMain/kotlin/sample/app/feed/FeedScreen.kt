@@ -51,7 +51,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
-import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 
 private data class Post(
     val author: String,
@@ -134,7 +134,7 @@ fun FeedScreen(modifier: Modifier = Modifier) {
 
 @Composable
 private fun FeedPostCard(post: Post, isMuted: Boolean, onMuteToggle: (Boolean) -> Unit) {
-    val playerState = rememberVideoPlayerState()
+    val playerState = rememberRenderableVideoPlayerState()
 
     LaunchedEffect(post.videoUrl) {
         playerState.openUri(post.videoUrl)

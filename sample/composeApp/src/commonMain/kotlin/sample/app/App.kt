@@ -26,9 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 import sample.app.feed.FeedScreen
 import sample.app.gallery.GalleryScreen
 import sample.app.player.PlayerScreen
@@ -48,7 +48,7 @@ fun App(
 ) {
     AppTheme {
         var currentScreen by remember { mutableStateOf(Screen.Player) }
-        val playerState = rememberVideoPlayerState(playbackOptions = playbackOptions)
+        val playerState = rememberRenderableVideoPlayerState(playbackOptions = playbackOptions)
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val useRail = maxWidth >= 600.dp
@@ -79,7 +79,7 @@ fun App(
 private fun BarLayout(
     current: Screen,
     onScreenChange: (Screen) -> Unit,
-    playerState: VideoPlayerState,
+    playerState: RenderableVideoPlayerState,
     initialVideoUrl: String?,
     demoSubtitleEnabled: Boolean,
 ) {
@@ -112,7 +112,7 @@ private fun BarLayout(
 private fun RailLayout(
     current: Screen,
     onScreenChange: (Screen) -> Unit,
-    playerState: VideoPlayerState,
+    playerState: RenderableVideoPlayerState,
     initialVideoUrl: String?,
     demoSubtitleEnabled: Boolean,
 ) {
@@ -143,7 +143,7 @@ private fun RailLayout(
 private fun ScreenContent(
     screen: Screen,
     modifier: Modifier,
-    playerState: VideoPlayerState,
+    playerState: RenderableVideoPlayerState,
     initialVideoUrl: String?,
     demoSubtitleEnabled: Boolean,
 ) {

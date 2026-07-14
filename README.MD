@@ -10,7 +10,7 @@
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Shusek/KMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/Shusek/KMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
 [![GitHub last commit](https://img.shields.io/github/last-commit/Shusek/KMediaPlayer)](https://github.com/Shusek/KMediaPlayer/commits/master)
 
-**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations for its native backends. All desktop platforms communicate with their native backends through **pure JNI** — no JNA and no Java media bindings. The library leverages:
+**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. Desktop native bridges are packaged in the JVM artifact and communicate through **pure JNI** — no JNA and no Java media bindings. Linux additionally requires a compatible GStreamer 1.x runtime and plugins to be installed on the host. The library leverages:
 
 - **GStreamer** (via JNI) for Linux
 - **Media Foundation** (via JNI) for Windows
@@ -20,7 +20,7 @@
 
 ## Project Status
 
-This repository is a personal fork maintained for my own projects and integration needs. It is published for transparency and reproducible builds, but it is not a supported public distribution of the library. Releases may change without compatibility guarantees, and I cannot provide support for third-party usage. If you need a stable library for your own project, please use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
+This repository is a personal fork maintained for my own projects and integration needs. Source code and tagged artifacts are published for transparency and reproducible internal deployments; publication is not an additional grant beyond the permissions in [LICENSE](LICENSE). This is not a supported public distribution, and releases may change without compatibility guarantees. JitPack builds are intentionally not provided because their generated coordinates and mutable commit builds are not part of the verified release pipeline. If you need a supported library for external use, use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
 
 ## Table of Contents
 - [Project Status](#project-status)
@@ -71,11 +71,11 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 - **Media Controls**: Includes play, pause, loop toggle, volume control, playback speed, loop playback and timeline slider.
 - **Initial Playback Control**: Choose whether videos automatically play or remain paused after opening.
 - **Custom Video Player UI**: Fully customizable using Compose Multiplatform, with support for custom overlays that display even in fullscreen mode.
-- **HLS Streaming**: Native HLS (M3U8) support on all platforms except Web.
+- **HLS Streaming**: Native HLS playback on Android, iOS, macOS, Windows, and Linux, with the pinned `hls.js` fallback on compatible Wasm browsers.
 - **Fullscreen Mode**: Toggle between windowed and fullscreen playback modes.
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
 - **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
-- **Video Caching**: Opt-in disk caching for video data on Android and iOS, ideal for scroll-based UIs.
+- **Video Caching**: Opt-in Media3 disk caching on Android, ideal for scroll-based UIs.
 - **3D/VR Projection**: Configure and auto-detect flat 3D, VR180, VR360, fisheye, and EAC projection modes. Android renders VR360 through Media3's spherical GL surface and other projected modes through an OpenGL shader surface, iOS renders projected modes through SceneKit, Web renders projected sources through WebGL, and desktop JVM canvas paths use a Skia shader renderer.
 - **Error handling** Simple error handling for network or playback issues.
 
@@ -91,12 +91,11 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 | WEBM | ⚠️†                                                                                                                | ✅ | ⚠️†                                                                          | ✅ | ✅ |
 | WMV | ✅                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
 | 3GP | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ❌ |
-| HLS (M3U8) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅* | ❌ |
+| HLS (M3U8) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ✅‡ |
 
-> *\* On Android, HLS requires adding the ExoPlayer HLS module dependency:*
-> ```kotlin
-> implementation("androidx.media3:media3-exoplayer-hls:<version>")
-> ```
+> The Android artifact includes the matching Media3 HLS module; consumers do not need to add it separately.
+
+> ‡ Browser HLS support uses the browser's native implementation when available and the bundled, version-locked `hls.js` dependency when Media Source Extensions are available.
 
 > † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC playback, or external HLS fallback backends when the platform backend cannot demux the source directly. libVLC supports both the Compose canvas path and an opt-in direct native-view path (`libvlc-native-view`) on macOS, Windows, and Linux. VLC/libVLC is preferred in `auto` mode; `ffmpeg` is the last fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
@@ -133,6 +132,9 @@ val supportedCodecs = mediaSupport.allCodecs
 
 ## 🔧 Installation
 
+> [!IMPORTANT]
+> These coordinates reproduce the maintainer's tagged internal artifacts. Their availability does not change the permitted uses stated in [LICENSE](LICENSE). Every remote release uses an immutable `vMAJOR.MINOR.PATCH` tag; `dev` builds are local-only.
+
 To add Compose Media Player to your project, add the GitHub Pages Maven repository in your `settings.gradle.kts` file:
 
 ```kotlin
@@ -152,15 +154,35 @@ dependencies {
 }
 ```
 
+### Build and runtime requirements
+
+- **Build JDK and desktop runtime:** Java 25 or newer. Desktop JVM classes are intentionally published as Java 25 bytecode; Java 17/21 are not supported.
+- **Gradle:** use the checked-in Gradle 9.6.1 wrapper, whose distribution checksum is verified.
+- **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `1.0.x` line.
+- **Android:** the library is built and verified with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`.
+- **iOS:** an Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
+- **Linux desktop runtime:** install GStreamer 1.x core, base libraries, and the plugins required by the media formats you use. On Debian/Ubuntu the CI baseline is `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-base`, and `gstreamer1.0-plugins-good`.
+- **Building the Linux JNI bridge:** additionally install CMake, `pkg-config`, a C compiler, full JDK 25 JNI headers, `libgstreamer1.0-dev`, and `libgstreamer-plugins-base1.0-dev`.
+- **Building the macOS/Windows bridges:** use full JDK 25 JNI headers plus Xcode/Swift on macOS or Visual Studio with CMake on Windows.
+
+The repository commits Kotlin/Wasm Yarn lockfiles. CI fails instead of silently replacing them when an npm dependency changes; run `./gradlew kotlinWasmUpgradeYarnLock` after an intentional npm update and review the resulting lockfile diff.
+
+Gradle dependency verification pins external build artifacts by SHA-256. The only checksum exception is restricted to the locally generated `dev` and `0.0.0-consumer.*` smoke-test publications under this project's own coordinates, whose binaries change with the source under test.
+
 ## 📊 Compatibility Table
 
-| Library Version | Kotlin Version | Compose Version |
-|-----------------|----------------|-----------------|
-| 0.9.0           | 2.3.20         | 1.10.3          |
-| 0.8.6           | 2.3.0          | 1.9.3           |
-| 0.8.3           | 2.2.20         | 1.9.0           |
-| 0.7.11          | 2.2.0          | 1.8.2           |
-| 0.7.10          | 2.1.21         | 1.8.2           |
+| Library Version | Kotlin Version | Compose Version | Java | Android toolchain |
+|-----------------|----------------|-----------------|------|-------------------|
+| 1.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23 |
+| 0.9.0           | 2.3.20         | 1.10.3          | See release | See release |
+| 0.8.6           | 2.3.0          | 1.9.3           | See release | See release |
+| 0.8.3           | 2.2.20         | 1.9.0           | See release | See release |
+| 0.7.11          | 2.2.0          | 1.8.2           | See release | See release |
+| 0.7.10          | 2.1.21         | 1.8.2           | See release | See release |
+
+The current build records the public Kotlin ABI in version control. `checkKotlinAbi`, the published-consumer smoke project, platform tests, and the Java 25 classfile check must all pass before the single release workflow publishes the same GAV and native payload to Maven Central and the GitHub Pages Maven mirror. To reproduce the isolated consumer check locally, first run `./gradlew publishConsumerSmokeArtifacts -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache`, then `./gradlew consumerSmokeTest -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache`.
+
+The release workflow verifies the complete GitHub Pages staging repository and uploads an immutable release-delta artifact before it performs the irreversible Maven Central release. The delta intentionally excludes mutable `maven-metadata.xml` files. If Maven Central succeeds but the final `gh-pages` push fails after its retries, overlay that delta on the latest Pages repository, run `python3 .github/scripts/rebuild_maven_metadata.py <pages-worktree>/maven`, and publish the resulting commit; do **not** run the Maven Central publication again for the same version.
 
 ## 🚀 Getting Started
 
@@ -437,6 +459,17 @@ when (val result = quality?.let { playerState.selectHlsQuality(it.id) } ?: playe
 ```
 
 Use `currentHlsQuality` and `hlsQualityMode` to reflect the current state in custom controls. `Selected` and `Auto` mean the request was applied; `NotFound` means the variant id was stale or from another source; `NotSupported` means the current platform or source does not expose HLS variants. Android, iOS and desktop targets currently report `NotSupported` for this API.
+
+### Browser MKV parser loading
+
+Embedded MKV subtitle extraction on Wasm loads the exact `matroska-subtitles` 3.3.2 browser bundle with a pinned SHA-384 subresource-integrity value. Strict-CSP or offline deployments can self-host that same file; configure both values before creating a player:
+
+```kotlin
+WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = "/vendor/matroska-subtitles-3.3.2.min.js"
+WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity = "sha384-..."
+```
+
+Setting the URL to an empty string disables embedded MKV subtitle extraction without affecting ordinary browser video playback.
 
 ### Full Controls
 
@@ -842,9 +875,15 @@ val playerState = rememberVideoPlayerState(
 > [!NOTE]
 > Audio mode is only effective on **Android** and **iOS**. On desktop and web, the parameter is accepted but ignored.
 
+On iOS the default process-wide manager reference-counts active players so one player cannot deactivate `AVAudioSession` while another is using it. Applications that own audio-session configuration can opt out before creating any players:
+
+```kotlin
+IosAudioSessionPolicy.automaticManagementEnabled = false
+```
+
 ### 💾 Video Caching
 
-You can enable disk-based caching so that video data fetched via `openUri()` is stored locally. Subsequent plays of the same URL load from the cache instead of re-downloading, which is especially useful for scroll-based UIs like TikTok/Reels-style `VerticalPager`.
+On Android you can enable disk-based caching so that video data fetched via `openUri()` is stored locally. Subsequent plays of the same URL load from the cache instead of re-downloading, which is especially useful for scroll-based UIs like TikTok/Reels-style `VerticalPager`.
 
 ```kotlin
 val playerState = rememberVideoPlayerState(
@@ -874,12 +913,12 @@ when (val result = playerState.clearCache()) {
 | Platform | Status | Implementation |
 | :--- | :---: | :--- |
 | **Android** | ✅ | Media3 `SimpleCache` with `LeastRecentlyUsedCacheEvictor` |
-| **iOS** | ✅ | `NSURLCache` with increased disk capacity |
+| **iOS** | ❌ | Returns `CacheClearResult.NotSupported`; the library does not mutate the host application's process-global `NSURLCache` |
 | **Desktop** | ❌ | Returns `CacheClearResult.NotSupported` |
 | **Web** | ❌ | Returns `CacheClearResult.NotSupported`; browser manages its own HTTP cache |
 
 > [!NOTE]
-> Caching only applies to URIs opened via `openUri()`. Local files and assets are not cached. The cache is shared across all player instances, so multiple players benefit from the same cached data.
+> Android caching only applies to URIs opened via `openUri()`. Local files and assets are not cached. The cache is shared across Android player instances, so multiple players benefit from the same cached data.
 
 ## 🔍 Metadata Support
 

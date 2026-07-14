@@ -85,7 +85,7 @@ complexity:
     active: false
   TooManyFunctions:
     active: true
-    excludes: ['**/test/**', '**/sample/**']
+    excludes: ['**/test/**', '**/src/*Test/**', '**/sample/**']
     allowedFunctionsPerFile: 15
     allowedFunctionsPerClass: 50
     allowedFunctionsPerInterface: 15
@@ -225,7 +225,7 @@ naming:
     enumEntryPattern: '[A-Z][_a-zA-Z0-9]*'
   FunctionNaming:
     active: true
-    excludes: ['**/test/**']
+    excludes: ['**/test/**', '**/src/*Test/**']
     functionPattern: '[a-zA-Z][a-zA-Z0-9]*'
   FunctionParameterNaming:
     active: true
@@ -269,7 +269,7 @@ performance:
     active: true
   SpreadOperator:
     active: true
-    excludes: ['**/test/**']
+    excludes: ['**/test/**', '**/src/*Test/**']
   UnnecessaryTemporaryInstantiation:
     active: true
 
@@ -317,7 +317,7 @@ potential-bugs:
     active: true
   UnsafeCallOnNullableType:
     active: true
-    excludes: ['**/test/**']
+    excludes: ['**/test/**', '**/src/*Test/**']
   UnsafeCast:
     active: true
   UnusedUnaryOperator:
@@ -358,7 +358,7 @@ style:
     maxJumpCount: 1
   MagicNumber:
     active: true
-    excludes: ['**/test/**', '**/*.kts', '**/sample/**']
+    excludes: ['**/test/**', '**/src/*Test/**', '**/*.kts', '**/sample/**']
     ignoreNumbers:
       - '-1'
       - '0'

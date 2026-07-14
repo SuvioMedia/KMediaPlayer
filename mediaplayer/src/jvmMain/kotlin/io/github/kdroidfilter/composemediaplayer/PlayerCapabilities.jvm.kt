@@ -40,6 +40,8 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
             )
     }
 
+internal actual fun platformSupportsHls(): Boolean = true
+
 private val JVM_SUPPORTED_URI_SCHEMES = setOf("file", "http", "https")
 
 private fun supportsDesktopMkvPlayback(

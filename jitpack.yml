@@ -1,6 +1,0 @@
-before_install:
-  - sdk install java 25-open
-  - sdk use java 25-open
-
-install:
-  - ./gradlew :mediaplayer:publishKotlinMultiplatformPublicationToMavenLocal :mediaplayer:publishAndroidPublicationToMavenLocal :mediaplayer:publishWasmJsPublicationToMavenLocal --no-daemon --stacktrace

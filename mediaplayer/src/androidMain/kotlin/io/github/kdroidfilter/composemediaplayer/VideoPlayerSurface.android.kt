@@ -80,6 +80,24 @@ fun VideoPlayerSurface(
 
 @UnstableApi
 @Composable
+fun VideoPlayerSurface(
+    playerState: RenderableVideoPlayerState,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    surfaceType: SurfaceType = SurfaceType.Auto,
+    overlay: @Composable () -> Unit = {},
+) {
+    VideoPlayerSurfaceInternal(
+        playerState = playerState.platformState,
+        modifier = modifier,
+        contentScale = contentScale,
+        overlay = overlay,
+        surfaceType = surfaceType,
+    )
+}
+
+@UnstableApi
+@Composable
 private fun VideoPlayerSurfaceInternal(
     playerState: VideoPlayerState,
     modifier: Modifier,
@@ -87,25 +105,26 @@ private fun VideoPlayerSurfaceInternal(
     surfaceType: SurfaceType,
     overlay: @Composable () -> Unit,
 ) {
-    if (LocalInspectionMode.current) {
+    if (LocalInspectionMode.current || playerState is PreviewableVideoPlayerState) {
         VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
         return
+    }
+    require(playerState is DefaultVideoPlayerState) {
+        "Unsupported renderable player state: ${playerState::class}"
     }
 
     // Single source of truth — no rememberSaveable, drive directly from playerState
     val isFullscreen = playerState.isFullscreen
-    val isPipFullScreen = (playerState as? DefaultVideoPlayerState)?.isPipFullScreen ?: false
+    val isPipFullScreen = playerState.isPipFullScreen
 
     BindAndroidActivity(playerState = playerState)
     AutoPipEffect(playerState = playerState)
 
     // Exit fullscreen when returning from PiP
     LaunchedEffect(playerState.isPipActive) {
-        (playerState as? DefaultVideoPlayerState)?.let { playerState ->
-            if (!playerState.isPipActive && playerState.isPipFullScreen) {
-                delay(300.milliseconds)
-                playerState.togglePipFullScreen()
-            }
+        if (!playerState.isPipActive && playerState.isPipFullScreen) {
+            delay(300.milliseconds)
+            playerState.togglePipFullScreen()
         }
     }
 
@@ -113,9 +132,7 @@ private fun VideoPlayerSurfaceInternal(
         onDispose {
             try {
                 // Detach the view from the player
-                if (playerState is DefaultVideoPlayerState) {
-                    playerState.attachPlayerView(null)
-                }
+                playerState.attachPlayerView(null)
             } catch (e: Exception) {
                 androidVideoLogger.e { "Error detaching PlayerView on dispose: ${e.message}" }
             }
@@ -159,7 +176,7 @@ private fun VideoPlayerSurfaceInternal(
 @UnstableApi
 @Composable
 private fun VideoPlayerContent(
-    playerState: VideoPlayerState,
+    playerState: DefaultVideoPlayerState,
     modifier: Modifier,
     overlay: @Composable () -> Unit,
     contentScale: ContentScale,
@@ -225,7 +242,7 @@ private fun VideoPlayerContent(
 
 @Composable
 private fun AndroidProjectionSurface(
-    playerState: VideoPlayerState,
+    playerState: DefaultVideoPlayerState,
     contentScale: ContentScale,
 ) {
     AndroidProjectionDeviceMotionEffect(playerState)
@@ -243,7 +260,7 @@ private fun AndroidProjectionSurface(
                 callback =
                     object : AndroidProjectionGlSurfaceView.Callback {
                         override fun onVideoSurfaceCreated(surface: android.view.Surface) {
-                            (playerState as? DefaultVideoPlayerState)?.attachProjectionVideoSurface(surface)
+                            playerState.attachProjectionVideoSurface(surface)
                         }
 
                         override fun onProjectionRendererError(message: String) {
@@ -258,10 +275,8 @@ private fun AndroidProjectionSurface(
             }
         },
         update = { projectionView ->
-            (playerState as? DefaultVideoPlayerState)?.let { state ->
-                state.attachPlayerView(null)
-                projectionView.videoSurface?.let(state::attachProjectionVideoSurface)
-            }
+            playerState.attachPlayerView(null)
+            projectionView.videoSurface?.let(playerState::attachProjectionVideoSurface)
             projectionView.onResume()
             projectionView.configure(
                 projection = playerState.projection,
@@ -270,11 +285,11 @@ private fun AndroidProjectionSurface(
             )
         },
         onReset = { projectionView ->
-            (playerState as? DefaultVideoPlayerState)?.attachProjectionVideoSurface(null)
+            playerState.attachProjectionVideoSurface(null)
             projectionView.onPause()
         },
         onRelease = { projectionView ->
-            (playerState as? DefaultVideoPlayerState)?.attachProjectionVideoSurface(null)
+            playerState.attachProjectionVideoSurface(null)
             projectionView.releaseRenderer()
         },
     )
@@ -283,7 +298,7 @@ private fun AndroidProjectionSurface(
 @OptIn(UnstableApi::class)
 @Composable
 private fun AndroidPlayerViewSurface(
-    playerState: VideoPlayerState,
+    playerState: DefaultVideoPlayerState,
     contentScale: ContentScale,
     resolvedSurfaceType: SurfaceType,
 ) {
@@ -299,15 +314,13 @@ private fun AndroidPlayerViewSurface(
                 // Create PlayerView with the appropriate surface type
 
                 createPlayerViewWithSurfaceType(context, resolvedSurfaceType).apply {
-                    if (playerState is DefaultVideoPlayerState) {
-                        playerState.attachProjectionVideoSurface(null)
-                        // Attach this view to the player state
-                        playerState.attachPlayerView(this)
+                    playerState.attachProjectionVideoSurface(null)
+                    // Attach this view to the player state
+                    playerState.attachPlayerView(this)
 
-                        if (playerState.exoPlayer != null) {
-                            // Attach the player from the state
-                            player = playerState.exoPlayer
-                        }
+                    if (playerState.exoPlayer != null) {
+                        // Attach the player from the state
+                        player = playerState.exoPlayer
                     }
 
                     useController = false
@@ -335,14 +348,13 @@ private fun AndroidPlayerViewSurface(
         },
         update = { playerView ->
             try {
-                val state = playerState as? DefaultVideoPlayerState
-                if (state?.exoPlayer != null) {
-                    state.attachProjectionVideoSurface(null)
+                if (playerState.exoPlayer != null) {
+                    playerState.attachProjectionVideoSurface(null)
                     // Re-attach after LazyList recycle: onReset nulls playerView.player
                     // and calls onPause(). Without this, the surface stays blank until
                     // the user navigates away and back.
                     if (playerView.player == null) {
-                        state.attachPlayerView(playerView)
+                        playerState.attachPlayerView(playerView)
                         playerView.onResume()
                     }
                     playerView.resizeMode = mapContentScaleToResizeMode(contentScale)
@@ -500,28 +512,27 @@ private fun VideoProjectionSettings.toMedia3StereoMode(): Int =
     }
 
 @Composable
-private fun BindAndroidActivity(playerState: VideoPlayerState) {
-    val defaultState = playerState as? DefaultVideoPlayerState
+private fun BindAndroidActivity(playerState: DefaultVideoPlayerState) {
     val activity = LocalActivity.current as? ComponentActivity
 
-    DisposableEffect(defaultState, activity) {
-        if (defaultState == null || activity == null) {
+    DisposableEffect(playerState, activity) {
+        if (activity == null) {
             return@DisposableEffect onDispose { }
         }
 
         val listener =
             Consumer<PictureInPictureModeChangedInfo> { info ->
-                defaultState.onPictureInPictureModeChanged(info.isInPictureInPictureMode)
+                playerState.onPictureInPictureModeChanged(info.isInPictureInPictureMode)
             }
-        defaultState.attachActivity(activity)
+        playerState.attachActivity(activity)
         activity.addOnPictureInPictureModeChangedListener(listener)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            defaultState.onPictureInPictureModeChanged(activity.isInPictureInPictureMode)
+            playerState.onPictureInPictureModeChanged(activity.isInPictureInPictureMode)
         }
 
         onDispose {
             activity.removeOnPictureInPictureModeChangedListener(listener)
-            defaultState.detachActivity(activity)
+            playerState.detachActivity(activity)
         }
     }
 }

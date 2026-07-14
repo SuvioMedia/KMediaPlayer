@@ -12,8 +12,9 @@ package io.github.kdroidfilter.composemediaplayer
  * Caching only applies to URIs opened via [VideoPlayerState.openUri]; local files
  * and assets are not cached.
  *
- * Currently supported on **Android** and **iOS** only. On other platforms the
- * configuration is accepted but has no effect.
+ * Currently supported on **Android** only. iOS deliberately reports caching as unsupported instead
+ * of mutating the host application's process-global `NSURLCache`; other platforms accept the
+ * configuration but do not cache media.
  *
  * @param enabled Whether caching is active. Default is `false`.
  * @param maxCacheSizeBytes Maximum disk space the cache may use, in bytes.

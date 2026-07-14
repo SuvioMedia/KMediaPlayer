@@ -1,26 +1,37 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import kotlin.test.Test
-import kotlin.test.assertTrue
+import kotlin.test.assertNotNull
 
 /**
  * Tests for the JVM implementation of VideoPlayerSurface
  *
- * Note: Since we can't easily test the actual rendering of the surface in a unit test,
- * we're just testing that the VideoPlayerSurface function exists and can be referenced.
- * More comprehensive testing would require integration tests with a real UI.
+ * Rendering itself is covered by platform integration tests; this verifies the public compile-time
+ * contract without constructing a native player.
  */
 class VideoPlayerSurfaceTest {
-    /**
-     * Test that the VideoPlayerSurface function exists.
-     * This is a simple existence test to ensure the function is available.
-     */
+    /** The strict overload is additive while the original 1.x function type stays available. */
     @Test
-    fun testVideoPlayerSurfaceExists() {
-        // This test doesn't actually call the function, it just verifies
-        // that the class exists and can be instantiated.
-        // Since we can't easily test Compose functions without the proper setup,
-        // we'll just assert true to make the test pass.
-        assertTrue(true, "VideoPlayerSurface function should exist")
+    fun videoPlayerSurfaceSupportsStrictAndLegacyStateTypes() {
+        val strictSurface:
+            @Composable (
+                RenderableVideoPlayerState,
+                Modifier,
+                ContentScale,
+                @Composable () -> Unit,
+            ) -> Unit = ::VideoPlayerSurface
+        val legacySurface:
+            @Composable (
+                VideoPlayerState,
+                Modifier,
+                ContentScale,
+                @Composable () -> Unit,
+            ) -> Unit = ::VideoPlayerSurface
+
+        assertNotNull(strictSurface)
+        assertNotNull(legacySurface)
     }
 }

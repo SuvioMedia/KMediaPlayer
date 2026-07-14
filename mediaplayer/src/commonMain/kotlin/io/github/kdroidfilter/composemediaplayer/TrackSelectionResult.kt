@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer
 
+/** Result of requesting an audio or subtitle track change. */
 sealed class TrackSelectionResult {
     data object Auto : TrackSelectionResult()
 

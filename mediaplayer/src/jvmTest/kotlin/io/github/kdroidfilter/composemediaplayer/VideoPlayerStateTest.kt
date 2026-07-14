@@ -41,7 +41,7 @@ class VideoPlayerStateTest {
         }
 
     private fun withPlayerState(block: (VideoPlayerState) -> Unit) {
-        val playerState = createVideoPlayerState()
+        val playerState: RenderableVideoPlayerState = createRenderableVideoPlayerState()
         try {
             block(playerState)
         } finally {
@@ -109,9 +109,10 @@ class VideoPlayerStateTest {
     @Test
     fun testDefaultStateReflectsDelegateSubtitleState() {
         withPlayerState { playerState ->
+            val platformState = (playerState as? RenderableVideoPlayerState)?.platformState ?: playerState
             val defaultState =
-                playerState as? DefaultVideoPlayerState
-                    ?: error("createVideoPlayerState() should return DefaultVideoPlayerState on JVM")
+                platformState as? DefaultVideoPlayerState
+                    ?: error("The JVM renderable factory should wrap DefaultVideoPlayerState")
 
             val subtitleTrack =
                 SubtitleTrack(

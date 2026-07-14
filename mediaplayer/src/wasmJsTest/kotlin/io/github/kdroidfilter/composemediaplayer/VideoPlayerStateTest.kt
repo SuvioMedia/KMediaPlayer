@@ -1,5 +1,9 @@
+@file:Suppress("FunctionNaming", "MagicNumber")
+
 package io.github.kdroidfilter.composemediaplayer
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -7,11 +11,14 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.w3c.dom.events.Event
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.js
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
@@ -299,7 +306,7 @@ class VideoPlayerStateTest {
     }
 
     @Test
-    fun testMediaSessionIdInvalidatesPreviousSource() {
+    fun testReleaseSourceInvalidatesPreviousSource() {
         val playerState = createVideoPlayerState() as DefaultVideoPlayerState
 
         playerState.openUri("file:///first.mp4")
@@ -312,9 +319,30 @@ class VideoPlayerStateTest {
         assertFalse(playerState.isCurrentMediaSession(firstSessionId))
         assertTrue(playerState.isCurrentMediaSession(secondSessionId))
 
-        playerState.stop()
+        playerState.releaseSource()
 
         assertFalse(playerState.isCurrentMediaSession(secondSessionId))
+        playerState.dispose()
+    }
+
+    @Test
+    fun testStopKeepsCurrentSourceReusable() {
+        val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+
+        playerState.openUri("https://example.test/video.mp4")
+        val sessionId = playerState.mediaSessionId
+        playerState.play()
+        playerState.stop()
+
+        assertTrue(playerState.hasMedia)
+        assertEquals("https://example.test/video.mp4", playerState.sourceUri)
+        assertEquals(sessionId, playerState.mediaSessionId)
+        assertFalse(playerState.isPlaying)
+        assertEquals(0.seconds, playerState.currentTime)
+
+        playerState.play()
+        assertTrue(playerState.isPlaying)
+        assertEquals(sessionId, playerState.mediaSessionId)
         playerState.dispose()
     }
 
@@ -392,14 +420,14 @@ class VideoPlayerStateTest {
         }
 
     @Test
-    fun testStopClearsStaleHlsQualityCallback() =
+    fun testReleaseSourceClearsStaleHlsQualityCallback() =
         runTest {
             val playerState = createVideoPlayerState() as DefaultVideoPlayerState
             val events = collectEvents(playerState)
             var callbackCalls = 0
             playerState.applyHlsQualityCallback = { callbackCalls += 1 }
 
-            playerState.stop()
+            playerState.releaseSource()
             val result = playerState.selectAutoHlsQuality()
             runCurrent()
 
@@ -409,6 +437,208 @@ class VideoPlayerStateTest {
 
             playerState.dispose()
         }
+
+    @Test
+    fun testSeekAndStallEventsArePairedWithoutDuplicates() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val events = collectEvents(playerState)
+            playerState.openUri("https://example.test/video.mp4")
+            playerState.updatePosition(0.seconds, 60.seconds, forceUpdate = true)
+            runCurrent()
+            events.clear()
+
+            playerState.seekTo(10.seconds)
+            playerState.onWebSeeking()
+            playerState.onWebSeeking()
+            playerState.onWebSeeked()
+            playerState.onWebSeeked()
+            playerState.onWebPlaybackReady()
+            playerState.onWebWaiting()
+            playerState.onWebWaiting()
+            playerState.onWebPlaybackReady()
+            playerState.onWebPlaybackReady()
+            runCurrent()
+
+            assertEquals(4, events.size)
+            assertIs<PlaybackEvent.SeekStarted>(events[0])
+            assertIs<PlaybackEvent.SeekCompleted>(events[1])
+            assertIs<PlaybackEvent.Stalled>(events[2])
+            assertIs<PlaybackEvent.Recovered>(events[3])
+            assertTrue(events.all { it.mediaSessionId == playerState.mediaSessionId })
+
+            playerState.dispose()
+        }
+
+    @Test
+    fun testStopPositionResetDoesNotEmitSeekEvents() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val events = collectEvents(playerState)
+            playerState.openUri("https://example.test/video.mp4")
+            playerState.updatePosition(5.seconds, 60.seconds, forceUpdate = true)
+            runCurrent()
+            events.clear()
+
+            playerState.stop()
+            playerState.onWebSeeking()
+            playerState.onWebSeeked()
+            runCurrent()
+
+            assertTrue(events.none { it is PlaybackEvent.SeekStarted || it is PlaybackEvent.SeekCompleted })
+            playerState.dispose()
+        }
+
+    @Test
+    fun testSourceLoadedIsEmittedOncePerSession() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val events = collectEvents(playerState)
+            playerState.openUri("https://example.test/video.mp4")
+            runCurrent()
+            events.clear()
+
+            playerState.onWebSourceLoaded(60.seconds)
+            playerState.onWebSourceLoaded(60.seconds)
+            runCurrent()
+
+            assertEquals(1, events.size)
+            assertIs<PlaybackEvent.SourceLoaded>(events.single())
+            playerState.dispose()
+        }
+
+    @Test
+    fun testReleaseSourceIgnoresLateBrowserSignals() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val events = collectEvents(playerState)
+            playerState.openUri("https://example.test/video.mp4")
+            runCurrent()
+            playerState.releaseSource()
+            runCurrent()
+            events.clear()
+
+            playerState.onWebSeeking()
+            playerState.onWebSeeked()
+            playerState.onWebWaiting()
+            playerState.onWebPlaybackReady()
+            playerState.onWebSourceLoaded(60.seconds)
+            runCurrent()
+
+            assertEquals(emptyList(), events)
+            assertFalse(playerState.hasMedia)
+            playerState.dispose()
+        }
+
+    @Test
+    @Suppress("LongMethod")
+    fun testDisposeIsIdempotentAndPublicCommandsFailAfterwards() {
+        val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+        val audioTrack = AudioTrack(id = "audio", label = "Audio")
+        val subtitleTrack = SubtitleTrack(label = "Subtitle", language = "en", src = "subtitle.vtt")
+        playerState.openUri("https://example.test/video.mp4")
+
+        playerState.dispose()
+        playerState.dispose()
+
+        val commands =
+            listOf<() -> Unit>(
+                { playerState.openUri("https://example.test/other.mp4") },
+                { playerState.play() },
+                { playerState.pause() },
+                { playerState.stop() },
+                { playerState.releaseSource() },
+                { playerState.restart() },
+                { playerState.prepare("https://example.test/other.mp4") },
+                { playerState.openAsset("video.mp4") },
+                { playerState.seekTo(1.seconds) },
+                { playerState.seekToMs(1_000L) },
+                { playerState.seekBy(1.seconds) },
+                { playerState.seekByMs(1_000L) },
+                { playerState.seekToProgress(0.5f) },
+                { playerState.seekStart(0.5f) },
+                { playerState.seekFinished() },
+                { playerState.clearError() },
+                { playerState.clearCache() },
+                { playerState.canPlaySource("https://example.test/video.mp4") },
+                {
+                    playerState.addSubtitleTrack(
+                        SubtitleTrack(label = "Track", language = "", src = "track.vtt", id = "id"),
+                    )
+                },
+                { playerState.selectAudioTrack(null as AudioTrack?) },
+                { playerState.selectAudioTrack(audioTrack) },
+                { playerState.selectAudioTrack("missing") },
+                { playerState.selectSubtitleTrack(subtitleTrack) },
+                { playerState.selectSubtitleTrack("missing") },
+                { playerState.removeSubtitleTrack(subtitleTrack.id) },
+                { playerState.removeSubtitleTrack(subtitleTrack) },
+                { playerState.clearExternalSubtitleTracks() },
+                { playerState.replaceExternalSubtitleTracks(listOf(subtitleTrack)) },
+                { playerState.disableSubtitles() },
+                { playerState.selectHlsQuality(null) },
+                { playerState.selectAutoHlsQuality() },
+                { playerState.toggleFullscreen() },
+                { playerState.volume = 0.5f },
+                { playerState.sliderPos = 500f },
+                { playerState.userDragging = true },
+                { playerState.loop = true },
+                { playerState.playbackSpeed = 1.5f },
+                { playerState.isFullscreen = true },
+                { playerState.isPipActive = true },
+                { playerState.isPipEnabled = true },
+                { playerState.projection = VideoProjectionSettings() },
+                { playerState.projectionView = VideoProjectionViewSettings(yawDegrees = 10f) },
+                { playerState.projectionViewControlMode = VideoProjectionViewControlMode.MANUAL },
+                { playerState.projectionTextureCrop = VideoTextureCrop(left = 0.1f) },
+                { playerState.onPlaybackEnded = null },
+                { playerState.onRestart = null },
+                { playerState.currentAudioTrack = audioTrack },
+                { playerState.subtitlesEnabled = true },
+                { playerState.currentSubtitleTrack = subtitleTrack },
+                { playerState.subtitleTextStyle = TextStyle.Default },
+                { playerState.subtitleBackgroundColor = Color.Transparent },
+                { playerState.subtitleOffset = 1.seconds },
+            )
+
+        commands.forEach { command ->
+            val error = assertFailsWith<IllegalStateException> { command() }
+            assertEquals("VideoPlayerState has been disposed", error.message)
+        }
+    }
+
+    @Test
+    fun testDisposedStateRejectsEnterPip() =
+        runTest {
+            val playerState = createVideoPlayerState()
+            playerState.dispose()
+
+            val error = assertFailsWith<IllegalStateException> { playerState.enterPip() }
+            assertEquals("VideoPlayerState has been disposed", error.message)
+        }
+
+    @Test
+    fun testExternalSubtitleTracksSurviveSourceChangesAndRelease() {
+        val playerState = createVideoPlayerState()
+        val externalTrack = SubtitleTrack(label = "External", language = "en", src = "external.vtt")
+        try {
+            playerState.addSubtitleTrack(externalTrack)
+            playerState.selectSubtitleTrack(externalTrack)
+
+            playerState.openUri("https://example.test/first.mp4")
+            assertTrue(playerState.availableSubtitleTracks.any { it.id == externalTrack.id && it.isExternal })
+            assertEquals(externalTrack.id, playerState.currentSubtitleTrack?.id)
+
+            playerState.releaseSource()
+            assertTrue(playerState.availableSubtitleTracks.any { it.id == externalTrack.id && it.isExternal })
+            assertEquals(externalTrack.id, playerState.currentSubtitleTrack?.id)
+
+            playerState.openUri("https://example.test/second.mp4")
+            assertTrue(playerState.availableSubtitleTracks.any { it.id == externalTrack.id && it.isExternal })
+        } finally {
+            playerState.dispose()
+        }
+    }
 
     @Test
     fun testHlsQualityRowsIgnoreInvalidVariantsAndMetrics() {
@@ -470,6 +700,115 @@ class VideoPlayerStateTest {
         playerState.dispose()
     }
 
+    @Test
+    fun testBundledHlsModuleIsAvailableOffline() {
+        assertTrue(ensureHlsModuleLoaded())
+    }
+
+    @Test
+    fun testBundledHlsModuleDoesNotOverwriteHostGlobal() {
+        installGlobalHlsSentinel()
+        try {
+            assertTrue(ensureHlsModuleLoaded())
+            assertTrue(isGlobalHlsSentinelIntact())
+        } finally {
+            restoreGlobalHlsAfterSentinel()
+        }
+    }
+
+    @Test
+    fun testMatroskaParserUsesPinnedIntegrityProtectedDefaultAndCanBeDisabled() =
+        runTest {
+            assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.contains("@3.3.2/"))
+            assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity.startsWith("sha384-"))
+
+            val previousUrl = WebMediaDependencyConfig.matroskaSubtitlesScriptUrl
+            try {
+                WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = ""
+                assertFalse(ensureMatroskaSubtitlesModuleLoaded())
+            } finally {
+                WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = previousUrl
+            }
+        }
+
+    @Test
+    fun testVideoElementCleanupDetachesManagedListenersAndSource() {
+        val video = createVideoElement()
+        var eventCalls = 0
+        video.addManagedEventListener("play") { eventCalls += 1 }
+        video.setAttribute("src", "https://example.test/video.mp4")
+
+        video.cleanupWebVideoElement()
+        video.dispatchEvent(Event("play"))
+
+        assertEquals(0, eventCalls)
+        assertFalse(video.hasAttribute("src"))
+    }
+
+    @Test
+    fun testVideoCallbacksIgnorePreviousSessionWhenSameUriIsReopened() =
+        runTest {
+            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+            val previousVideo = createVideoElement(useCors = false)
+            val currentVideo = createVideoElement(useCors = false)
+            val events = collectEvents(playerState)
+            val uri = "https://example.test/video.mp4"
+
+            try {
+                playerState.openUri(uri)
+                previousVideo.src = uri
+                previousVideo.markMediaSession(playerState.mediaSessionId, uri)
+                setupVideoElement(
+                    video = previousVideo,
+                    playerState = playerState,
+                    scope = this,
+                    useCors = false,
+                )
+                events.clear()
+
+                playerState.openUri(uri)
+                val reopenedSessionId = playerState.mediaSessionId
+                previousVideo.markMediaSession(reopenedSessionId, uri)
+                previousVideo.dispatchEvent(Event("waiting"))
+                runCurrent()
+
+                assertTrue(events.none { it is PlaybackEvent.Stalled })
+
+                currentVideo.src = uri
+                currentVideo.markMediaSession(reopenedSessionId, uri)
+                setupVideoElement(
+                    video = currentVideo,
+                    playerState = playerState,
+                    scope = this,
+                    useCors = false,
+                )
+                currentVideo.dispatchEvent(Event("waiting"))
+                runCurrent()
+
+                assertEquals(
+                    listOf(reopenedSessionId),
+                    events.filterIsInstance<PlaybackEvent.Stalled>().map(PlaybackEvent::mediaSessionId),
+                )
+            } finally {
+                previousVideo.cleanupWebVideoElement()
+                currentVideo.cleanupWebVideoElement()
+                playerState.dispose()
+            }
+        }
+
+    @Test
+    fun testVideoElementCorsModeFollowsSourceAttempt() {
+        val video = createVideoElement(useCors = true)
+
+        assertEquals("anonymous", video.getAttribute("crossorigin"))
+
+        video.configureCrossOrigin(useCors = true, useCredentials = true)
+        assertEquals("use-credentials", video.getAttribute("crossorigin"))
+
+        video.configureCrossOrigin(useCors = false, useCredentials = false)
+        assertFalse(video.hasAttribute("crossorigin"))
+    }
+
     private fun TestScope.collectEvents(state: VideoPlayerState): MutableList<PlaybackEvent> {
         val events = mutableListOf<PlaybackEvent>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
@@ -491,5 +830,38 @@ private fun canRequestFullscreenFromCurrentContext(): Boolean =
             navigator.userActivation &&
             navigator.userActivation.isActive
         )
+        """,
+    )
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun installGlobalHlsSentinel(): Unit =
+    js(
+        """
+        {
+            globalThis.__composeMediaPlayerHadOwnHls = Object.prototype.hasOwnProperty.call(globalThis, "Hls");
+            globalThis.__composeMediaPlayerPreviousHls = globalThis.Hls;
+            globalThis.__composeMediaPlayerHlsSentinel = { owner: "host" };
+            globalThis.Hls = globalThis.__composeMediaPlayerHlsSentinel;
+        }
+        """,
+    )
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun isGlobalHlsSentinelIntact(): Boolean = js("globalThis.Hls === globalThis.__composeMediaPlayerHlsSentinel")
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun restoreGlobalHlsAfterSentinel(): Unit =
+    js(
+        """
+        {
+            if (globalThis.__composeMediaPlayerHadOwnHls) {
+                globalThis.Hls = globalThis.__composeMediaPlayerPreviousHls;
+            } else {
+                delete globalThis.Hls;
+            }
+            delete globalThis.__composeMediaPlayerHadOwnHls;
+            delete globalThis.__composeMediaPlayerPreviousHls;
+            delete globalThis.__composeMediaPlayerHlsSentinel;
+        }
         """,
     )

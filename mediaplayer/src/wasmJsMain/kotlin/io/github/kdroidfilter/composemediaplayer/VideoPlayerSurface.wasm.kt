@@ -17,24 +17,29 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
 ) {
+    if (playerState is PreviewableVideoPlayerState) {
+        VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
+        return
+    }
+    require(playerState is DefaultVideoPlayerState) {
+        "Unsupported video player state: ${playerState::class}"
+    }
+
     if (playerState.hasMedia) {
-        var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
-        var videoRatio by remember { mutableStateOf<Float?>(null) }
+        val surfaceMediaSessionId = playerState.mediaSessionId
+        var videoElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLVideoElement?>(null) }
+        var videoRatio by remember(surfaceMediaSessionId) { mutableStateOf<Float?>(null) }
         val usesProjectionRenderer =
             playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)
-        val sourceKind =
-            (playerState as? DefaultVideoPlayerState)
-                ?.sourceUri
-                ?.toWebMediaSourceKind()
-                ?: WebMediaSourceKind.EMPTY
-        var useCors by remember(sourceKind) { mutableStateOf(sourceKind.shouldUseCors) }
+        val sourceKind = playerState.sourceUri?.toWebMediaSourceKind() ?: WebMediaSourceKind.EMPTY
+        var useCors by remember(sourceKind, surfaceMediaSessionId) { mutableStateOf(sourceKind.shouldUseCors) }
         val scope = rememberCoroutineScope()
 
         WebProjectionDeviceMotionEffect(playerState = playerState, enabled = usesProjectionRenderer)
 
         // State for CORS mode changes
-        var lastPosition by remember { mutableStateOf(0.0) }
-        var wasPlaying by remember { mutableStateOf(false) }
+        var lastPosition by remember(surfaceMediaSessionId) { mutableStateOf(0.0) }
+        var wasPlaying by remember(surfaceMediaSessionId) { mutableStateOf(false) }
 
         // Shared effects
         VideoPlayerEffects(
@@ -67,7 +72,7 @@ actual fun VideoPlayerSurface(
             contentScale = contentScale,
             overlay = overlay,
         ) {
-            key(sourceKind, useCors) {
+            key(sourceKind, useCors, surfaceMediaSessionId) {
                 HtmlElementView(
                     factory = {
                         createVideoElement(useCors).apply {
@@ -99,10 +104,7 @@ actual fun VideoPlayerSurface(
                             lastPosition = video.currentTime
                         }
                         wasPlaying = playerState.isPlaying || !video.paused
-                        video.stopPlaybackQualityDiagnostics()
-                        video.safePause()
-                        video.destroyHlsController()
-                        video.destroyMkvSidecarTracks()
+                        video.cleanupWebVideoElement()
                         videoElement = null
                     },
                 )

@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.DesktopPlayerLifecycle
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackSupport
 import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
@@ -39,6 +40,7 @@ import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
 import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.normalizeUnixLocalFileUriForPlayback
 import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
@@ -123,6 +125,9 @@ class LinuxVideoPlayerState(
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
 
+    /** Serializes native-player replacement/destruction with AWT surface attachment. */
+    private val nativeInstanceLock = Any()
+
     // Serial dispatcher for frame processing
     private val frameDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
@@ -140,9 +145,12 @@ class LinuxVideoPlayerState(
     private var surfaceHeight = 0
     private val isResizing = AtomicBoolean(false)
     private var resizeJob: Job? = null
+    private val resizeRequestToken = AtomicLong(0L)
 
     // Background worker scopes and jobs
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val cleanupScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val lifecycle = DesktopPlayerLifecycle(ioScope, cleanupScope)
     private var playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var frameUpdateJob: Job? = null
     private var bufferingCheckJob: Job? = null
@@ -246,10 +254,11 @@ class LinuxVideoPlayerState(
     override var volume: Float
         get() = _volumeState.value
         set(value) {
+            lifecycle.ensureUsable()
             val newValue = value.coerceIn(0f, 1f)
             if (_volumeState.value != newValue) {
                 _volumeState.value = newValue
-                ioScope.launch { applyVolume() }
+                lifecycle.launchSourceBoundControlOperation { applyVolume() }
             }
         }
 
@@ -258,10 +267,11 @@ class LinuxVideoPlayerState(
     override var playbackSpeed: Float
         get() = _playbackSpeedState.value
         set(value) {
+            lifecycle.ensureUsable()
             val newValue = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             if (_playbackSpeedState.value != newValue) {
                 _playbackSpeedState.value = newValue
-                ioScope.launch { applyPlaybackSpeed() }
+                lifecycle.launchSourceBoundControlOperation { applyPlaybackSpeed() }
             }
         }
 
@@ -278,7 +288,7 @@ class LinuxVideoPlayerState(
 
     init {
         linuxLogger.d { "Initializing Linux video player (JNI)" }
-        ioScope.launch {
+        lifecycle.launchControlOperation {
             initPlayer()
             startUIUpdateJob()
         }
@@ -298,39 +308,56 @@ class LinuxVideoPlayerState(
             }
     }
 
-    private suspend fun initPlayer() =
-        ioScope
-            .launch {
-                linuxLogger.d { "initPlayer() - Creating native player" }
-                try {
-                    val ptr = LinuxNativeBridge.nCreatePlayer()
-                    if (ptr != 0L) {
-                        playerPtrAtomic.set(ptr)
-                        nativeBackendUsesLibVlc = false
-                        linuxLogger.d { "Native player created successfully" }
-                        applyVolume()
-                        applyPlaybackSpeed()
-                    } else {
-                        linuxLogger.e { "Failed to create native player" }
-                        withContext(Dispatchers.Main) {
-                            error = VideoPlayerError.UnknownError("Failed to create native player")
+    private suspend fun initPlayer() {
+        linuxLogger.d { "initPlayer() - Creating native player" }
+        try {
+            val ptr = LinuxNativeBridge.nCreatePlayer()
+            if (ptr != 0L) {
+                val coroutineIsActive = currentCoroutineContext().isActive
+                val installed =
+                    synchronized(nativeInstanceLock) {
+                        if (lifecycle.isDisposed || !coroutineIsActive) {
+                            false
+                        } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
+                            nativeBackendUsesLibVlc = false
+                            true
+                        } else {
+                            false
                         }
                     }
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    linuxLogger.e { "Exception in initPlayer: ${e.message}" }
-                    withContext(Dispatchers.Main) {
-                        error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
-                    }
+                if (!installed) {
+                    disposeNativePlayer(ptr)
+                    return
                 }
-            }.join()
+                linuxLogger.d { "Native player created successfully" }
+                applyVolume()
+                applyPlaybackSpeed()
+            } else {
+                linuxLogger.e { "Failed to create native player" }
+                withContext(Dispatchers.Main) {
+                    error = VideoPlayerError.UnknownError("Failed to create native player")
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Exception in initPlayer: ${e.message}" }
+            withContext(Dispatchers.Main) {
+                error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
+            }
+        }
+    }
 
     private fun checkExistsIfLocalFile(uri: String): Boolean {
         val schemeDelimiter = uri.indexOf("://")
-        val scheme = if (schemeDelimiter >= 0) uri.substring(0, schemeDelimiter) else ""
+        val scheme =
+            when {
+                uri.startsWith("file:", ignoreCase = true) -> "file"
+                schemeDelimiter >= 0 -> uri.substring(0, schemeDelimiter)
+                else -> ""
+            }
         return when (scheme) {
             "", "file" -> {
-                val path = if (scheme == "file") uri.removePrefix("file://") else uri
+                val path = if (scheme == "file") normalizeUnixLocalFileUriForPlayback(uri) else uri
                 File(path).exists()
             }
             else -> true
@@ -342,34 +369,40 @@ class LinuxVideoPlayerState(
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
+        lifecycle.ensureUsable()
         linuxLogger.d { "openUri() - Opening URI: $uri" }
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
-        lastUri = uri
-        lastRequestHeaders = sanitizedHeaders
-
-        if (!checkExistsIfLocalFile(uri)) {
-            linuxLogger.e { "File does not exist: $uri" }
-            setPlayerError(VideoPlayerError.SourceError("File not found: $uri"))
-            return
-        }
-
-        ioScope.launch {
+        lifecycle.launchSourceOperation(
+            onScheduled = {
+                lastUri = uri
+                lastRequestHeaders = sanitizedHeaders
+            },
+        ) { generation ->
+            if (!checkExistsIfLocalFile(uri)) {
+                linuxLogger.e { "File does not exist: $uri" }
+                setPlayerError(VideoPlayerError.SourceError("File not found: $uri"))
+                return@launchSourceOperation
+            }
+            lifecycle.ensureCurrentSource(generation)
             withContext(Dispatchers.Main) {
                 isLoading = true
                 error = null
                 playbackSpeed = 1.0f
             }
+            lifecycle.ensureCurrentSource(generation)
 
             try {
                 if (hasMedia || externalHlsFallback != null || libVlcBackendActive) {
                     cleanupCurrentPlayback()
                 }
+                lifecycle.ensureCurrentSource(generation)
 
                 clearExternalHlsFallbackTrackState()
                 clearLibVlcTrackState()
 
                 val libVlcBackend = resolveLibVlcBackendForUri(uri, sanitizedHeaders)
                 ensurePlayerInitialized(libVlcBackend)
+                lifecycle.ensureCurrentSource(generation)
 
                 var playbackUri = uri
                 var playbackHeaders = sanitizedHeaders
@@ -394,22 +427,26 @@ class LinuxVideoPlayerState(
                     withContext(Dispatchers.Main) { error = null }
                     result = openMediaUri(fallbackUri, playbackHeaders)
                 }
+                lifecycle.ensureCurrentSource(generation)
 
                 if (result) {
                     // Update frame rate from native layer
                     updateFrameRateInfo()
                     updateMetadata()
+                    lifecycle.ensureCurrentSource(generation)
 
                     if (surfaceWidth > 0 && surfaceHeight > 0) {
                         applyOutputScaling()
                     }
 
                     withContext(Dispatchers.Main) {
+                        if (!lifecycle.isCurrentSource(generation)) return@withContext
                         hasMedia = true
                         updateProjectionRenderingInfo()
                         isLoading = false
                         isPlaying = startPlayback
                     }
+                    lifecycle.ensureCurrentSource(generation)
 
                     startFrameUpdates()
                     updateFrameAsync()
@@ -455,22 +492,22 @@ class LinuxVideoPlayerState(
         file: PlatformFile,
         initializePlayerState: InitialPlayerState,
     ) {
+        lifecycle.ensureUsable()
         openUri(file.file.path, initializePlayerState)
     }
 
     private suspend fun cleanupCurrentPlayback() {
         pauseInBackground()
-        stopFrameUpdates()
-        stopBufferingCheck()
+        cancelAndResetPlayerScope(recreate = true)
 
-        val ptrToDispose =
-            withContext(frameDispatcher) {
-                playerPtrAtomic.getAndSet(0L)
-            }
-
-        if (ptrToDispose != 0L) {
+        withContext(frameDispatcher) {
             try {
-                disposeNativePlayer(ptrToDispose)
+                synchronized(nativeInstanceLock) {
+                    val ptrToDispose = playerPtrAtomic.getAndSet(0L)
+                    if (ptrToDispose != 0L) {
+                        disposeNativePlayer(ptrToDispose)
+                    }
+                }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 linuxLogger.e { "Error disposing player: ${e.message}" }
@@ -483,6 +520,17 @@ class LinuxVideoPlayerState(
         clearLibVlcTrackState()
     }
 
+    private suspend fun cancelAndResetPlayerScope(recreate: Boolean) {
+        playerScope.coroutineContext[Job]?.cancelAndJoin()
+        frameUpdateJob = null
+        bufferingCheckJob = null
+        seekInProgress = false
+        targetSeekTime = null
+        if (recreate && !lifecycle.isDisposed) {
+            playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        }
+    }
+
     private suspend fun ensurePlayerInitialized(libVlcBackend: LinuxResolvedLibVlcBackend? = null) {
         if (!playerScope.isActive) {
             playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -490,22 +538,29 @@ class LinuxVideoPlayerState(
 
         val wantsLibVlc = libVlcBackend != null
         val wantsLibVlcRenderMode = libVlcBackend?.renderMode
-        val existingPtr = playerPtr
-        if (existingPtr != 0L &&
-            (
-                nativeBackendUsesLibVlc != wantsLibVlc ||
-                    (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
-            )
-        ) {
-            val ptrToDispose = playerPtrAtomic.getAndSet(0L)
-            if (ptrToDispose != 0L) {
-                disposeNativePlayer(ptrToDispose, wasLibVlc = nativeBackendUsesLibVlc)
+        val needsBackendReplacement =
+            synchronized(nativeInstanceLock) {
+                playerPtr != 0L &&
+                    (
+                        nativeBackendUsesLibVlc != wantsLibVlc ||
+                            (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
+                    )
             }
-            nativeBackendUsesLibVlc = false
-            nativeBackendLibVlcRenderMode = null
+        if (needsBackendReplacement) {
+            cancelAndResetPlayerScope(recreate = true)
+            withContext(frameDispatcher) {
+                synchronized(nativeInstanceLock) {
+                    val ptrToDispose = playerPtrAtomic.getAndSet(0L)
+                    if (ptrToDispose != 0L) {
+                        disposeNativePlayer(ptrToDispose, wasLibVlc = nativeBackendUsesLibVlc)
+                    }
+                    nativeBackendUsesLibVlc = false
+                    nativeBackendLibVlcRenderMode = null
+                }
+            }
         }
 
-        if (playerPtr == 0L) {
+        if (synchronized(nativeInstanceLock) { playerPtr == 0L }) {
             val ptr =
                 if (libVlcBackend != null) {
                     LinuxNativeBridge.nCreateLibVlcPlayer(
@@ -517,11 +572,22 @@ class LinuxVideoPlayerState(
                     LinuxNativeBridge.nCreatePlayer()
                 }
             if (ptr != 0L) {
-                if (!playerPtrAtomic.compareAndSet(0L, ptr)) {
+                val coroutineIsActive = currentCoroutineContext().isActive
+                val installed =
+                    synchronized(nativeInstanceLock) {
+                        if (lifecycle.isDisposed || !coroutineIsActive) {
+                            false
+                        } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
+                            nativeBackendUsesLibVlc = wantsLibVlc
+                            nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                if (!installed) {
                     disposeNativePlayer(ptr, wasLibVlc = wantsLibVlc)
                 } else {
-                    nativeBackendUsesLibVlc = wantsLibVlc
-                    nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
                     applyVolume()
                     applyPlaybackSpeed()
                 }
@@ -836,39 +902,44 @@ class LinuxVideoPlayerState(
     }
 
     internal fun shouldUseLibVlcNativeSurface(): Boolean =
-        libVlcNativeSurfaceRequested &&
+        !lifecycle.isDisposed &&
+            libVlcNativeSurfaceRequested &&
             libVlcBackendActive &&
             nativeBackendUsesLibVlc &&
             nativeBackendLibVlcRenderMode == LinuxLibVlcRenderMode.NATIVE_VIEW
 
     internal fun attachLibVlcNativeComponent(component: Component): Boolean {
-        if (!shouldUseLibVlcNativeSurface()) return false
-        val ptr = playerPtr
-        if (ptr == 0L) return false
+        synchronized(nativeInstanceLock) {
+            if (!shouldUseLibVlcNativeSurface()) return false
+            val ptr = playerPtr
+            if (ptr == 0L) return false
 
-        return runCatching {
-            val attached = LinuxNativeBridge.nAttachLibVlcNativeView(ptr, component)
-            libVlcNativeSurfaceAttached = attached
-            if (attached && isPlaying) {
-                nativePlay(ptr)
-                startFrameUpdates()
-                startBufferingCheck()
+            return runCatching {
+                val attached = LinuxNativeBridge.nAttachLibVlcNativeView(ptr, component)
+                libVlcNativeSurfaceAttached = attached
+                if (attached && isPlaying) {
+                    nativePlay(ptr)
+                    startFrameUpdates()
+                    startBufferingCheck()
+                }
+                attached
+            }.getOrElse { e ->
+                linuxLogger.e { "Failed to attach Linux libVLC native surface: ${e.message}" }
+                false
             }
-            attached
-        }.getOrElse { e ->
-            linuxLogger.e { "Failed to attach Linux libVLC native surface: ${e.message}" }
-            false
         }
     }
 
     internal fun detachLibVlcNativeComponent(component: Component) {
-        val ptr = playerPtr
-        if (ptr == 0L) return
-        runCatching {
-            LinuxNativeBridge.nDetachLibVlcNativeView(ptr, component)
-            libVlcNativeSurfaceAttached = false
-        }.onFailure { e ->
-            linuxLogger.e { "Failed to detach Linux libVLC native surface: ${e.message}" }
+        synchronized(nativeInstanceLock) {
+            val ptr = playerPtr
+            if (ptr == 0L) return
+            runCatching {
+                LinuxNativeBridge.nDetachLibVlcNativeView(ptr, component)
+                libVlcNativeSurfaceAttached = false
+            }.onFailure { e ->
+                linuxLogger.e { "Failed to detach Linux libVLC native surface: ${e.message}" }
+            }
         }
     }
 
@@ -1075,7 +1146,7 @@ class LinuxVideoPlayerState(
     private fun startFrameUpdates() {
         stopFrameUpdates()
         frameUpdateJob =
-            ioScope.launch {
+            playerScope.launch {
                 while (isActive) {
                     ensureActive()
                     if (shouldUseLibVlcNativeSurface()) {
@@ -1102,7 +1173,7 @@ class LinuxVideoPlayerState(
     private fun startBufferingCheck() {
         stopBufferingCheck()
         bufferingCheckJob =
-            ioScope.launch {
+            playerScope.launch {
                 while (isActive) {
                     ensureActive()
                     checkBufferingState()
@@ -1260,11 +1331,14 @@ class LinuxVideoPlayerState(
     // --- Playback controls ---
 
     override fun play() {
-        ioScope.launch {
-            val uri = lastUri
-            if (!hasMedia && uri != null) {
-                openUri(uri, requestHeaders = lastRequestHeaders)
-            } else if (hasMedia) {
+        lifecycle.ensureUsable()
+        val uri = lastUri
+        if (!hasMedia && uri != null) {
+            openUri(uri, requestHeaders = lastRequestHeaders)
+            return
+        }
+        lifecycle.launchControlOperation {
+            if (hasMedia) {
                 playInBackground()
             } else {
                 withContext(Dispatchers.Main) {
@@ -1297,7 +1371,8 @@ class LinuxVideoPlayerState(
     }
 
     override fun pause() {
-        ioScope.launch { pauseInBackground() }
+        lifecycle.ensureUsable()
+        lifecycle.launchControlOperation { pauseInBackground() }
     }
 
     private suspend fun pauseInBackground() {
@@ -1321,12 +1396,13 @@ class LinuxVideoPlayerState(
     }
 
     override fun stop() {
-        ioScope.launch {
+        lifecycle.ensureUsable()
+        lifecycle.launchSourceOperation { generation ->
             if (externalHlsFallback != null || libVlcBackendActive) {
                 cleanupCurrentPlayback()
             } else {
                 pauseInBackground()
-                if (hasMedia) seekToAsync(0f)
+                if (hasMedia) seekToAsync(0f, generation)
             }
             withContext(Dispatchers.Main) {
                 hasMedia = false
@@ -1338,10 +1414,27 @@ class LinuxVideoPlayerState(
         }
     }
 
+    override fun releaseSource() {
+        lifecycle.ensureUsable()
+        lifecycle.launchSourceOperation(
+            onScheduled = {
+                lastUri = null
+                lastRequestHeaders = emptyMap()
+            },
+        ) {
+            cleanupCurrentPlayback()
+            clearExternalHlsFallbackTrackState()
+            clearLibVlcTrackState()
+            resetState()
+        }
+    }
+
     override fun seekTo(time: Duration) {
-        ioScope.launch {
+        lifecycle.ensureUsable()
+        lifecycle.launchSourceBoundControlOperation { generation ->
             delay(10.milliseconds) // Coalesce rapid seek events
-            seekToTimeAsync(time)
+            lifecycle.ensureCurrentSource(generation)
+            seekToTimeAsync(time, generation)
         }
     }
 
@@ -1351,35 +1444,44 @@ class LinuxVideoPlayerState(
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
-        ioScope.launch {
+        lifecycle.ensureUsable()
+        lifecycle.launchSourceBoundControlOperation { generation ->
             delay(10.milliseconds) // Coalesce rapid seek events
+            lifecycle.ensureCurrentSource(generation)
             val duration = getDurationSafely()
             if (duration <= Duration.ZERO) {
-                withContext(Dispatchers.Main) { isLoading = false }
-                return@launch
+                commitCurrentSourceOnMain(generation) { isLoading = false }
+                return@launchSourceBoundControlOperation
             }
             val seekTime = duration * (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
-            seekToTimeAsync(seekTime)
+            seekToTimeAsync(seekTime, generation)
         }
     }
 
-    private suspend fun seekToAsync(value: Float) {
+    private suspend fun seekToAsync(
+        value: Float,
+        sourceGeneration: Long? = null,
+    ) {
         val duration = getDurationSafely()
         if (duration <= Duration.ZERO) {
-            withContext(Dispatchers.Main) { isLoading = false }
+            commitSeekStateOnMain(sourceGeneration) { isLoading = false }
             return
         }
         val seekTime = duration * (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
-        seekToTimeAsync(seekTime)
+        seekToTimeAsync(seekTime, sourceGeneration)
     }
 
-    private suspend fun seekToTimeAsync(time: Duration) {
-        withContext(Dispatchers.Main) { isLoading = true }
+    private suspend fun seekToTimeAsync(
+        time: Duration,
+        sourceGeneration: Long? = null,
+    ) {
+        if (!commitSeekStateOnMain(sourceGeneration) { isLoading = true }) return
 
         try {
+            sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
             val duration = getDurationSafely()
             if (duration <= Duration.ZERO) {
-                withContext(Dispatchers.Main) { isLoading = false }
+                commitSeekStateOnMain(sourceGeneration) { isLoading = false }
                 return
             }
 
@@ -1390,48 +1492,66 @@ class LinuxVideoPlayerState(
                     else -> time
                 }
 
-            withContext(Dispatchers.Main) {
-                seekInProgress = true
-                targetSeekTime = seekTime
-                sliderPos =
-                    (seekTime.toSecondsDouble() / duration.toSecondsDouble() * VideoPlayerState.SLIDER_SCALE)
-                        .toFloat()
-                        .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
+            if (!commitSeekStateOnMain(sourceGeneration) {
+                    seekInProgress = true
+                    targetSeekTime = seekTime
+                    sliderPos =
+                        (seekTime.toSecondsDouble() / duration.toSecondsDouble() * VideoPlayerState.SLIDER_SCALE)
+                            .toFloat()
+                            .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
+                }
+            ) {
+                return
             }
 
             lastFrameUpdateTime = System.currentTimeMillis()
 
+            sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
             val ptr = playerPtr
-            if (ptr == 0L) return
+            if (ptr == 0L) {
+                commitSeekStateOnMain(sourceGeneration) {
+                    isLoading = false
+                    seekInProgress = false
+                    targetSeekTime = null
+                }
+                return
+            }
             nativeSeekTo(ptr, seekTime.toSecondsDouble())
+            sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
 
             if (isPlaying) {
                 nativePlay(ptr)
                 delay(10.milliseconds)
+                sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
                 if (!shouldUseLibVlcNativeSurface()) {
                     updateFrameAsync()
                 }
-                ioScope.launch {
+                playerScope.launch {
                     delay(300.milliseconds)
-                    if (seekInProgress) {
-                        seekInProgress = false
-                        targetSeekTime = null
-                        withContext(Dispatchers.Main) { isLoading = false }
+                    commitSeekStateOnMain(sourceGeneration) {
+                        if (seekInProgress) {
+                            seekInProgress = false
+                            targetSeekTime = null
+                            isLoading = false
+                        }
                     }
                 }
             } else {
                 delay(50.milliseconds)
+                sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
                 if (!shouldUseLibVlcNativeSurface()) {
                     updateFrameAsync()
                 }
-                seekInProgress = false
-                targetSeekTime = null
-                withContext(Dispatchers.Main) { isLoading = false }
+                commitSeekStateOnMain(sourceGeneration) {
+                    seekInProgress = false
+                    targetSeekTime = null
+                    isLoading = false
+                }
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             linuxLogger.e { "Error in seekToAsync: ${e.message}" }
-            withContext(Dispatchers.Main) {
+            commitSeekStateOnMain(sourceGeneration) {
                 isLoading = false
                 seekInProgress = false
                 targetSeekTime = null
@@ -1439,55 +1559,89 @@ class LinuxVideoPlayerState(
         }
     }
 
-    override fun clearError() {
-        runBlocking {
-            withContext(Dispatchers.Main) { error = null }
+    private suspend fun commitSeekStateOnMain(
+        sourceGeneration: Long?,
+        block: () -> Unit,
+    ): Boolean =
+        if (sourceGeneration == null) {
+            withContext(Dispatchers.Main) { block() }
+            true
+        } else {
+            commitCurrentSourceOnMain(sourceGeneration, block)
         }
+
+    override fun clearError() {
+        lifecycle.ensureUsable()
+        error = null
     }
 
     override fun toggleFullscreen() {
+        lifecycle.ensureUsable()
         isFullscreen = !isFullscreen
     }
 
     override fun dispose() {
-        stopFrameUpdates()
-        stopBufferingCheck()
-        uiUpdateJob?.cancel()
-        playerScope.cancel()
+        val cleanupJob =
+            lifecycle.dispose {
+                cancelAndResetPlayerScope(recreate = false)
+                val wasLibVlc = nativeBackendUsesLibVlc
+                val ptrToDispose =
+                    withContext(frameDispatcher) {
+                        val ptr = synchronized(nativeInstanceLock) { playerPtrAtomic.getAndSet(0L) }
+                        try {
+                            skiaBitmapA?.close()
+                            skiaBitmapB?.close()
+                            skiaBitmapA = null
+                            skiaBitmapB = null
+                            skiaBitmapWidth = 0
+                            skiaBitmapHeight = 0
+                            nextSkiaBitmapA = true
+                        } catch (e: Exception) {
+                            linuxLogger.e { "Error releasing bitmaps: ${e.message}" }
+                        }
+                        ptr
+                    }
 
-        // Clear the pointer atomically so no background task can use it
-        val ptrToDispose = playerPtrAtomic.getAndSet(0L)
-
-        // Native cleanup on a background thread to avoid blocking the UI.
-        Thread {
-            try {
-                skiaBitmapA?.close()
-                skiaBitmapB?.close()
-                skiaBitmapA = null
-                skiaBitmapB = null
-                skiaBitmapWidth = 0
-                skiaBitmapHeight = 0
-                nextSkiaBitmapA = true
-            } catch (e: Exception) {
-                linuxLogger.e { "Error releasing bitmaps: ${e.message}" }
-            }
-
-            if (ptrToDispose != 0L) {
-                try {
-                    disposeNativePlayer(ptrToDispose)
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    linuxLogger.e { "Error disposing player: ${e.message}" }
+                if (ptrToDispose != 0L) {
+                    try {
+                        synchronized(nativeInstanceLock) {
+                            disposeNativePlayer(ptrToDispose, wasLibVlc = wasLibVlc)
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        linuxLogger.e { "Error disposing player: ${e.message}" }
+                    }
                 }
-            }
-        }.start()
 
-        closeExternalHlsFallback()
-        ioScope.cancel()
+                closeExternalHlsFallback()
+                nativeBackendUsesLibVlc = false
+                nativeBackendLibVlcRenderMode = null
+                libVlcBackendActive = false
+                libVlcNativeSurfaceAttached = false
+                resetState()
+                onPlaybackEnded = null
+                onRestart = null
+            }
+        cleanupJob?.invokeOnCompletion {
+            try {
+                cleanupScope.cancel()
+            } catch (_: Exception) {
+                // Cleanup has already completed; cancellation is best-effort.
+            }
+        }
     }
 
-    // --- Subtitle stubs ---
+    private suspend fun commitCurrentSourceOnMain(
+        generation: Long,
+        block: () -> Unit,
+    ): Boolean =
+        withContext(Dispatchers.Main) {
+            lifecycle.commitCurrentSource(generation, block)
+        }
+
+    // --- Track selection ---
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        lifecycle.ensureUsable()
         if (track != null && availableAudioTracks.none { it.id == track.id }) {
             return TrackSelectionResult.NotFound(track.id)
         }
@@ -1499,8 +1653,8 @@ class LinuxVideoPlayerState(
                 ?.let(::libVlcTrackStreamIndex)
 
         if (track != null && selectedLibVlcStreamIndex != null) {
-            ioScope.launch {
-                selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
@@ -1512,14 +1666,14 @@ class LinuxVideoPlayerState(
                 ?.let(ExternalHlsFallbackSupport::externalHlsTrackStreamIndex)
 
         if (track != null && selectedStreamIndex != null) {
-            ioScope.launch {
-                switchExternalHlsAudioTrack(track, selectedStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                switchExternalHlsAudioTrack(track, selectedStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
 
-        ioScope.launch {
-            withContext(Dispatchers.Main) {
+        lifecycle.launchSourceBoundControlOperation { generation ->
+            commitCurrentSourceOnMain(generation) {
                 currentAudioTrack = track
             }
         }
@@ -1527,9 +1681,10 @@ class LinuxVideoPlayerState(
     }
 
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
+        lifecycle.ensureUsable()
         if (track == null && libVlcBackendActive) {
-            ioScope.launch {
-                disableLibVlcSubtitles()
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                disableLibVlcSubtitles(generation)
             }
             return TrackSelectionResult.Disabled
         }
@@ -1544,8 +1699,8 @@ class LinuxVideoPlayerState(
                 ?.let(::libVlcTrackStreamIndex)
 
         if (track != null && selectedLibVlcStreamIndex != null) {
-            ioScope.launch {
-                selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
@@ -1557,14 +1712,14 @@ class LinuxVideoPlayerState(
                 ?.let(ExternalHlsFallbackSupport::externalHlsTrackStreamIndex)
 
         if (track != null && selectedStreamIndex != null) {
-            ioScope.launch {
-                switchExternalHlsSubtitleTrack(track, selectedStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                switchExternalHlsSubtitleTrack(track, selectedStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
 
-        ioScope.launch {
-            withContext(Dispatchers.Main) {
+        lifecycle.launchSourceBoundControlOperation { generation ->
+            commitCurrentSourceOnMain(generation) {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
             }
@@ -1573,12 +1728,14 @@ class LinuxVideoPlayerState(
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
+        lifecycle.ensureUsable()
         val externalTrack = track.copy(isEmbedded = false)
         _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
         _availableSubtitleTracks.add(externalTrack)
     }
 
     override fun removeSubtitleTrack(trackId: String) {
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
         if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
@@ -1587,6 +1744,7 @@ class LinuxVideoPlayerState(
     }
 
     override fun clearExternalSubtitleTracks() {
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.isExternal }
         if (selectedTrack?.isExternal == true) {
@@ -1595,91 +1753,100 @@ class LinuxVideoPlayerState(
     }
 
     override fun disableSubtitles(): TrackSelectionResult {
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
-        subtitlesEnabled = false
-        currentSubtitleTrack = null
         if (libVlcBackendActive && selectedTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
-            ioScope.launch {
-                disableLibVlcSubtitles()
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                disableLibVlcSubtitles(generation)
             }
             return TrackSelectionResult.Disabled
         }
 
         if (externalHlsSourceUri != null && externalHlsSelectedSubtitleStreamIndex != null) {
-            ioScope.launch {
-                switchExternalHlsSubtitleTrack(track = null, streamIndex = null)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                switchExternalHlsSubtitleTrack(track = null, streamIndex = null, generation = generation)
             }
             return TrackSelectionResult.Disabled
         }
+        subtitlesEnabled = false
+        currentSubtitleTrack = null
         return TrackSelectionResult.Disabled
     }
 
     private suspend fun selectLibVlcAudioTrack(
         track: AudioTrack,
         streamIndex: Int,
+        generation: Long,
     ) {
-        libVlcSelectedAudioStreamIndex = streamIndex
-        withContext(Dispatchers.Main) {
-            currentAudioTrack = track
-        }
-
         val ordinal =
             libVlcTrackInfo
                 ?.audioStreams
                 ?.firstOrNull { it.streamIndex == streamIndex }
                 ?.ordinal
-                ?: return
         val ptr = playerPtr
-        if (ptr != 0L) {
-            LinuxNativeBridge.nSelectLibVlcAudioTrack(ptr, ordinal)
+        val applied = ordinal != null && ptr != 0L && LinuxNativeBridge.nSelectLibVlcAudioTrack(ptr, ordinal)
+        lifecycle.ensureCurrentSource(generation)
+        commitCurrentSourceOnMain(generation) {
+            if (applied) {
+                libVlcSelectedAudioStreamIndex = streamIndex
+                currentAudioTrack = track
+            } else {
+                error = VideoPlayerError.CodecError("Failed to select libVLC audio track: ${track.id}")
+            }
         }
     }
 
     private suspend fun selectLibVlcSubtitleTrack(
         track: SubtitleTrack,
         streamIndex: Int,
+        generation: Long,
     ) {
-        libVlcSelectedSubtitleStreamIndex = streamIndex
-        withContext(Dispatchers.Main) {
-            currentSubtitleTrack = track
-            subtitlesEnabled = true
-        }
-
         val ordinal =
             libVlcTrackInfo
                 ?.subtitleStreams
                 ?.firstOrNull { it.streamIndex == streamIndex }
                 ?.ordinal
-                ?: return
         val ptr = playerPtr
-        if (ptr != 0L) {
-            LinuxNativeBridge.nSelectLibVlcSubtitleTrack(ptr, ordinal)
+        val applied = ordinal != null && ptr != 0L && LinuxNativeBridge.nSelectLibVlcSubtitleTrack(ptr, ordinal)
+        lifecycle.ensureCurrentSource(generation)
+        commitCurrentSourceOnMain(generation) {
+            if (applied) {
+                libVlcSelectedSubtitleStreamIndex = streamIndex
+                currentSubtitleTrack = track
+                subtitlesEnabled = true
+            } else {
+                error = VideoPlayerError.CodecError("Failed to select libVLC subtitle track: ${track.id}")
+            }
         }
     }
 
-    private suspend fun disableLibVlcSubtitles() {
-        libVlcSelectedSubtitleStreamIndex = null
+    private suspend fun disableLibVlcSubtitles(generation: Long) {
         val ptr = playerPtr
-        if (ptr != 0L) {
-            LinuxNativeBridge.nDisableLibVlcSubtitles(ptr)
-        }
-        withContext(Dispatchers.Main) {
-            subtitlesEnabled = false
-            currentSubtitleTrack = null
+        val applied = ptr != 0L && LinuxNativeBridge.nDisableLibVlcSubtitles(ptr)
+        lifecycle.ensureCurrentSource(generation)
+        commitCurrentSourceOnMain(generation) {
+            if (applied) {
+                libVlcSelectedSubtitleStreamIndex = null
+                subtitlesEnabled = false
+                currentSubtitleTrack = null
+            } else {
+                error = VideoPlayerError.CodecError("Failed to disable libVLC subtitles")
+            }
         }
     }
 
     private suspend fun switchExternalHlsAudioTrack(
         track: AudioTrack,
         streamIndex: Int,
+        generation: Long,
     ) {
         val sourceUri = externalHlsSourceUri
         if (sourceUri == null) {
-            withContext(Dispatchers.Main) { currentAudioTrack = track }
+            commitCurrentSourceOnMain(generation) { currentAudioTrack = track }
             return
         }
         if (externalHlsSelectedAudioStreamIndex == streamIndex) {
-            withContext(Dispatchers.Main) { currentAudioTrack = track }
+            commitCurrentSourceOnMain(generation) { currentAudioTrack = track }
             return
         }
 
@@ -1687,34 +1854,36 @@ class LinuxVideoPlayerState(
             sourceUri = sourceUri,
             selectedAudioStreamIndex = streamIndex,
             selectedSubtitleStreamIndex = externalHlsSelectedSubtitleStreamIndex,
-            onBeforeRestart = {
+            onSelectionApplied = {
                 currentAudioTrack = track
             },
             failureMessage = "Failed to switch audio track",
+            generation = generation,
         )
     }
 
     private suspend fun switchExternalHlsSubtitleTrack(
         track: SubtitleTrack?,
         streamIndex: Int?,
+        generation: Long,
     ) {
         val sourceUri = externalHlsSourceUri
         if (sourceUri == null) {
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
             }
             return
         }
         if (externalHlsSelectedSubtitleStreamIndex == streamIndex) {
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
             }
             return
         }
         if (track != null && !ExternalHlsFallbackSupport.hasSubtitleRenderer()) {
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 isLoading = false
                 currentSubtitleTrack = null
                 subtitlesEnabled = false
@@ -1731,11 +1900,12 @@ class LinuxVideoPlayerState(
             sourceUri = sourceUri,
             selectedAudioStreamIndex = externalHlsSelectedAudioStreamIndex,
             selectedSubtitleStreamIndex = streamIndex,
-            onBeforeRestart = {
+            onSelectionApplied = {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
             },
             failureMessage = "Failed to switch subtitle track",
+            generation = generation,
         )
     }
 
@@ -1743,8 +1913,9 @@ class LinuxVideoPlayerState(
         sourceUri: String,
         selectedAudioStreamIndex: Int?,
         selectedSubtitleStreamIndex: Int?,
-        onBeforeRestart: () -> Unit,
+        onSelectionApplied: () -> Unit,
         failureMessage: String,
+        generation: Long,
     ) {
         val shouldResumePlayback = isPlaying
         val restartPosition = getPositionSafely()
@@ -1759,26 +1930,32 @@ class LinuxVideoPlayerState(
             }
 
         try {
-            withContext(Dispatchers.Main) {
-                isLoading = true
-                error = null
-                onBeforeRestart()
-                sliderPos = restartSliderPos
-                _positionText.value = formatTime(restartPosition)
+            val loadingCommitted =
+                commitCurrentSourceOnMain(generation) {
+                    isLoading = true
+                    error = null
+                    sliderPos = restartSliderPos
+                    _positionText.value = formatTime(restartPosition)
+                }
+            if (!loadingCommitted) {
+                return
             }
 
             cleanupCurrentPlayback()
+            lifecycle.ensureCurrentSource(generation)
             ensurePlayerInitialized()
+            lifecycle.ensureCurrentSource(generation)
 
             externalHlsSelectedAudioStreamIndex = selectedAudioStreamIndex
             externalHlsSelectedSubtitleStreamIndex = selectedSubtitleStreamIndex
             externalHlsPlaybackOffsetSeconds = restartPosition.toSecondsDouble()
             val playableUri = prepareExternalHlsPlayback(sourceUri, lastRequestHeaders)
             val opened = openMediaUri(playableUri, emptyMap())
+            lifecycle.ensureCurrentSource(generation)
             if (!opened) {
                 closeExternalHlsFallback()
                 clearExternalHlsFallbackTrackState()
-                withContext(Dispatchers.Main) {
+                commitCurrentSourceOnMain(generation) {
                     isLoading = false
                     error = VideoPlayerError.SourceError(failureMessage)
                 }
@@ -1791,11 +1968,16 @@ class LinuxVideoPlayerState(
                 applyOutputScaling()
             }
 
-            withContext(Dispatchers.Main) {
-                hasMedia = true
-                updateProjectionRenderingInfo()
-                isLoading = false
-                isPlaying = shouldResumePlayback
+            val selectionCommitted =
+                commitCurrentSourceOnMain(generation) {
+                    onSelectionApplied()
+                    hasMedia = true
+                    updateProjectionRenderingInfo()
+                    isLoading = false
+                    isPlaying = shouldResumePlayback
+                }
+            if (!selectionCommitted) {
+                return
             }
 
             startFrameUpdates()
@@ -1810,7 +1992,10 @@ class LinuxVideoPlayerState(
             linuxLogger.e { "restartExternalHlsPlayback() - Exception: ${e.message}" }
             closeExternalHlsFallback()
             clearExternalHlsFallbackTrackState()
-            handleError(e)
+            commitCurrentSourceOnMain(generation) {
+                isLoading = false
+                error = VideoPlayerError.SourceError("Error: ${e.message}")
+            }
         }
     }
 
@@ -1820,21 +2005,25 @@ class LinuxVideoPlayerState(
         width: Int,
         height: Int,
     ) {
+        lifecycle.ensureUsable()
         if (width <= 0 || height <= 0) return
         if (width == surfaceWidth && height == surfaceHeight) return
 
         surfaceWidth = width
         surfaceHeight = height
 
+        val requestToken = resizeRequestToken.incrementAndGet()
         isResizing.set(true)
         resizeJob?.cancel()
         resizeJob =
-            ioScope.launch {
-                delay(120.milliseconds)
+            lifecycle.launchSourceBoundControlOperation {
                 try {
+                    delay(120.milliseconds)
                     applyOutputScaling()
                 } finally {
-                    isResizing.set(false)
+                    if (resizeRequestToken.get() == requestToken) {
+                        isResizing.set(false)
+                    }
                 }
             }
     }

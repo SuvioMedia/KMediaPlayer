@@ -14,7 +14,6 @@ xcuserdata/
 Pods/
 *.jks
 *.gpg
-*yarn.lock
 # Native compiled binaries (built locally or in CI)
 /mediaplayer/src/jvmMain/resources/composemediaplayer/native/
 /mediaplayer/src/jvmMain/resources/win32-x86-64/

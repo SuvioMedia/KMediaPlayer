@@ -4,7 +4,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
@@ -13,10 +12,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.CacheClearResult
+import io.github.kdroidfilter.composemediaplayer.DesktopPlayerLifecycle
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackSupport
 import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
 import io.github.kdroidfilter.composemediaplayer.HlsFallbackSource
+import io.github.kdroidfilter.composemediaplayer.HlsQualitySelectionResult
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.JvmExternalFallbackContainerSupport
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcAudioStream
@@ -66,8 +68,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -75,14 +75,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import java.awt.Component
-import java.awt.EventQueue
 import java.io.Closeable
 import java.io.File
 import java.net.URI
@@ -97,6 +95,16 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
+
+private sealed interface WindowsSeekRequest {
+    data class Time(
+        val value: Duration,
+    ) : WindowsSeekRequest
+
+    data class Slider(
+        val value: Float,
+    ) : WindowsSeekRequest
+}
 
 internal fun normalizeWindowsLocalFileUriForPlayback(uri: String): String {
     if (!uri.startsWith("file:", ignoreCase = true)) return uri
@@ -149,6 +157,7 @@ class WindowsVideoPlayerState(
     override var projection: VideoProjectionSettings
         get() = _projection
         set(value) {
+            lifecycle.ensureUsable()
             _projection = value.normalized()
             updateProjectionRenderingInfo()
         }
@@ -156,27 +165,27 @@ class WindowsVideoPlayerState(
     override var projectionView: VideoProjectionViewSettings
         get() = _projectionView
         set(value) {
+            lifecycle.ensureUsable()
             _projectionView = value.normalized()
         }
     private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
     override var projectionViewControlMode: VideoProjectionViewControlMode
         get() = _projectionViewControlMode
         set(value) {
+            lifecycle.ensureUsable()
             _projectionViewControlMode = value
         }
     private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
     override var projectionTextureCrop: VideoTextureCrop
         get() = _projectionTextureCrop
         set(value) {
+            lifecycle.ensureUsable()
             _projectionTextureCrop = value.normalized()
             updateProjectionRenderingInfo()
         }
 
     companion object {
         private const val HUNDRED_NANOSECOND_TICKS_PER_SECOND = 10_000_000.0
-        private const val DISPOSE_JOIN_TIMEOUT_MS = 500L
-        private const val DISPOSE_EDT_POLL_INTERVAL_MS = 10L
-        private const val NANOSECONDS_PER_MILLISECOND = 1_000_000L
         private val isMfBootstrapped = AtomicBoolean(false)
 
         /** Map to store volume settings for each player instance */
@@ -222,6 +231,11 @@ class WindowsVideoPlayerState(
 
     /** Coroutine scope for all async operations */
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val cleanupScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val callbackScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val lifecycle = DesktopPlayerLifecycle(scope, cleanupScope)
+    private val disposeLock = Any()
+    private var disposalJob: Job? = null
 
     /** Whether media has been loaded */
     private var _hasMedia by mutableStateOf(false)
@@ -234,14 +248,19 @@ class WindowsVideoPlayerState(
     /** Whether the user has intentionally paused the video */
     private var userPaused = false
 
-    /** Video player instance handle */
-    private var videoPlayerInstance: Long = 0L
+    /** Video player instance handle. Atomic reads are used by the frame hot path. */
+    private val videoPlayerInstanceAtomic = AtomicLong(0L)
+    private var videoPlayerInstance: Long
+        get() = videoPlayerInstanceAtomic.get()
+        set(value) {
+            videoPlayerInstanceAtomic.set(value)
+        }
+
+    /** Serializes handle replacement/destruction with native-surface attachment. */
+    private val nativeInstanceLock = Any()
 
     /** Deferred completed when initialization is ready */
     private val initReady = CompletableDeferred<Unit>()
-
-    /** Flag to track if the player is being disposed */
-    private val isDisposing = AtomicBoolean(false)
 
     /** Current volume level (0.0 to 1.0) */
     private var _volume by mutableStateOf(1f)
@@ -253,20 +272,16 @@ class WindowsVideoPlayerState(
     override var volume: Float
         get() = _volume
         set(value) {
+            lifecycle.ensureUsable()
             val newVolume = value.coerceIn(0f, 1f)
             if (_volume != newVolume) {
                 _volume = newVolume
-                scope.launch {
-                    mediaOperationMutex.withLock {
-                        videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
-                            // Store the volume setting for this instance
-                            instanceVolumes[instance] = newVolume
-
-                            // Apply the volume setting to the native player
-                            val hr = nativeSetAudioVolume(instance, newVolume)
-                            if (hr < 0) {
-                                setError("Error updating volume (hr=0x${hr.toString(16)})")
-                            }
+                executeMediaOperation("update volume") {
+                    videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
+                        instanceVolumes[instance] = newVolume
+                        val hr = nativeSetAudioVolume(instance, newVolume)
+                        if (hr < 0) {
+                            setError("Error updating volume (hr=0x${hr.toString(16)})")
                         }
                     }
                 }
@@ -279,38 +294,52 @@ class WindowsVideoPlayerState(
     override var sliderPos: Float
         get() = _progress * VideoPlayerState.SLIDER_SCALE
         set(value) {
+            lifecycle.ensureUsable()
             _progress = (value / VideoPlayerState.SLIDER_SCALE).coerceIn(0f, 1f)
         }
     private var _userDragging by mutableStateOf(false)
     override var userDragging: Boolean
         get() = _userDragging
         set(value) {
+            lifecycle.ensureUsable()
             _userDragging = value
         }
     private var _loop by mutableStateOf(false)
     override var loop: Boolean
         get() = _loop
         set(value) {
+            lifecycle.ensureUsable()
             _loop = value
         }
 
-    override var onPlaybackEnded: (() -> Unit)? = null
-    override var onRestart: (() -> Unit)? = null
+    private var _onPlaybackEnded: (() -> Unit)? = null
+    override var onPlaybackEnded: (() -> Unit)?
+        get() = _onPlaybackEnded
+        set(value) {
+            lifecycle.ensureUsable()
+            _onPlaybackEnded = value
+        }
+    private var _onRestart: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)?
+        get() = _onRestart
+        set(value) {
+            lifecycle.ensureUsable()
+            _onRestart = value
+        }
 
     private var _playbackSpeed by mutableStateOf(1.0f)
     override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
+            lifecycle.ensureUsable()
             val newSpeed = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             if (_playbackSpeed != newSpeed) {
                 _playbackSpeed = newSpeed
-                scope.launch {
-                    mediaOperationMutex.withLock {
-                        videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
-                            val hr = nativeSetPlaybackSpeed(instance, newSpeed)
-                            if (hr < 0) {
-                                setError("Error updating playback speed (hr=0x${hr.toString(16)})")
-                            }
+                executeMediaOperation("update playback speed") {
+                    videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
+                        val hr = nativeSetPlaybackSpeed(instance, newSpeed)
+                        if (hr < 0) {
+                            setError("Error updating playback speed (hr=0x${hr.toString(16)})")
                         }
                     }
                 }
@@ -323,6 +352,7 @@ class WindowsVideoPlayerState(
         get() = jvmPlayerCapabilities(playbackOptions)
 
     override fun clearError() {
+        lifecycle.ensureUsable()
         _error = null
         errorMessage = null
     }
@@ -390,7 +420,13 @@ class WindowsVideoPlayerState(
     private var errorMessage: String? by mutableStateOf(null)
 
     // Fullscreen state
-    override var isFullscreen by mutableStateOf(false)
+    private var _isFullscreen by mutableStateOf(false)
+    override var isFullscreen: Boolean
+        get() = _isFullscreen
+        set(value) {
+            lifecycle.ensureUsable()
+            _isFullscreen = value
+        }
 
     // Video properties
     var videoWidth by mutableStateOf(0)
@@ -405,12 +441,11 @@ class WindowsVideoPlayerState(
     private val isResizing = AtomicBoolean(false)
     private var videoJob: Job? = null
     private var resizeJob: Job? = null
+    private val resizeRequestToken = AtomicLong(0L)
 
-    // Seek coalescing: rapid slider drags overwrite the target; only the
-    // latest value is actually seeked. seekInFlight acts as the "a loop is
-    // draining the target" claim.
-    private val pendingSeekTarget = AtomicLong(Long.MIN_VALUE)
-    private val seekInFlight = AtomicBoolean(false)
+    // Rapid seeks overwrite the pending request, while each request remains tagged with the source
+    // generation for which it was scheduled.
+    private val pendingSeek = LatestSourceBoundRequestSlot<WindowsSeekRequest>()
 
 // Serializes the native video reader: ReadVideoFrame / UnlockVideoFrame
     // (held by the producer coroutine) and SeekMedia (held by the seek flow).
@@ -490,110 +525,105 @@ class WindowsVideoPlayerState(
         // Kick off native initialization immediately
         scope.launch {
             try {
-                val handle = WindowsNativeBridge.createInstance()
-                if (handle == 0L) {
-                    setError("Failed to create video player instance")
-                    return@launch
-                }
-                videoPlayerInstance = handle
+                mediaOperationMutex.withLock {
+                    val handle =
+                        synchronized(nativeInstanceLock) {
+                            WindowsNativeBridge.createInstance()
+                        }
+                    if (handle == 0L) {
+                        if (!lifecycle.isDisposed) {
+                            setError("Failed to create video player instance")
+                            initReady.completeExceptionally(
+                                IllegalStateException("Failed to create video player instance"),
+                            )
+                        }
+                        return@withLock
+                    }
 
-                // Store default volume so that later instances inherit it
-                instanceVolumes[handle] = _volume
-                initReady.complete(Unit)
+                    if (lifecycle.isDisposed) {
+                        synchronized(nativeInstanceLock) {
+                            WindowsNativeBridge.destroyInstance(handle)
+                        }
+                        return@withLock
+                    }
+
+                    videoPlayerInstance = handle
+
+                    // Store default volume so that later instances inherit it
+                    instanceVolumes[handle] = _volume
+                    initReady.complete(Unit)
+                }
+            } catch (e: CancellationException) {
+                initReady.cancel(e)
+                throw e
             } catch (e: Exception) {
                 initReady.completeExceptionally(e)
-                setError("Exception during initialization: ${e.message}")
+                if (!lifecycle.isDisposed) {
+                    setError("Exception during initialization: ${e.message}")
+                }
             }
         }
     }
 
     override fun dispose() {
-        if (isDisposing.getAndSet(true)) {
-            return // Already disposing
-        }
+        val cleanupJob =
+            synchronized(disposeLock) {
+                disposalJob ?: lifecycle
+                    .dispose(
+                        cleanup = {
+                            // DesktopPlayerLifecycle has cancelled and joined every scope child here,
+                            // including the frame reader. No JNI caller can still hold the handle.
+                            mediaOperationMutex.withLock {
+                                videoJob = null
+                                resizeJob = null
+                                _isPlaying = false
+                                _hasMedia = false
+                                isLoading = false
+                                releaseAllResources()
 
-        // Stop coroutines first. The producer reads native state under
-        // videoReaderMutex; we must wait for it to exit its critical section
-        // before tearing down the native reader, otherwise CloseMedia can
-        // free memory the producer is still dereferencing (exit 2170).
-        val jobToJoin = videoJob
-        videoJob = null
-        jobToJoin?.cancel()
-        resizeJob?.cancel()
-        _isPlaying = false
-        _hasMedia = false
+                                val wasLibVlc = nativeBackendUsesLibVlc
+                                synchronized(nativeInstanceLock) {
+                                    val instance = videoPlayerInstanceAtomic.getAndSet(0L)
+                                    if (instance != 0L) {
+                                        runCatching {
+                                            nativeSetPlaybackState(instance, false, stop = true, usesLibVlc = wasLibVlc)
+                                        }.onFailure { e ->
+                                            windowsLogger.e { "Exception stopping playback: ${e.message}" }
+                                        }
+                                        runCatching {
+                                            nativeCloseMedia(instance, usesLibVlc = wasLibVlc)
+                                        }.onFailure { e ->
+                                            windowsLogger.e { "Exception closing media: ${e.message}" }
+                                        }
+                                        instanceVolumes.remove(instance)
+                                        runCatching {
+                                            destroyNativeInstance(instance, usesLibVlc = wasLibVlc)
+                                        }.onFailure { e ->
+                                            windowsLogger.e { "Exception destroying instance: ${e.message}" }
+                                        }
+                                    }
+                                }
 
-        releaseAllResources()
-
-        val instance = videoPlayerInstance
-        val wasLibVlc = nativeBackendUsesLibVlc
-        videoPlayerInstance = 0L
-        lastUri = null
-        lastRequestHeaders = emptyMap()
-
-        // Native cleanup must run SYNCHRONOUSLY. Compose Desktop's window close
-        // ultimately calls System.exit, which will not wait for an arbitrary
-        // background thread: the DLL gets unloaded while the native audio
-        // thread is still running against freed globals, crashing the process
-        // (exit 2170). Doing it here blocks the caller briefly (<500 ms for
-        // StopAudioThread + MF teardown) but guarantees a clean shutdown.
-        if (instance != 0L) {
-            waitForVideoJobToFinish(jobToJoin)
-
-            try {
-                nativeSetPlaybackState(instance, false, stop = true, usesLibVlc = wasLibVlc)
-            } catch (e: Exception) {
-                windowsLogger.e { "Exception stopping playback: ${e.message}" }
+                                closeExternalHlsFallback()
+                                clearExternalHlsFallbackTrackState()
+                                clearLibVlcTrackState()
+                                lastUri = null
+                                lastRequestHeaders = emptyMap()
+                                nativeBackendUsesLibVlc = false
+                                nativeBackendLibVlcRenderMode = null
+                                callbackScope.cancel()
+                                _onPlaybackEnded = null
+                                _onRestart = null
+                            }
+                        },
+                    ).also { disposalJob = it }
             }
-            try {
-                nativeCloseMedia(instance, usesLibVlc = wasLibVlc)
-            } catch (e: Exception) {
-                windowsLogger.e { "Exception closing media: ${e.message}" }
-            }
-            closeExternalHlsFallback()
-            clearExternalHlsFallbackTrackState()
-            clearLibVlcTrackState()
-            instanceVolumes.remove(instance)
-            try {
-                destroyNativeInstance(instance, usesLibVlc = wasLibVlc)
-            } catch (e: Exception) {
-                windowsLogger.e { "Exception destroying instance: ${e.message}" }
-            }
-        }
 
-        scope.cancel()
-    }
-
-    private fun waitForVideoJobToFinish(job: Job?) {
-        if (job == null) return
-
-        // Avoid runBlocking on the AWT Event Dispatch Thread: if any child
-        // coroutine of `scope` ever chains on Dispatchers.Main, joining here
-        // could deadlock. Poll briefly on EDT; use structured join elsewhere.
-        if (EventQueue.isDispatchThread()) {
-            waitForVideoJobOnEventDispatchThread(job)
-        } else {
-            try {
-                runBlocking {
-                    withTimeoutOrNull(DISPOSE_JOIN_TIMEOUT_MS) {
-                        job.join()
-                    }
-                }
-            } catch (_: Exception) {
-                // Cleanup is best effort; native teardown below still runs.
-            }
-        }
-    }
-
-    private fun waitForVideoJobOnEventDispatchThread(job: Job) {
-        val deadlineNs = System.nanoTime() + DISPOSE_JOIN_TIMEOUT_MS * NANOSECONDS_PER_MILLISECOND
-        while (job.isActive && System.nanoTime() < deadlineNs) {
-            try {
-                Thread.sleep(DISPOSE_EDT_POLL_INTERVAL_MS)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return
-            }
+        if (cleanupJob != null) {
+            // Windows native shutdown must finish before dispose returns. Otherwise an
+            // immediate JVM exit can unload the DLL while its audio thread is alive.
+            runBlocking { cleanupJob.join() }
+            cleanupScope.cancel()
         }
     }
 
@@ -642,27 +672,35 @@ class WindowsVideoPlayerState(
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
-        if (isDisposing.get()) {
-            windowsLogger.w { "Ignoring openUri call - player is being disposed" }
-            return
-        }
-
+        lifecycle.ensureUsable()
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
-        lastUri = uri
-        lastRequestHeaders = sanitizedHeaders
-        playbackSpeed = 1.0f
-
-        scope.launch {
+        lifecycle.launchSourceOperation(
+            onScheduled = {
+                lastUri = uri
+                lastRequestHeaders = sanitizedHeaders
+                _playbackSpeed = 1.0f
+                _hasMedia = false
+                _isPlaying = false
+                isLoading = true
+                _error = null
+                errorMessage = null
+            },
+        ) { generation ->
             try {
                 // Wait for initialization to complete with a timeout
                 withTimeout(10_000) { initReady.await() }
-
-                // Here the native instance is guaranteed to be non-null
-                openUriInternal(uri, initializePlayerState, sanitizedHeaders)
+                lifecycle.ensureCurrentSource(generation)
+                openUriInternal(uri, initializePlayerState, sanitizedHeaders, generation)
             } catch (_: TimeoutCancellationException) {
-                setError("Player initialization timed out after 10 s.")
+                lifecycle.commitCurrentSource(generation) {
+                    setError("Player initialization timed out after 10 s.")
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                setError("Error while waiting for initialization: ${e.message}")
+                lifecycle.commitCurrentSource(generation) {
+                    setError("Error while waiting for initialization: ${e.message}")
+                }
             }
         }
     }
@@ -681,236 +719,274 @@ class WindowsVideoPlayerState(
      * @param initializePlayerState Controls whether playback should start automatically after opening
      */
     @Suppress("CyclomaticComplexMethod", "LongMethod")
-    private fun openUriInternal(
+    private suspend fun openUriInternal(
         uri: String,
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
+        sourceGeneration: Long? = null,
     ) {
-        scope.launch {
-            if (isDisposing.get()) {
-                return@launch
+        suspend fun ensureSourceIsCurrent() {
+            if (sourceGeneration != null) {
+                lifecycle.ensureCurrentSource(sourceGeneration)
+            } else if (lifecycle.isDisposed) {
+                throw CancellationException("Media source operation was disposed")
+            }
+        }
+
+        fun commitSourceUpdate(block: () -> Unit): Boolean =
+            if (sourceGeneration != null) {
+                lifecycle.commitCurrentSource(sourceGeneration, block)
+            } else if (!lifecycle.isDisposed) {
+                block()
+                true
+            } else {
+                false
             }
 
-            mediaOperationMutex.withLock {
-                try {
-                    isLoading = true
+        fun commitSourceError(message: String) {
+            commitSourceUpdate { setError(message) }
+        }
 
-                    val normalizedUri = normalizeWindowsLocalFileUriForPlayback(uri)
-                    val libVlcBackend = resolveLibVlcBackendForUri(normalizedUri, requestHeaders)
+        mediaOperationMutex.withLock {
+            try {
+                ensureSourceIsCurrent()
+                isLoading = true
 
-                    // Stop playback and release existing resources
-                    val wasPlaying = _isPlaying
-                    val oldInstance = videoPlayerInstance
+                val normalizedUri = normalizeWindowsLocalFileUriForPlayback(uri)
+                val libVlcBackend = resolveLibVlcBackendForUri(normalizedUri, requestHeaders)
+                ensureSourceIsCurrent()
 
-                    if (oldInstance != 0L && wasPlaying) {
-                        nativeSetPlaybackState(oldInstance, false, stop = false)
-                        _isPlaying = false
-                        delay(50.milliseconds)
+                // Stop playback and release existing resources
+                val wasPlaying = _isPlaying
+                val oldInstance = videoPlayerInstance
+
+                if (oldInstance != 0L && wasPlaying) {
+                    nativeSetPlaybackState(oldInstance, false, stop = false)
+                    _isPlaying = false
+                    delay(50.milliseconds)
+                    ensureSourceIsCurrent()
+                }
+
+                val preserveExternalHlsSelection = normalizedUri == externalHlsSourceUri
+                val requestedExternalAudioStreamIndex =
+                    externalHlsSelectedAudioStreamIndex.takeIf { preserveExternalHlsSelection }
+                val requestedExternalSubtitleStreamIndex =
+                    externalHlsSelectedSubtitleStreamIndex.takeIf { preserveExternalHlsSelection }
+                val requestedExternalPlaybackOffset =
+                    externalHlsPlaybackOffsetSeconds.takeIf { preserveExternalHlsSelection } ?: 0.0
+
+                videoJob?.cancelAndJoin()
+                ensureSourceIsCurrent()
+                releaseAllResources()
+                if (oldInstance != 0L) {
+                    nativeCloseMedia(oldInstance)
+                }
+                closeExternalHlsFallback()
+                clearExternalHlsFallbackTrackState()
+                clearLibVlcTrackState()
+                externalHlsSelectedAudioStreamIndex = requestedExternalAudioStreamIndex
+                externalHlsSelectedSubtitleStreamIndex = requestedExternalSubtitleStreamIndex
+                externalHlsPlaybackOffsetSeconds = requestedExternalPlaybackOffset
+
+                ensureNativeInstance(libVlcBackend)
+                ensureSourceIsCurrent()
+                val instance = videoPlayerInstance
+                if (instance == 0L) {
+                    commitSourceError("Video player instance is null")
+                    return@withLock
+                }
+
+                _currentTime = Duration.ZERO
+                _progress = 0f
+                _duration = Duration.ZERO
+                _metadata = VideoMetadata()
+                _hasMedia = false
+                userPaused = false
+
+                // Reset initialFrameRead flag to ensure we read an initial frame for the new video
+                initialFrameRead.set(false)
+
+                // Check if the file or URL is valid
+                if (!normalizedUri.startsWith("http", ignoreCase = true) && !File(normalizedUri).exists()) {
+                    commitSourceError("File not found: $uri")
+                    return@withLock
+                }
+
+                val playbackUri =
+                    if (libVlcBackend != null) {
+                        prepareLibVlcPlayback(normalizedUri, requestHeaders, libVlcBackend.renderMode)
+                    } else if (shouldUseExternalHlsFallback(normalizedUri, requestHeaders)) {
+                        prepareExternalHlsPlayback(normalizedUri, requestHeaders)
+                    } else {
+                        normalizedUri
                     }
+                ensureSourceIsCurrent()
+                val playbackRequestHeaders = if (playbackUri == normalizedUri) requestHeaders else emptyMap()
 
-                    val preserveExternalHlsSelection = normalizedUri == externalHlsSourceUri
-                    val requestedExternalAudioStreamIndex =
-                        externalHlsSelectedAudioStreamIndex.takeIf { preserveExternalHlsSelection }
-                    val requestedExternalSubtitleStreamIndex =
-                        externalHlsSelectedSubtitleStreamIndex.takeIf { preserveExternalHlsSelection }
-                    val requestedExternalPlaybackOffset =
-                        externalHlsPlaybackOffsetSeconds.takeIf { preserveExternalHlsSelection } ?: 0.0
-
-                    videoJob?.cancelAndJoin()
-                    releaseAllResources()
-                    if (oldInstance != 0L) {
-                        nativeCloseMedia(oldInstance)
+                // Always open media in paused state to avoid starting the native
+                // playback clock before we've finished setup (SetOutputSize, metadata, etc.).
+                // We explicitly call SetPlaybackState(true) later, right before starting
+                // the frame-reading coroutine, so the wall-clock is in sync with frame production.
+                val startPlayback = initializePlayerState == InitialPlayerState.PLAY
+                val requestHeaderLines = playbackRequestHeaders.requestHeadersLineString()
+                val hrOpen =
+                    if (nativeBackendUsesLibVlc) {
+                        WindowsNativeBridge.nOpenLibVlcMediaWithHeaders(
+                            instance,
+                            playbackUri,
+                            requestHeaderLines,
+                            false,
+                        )
+                    } else if (requestHeaderLines.isBlank()) {
+                        player.OpenMedia(instance, playbackUri, false)
+                    } else {
+                        player.nOpenMediaWithHeaders(instance, playbackUri, requestHeaderLines, false)
                     }
-                    closeExternalHlsFallback()
-                    clearExternalHlsFallbackTrackState()
-                    clearLibVlcTrackState()
-                    externalHlsSelectedAudioStreamIndex = requestedExternalAudioStreamIndex
-                    externalHlsSelectedSubtitleStreamIndex = requestedExternalSubtitleStreamIndex
-                    externalHlsPlaybackOffsetSeconds = requestedExternalPlaybackOffset
+                ensureSourceIsCurrent()
+                if (hrOpen < 0) {
+                    commitSourceError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
+                    return@withLock
+                }
 
-                    ensureNativeInstance(libVlcBackend)
-                    val instance = videoPlayerInstance
-                    if (instance == 0L) {
-                        setError("Video player instance is null")
-                        return@withLock
+                // Get the video dimensions
+                val sizeArr = IntArray(2)
+                nativeGetVideoSize(instance, sizeArr)
+                if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
+                    val probedInfo = libVlcTrackInfo
+                    if (nativeBackendUsesLibVlc &&
+                        probedInfo?.videoWidth != null &&
+                        probedInfo.videoHeight != null
+                    ) {
+                        sizeArr[0] = probedInfo.videoWidth
+                        sizeArr[1] = probedInfo.videoHeight
                     }
+                }
+                if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
+                    commitSourceError("Failed to retrieve video size")
+                    nativeCloseMedia(instance)
+                    return@withLock
+                }
+                videoWidth = sizeArr[0]
+                videoHeight = sizeArr[1]
 
-                    _currentTime = Duration.ZERO
-                    _progress = 0f
-                    _duration = Duration.ZERO
-                    _metadata = VideoMetadata()
-                    _hasMedia = false
-                    userPaused = false
-
-                    // Reset initialFrameRead flag to ensure we read an initial frame for the new video
-                    initialFrameRead.set(false)
-
-                    // Check if the file or URL is valid
-                    if (!normalizedUri.startsWith("http", ignoreCase = true) && !File(normalizedUri).exists()) {
-                        setError("File not found: $uri")
-                        return@withLock
-                    }
-
-                    val playbackUri =
-                        if (libVlcBackend != null) {
-                            prepareLibVlcPlayback(normalizedUri, requestHeaders, libVlcBackend.renderMode)
-                        } else if (shouldUseExternalHlsFallback(normalizedUri, requestHeaders)) {
-                            prepareExternalHlsPlayback(normalizedUri, requestHeaders)
-                        } else {
-                            normalizedUri
+                // Scale output to match display surface (saves memory for 4K+ video)
+                if (surfaceWidth > 0 && surfaceHeight > 0) {
+                    val hrScale = nativeSetOutputSize(instance, surfaceWidth, surfaceHeight)
+                    if (hrScale >= 0) {
+                        nativeGetVideoSize(instance, sizeArr)
+                        if (sizeArr[0] > 0 && sizeArr[1] > 0) {
+                            videoWidth = sizeArr[0]
+                            videoHeight = sizeArr[1]
                         }
-                    val playbackRequestHeaders = if (playbackUri == normalizedUri) requestHeaders else emptyMap()
-
-                    // Always open media in paused state to avoid starting the native
-                    // playback clock before we've finished setup (SetOutputSize, metadata, etc.).
-                    // We explicitly call SetPlaybackState(true) later, right before starting
-                    // the frame-reading coroutine, so the wall-clock is in sync with frame production.
-                    val startPlayback = initializePlayerState == InitialPlayerState.PLAY
-                    val requestHeaderLines = playbackRequestHeaders.requestHeadersLineString()
-                    val hrOpen =
-                        if (nativeBackendUsesLibVlc) {
-                            WindowsNativeBridge.nOpenLibVlcMediaWithHeaders(
-                                instance,
-                                playbackUri,
-                                requestHeaderLines,
-                                false,
-                            )
-                        } else if (requestHeaderLines.isBlank()) {
-                            player.OpenMedia(instance, playbackUri, false)
-                        } else {
-                            player.nOpenMediaWithHeaders(instance, playbackUri, requestHeaderLines, false)
-                        }
-                    if (hrOpen < 0) {
-                        setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
-                        return@withLock
                     }
+                }
 
-                    // Get the video dimensions
-                    val sizeArr = IntArray(2)
-                    nativeGetVideoSize(instance, sizeArr)
-                    if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
-                        val probedInfo = libVlcTrackInfo
-                        if (nativeBackendUsesLibVlc &&
-                            probedInfo?.videoWidth != null &&
-                            probedInfo.videoHeight != null
-                        ) {
-                            sizeArr[0] = probedInfo.videoWidth
-                            sizeArr[1] = probedInfo.videoHeight
-                        }
-                    }
-                    if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
-                        setError("Failed to retrieve video size")
+                // Get the media duration (may be 0 for live HLS streams)
+                val durArr = LongArray(1)
+                val hrDuration = nativeGetMediaDuration(instance, durArr)
+                if (hrDuration < 0) {
+                    // Only fail for non-network sources; network/HLS may lack duration
+                    if (!uri.startsWith("http", ignoreCase = true)) {
+                        commitSourceError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
                         nativeCloseMedia(instance)
                         return@withLock
                     }
-                    videoWidth = sizeArr[0]
-                    videoHeight = sizeArr[1]
+                }
+                _duration =
+                    externalHlsFallbackDurationSeconds
+                        ?.takeIf { it > 0.0 }
+                        ?.secondsAsDuration()
+                        ?: durArr[0].hundredNanosecondsAsDuration()
 
-                    // Scale output to match display surface (saves memory for 4K+ video)
-                    if (surfaceWidth > 0 && surfaceHeight > 0) {
-                        val hrScale = nativeSetOutputSize(instance, surfaceWidth, surfaceHeight)
-                        if (hrScale >= 0) {
-                            nativeGetVideoSize(instance, sizeArr)
-                            if (sizeArr[0] > 0 && sizeArr[1] > 0) {
-                                videoWidth = sizeArr[0]
-                                videoHeight = sizeArr[1]
-                            }
-                        }
-                    }
+                // Retrieve metadata using the native function
+                val retrievedMetadata = nativeVideoMetadata(instance)
+                if (retrievedMetadata != null) {
+                    _metadata = retrievedMetadata
+                } else {
+                    // If metadata retrieval failed, create a basic metadata object with what we know
+                    _metadata =
+                        VideoMetadata(
+                            width = videoWidth,
+                            height = videoHeight,
+                            duration = _duration,
+                        )
+                }
 
-                    // Get the media duration (may be 0 for live HLS streams)
-                    val durArr = LongArray(1)
-                    val hrDuration = nativeGetMediaDuration(instance, durArr)
-                    if (hrDuration < 0) {
-                        // Only fail for non-network sources; network/HLS may lack duration
-                        if (!uri.startsWith("http", ignoreCase = true)) {
-                            setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
-                            nativeCloseMedia(instance)
-                            return@withLock
-                        }
-                    }
-                    _duration =
-                        externalHlsFallbackDurationSeconds
-                            ?.takeIf { it > 0.0 }
-                            ?.secondsAsDuration()
-                            ?: durArr[0].hundredNanosecondsAsDuration()
+                // Query the native frame rate to compute an adaptive polling interval
+                // like macOS does with captureFrameRate.
+                val rateArr = IntArray(2)
+                val frameRate = nativeVideoFrameRate(instance, rateArr)
+                if (frameRate > 0.0f) {
+                    val fps = rateArr[0].toDouble() / rateArr[1].coerceAtLeast(1).toDouble()
+                    frameIntervalMs = (1000.0 / fps).toLong().coerceIn(8L, 50L)
+                } else {
+                    frameIntervalMs = 16L // fallback ~60fps
+                }
 
-                    // Retrieve metadata using the native function
-                    val retrievedMetadata = nativeVideoMetadata(instance)
-                    if (retrievedMetadata != null) {
-                        _metadata = retrievedMetadata
-                    } else {
-                        // If metadata retrieval failed, create a basic metadata object with what we know
-                        _metadata =
-                            VideoMetadata(
-                                width = videoWidth,
-                                height = videoHeight,
-                                duration = _duration,
-                            )
-                    }
+                if (libVlcBackend != null) {
+                    refreshLibVlcRuntimeTracksIfNeeded()
+                    ensureSourceIsCurrent()
+                    applyLibVlcSelectedTracks()
+                }
 
-                    // Query the native frame rate to compute an adaptive polling interval
-                    // like macOS does with captureFrameRate.
-                    val rateArr = IntArray(2)
-                    val frameRate = nativeVideoFrameRate(instance, rateArr)
-                    if (frameRate > 0.0f) {
-                        val fps = rateArr[0].toDouble() / rateArr[1].coerceAtLeast(1).toDouble()
-                        frameIntervalMs = (1000.0 / fps).toLong().coerceIn(8L, 50L)
-                    } else {
-                        frameIntervalMs = 16L // fallback ~60fps
-                    }
+                ensureSourceIsCurrent()
+                val sourceCommitted =
+                    commitSourceUpdate {
+                        // Set _hasMedia to true only if everything succeeded
+                        _hasMedia = true
+                        updateProjectionRenderingInfo()
 
-                    if (libVlcBackend != null) {
-                        refreshLibVlcRuntimeTracksIfNeeded()
-                        applyLibVlcSelectedTracks()
-                    }
-
-                    // Set _hasMedia to true only if everything succeeded
-                    _hasMedia = true
-                    updateProjectionRenderingInfo()
-
-                    if (!isDisposing.get()) {
-                        // Restore the volume setting BEFORE starting playback
-                        val storedVolume = instanceVolumes[instance]
-                        if (storedVolume != null) {
-                            val volArr = FloatArray(1)
-                            val hr = nativeGetAudioVolume(instance, volArr)
-                            if (hr >= 0 && storedVolume != volArr[0]) {
-                                val setHr = nativeSetAudioVolume(instance, storedVolume)
-                                if (setHr < 0) {
-                                    windowsLogger.e { "Error restoring volume (hr=0x${setHr.toString(16)})" }
+                        if (!lifecycle.isDisposed) {
+                            // Restore the volume setting BEFORE starting playback
+                            val storedVolume = instanceVolumes[instance]
+                            if (storedVolume != null) {
+                                val volArr = FloatArray(1)
+                                val hr = nativeGetAudioVolume(instance, volArr)
+                                if (hr >= 0 && storedVolume != volArr[0]) {
+                                    val setHr = nativeSetAudioVolume(instance, storedVolume)
+                                    if (setHr < 0) {
+                                        windowsLogger.e { "Error restoring volume (hr=0x${setHr.toString(16)})" }
+                                    }
                                 }
                             }
-                        }
 
-                        if (!startPlayback) {
-                            userPaused = true
-                            initialFrameRead.set(false)
-                            isLoading = false
-                        }
-
-                        // Start native playback as late as possible — this sets
-                        // the wall-clock origin (llPlaybackStartTime) to NOW,
-                        // minimising the gap before produceFrames reads its first frame.
-                        val shouldDeferNativePlayback =
-                            startPlayback &&
-                                shouldUseLibVlcNativeSurface() &&
-                                !libVlcNativeSurfaceAttached
-                        if (startPlayback && !shouldDeferNativePlayback) {
-                            val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
-                            if (hrPlay < 0) {
-                                windowsLogger.e { "Failed to start playback (hr=0x${hrPlay.toString(16)})" }
+                            if (!startPlayback) {
+                                userPaused = true
+                                initialFrameRead.set(false)
+                                isLoading = false
                             }
-                        }
-                        _isPlaying = startPlayback
 
-                        // Start video processing
-                        videoJob = startVideoPipeline()
+                            // Start native playback as late as possible — this sets
+                            // the wall-clock origin (llPlaybackStartTime) to NOW,
+                            // minimising the gap before produceFrames reads its first frame.
+                            val shouldDeferNativePlayback =
+                                startPlayback &&
+                                    shouldUseLibVlcNativeSurface() &&
+                                    !libVlcNativeSurfaceAttached
+                            if (startPlayback && !shouldDeferNativePlayback) {
+                                val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
+                                if (hrPlay < 0) {
+                                    windowsLogger.e { "Failed to start playback (hr=0x${hrPlay.toString(16)})" }
+                                }
+                            }
+                            _isPlaying = startPlayback
+
+                            // Start video processing
+                            videoJob = startVideoPipeline()
+                        }
                     }
-                } catch (e: Exception) {
+                if (!sourceCommitted) {
+                    throw CancellationException("Media source operation was superseded before commit")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                commitSourceUpdate {
                     setError("Error while opening media: ${e.message}")
                     _hasMedia = false
-                } finally {
+                }
+            } finally {
+                commitSourceUpdate {
                     if (!_hasMedia) {
                         isLoading = false
                     }
@@ -983,45 +1059,47 @@ class WindowsVideoPlayerState(
                 "ComposeMediaPlayer does not bundle or link VLC.",
         )
 
-    private suspend fun ensureNativeInstance(libVlcBackend: WindowsResolvedLibVlcBackend?) {
-        val wantsLibVlc = libVlcBackend != null
-        val wantsLibVlcRenderMode = libVlcBackend?.renderMode
-        val existingInstance = videoPlayerInstance
-        if (existingInstance != 0L &&
-            (
-                nativeBackendUsesLibVlc != wantsLibVlc ||
-                    (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
-            )
-        ) {
-            nativeSetPlaybackState(existingInstance, false, stop = true)
-            nativeCloseMedia(existingInstance)
-            destroyNativeInstance(existingInstance)
-            instanceVolumes.remove(existingInstance)
-            videoPlayerInstance = 0L
-            nativeBackendUsesLibVlc = false
-            nativeBackendLibVlcRenderMode = null
-        }
-
-        if (videoPlayerInstance == 0L) {
-            val handle =
-                if (libVlcBackend != null) {
-                    WindowsNativeBridge.createLibVlcInstance(
-                        libVlcBackend.installation.libVlcPath,
-                        libVlcBackend.installation.pluginPath,
-                        libVlcBackend.renderMode == WindowsLibVlcRenderMode.NATIVE_VIEW,
-                    )
-                } else {
-                    WindowsNativeBridge.createInstance()
-                }
-            if (handle == 0L) {
-                throw IllegalStateException("Failed to create video player instance")
+    private fun ensureNativeInstance(libVlcBackend: WindowsResolvedLibVlcBackend?) {
+        synchronized(nativeInstanceLock) {
+            val wantsLibVlc = libVlcBackend != null
+            val wantsLibVlcRenderMode = libVlcBackend?.renderMode
+            val existingInstance = videoPlayerInstance
+            if (existingInstance != 0L &&
+                (
+                    nativeBackendUsesLibVlc != wantsLibVlc ||
+                        (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
+                )
+            ) {
+                nativeSetPlaybackState(existingInstance, false, stop = true)
+                nativeCloseMedia(existingInstance)
+                destroyNativeInstance(existingInstance)
+                instanceVolumes.remove(existingInstance)
+                videoPlayerInstance = 0L
+                nativeBackendUsesLibVlc = false
+                nativeBackendLibVlcRenderMode = null
             }
-            videoPlayerInstance = handle
-            nativeBackendUsesLibVlc = wantsLibVlc
-            nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
-            instanceVolumes[handle] = _volume
-            nativeSetAudioVolume(handle, _volume)
-            nativeSetPlaybackSpeed(handle, _playbackSpeed)
+
+            if (videoPlayerInstance == 0L) {
+                val handle =
+                    if (libVlcBackend != null) {
+                        WindowsNativeBridge.createLibVlcInstance(
+                            libVlcBackend.installation.libVlcPath,
+                            libVlcBackend.installation.pluginPath,
+                            libVlcBackend.renderMode == WindowsLibVlcRenderMode.NATIVE_VIEW,
+                        )
+                    } else {
+                        WindowsNativeBridge.createInstance()
+                    }
+                if (handle == 0L) {
+                    throw IllegalStateException("Failed to create video player instance")
+                }
+                videoPlayerInstance = handle
+                nativeBackendUsesLibVlc = wantsLibVlc
+                nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
+                instanceVolumes[handle] = _volume
+                nativeSetAudioVolume(handle, _volume)
+                nativeSetPlaybackSpeed(handle, _playbackSpeed)
+            }
         }
     }
 
@@ -1034,18 +1112,16 @@ class WindowsVideoPlayerState(
         libVlcSourceUri = uri
         libVlcNativeSurfaceRequested = renderMode == WindowsLibVlcRenderMode.NATIVE_VIEW
         libVlcNativeSurfaceAttached = false
-        withContext(Dispatchers.Main) {
-            renderingInfo.update(
-                backend = libVlcBackendLabel(renderMode),
-                container = "Source through user-installed libVLC",
-                videoDecoder = "libVLC",
-                videoRenderer = libVlcVideoRenderer(renderMode),
-                audioRenderer = "libVLC / Windows audio output",
-                subtitleRenderer = null,
-                subtitleSource = null,
-                notes = libVlcRenderingNotes(renderMode),
-            )
-        }
+        renderingInfo.update(
+            backend = libVlcBackendLabel(renderMode),
+            container = "Source through user-installed libVLC",
+            videoDecoder = "libVLC",
+            videoRenderer = libVlcVideoRenderer(renderMode),
+            audioRenderer = "libVLC / Windows audio output",
+            subtitleRenderer = null,
+            subtitleSource = null,
+            notes = libVlcRenderingNotes(renderMode),
+        )
         val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
         libVlcTrackInfo = trackInfo
         updateLibVlcTracks(trackInfo)
@@ -1195,42 +1271,47 @@ class WindowsVideoPlayerState(
     }
 
     internal fun shouldUseLibVlcNativeSurface(): Boolean =
-        libVlcNativeSurfaceRequested &&
+        !lifecycle.isDisposed &&
+            libVlcNativeSurfaceRequested &&
             libVlcBackendActive &&
             nativeBackendUsesLibVlc &&
             nativeBackendLibVlcRenderMode == WindowsLibVlcRenderMode.NATIVE_VIEW
 
     internal fun attachLibVlcNativeComponent(component: Component): Boolean {
-        if (!shouldUseLibVlcNativeSurface()) return false
-        val instance = videoPlayerInstance
-        if (instance == 0L) return false
+        synchronized(nativeInstanceLock) {
+            if (!shouldUseLibVlcNativeSurface()) return false
+            val instance = videoPlayerInstance
+            if (instance == 0L) return false
 
-        return runCatching {
-            val attached = WindowsNativeBridge.nAttachLibVlcNativeView(instance, component)
-            libVlcNativeSurfaceAttached = attached
-            if (attached && _isPlaying) {
-                val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
-                if (hrPlay < 0) {
-                    windowsLogger.e {
-                        "Failed to start Windows libVLC native playback after attach: 0x${hrPlay.toString(16)}"
+            return runCatching {
+                val attached = WindowsNativeBridge.nAttachLibVlcNativeView(instance, component)
+                libVlcNativeSurfaceAttached = attached
+                if (attached && _isPlaying) {
+                    val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
+                    if (hrPlay < 0) {
+                        windowsLogger.e {
+                            "Failed to start Windows libVLC native playback after attach: 0x${hrPlay.toString(16)}"
+                        }
                     }
                 }
+                attached
+            }.getOrElse { e ->
+                windowsLogger.e { "Failed to attach Windows libVLC native surface: ${e.message}" }
+                false
             }
-            attached
-        }.getOrElse { e ->
-            windowsLogger.e { "Failed to attach Windows libVLC native surface: ${e.message}" }
-            false
         }
     }
 
     internal fun detachLibVlcNativeComponent(component: Component) {
-        val instance = videoPlayerInstance
-        if (instance == 0L) return
-        runCatching {
-            WindowsNativeBridge.nDetachLibVlcNativeView(instance, component)
-            libVlcNativeSurfaceAttached = false
-        }.onFailure { e ->
-            windowsLogger.e { "Failed to detach Windows libVLC native surface: ${e.message}" }
+        synchronized(nativeInstanceLock) {
+            val instance = videoPlayerInstance
+            if (instance == 0L) return
+            runCatching {
+                WindowsNativeBridge.nDetachLibVlcNativeView(instance, component)
+                libVlcNativeSurfaceAttached = false
+            }.onFailure { e ->
+                windowsLogger.e { "Failed to detach Windows libVLC native surface: ${e.message}" }
+            }
         }
     }
 
@@ -1359,6 +1440,14 @@ class WindowsVideoPlayerState(
             .secondsAsDuration()
     }
 
+    private fun dispatchCallback(callback: (() -> Unit)?) {
+        if (callback == null || lifecycle.isDisposed) return
+        callbackScope.launch {
+            runCatching(callback)
+                .onFailure { e -> windowsLogger.e { "Playback callback failed: ${e.message}" } }
+        }
+    }
+
     private fun externalHlsLocalSeekTicks(targetTicks: Long): Long {
         val fallbackDuration = externalHlsFallbackDurationSeconds
         if (fallbackDuration == null || fallbackDuration <= 0.0) return targetTicks
@@ -1383,7 +1472,7 @@ class WindowsVideoPlayerState(
 
     private fun startNativeTimelinePipeline(): Job =
         scope.launch {
-            while (scope.isActive && _hasMedia && !isDisposing.get()) {
+            while (scope.isActive && _hasMedia && !lifecycle.isDisposed) {
                 val instance = videoPlayerInstance
                 if (instance == 0L) break
 
@@ -1396,7 +1485,7 @@ class WindowsVideoPlayerState(
                             userPaused = false
                             seekTo(Duration.ZERO)
                             play()
-                            onRestart?.invoke()
+                            dispatchCallback(onRestart)
                         } catch (e: Exception) {
                             setError("Error during SeekMedia for loop: ${e.message}")
                         }
@@ -1406,7 +1495,7 @@ class WindowsVideoPlayerState(
                             _progress = 1f
                         }
                         pause()
-                        onPlaybackEnded?.invoke()
+                        dispatchCallback(onPlaybackEnded)
                         break
                     }
                 }
@@ -1440,7 +1529,7 @@ class WindowsVideoPlayerState(
      * 4. Single memory copy: Native buffer → Skia bitmap pixels.
      */
     private suspend fun produceFrames() {
-        while (scope.isActive && _hasMedia && !isDisposing.get()) {
+        while (scope.isActive && _hasMedia && !lifecycle.isDisposed) {
             val instance = videoPlayerInstance
             if (instance == 0L) break
 
@@ -1457,7 +1546,7 @@ class WindowsVideoPlayerState(
                         lastFrameHash = Int.MIN_VALUE // Reset hash for new loop
                         seekTo(Duration.ZERO)
                         play()
-                        onRestart?.invoke()
+                        dispatchCallback(onRestart)
                     } catch (e: Exception) {
                         setError("Error during SeekMedia for loop: ${e.message}")
                     }
@@ -1470,7 +1559,7 @@ class WindowsVideoPlayerState(
                         _progress = 1f
                     }
                     pause()
-                    onPlaybackEnded?.invoke()
+                    dispatchCallback(onPlaybackEnded)
                     break
                 }
             }
@@ -1505,7 +1594,7 @@ class WindowsVideoPlayerState(
                 } catch (e: CancellationException) {
                     break
                 } catch (e: Exception) {
-                    if (scope.isActive && _hasMedia && !isDisposing.get()) {
+                    if (scope.isActive && _hasMedia && !lifecycle.isDisposed) {
                         setError("Error while reading a frame: ${e.message}")
                     }
                     delay(100.milliseconds)
@@ -1655,7 +1744,7 @@ class WindowsVideoPlayerState(
         var frameReceived = false
         var loadingTimeout = 0
 
-        while (scope.isActive && _hasMedia && !isDisposing.get()) {
+        while (scope.isActive && _hasMedia && !lifecycle.isDisposed) {
             if (waitIfResizing()) continue
 
             try {
@@ -1704,7 +1793,7 @@ class WindowsVideoPlayerState(
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
-                if (scope.isActive && _hasMedia && !isDisposing.get()) {
+                if (scope.isActive && _hasMedia && !lifecycle.isDisposed) {
                     setError("Error while processing a frame: ${e.message}")
                 }
                 delay(100.milliseconds)
@@ -1712,45 +1801,35 @@ class WindowsVideoPlayerState(
         }
     }
 
-    /**
-     * Starts or resumes playback.
-     * If media is not loaded yet (openUri in progress), waits for it to finish
-     * instead of triggering a second open which would race with the first.
-     */
+    override fun canPlaySource(
+        uri: String,
+        mimeType: String?,
+    ): Boolean {
+        lifecycle.ensureUsable()
+        return capabilities.canPlaySource(uri, mimeType)
+    }
+
+    /** Starts or resumes playback, reopening the retained source after [stop]. */
     override fun play() {
-        if (isDisposing.get()) return
+        lifecycle.ensureUsable()
 
         if (readyForPlayback()) {
-            // Fast path: media is loaded, just resume
             executeMediaOperation(operation = "play") {
                 resumePlayback()
             }
             return
         }
 
-        // Slow path: wait for any in-progress openUri to complete, then resume
-        scope.launch {
-            try {
-                withTimeout(10_000) { initReady.await() }
-                // Wait for _hasMedia to become true (set by openUriInternal)
-                withTimeout(10_000) {
-                    snapshotFlow { _hasMedia }.filter { it }.first()
-                }
-            } catch (_: Exception) {
-                // Timeout or cancellation — if we still have a URI, try a fresh open
-                if (!_hasMedia) {
-                    lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
-                        openUriInternal(uri, InitialPlayerState.PLAY, lastRequestHeaders)
-                    }
-                }
-                return@launch
-            }
-
-            // Media is loaded — resume playback
-            mediaOperationMutex.withLock {
-                if (!isDisposing.get()) resumePlayback()
-            }
+        val sourceUri = lastUri
+        if (!sourceUri.isNullOrEmpty()) {
+            openUri(sourceUri, InitialPlayerState.PLAY, lastRequestHeaders)
         }
+    }
+
+    override fun restart() {
+        lifecycle.ensureUsable()
+        seekTo(Duration.ZERO)
+        play()
     }
 
     /**
@@ -1773,12 +1852,9 @@ class WindowsVideoPlayerState(
      * Pauses playback if currently playing
      */
     override fun pause() {
-        if (isDisposing.get()) return
-
-        executeMediaOperation(
-            operation = "pause",
-            precondition = _isPlaying,
-        ) {
+        lifecycle.ensureUsable()
+        executeMediaOperation(operation = "pause") {
+            if (!_hasMedia) return@executeMediaOperation
             userPaused = true
             // Reset initialFrameRead flag when switching to pause state
             // This ensures that we'll read a new initial frame to display
@@ -1788,93 +1864,141 @@ class WindowsVideoPlayerState(
         }
     }
 
-    /**
-     * Stops playback and releases media resources
-     * This will close the media file but keep the player instance
-     */
+    /** Stops playback while retaining the source specification for a later [play]. */
     override fun stop() {
-        if (isDisposing.get()) return
-
-        executeMediaOperation(
-            operation = "stop",
+        lifecycle.ensureUsable()
+        lifecycle.launchSourceOperation(
+            onScheduled = {
+                _hasMedia = false
+                _isPlaying = false
+                isLoading = false
+            },
         ) {
-            setPlaybackState(false, "Error while stopping playback", true)
-            delay(50.milliseconds)
-            videoJob?.cancelAndJoin()
-            releaseAllResources()
-            _hasMedia = false
-            _progress = 0f
-            _currentTime = Duration.ZERO
-            _duration = Duration.ZERO
-            isLoading = false
-            errorMessage = null
-            _error = null
-            userPaused = false
-
-            // Reset initialFrameRead flag to ensure we read a new frame when playing again
-            initialFrameRead.set(false)
-
-            videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
-                nativeCloseMedia(instance)
+            mediaOperationMutex.withLock {
+                releaseCurrentMedia()
             }
-            closeExternalHlsFallback()
-            clearExternalHlsFallbackTrackState()
-            clearLibVlcTrackState()
         }
     }
 
+    /** Detaches the current source while keeping this state reusable. */
+    override fun releaseSource() {
+        lifecycle.ensureUsable()
+        lifecycle.launchSourceOperation(
+            onScheduled = {
+                lastUri = null
+                lastRequestHeaders = emptyMap()
+                _hasMedia = false
+                _isPlaying = false
+                isLoading = false
+            },
+        ) {
+            mediaOperationMutex.withLock {
+                releaseCurrentMedia()
+            }
+        }
+    }
+
+    private suspend fun releaseCurrentMedia() {
+        val instance = videoPlayerInstance
+        if (instance != 0L) {
+            runCatching {
+                nativeSetPlaybackState(instance, false, stop = true)
+            }.onFailure { e ->
+                windowsLogger.e { "Exception stopping the current source: ${e.message}" }
+            }
+        }
+
+        videoJob?.cancelAndJoin()
+        videoJob = null
+        releaseAllResources()
+        if (instance != 0L) {
+            runCatching { nativeCloseMedia(instance) }
+                .onFailure { e -> windowsLogger.e { "Exception closing the current source: ${e.message}" } }
+        }
+        closeExternalHlsFallback()
+        clearExternalHlsFallbackTrackState()
+        clearLibVlcTrackState()
+        _hasMedia = false
+        _isPlaying = false
+        _progress = 0f
+        _currentTime = Duration.ZERO
+        _duration = Duration.ZERO
+        _metadata = VideoMetadata()
+        isLoading = false
+        errorMessage = null
+        _error = null
+        userPaused = false
+        initialFrameRead.set(false)
+    }
+
     override fun seekTo(time: Duration) {
-        if (_duration <= Duration.ZERO) return
-        val progress =
-            (time.inWholeMilliseconds.toDouble() / _duration.inWholeMilliseconds.toDouble())
-                .toFloat()
-                .coerceIn(0f, 1f)
-        seekToProgress(progress)
+        lifecycle.ensureUsable()
+        scheduleSeek(WindowsSeekRequest.Time(time))
     }
 
     override fun seekToProgress(progress: Float) {
         seekTo(progress.coerceIn(0f, 1f) * VideoPlayerState.SLIDER_SCALE)
     }
 
+    override fun seekStart(value: Float) {
+        lifecycle.ensureUsable()
+        userDragging = true
+        sliderPos = value
+    }
+
+    override fun seekFinished() {
+        lifecycle.ensureUsable()
+        seekToProgress(sliderPos / VideoPlayerState.SLIDER_SCALE)
+        userDragging = false
+    }
+
     @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
-        if (isDisposing.get()) return
-        if (_duration <= Duration.ZERO) return // Live stream — seeking not supported
-
-        val clamped = value.coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
-        val targetPos = (_duration * (clamped / VideoPlayerState.SLIDER_SCALE).toDouble()).inWhole100NanosecondTicks()
-
-        // Latch the newest target; whoever is running the seek loop will see it.
-        pendingSeekTarget.set(targetPos)
-
-        // Optimistic UI so the slider tracks the drag smoothly even while the
-        // native seek is still settling.
-        _progress = (clamped / VideoPlayerState.SLIDER_SCALE).coerceIn(0f, 1f)
-        _currentTime = _duration * _progress.toDouble()
-
-        scheduleSeek()
+        lifecycle.ensureUsable()
+        scheduleSeek(WindowsSeekRequest.Slider(value.coerceIn(0f, VideoPlayerState.SLIDER_SCALE)))
     }
 
     /**
-     * Launches the seek loop if no other loop is currently draining the target.
-     * If multiple `seekTo` calls arrive in quick succession, only the latest
-     * target is actually processed — intermediate values are coalesced.
+     * Binds the request to the source current at scheduling time. The lifecycle mutex prevents a
+     * source replacement from overlapping the native call, while the generation tag prevents a
+     * queued or delayed request from being applied to the replacement source.
      */
-    private fun scheduleSeek() {
-        if (!seekInFlight.compareAndSet(false, true)) return
-
-        scope.launch {
+    private fun scheduleSeek(request: WindowsSeekRequest) {
+        lateinit var publication: LatestSourceBoundRequestSlot.Publication<WindowsSeekRequest>
+        lifecycle.launchSourceBoundControlOperation(
+            onScheduled = { generation ->
+                publication = pendingSeek.publish(generation, request)
+            },
+        ) { generation ->
             try {
                 while (true) {
-                    val target = pendingSeekTarget.getAndSet(Long.MIN_VALUE)
-                    if (target == Long.MIN_VALUE) break
-                    performSeek(target)
+                    lifecycle.ensureCurrentSource(generation)
+                    val pendingRequest = pendingSeek.take(generation) ?: break
+
+                    val sourceDuration = _duration
+                    if (!_hasMedia || sourceDuration <= Duration.ZERO) continue
+                    val target =
+                        when (pendingRequest) {
+                            is WindowsSeekRequest.Time ->
+                                pendingRequest.value.coerceIn(Duration.ZERO, sourceDuration)
+                            is WindowsSeekRequest.Slider ->
+                                sourceDuration *
+                                    (pendingRequest.value / VideoPlayerState.SLIDER_SCALE)
+                                        .toDouble()
+                                        .coerceIn(0.0, 1.0)
+                        }
+                    val targetProgress =
+                        (target.toSecondsDouble() / sourceDuration.toSecondsDouble())
+                            .toFloat()
+                            .coerceIn(0f, 1f)
+                    lifecycle.commitCurrentSource(generation) {
+                        _progress = targetProgress
+                        _currentTime = target
+                    }
+                    performSeek(target.inWhole100NanosecondTicks(), generation)
                 }
             } finally {
-                seekInFlight.set(false)
-                // Tiny race: a caller may have enqueued a target between our
-                // last getAndSet and releasing the claim. Re-check & re-launch.
-                if (pendingSeekTarget.get() != Long.MIN_VALUE) scheduleSeek()
+                pendingSeek.clear(publication)
             }
         }
     }
@@ -1888,16 +2012,19 @@ class WindowsVideoPlayerState(
      * under GraalVM native-image (the relaunched job sometimes never ran,
      * leaving audio but no video).
      */
-    private suspend fun performSeek(targetPos: Long) {
+    private suspend fun performSeek(
+        targetPos: Long,
+        sourceGeneration: Long,
+    ) {
         val loadingTrigger =
             scope.launch {
                 delay(200.milliseconds)
-                if (!isDisposing.get()) isLoading = true
+                lifecycle.commitCurrentSource(sourceGeneration) { isLoading = true }
             }
 
         try {
             mediaOperationMutex.withLock {
-                if (isDisposing.get()) return@withLock
+                lifecycle.ensureCurrentSource(sourceGeneration)
                 val instance = videoPlayerInstance
                 if (instance == 0L || !_hasMedia) return@withLock
 
@@ -1913,24 +2040,30 @@ class WindowsVideoPlayerState(
                         var hr = nativeSeekMedia(instance, nativeTargetPos)
                         if (hr < 0) {
                             delay(30.milliseconds)
+                            lifecycle.ensureCurrentSource(sourceGeneration)
                             hr = nativeSeekMedia(instance, nativeTargetPos)
                         }
                         if (hr < 0) {
-                            setError("Seek failed (hr=0x${hr.toString(16)})")
+                            lifecycle.commitCurrentSource(sourceGeneration) {
+                                setError("Seek failed (hr=0x${hr.toString(16)})")
+                            }
                             return@withLock
                         }
 
                         val posArr = LongArray(1)
                         if (nativeGetMediaPosition(instance, posArr) >= 0) {
-                            _currentTime = adjustedExternalHlsPosition(posArr[0].hundredNanosecondsAsDuration())
-                            _progress =
-                                if (_duration > Duration.ZERO) {
-                                    (_currentTime.toSecondsDouble() / _duration.toSecondsDouble())
-                                        .toFloat()
-                                        .coerceIn(0f, 1f)
-                                } else {
-                                    0f
-                                }
+                            val updatedTime = adjustedExternalHlsPosition(posArr[0].hundredNanosecondsAsDuration())
+                            lifecycle.commitCurrentSource(sourceGeneration) {
+                                _currentTime = updatedTime
+                                _progress =
+                                    if (_duration > Duration.ZERO) {
+                                        (_currentTime.toSecondsDouble() / _duration.toSecondsDouble())
+                                            .toFloat()
+                                            .coerceIn(0f, 1f)
+                                    } else {
+                                        0f
+                                    }
+                            }
                         }
                     }
                 } finally {
@@ -1939,13 +2072,13 @@ class WindowsVideoPlayerState(
 
                 // If the producer was never started (e.g. stop() was called
                 // before the first play), start it now so the new frame shows.
-                if (!isDisposing.get() && (videoJob == null || videoJob?.isActive == false)) {
+                if (lifecycle.isCurrentSource(sourceGeneration) && (videoJob == null || videoJob?.isActive == false)) {
                     videoJob = startVideoPipeline()
                 }
             }
         } finally {
             loadingTrigger.cancel()
-            isLoading = false
+            lifecycle.commitCurrentSource(sourceGeneration) { isLoading = false }
         }
     }
 
@@ -1958,7 +2091,7 @@ class WindowsVideoPlayerState(
         width: Int = 0,
         height: Int = 0,
     ) {
-        if (isDisposing.get()) return
+        lifecycle.ensureUsable()
 
         if (width <= 0 || height <= 0) return
 
@@ -1968,15 +2101,18 @@ class WindowsVideoPlayerState(
         surfaceHeight = height
 
         // Mark resizing in progress and debounce rapid events
+        val requestToken = resizeRequestToken.incrementAndGet()
         isResizing.set(true)
         resizeJob?.cancel()
         resizeJob =
-            scope.launch {
-                delay(120.milliseconds)
+            lifecycle.launchSourceBoundControlOperation {
                 try {
+                    delay(120.milliseconds)
                     applyOutputScaling()
                 } finally {
-                    isResizing.set(false)
+                    if (resizeRequestToken.get() == requestToken) {
+                        isResizing.set(false)
+                    }
                 }
             }
     }
@@ -1986,7 +2122,7 @@ class WindowsVideoPlayerState(
      * instead of full native resolution. Saves significant memory for 4K+ video.
      */
     private suspend fun applyOutputScaling() {
-        if (isDisposing.get() || !_hasMedia) return
+        if (lifecycle.isDisposed || !_hasMedia) return
         val sw = surfaceWidth
         val sh = surfaceHeight
         if (sw <= 0 || sh <= 0) return
@@ -2286,7 +2422,7 @@ class WindowsVideoPlayerState(
         // initialFrameRead being reset (e.g. after a paused seek, where the
         // producer must fetch & display the new frame without needing
         // cancellation/restart of its coroutine).
-        while (scope.isActive && _hasMedia && !isDisposing.get()) {
+        while (scope.isActive && _hasMedia && !lifecycle.isDisposed) {
             if (_isPlaying) return true
             if (userPaused && allowInitialFrame && !initialFrameRead.getAndSet(true)) return true
             try {
@@ -2336,7 +2472,7 @@ class WindowsVideoPlayerState(
      * @return True if the player is initialized and has media loaded, false otherwise
      */
     private fun readyForPlayback(): Boolean =
-        initReady.isCompleted && videoPlayerInstance != 0L && _hasMedia && !isDisposing.get()
+        initReady.isCompleted && videoPlayerInstance != 0L && _hasMedia && !lifecycle.isDisposed
 
     /**
      * Executes a media operation with proper error handling and mutex locking
@@ -2350,25 +2486,40 @@ class WindowsVideoPlayerState(
         precondition: Boolean = true,
         block: suspend () -> Unit,
     ) {
-        if (!precondition || isDisposing.get()) return
+        lifecycle.ensureUsable()
+        if (!precondition) return
 
-        scope.launch {
+        lifecycle.launchControlOperation {
             mediaOperationMutex.withLock {
                 try {
-                    if (!isDisposing.get()) {
-                        block()
-                    }
+                    block()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    setError("Error during $operation: ${e.message}")
+                    if (!lifecycle.isDisposed) {
+                        setError("Error during $operation: ${e.message}")
+                    }
                 }
             }
         }
     }
 
+    override fun selectSubtitleTrack(trackId: String?): TrackSelectionResult {
+        lifecycle.ensureUsable()
+        return trackId
+            ?.let { id ->
+                availableSubtitleTracks
+                    .firstOrNull { it.id == id }
+                    ?.let(::selectSubtitleTrack)
+                    ?: TrackSelectionResult.NotFound(id)
+            } ?: selectSubtitleTrack(null as SubtitleTrack?)
+    }
+
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
+        lifecycle.ensureUsable()
         if (track == null && libVlcBackendActive) {
-            scope.launch {
-                disableLibVlcSubtitles()
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                mediaOperationMutex.withLock { disableLibVlcSubtitles(generation) }
             }
             return TrackSelectionResult.Disabled
         }
@@ -2383,8 +2534,10 @@ class WindowsVideoPlayerState(
                 ?.let(::libVlcTrackStreamIndex)
 
         if (track != null && selectedLibVlcStreamIndex != null) {
-            scope.launch {
-                selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                mediaOperationMutex.withLock {
+                    selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex, generation)
+                }
             }
             return TrackSelectionResult.Selected(track.id)
         }
@@ -2396,22 +2549,30 @@ class WindowsVideoPlayerState(
                 ?.let(ExternalHlsFallbackSupport::externalHlsTrackStreamIndex)
 
         if (track != null && selectedStreamIndex != null) {
-            scope.launch {
-                switchExternalHlsSubtitleTrack(track, selectedStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                switchExternalHlsSubtitleTrack(track, selectedStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
 
-        scope.launch {
-            withContext(Dispatchers.Main) {
-                currentSubtitleTrack = track
-                subtitlesEnabled = track != null
-            }
-        }
+        currentSubtitleTrack = track
+        subtitlesEnabled = track != null
         return track.subtitleTrackSelectionResult()
     }
 
+    override fun selectAudioTrack(trackId: String?): TrackSelectionResult {
+        lifecycle.ensureUsable()
+        return trackId
+            ?.let { id ->
+                availableAudioTracks
+                    .firstOrNull { it.id == id }
+                    ?.let(::selectAudioTrack)
+                    ?: TrackSelectionResult.NotFound(id)
+            } ?: selectAudioTrack(null as AudioTrack?)
+    }
+
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        lifecycle.ensureUsable()
         if (track != null && availableAudioTracks.none { it.id == track.id }) {
             return TrackSelectionResult.NotFound(track.id)
         }
@@ -2423,8 +2584,10 @@ class WindowsVideoPlayerState(
                 ?.let(::libVlcTrackStreamIndex)
 
         if (track != null && selectedLibVlcStreamIndex != null) {
-            scope.launch {
-                selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                mediaOperationMutex.withLock {
+                    selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex, generation)
+                }
             }
             return TrackSelectionResult.Selected(track.id)
         }
@@ -2436,27 +2599,25 @@ class WindowsVideoPlayerState(
                 ?.let(ExternalHlsFallbackSupport::externalHlsTrackStreamIndex)
 
         if (track != null && selectedStreamIndex != null) {
-            scope.launch {
-                switchExternalHlsAudioTrack(track, selectedStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                switchExternalHlsAudioTrack(track, selectedStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
 
-        scope.launch {
-            withContext(Dispatchers.Main) {
-                currentAudioTrack = track
-            }
-        }
+        currentAudioTrack = track
         return track.audioTrackSelectionResult()
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
+        lifecycle.ensureUsable()
         val externalTrack = track.copy(isEmbedded = false)
         _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
         _availableSubtitleTracks.add(externalTrack)
     }
 
     override fun removeSubtitleTrack(trackId: String) {
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
         if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
@@ -2465,6 +2626,7 @@ class WindowsVideoPlayerState(
     }
 
     override fun clearExternalSubtitleTracks() {
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.isExternal }
         if (selectedTrack?.isExternal == true) {
@@ -2473,85 +2635,104 @@ class WindowsVideoPlayerState(
     }
 
     override fun disableSubtitles(): TrackSelectionResult {
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
-        subtitlesEnabled = false
-        currentSubtitleTrack = null
         if (libVlcBackendActive && selectedTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
-            scope.launch {
-                disableLibVlcSubtitles()
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                mediaOperationMutex.withLock { disableLibVlcSubtitles(generation) }
             }
             return TrackSelectionResult.Disabled
         }
 
         if (externalHlsSourceUri != null && externalHlsSelectedSubtitleStreamIndex != null) {
-            scope.launch {
-                switchExternalHlsSubtitleTrack(track = null, streamIndex = null)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                switchExternalHlsSubtitleTrack(track = null, streamIndex = null, generation = generation)
             }
             return TrackSelectionResult.Disabled
         }
+        subtitlesEnabled = false
+        currentSubtitleTrack = null
         return TrackSelectionResult.Disabled
     }
 
     private suspend fun selectLibVlcAudioTrack(
         track: AudioTrack,
         streamIndex: Int,
+        generation: Long,
     ) {
-        libVlcSelectedAudioStreamIndex = streamIndex
-        currentAudioTrack = track
-
         val ordinal =
             libVlcTrackInfo
                 ?.audioStreams
                 ?.firstOrNull { it.streamIndex == streamIndex }
                 ?.ordinal
-                ?: return
         val instance = videoPlayerInstance
-        if (instance != 0L) {
-            WindowsNativeBridge.nSelectLibVlcAudioTrack(instance, ordinal)
+        val applied =
+            ordinal != null &&
+                instance != 0L &&
+                WindowsNativeBridge.nSelectLibVlcAudioTrack(instance, ordinal)
+        lifecycle.ensureCurrentSource(generation)
+        lifecycle.commitCurrentSource(generation) {
+            if (applied) {
+                libVlcSelectedAudioStreamIndex = streamIndex
+                currentAudioTrack = track
+            } else {
+                _error = VideoPlayerError.CodecError("Failed to select libVLC audio track: ${track.id}")
+            }
         }
     }
 
     private suspend fun selectLibVlcSubtitleTrack(
         track: SubtitleTrack,
         streamIndex: Int,
+        generation: Long,
     ) {
-        libVlcSelectedSubtitleStreamIndex = streamIndex
-        currentSubtitleTrack = track
-        subtitlesEnabled = true
-
         val ordinal =
             libVlcTrackInfo
                 ?.subtitleStreams
                 ?.firstOrNull { it.streamIndex == streamIndex }
                 ?.ordinal
-                ?: return
         val instance = videoPlayerInstance
-        if (instance != 0L) {
-            WindowsNativeBridge.nSelectLibVlcSubtitleTrack(instance, ordinal)
+        val applied =
+            ordinal != null && instance != 0L && WindowsNativeBridge.nSelectLibVlcSubtitleTrack(instance, ordinal)
+        lifecycle.ensureCurrentSource(generation)
+        lifecycle.commitCurrentSource(generation) {
+            if (applied) {
+                libVlcSelectedSubtitleStreamIndex = streamIndex
+                currentSubtitleTrack = track
+                subtitlesEnabled = true
+            } else {
+                _error = VideoPlayerError.CodecError("Failed to select libVLC subtitle track: ${track.id}")
+            }
         }
     }
 
-    private suspend fun disableLibVlcSubtitles() {
-        libVlcSelectedSubtitleStreamIndex = null
+    private suspend fun disableLibVlcSubtitles(generation: Long) {
         val instance = videoPlayerInstance
-        if (instance != 0L) {
-            WindowsNativeBridge.nDisableLibVlcSubtitles(instance)
+        val applied = instance != 0L && WindowsNativeBridge.nDisableLibVlcSubtitles(instance)
+        lifecycle.ensureCurrentSource(generation)
+        lifecycle.commitCurrentSource(generation) {
+            if (applied) {
+                libVlcSelectedSubtitleStreamIndex = null
+                subtitlesEnabled = false
+                currentSubtitleTrack = null
+            } else {
+                _error = VideoPlayerError.CodecError("Failed to disable libVLC subtitles")
+            }
         }
-        subtitlesEnabled = false
-        currentSubtitleTrack = null
     }
 
     private suspend fun switchExternalHlsAudioTrack(
         track: AudioTrack,
         streamIndex: Int,
+        generation: Long,
     ) {
         val sourceUri = externalHlsSourceUri
         if (sourceUri == null) {
-            currentAudioTrack = track
+            lifecycle.commitCurrentSource(generation) { currentAudioTrack = track }
             return
         }
         if (externalHlsSelectedAudioStreamIndex == streamIndex) {
-            currentAudioTrack = track
+            lifecycle.commitCurrentSource(generation) { currentAudioTrack = track }
             return
         }
 
@@ -2559,37 +2740,45 @@ class WindowsVideoPlayerState(
             sourceUri = sourceUri,
             selectedAudioStreamIndex = streamIndex,
             selectedSubtitleStreamIndex = externalHlsSelectedSubtitleStreamIndex,
-            onBeforeRestart = {
+            onRestarted = {
                 currentAudioTrack = track
             },
             failureMessage = "Failed to switch audio track",
+            generation = generation,
         )
     }
 
     private suspend fun switchExternalHlsSubtitleTrack(
         track: SubtitleTrack?,
         streamIndex: Int?,
+        generation: Long,
     ) {
         val sourceUri = externalHlsSourceUri
         if (sourceUri == null) {
-            currentSubtitleTrack = track
-            subtitlesEnabled = track != null
+            lifecycle.commitCurrentSource(generation) {
+                currentSubtitleTrack = track
+                subtitlesEnabled = track != null
+            }
             return
         }
         if (externalHlsSelectedSubtitleStreamIndex == streamIndex) {
-            currentSubtitleTrack = track
-            subtitlesEnabled = track != null
+            lifecycle.commitCurrentSource(generation) {
+                currentSubtitleTrack = track
+                subtitlesEnabled = track != null
+            }
             return
         }
         if (track != null && !ExternalHlsFallbackSupport.hasSubtitleRenderer()) {
-            isLoading = false
-            currentSubtitleTrack = null
-            subtitlesEnabled = false
-            _error =
-                VideoPlayerError.CodecError(
-                    "Full embedded subtitle rendering through the external HLS fallback requires VLC " +
-                        "or ffmpeg with libass and the subtitles filter enabled.",
-                )
+            lifecycle.commitCurrentSource(generation) {
+                isLoading = false
+                currentSubtitleTrack = null
+                subtitlesEnabled = false
+                _error =
+                    VideoPlayerError.CodecError(
+                        "Full embedded subtitle rendering through the external HLS fallback requires VLC " +
+                            "or ffmpeg with libass and the subtitles filter enabled.",
+                    )
+            }
             return
         }
 
@@ -2597,11 +2786,12 @@ class WindowsVideoPlayerState(
             sourceUri = sourceUri,
             selectedAudioStreamIndex = externalHlsSelectedAudioStreamIndex,
             selectedSubtitleStreamIndex = streamIndex,
-            onBeforeRestart = {
+            onRestarted = {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
             },
             failureMessage = "Failed to switch subtitle track",
+            generation = generation,
         )
     }
 
@@ -2609,42 +2799,64 @@ class WindowsVideoPlayerState(
         sourceUri: String,
         selectedAudioStreamIndex: Int?,
         selectedSubtitleStreamIndex: Int?,
-        onBeforeRestart: () -> Unit,
+        onRestarted: () -> Unit,
         failureMessage: String,
+        generation: Long,
     ) {
         val shouldResumePlayback = _isPlaying
         val restartPosition = _currentTime
         val duration = _duration
-        _progress =
-            if (duration > Duration.ZERO) {
-                (restartPosition.toSecondsDouble() / duration.toSecondsDouble()).toFloat().coerceIn(0f, 1f)
-            } else {
-                _progress
+        val loadingCommitted =
+            lifecycle.commitCurrentSource(generation) {
+                _progress =
+                    if (duration > Duration.ZERO) {
+                        (restartPosition.toSecondsDouble() / duration.toSecondsDouble()).toFloat().coerceIn(0f, 1f)
+                    } else {
+                        _progress
+                    }
+                isLoading = true
+                _error = null
+                errorMessage = null
+                externalHlsSelectedAudioStreamIndex = selectedAudioStreamIndex
+                externalHlsSelectedSubtitleStreamIndex = selectedSubtitleStreamIndex
+                externalHlsPlaybackOffsetSeconds = restartPosition.toSecondsDouble()
             }
-        isLoading = true
-        _error = null
-        errorMessage = null
-        onBeforeRestart()
-
-        externalHlsSelectedAudioStreamIndex = selectedAudioStreamIndex
-        externalHlsSelectedSubtitleStreamIndex = selectedSubtitleStreamIndex
-        externalHlsPlaybackOffsetSeconds = restartPosition.toSecondsDouble()
+        if (!loadingCommitted) {
+            return
+        }
 
         openUriInternal(
             uri = sourceUri,
             initializePlayerState = if (shouldResumePlayback) InitialPlayerState.PLAY else InitialPlayerState.PAUSE,
             requestHeaders = lastRequestHeaders,
+            sourceGeneration = generation,
         )
+        lifecycle.ensureCurrentSource(generation)
 
-        if (isDisposing.get()) {
-            _error = VideoPlayerError.SourceError(failureMessage)
+        lifecycle.commitCurrentSource(generation) {
+            if (_hasMedia) {
+                onRestarted()
+            } else {
+                _error = VideoPlayerError.SourceError(failureMessage)
+            }
         }
+    }
+
+    override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
+        lifecycle.ensureUsable()
+        return HlsQualitySelectionResult.NotSupported
+    }
+
+    override fun clearCache(): CacheClearResult {
+        lifecycle.ensureUsable()
+        return CacheClearResult.NotSupported
     }
 
     /**
      * Toggles the fullscreen state of the video player
      */
     override fun toggleFullscreen() {
+        lifecycle.ensureUsable()
         isFullscreen = !isFullscreen
     }
 }

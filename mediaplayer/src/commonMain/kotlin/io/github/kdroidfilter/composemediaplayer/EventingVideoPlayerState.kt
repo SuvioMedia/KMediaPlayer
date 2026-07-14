@@ -6,50 +6,69 @@ import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.coroutines.CoroutineContext
+import kotlin.math.abs
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
-@Suppress("TooManyFunctions")
+@Suppress("LargeClass", "TooManyFunctions")
 internal class EventingVideoPlayerState(
     private val delegate: VideoPlayerState,
+    eventCoroutineContext: CoroutineContext,
 ) : VideoPlayerState by delegate {
+    constructor(delegate: VideoPlayerState) : this(delegate, Dispatchers.Default)
+
     private val eventDispatcher = PlaybackEventDispatcher()
-    private val eventScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val eventScope = CoroutineScope(eventCoroutineContext + SupervisorJob())
+    private val eventStateLock = PlatformLock()
+
+    // Every field below is read and written under eventStateLock. Public player calls may arrive
+    // from UI and media callback threads concurrently on JVM, Android, and iOS.
     private var activeSourceSessionId = 0L
     private var sourceLoadedSessionId = 0L
     private var sourceLoadedJob: Job? = null
+    private var seekCompletionJob: Job? = null
+    private var audioTrackSelectionJob: Job? = null
+    private var subtitleTrackSelectionJob: Job? = null
     private var lastError: VideoPlayerError? = null
     private var playbackEndedCallback: (() -> Unit)? = null
     private var restartCallback: (() -> Unit)? = null
     private var isDisposed = false
     private val delegatePlaybackEndedCallback: () -> Unit = {
-        if (!isDisposed) {
-            emitPlaybackEvent { sessionId, sampledAtMs ->
-                PlaybackEvent.PlaybackEnded(
-                    mediaSessionId = sessionId,
-                    sampledAtMs = sampledAtMs,
-                )
+        val callback =
+            eventStateLock.withLock {
+                if (isDisposed) return@withLock null
+                emitPlaybackEvent { sessionId, sampledAtMs ->
+                    PlaybackEvent.PlaybackEnded(
+                        mediaSessionId = sessionId,
+                        sampledAtMs = sampledAtMs,
+                    )
+                }
+                playbackEndedCallback
             }
-            playbackEndedCallback?.invoke()
-        }
+        callback?.invoke()
     }
     private val delegateRestartCallback: () -> Unit = {
-        if (!isDisposed) {
-            emitPlaybackEvent { sessionId, sampledAtMs ->
-                PlaybackEvent.PlaybackRestarted(
-                    mediaSessionId = sessionId,
-                    sampledAtMs = sampledAtMs,
-                )
+        val callback =
+            eventStateLock.withLock {
+                if (isDisposed) return@withLock null
+                emitPlaybackEvent { sessionId, sampledAtMs ->
+                    PlaybackEvent.PlaybackRestarted(
+                        mediaSessionId = sessionId,
+                        sampledAtMs = sampledAtMs,
+                    )
+                }
+                restartCallback
             }
-            restartCallback?.invoke()
-        }
+        callback?.invoke()
     }
 
     override val mediaSessionId: Long get() = eventDispatcher.mediaSessionId
@@ -192,17 +211,23 @@ internal class EventingVideoPlayerState(
     }
 
     override var onPlaybackEnded: (() -> Unit)?
-        get() = playbackEndedCallback
+        get() = eventStateLock.withLock { playbackEndedCallback }
         set(value) {
             ensureNotDisposed()
-            playbackEndedCallback = value
+            eventStateLock.withLock {
+                check(!isDisposed) { DISPOSED_MESSAGE }
+                playbackEndedCallback = value
+            }
         }
 
     override var onRestart: (() -> Unit)?
-        get() = restartCallback
+        get() = eventStateLock.withLock { restartCallback }
         set(value) {
             ensureNotDisposed()
-            restartCallback = value
+            eventStateLock.withLock {
+                check(!isDisposed) { DISPOSED_MESSAGE }
+                restartCallback = value
+            }
         }
 
     override fun play() {
@@ -254,13 +279,8 @@ internal class EventingVideoPlayerState(
 
     override fun stop() {
         ensureNotDisposed()
-        val releasedSessionId = sourceSessionToRelease()
+        cancelSeekCompletionJob()
         delegate.stop()
-        clearActiveSource()
-        if (releasedSessionId != 0L) {
-            emitSourceReleased(releasedSessionId)
-            eventDispatcher.nextMediaSessionId()
-        }
         emitCurrentErrorIfChanged()
     }
 
@@ -268,37 +288,98 @@ internal class EventingVideoPlayerState(
         ensureNotDisposed()
         val releasedSessionId = sourceSessionToRelease()
         delegate.releaseSource()
-        clearActiveSource()
         if (releasedSessionId != 0L) {
-            emitSourceReleased(releasedSessionId)
-            eventDispatcher.nextMediaSessionId()
+            eventStateLock.withLock {
+                val stillCurrent =
+                    activeSourceSessionId == releasedSessionId ||
+                        (activeSourceSessionId == 0L && mediaSessionId == releasedSessionId)
+                if (stillCurrent && !isDisposed) {
+                    clearActiveSourceUnsafe().forEach { it.cancel() }
+                    emitSourceReleased(releasedSessionId)
+                    eventDispatcher.nextMediaSessionId()
+                }
+            }
         }
         emitCurrentErrorIfChanged()
     }
 
     override fun seekTo(time: Duration) {
         ensureNotDisposed()
-        if (!canSeekCurrentSource()) {
+        val seekSessionId = sourceSessionToRelease()
+        if (seekSessionId == 0L || !canSeekCurrentSource()) {
             emitCurrentErrorIfChanged()
             return
         }
         val target = clampedSeekTarget(time)
-        emitPlaybackEvent { sessionId, sampledAtMs ->
-            PlaybackEvent.SeekStarted(
-                mediaSessionId = sessionId,
-                sampledAtMs = sampledAtMs,
-                target = target,
-            )
+        eventStateLock.withLock {
+            if (isDisposed || activeSourceSessionId != seekSessionId) return@withLock
+            emitPlaybackEventForSession(seekSessionId) { sessionId, sampledAtMs ->
+                PlaybackEvent.SeekStarted(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    target = target,
+                )
+            }
         }
         delegate.seekTo(target)
-        emitPlaybackEvent { sessionId, sampledAtMs ->
-            PlaybackEvent.SeekCompleted(
-                mediaSessionId = sessionId,
-                sampledAtMs = sampledAtMs,
-                position = delegate.preciseCurrentTime,
-            )
+        cancelSeekCompletionJob()
+        if (!isActiveSourceSession(seekSessionId)) return
+        val immediatePosition = delegate.preciseCurrentTime
+        val completedSynchronously =
+            !delegate.isSeeking &&
+                isWithinSeekTolerance(position = immediatePosition, target = target)
+        if (completedSynchronously) {
+            emitSeekCompleted(seekSessionId, immediatePosition)
+            emitCurrentErrorIfChanged()
+            return
         }
+        lateinit var newJob: Job
+        val shouldStart =
+            eventStateLock.withLock {
+                if (isDisposed || activeSourceSessionId != seekSessionId) {
+                    false
+                } else {
+                    newJob =
+                        eventScope.launch(start = CoroutineStart.LAZY) {
+                            repeat(SEEK_COMPLETION_POLL_ATTEMPTS) {
+                                if (!isActiveSourceSession(seekSessionId)) return@launch
+                                val position = delegate.preciseCurrentTime
+                                if (!delegate.isSeeking && isWithinSeekTolerance(position, target)) {
+                                    emitSeekCompleted(seekSessionId, position)
+                                    return@launch
+                                }
+                                delay(SEEK_COMPLETION_POLL_INTERVAL)
+                            }
+                        }
+                    seekCompletionJob = newJob
+                    true
+                }
+            }
+        if (shouldStart) newJob.start()
         emitCurrentErrorIfChanged()
+    }
+
+    private fun isWithinSeekTolerance(
+        position: Duration,
+        target: Duration,
+    ): Boolean =
+        abs(position.inWholeMilliseconds - target.inWholeMilliseconds) <=
+            SEEK_COMPLETION_TOLERANCE.inWholeMilliseconds
+
+    private fun emitSeekCompleted(
+        sessionId: Long,
+        position: Duration,
+    ) {
+        eventStateLock.withLock {
+            if (isDisposed || activeSourceSessionId != sessionId) return@withLock
+            emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+                PlaybackEvent.SeekCompleted(
+                    mediaSessionId = eventSessionId,
+                    sampledAtMs = sampledAtMs,
+                    position = position,
+                )
+            }
+        }
     }
 
     override fun seekBy(delta: Duration) {
@@ -345,10 +426,10 @@ internal class EventingVideoPlayerState(
 
     override fun restart() {
         ensureNotDisposed()
-        val hasActiveSource = sourceSessionToRelease() != 0L
+        val restartSessionId = sourceSessionToRelease()
         delegate.restart()
-        if (hasActiveSource) {
-            emitPlaybackRestarted()
+        if (restartSessionId != 0L) {
+            emitPlaybackRestarted(restartSessionId)
         }
         emitCurrentErrorIfChanged()
     }
@@ -360,10 +441,16 @@ internal class EventingVideoPlayerState(
 
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
         ensureNotDisposed()
+        val selectionSessionId = mediaSessionId
+        val previousTrackId = delegate.currentAudioTrack?.id
         val result = delegate.selectAudioTrack(track)
-        if (result.isApplied) {
-            emitTrackChanged(TrackKind.AUDIO, result.trackChangedEventId())
-        }
+        handleTrackSelectionResult(
+            kind = TrackKind.AUDIO,
+            result = result,
+            selectionSessionId = selectionSessionId,
+            previousTrackId = previousTrackId,
+            currentTrackId = { delegate.currentAudioTrack?.id },
+        )
         emitCurrentErrorIfChanged()
         return result
     }
@@ -382,10 +469,16 @@ internal class EventingVideoPlayerState(
 
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
         ensureNotDisposed()
+        val selectionSessionId = mediaSessionId
+        val previousTrackId = delegate.currentSubtitleTrack?.id
         val result = delegate.selectSubtitleTrack(track)
-        if (result.isApplied) {
-            emitTrackChanged(TrackKind.SUBTITLE, result.trackChangedEventId())
-        }
+        handleTrackSelectionResult(
+            kind = TrackKind.SUBTITLE,
+            result = result,
+            selectionSessionId = selectionSessionId,
+            previousTrackId = previousTrackId,
+            currentTrackId = { delegate.currentSubtitleTrack?.id },
+        )
         emitCurrentErrorIfChanged()
         return result
     }
@@ -409,10 +502,11 @@ internal class EventingVideoPlayerState(
 
     override fun removeSubtitleTrack(trackId: String) {
         ensureNotDisposed()
+        val selectionSessionId = mediaSessionId
         val selectedTrack = delegate.currentSubtitleTrack
         delegate.removeSubtitleTrack(trackId)
         if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
-            emitTrackChanged(TrackKind.SUBTITLE, null)
+            emitTrackChanged(TrackKind.SUBTITLE, null, selectionSessionId)
         }
     }
 
@@ -422,10 +516,11 @@ internal class EventingVideoPlayerState(
 
     override fun clearExternalSubtitleTracks() {
         ensureNotDisposed()
+        val selectionSessionId = mediaSessionId
         val selectedTrack = delegate.currentSubtitleTrack
         delegate.clearExternalSubtitleTracks()
         if (selectedTrack?.isExternal == true) {
-            emitTrackChanged(TrackKind.SUBTITLE, null)
+            emitTrackChanged(TrackKind.SUBTITLE, null, selectionSessionId)
         }
     }
 
@@ -447,16 +542,23 @@ internal class EventingVideoPlayerState(
 
     override fun disableSubtitles(): TrackSelectionResult {
         ensureNotDisposed()
+        val selectionSessionId = mediaSessionId
+        val previousTrackId = delegate.currentSubtitleTrack?.id
         val result = delegate.disableSubtitles()
-        if (result.isApplied) {
-            emitTrackChanged(TrackKind.SUBTITLE, null)
-        }
+        handleTrackSelectionResult(
+            kind = TrackKind.SUBTITLE,
+            result = result,
+            selectionSessionId = selectionSessionId,
+            previousTrackId = previousTrackId,
+            currentTrackId = { delegate.currentSubtitleTrack?.id },
+        )
         emitCurrentErrorIfChanged()
         return result
     }
 
     override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
         ensureNotDisposed()
+        val selectionSessionId = mediaSessionId
         val result = delegate.selectHlsQuality(variantId)
         if (result.isApplied) {
             emitTrackChanged(
@@ -467,6 +569,7 @@ internal class EventingVideoPlayerState(
                         is HlsQualitySelectionResult.Selected -> result.quality.id
                         else -> variantId
                     },
+                expectedSessionId = selectionSessionId,
             )
         }
         emitCurrentErrorIfChanged()
@@ -489,7 +592,7 @@ internal class EventingVideoPlayerState(
     override fun clearError() {
         ensureNotDisposed()
         delegate.clearError()
-        lastError = null
+        eventStateLock.withLock { lastError = null }
     }
 
     override fun clearCache(): CacheClearResult {
@@ -498,23 +601,31 @@ internal class EventingVideoPlayerState(
     }
 
     override fun dispose() {
-        if (isDisposed) return
+        val delegateHasMedia = delegate.hasMedia
+        val disposalState =
+            eventStateLock.withLock {
+                if (isDisposed) return@withLock null
+                isDisposed = true
+                val releasedSessionId = sourceSessionToReleaseUnsafe(delegateHasMedia)
+                val jobs = clearActiveSourceUnsafe()
+                playbackEndedCallback = null
+                restartCallback = null
+                releasedSessionId to jobs
+            } ?: return
 
-        val releasedSessionId = sourceSessionToRelease()
-        isDisposed = true
+        disposalState.second.forEach { it.cancel() }
         detachDelegateCallbacks()
         delegate.dispose()
-        clearActiveSource()
-        if (releasedSessionId != 0L) {
-            emitSourceReleased(releasedSessionId)
+        if (disposalState.first != 0L) {
+            emitSourceReleased(disposalState.first)
         }
-        playbackEndedCallback = null
-        restartCallback = null
         eventScope.cancel()
     }
 
     private fun ensureNotDisposed() {
-        check(!isDisposed) { "VideoPlayerState has been disposed and cannot be reused." }
+        eventStateLock.withLock {
+            check(!isDisposed) { DISPOSED_MESSAGE }
+        }
     }
 
     private fun detachDelegateCallbacks() {
@@ -527,21 +638,26 @@ internal class EventingVideoPlayerState(
     }
 
     private fun beginSource(uri: String): Long {
-        val previousSessionId = sourceSessionToRelease()
-        if (previousSessionId != 0L) {
-            emitSourceReleased(previousSessionId)
+        val delegateHasMedia = delegate.hasMedia
+        return eventStateLock.withLock {
+            check(!isDisposed) { DISPOSED_MESSAGE }
+            val previousSessionId = sourceSessionToReleaseUnsafe(delegateHasMedia)
+            if (previousSessionId != 0L) {
+                emitSourceReleased(previousSessionId)
+            }
+            clearActiveSourceUnsafe().forEach { it.cancel() }
+            lastError = null
+            val sessionId = eventDispatcher.nextMediaSessionId()
+            activeSourceSessionId = sessionId
+            emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+                PlaybackEvent.SourcePreparing(
+                    mediaSessionId = eventSessionId,
+                    sampledAtMs = sampledAtMs,
+                    uri = uri,
+                )
+            }
+            sessionId
         }
-        clearActiveSource()
-        lastError = null
-        val sessionId = eventDispatcher.nextMediaSessionId()
-        emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
-            PlaybackEvent.SourcePreparing(
-                mediaSessionId = eventSessionId,
-                sampledAtMs = sampledAtMs,
-                uri = uri,
-            )
-        }
-        return sessionId
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -554,55 +670,93 @@ internal class EventingVideoPlayerState(
         try {
             open()
         } catch (e: UnsupportedOperationException) {
-            failSourceOpen(e)
+            failSourceOpen(sessionId, e)
         } catch (e: IllegalArgumentException) {
-            failSourceOpen(e)
+            failSourceOpen(sessionId, e)
         } catch (e: IllegalStateException) {
-            failSourceOpen(e)
+            failSourceOpen(sessionId, e)
         } catch (e: RuntimeException) {
-            failSourceOpen(e)
+            failSourceOpen(sessionId, e)
         }
-        activeSourceSessionId = sessionId
-        scheduleSourceLoaded()
+        scheduleSourceLoaded(sessionId)
         emitCurrentErrorIfChanged()
     }
 
-    private fun scheduleSourceLoaded() {
-        val sessionId = mediaSessionId
-        sourceLoadedJob?.cancel()
-        sourceLoadedJob =
-            eventScope.launch {
-                repeat(SOURCE_LOAD_POLL_ATTEMPTS) {
-                    delay(SOURCE_LOAD_POLL_INTERVAL)
-                    if (sessionId != mediaSessionId || sourceLoadedSessionId == sessionId) return@launch
-                    emitCurrentErrorIfChanged()
-                    if (delegate.hasMedia && (!delegate.isLoading || delegate.duration > Duration.ZERO)) {
-                        sourceLoadedSessionId = sessionId
-                        emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
-                            PlaybackEvent.SourceLoaded(
-                                mediaSessionId = eventSessionId,
-                                sampledAtMs = sampledAtMs,
-                                duration = delegate.duration,
-                            )
+    private fun scheduleSourceLoaded(sessionId: Long) {
+        lateinit var newJob: Job
+        val shouldStart =
+            eventStateLock.withLock {
+                if (isDisposed || activeSourceSessionId != sessionId || mediaSessionId != sessionId) {
+                    false
+                } else {
+                    sourceLoadedJob?.cancel()
+                    newJob =
+                        eventScope.launch(start = CoroutineStart.LAZY) {
+                            while (isActiveSourceSession(sessionId)) {
+                                val pollInterval =
+                                    eventStateLock.withLock {
+                                        if (sourceLoadedSessionId == sessionId) {
+                                            SOURCE_MONITOR_POLL_INTERVAL
+                                        } else {
+                                            SOURCE_LOAD_POLL_INTERVAL
+                                        }
+                                    }
+                                delay(pollInterval)
+                                if (!isActiveSourceSession(sessionId)) return@launch
+                                emitCurrentErrorIfChanged()
+                                val sourceIsReady =
+                                    delegate.hasMedia &&
+                                        (!delegate.isLoading || delegate.duration > Duration.ZERO)
+                                if (sourceIsReady) {
+                                    val loadedDuration = delegate.duration
+                                    eventStateLock.withLock {
+                                        if (isDisposed ||
+                                            activeSourceSessionId != sessionId ||
+                                            sourceLoadedSessionId == sessionId
+                                        ) {
+                                            return@withLock
+                                        }
+                                        sourceLoadedSessionId = sessionId
+                                        emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+                                            PlaybackEvent.SourceLoaded(
+                                                mediaSessionId = eventSessionId,
+                                                sampledAtMs = sampledAtMs,
+                                                duration = loadedDuration,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        return@launch
-                    }
+                    sourceLoadedJob = newJob
+                    true
                 }
             }
+        if (shouldStart) newJob.start()
     }
 
-    private fun failSourceOpen(exception: RuntimeException): Nothing {
-        clearActiveSource()
-        emitOpenFailed(exception)
+    private fun failSourceOpen(
+        sessionId: Long,
+        exception: RuntimeException,
+    ): Nothing {
+        eventStateLock.withLock {
+            if (!isDisposed && activeSourceSessionId == sessionId) {
+                clearActiveSourceUnsafe().forEach { it.cancel() }
+                emitOpenFailed(sessionId, exception)
+            }
+        }
         throw exception
     }
 
-    private fun emitOpenFailed(exception: RuntimeException) {
+    private fun emitOpenFailed(
+        sessionId: Long,
+        exception: RuntimeException,
+    ) {
         val error = exception.toVideoPlayerError()
         lastError = error
-        emitPlaybackEvent { sessionId, sampledAtMs ->
+        emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
             PlaybackEvent.Error(
-                mediaSessionId = sessionId,
+                mediaSessionId = eventSessionId,
                 sampledAtMs = sampledAtMs,
                 error = error,
             )
@@ -626,38 +780,118 @@ internal class EventingVideoPlayerState(
         }
 
     private fun emitCurrentErrorIfChanged() {
+        val errorSessionId = mediaSessionId
         val currentError = delegate.error
-        if (currentError == null || currentError == lastError) return
-        lastError = currentError
-        emitPlaybackEvent { sessionId, sampledAtMs ->
-            PlaybackEvent.Error(
-                mediaSessionId = sessionId,
-                sampledAtMs = sampledAtMs,
-                error = currentError,
-            )
+        eventStateLock.withLock {
+            if (isDisposed || mediaSessionId != errorSessionId) return@withLock
+            if (currentError == null) {
+                lastError = null
+                return@withLock
+            }
+            if (currentError == lastError) return@withLock
+            lastError = currentError
+            emitPlaybackEventForSession(errorSessionId) { sessionId, sampledAtMs ->
+                PlaybackEvent.Error(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    error = currentError,
+                )
+            }
         }
     }
 
     private fun emitTrackChanged(
         kind: TrackKind,
         trackId: String?,
+        expectedSessionId: Long? = null,
     ) {
-        emitPlaybackEvent { sessionId, sampledAtMs ->
-            PlaybackEvent.TrackChanged(
-                mediaSessionId = sessionId,
-                sampledAtMs = sampledAtMs,
-                kind = kind,
-                trackId = trackId,
-            )
+        eventStateLock.withLock {
+            if (isDisposed || (expectedSessionId != null && mediaSessionId != expectedSessionId)) return@withLock
+            val eventSessionId = expectedSessionId ?: mediaSessionId
+            emitPlaybackEventForSession(eventSessionId) { sessionId, sampledAtMs ->
+                PlaybackEvent.TrackChanged(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    kind = kind,
+                    trackId = trackId,
+                )
+            }
         }
     }
 
-    private fun emitPlaybackRestarted() {
-        emitPlaybackEvent { sessionId, sampledAtMs ->
-            PlaybackEvent.PlaybackRestarted(
-                mediaSessionId = sessionId,
-                sampledAtMs = sampledAtMs,
-            )
+    private fun handleTrackSelectionResult(
+        kind: TrackKind,
+        result: TrackSelectionResult,
+        selectionSessionId: Long,
+        previousTrackId: String?,
+        currentTrackId: () -> String?,
+    ) {
+        val previousSelectionJob =
+            eventStateLock.withLock {
+                when (kind) {
+                    TrackKind.AUDIO -> audioTrackSelectionJob.also { audioTrackSelectionJob = null }
+                    TrackKind.SUBTITLE -> subtitleTrackSelectionJob.also { subtitleTrackSelectionJob = null }
+                    TrackKind.HLS_QUALITY -> null
+                }
+            }
+        previousSelectionJob?.cancel()
+
+        if (!result.isApplied) return
+        val requestedTrackId = result.trackChangedEventId()
+        if (requestedTrackId == previousTrackId) return
+        if (currentTrackId() == requestedTrackId) {
+            emitTrackChanged(kind, requestedTrackId, selectionSessionId)
+            return
+        }
+
+        lateinit var newJob: Job
+        val shouldStart =
+            eventStateLock.withLock {
+                if (isDisposed || mediaSessionId != selectionSessionId) {
+                    false
+                } else {
+                    newJob =
+                        eventScope.launch(start = CoroutineStart.LAZY) {
+                            repeat(TRACK_SELECTION_CONFIRMATION_POLL_ATTEMPTS) {
+                                delay(TRACK_SELECTION_CONFIRMATION_POLL_INTERVAL)
+                                if (!isCurrentEventSession(selectionSessionId)) return@launch
+                                emitCurrentErrorIfChanged()
+                                if (currentTrackId() == requestedTrackId) {
+                                    eventStateLock.withLock {
+                                        if (isDisposed || mediaSessionId != selectionSessionId) return@withLock
+                                        emitPlaybackEventForSession(selectionSessionId) { sessionId, sampledAtMs ->
+                                            PlaybackEvent.TrackChanged(
+                                                mediaSessionId = sessionId,
+                                                sampledAtMs = sampledAtMs,
+                                                kind = kind,
+                                                trackId = requestedTrackId,
+                                            )
+                                        }
+                                    }
+                                    return@launch
+                                }
+                            }
+                        }
+                    when (kind) {
+                        TrackKind.AUDIO -> audioTrackSelectionJob = newJob
+                        TrackKind.SUBTITLE -> subtitleTrackSelectionJob = newJob
+                        TrackKind.HLS_QUALITY -> Unit
+                    }
+                    true
+                }
+            }
+        if (shouldStart) newJob.start()
+    }
+
+    private fun emitPlaybackRestarted(sessionId: Long) {
+        eventStateLock.withLock {
+            if (isDisposed || activeSourceSessionId != sessionId) return@withLock
+            emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+                PlaybackEvent.PlaybackRestarted(
+                    mediaSessionId = eventSessionId,
+                    sampledAtMs = sampledAtMs,
+                )
+            }
         }
     }
 
@@ -682,18 +916,51 @@ internal class EventingVideoPlayerState(
         }
     }
 
-    private fun sourceSessionToRelease(): Long =
+    private fun sourceSessionToRelease(): Long {
+        val delegateHasMedia = delegate.hasMedia
+        return eventStateLock.withLock { sourceSessionToReleaseUnsafe(delegateHasMedia) }
+    }
+
+    private fun sourceSessionToReleaseUnsafe(delegateHasMedia: Boolean): Long =
         activeSourceSessionId.takeIf { it != 0L }
-            ?: mediaSessionId.takeIf { delegate.hasMedia }
+            ?: mediaSessionId.takeIf { delegateHasMedia }
             ?: 0L
 
     private fun canSeekCurrentSource(): Boolean =
         sourceSessionToRelease() != 0L && (delegate.hasMedia || delegate.duration > Duration.ZERO)
 
-    private fun clearActiveSource() {
-        sourceLoadedJob?.cancel()
+    private fun isActiveSourceSession(sessionId: Long): Boolean =
+        eventStateLock.withLock {
+            !isDisposed && activeSourceSessionId == sessionId && mediaSessionId == sessionId
+        }
+
+    private fun isCurrentEventSession(sessionId: Long): Boolean =
+        eventStateLock.withLock { !isDisposed && mediaSessionId == sessionId }
+
+    private fun cancelSeekCompletionJob() {
+        val previousSeekCompletionJob =
+            eventStateLock.withLock {
+                seekCompletionJob.also { seekCompletionJob = null }
+            }
+        previousSeekCompletionJob?.cancel()
+    }
+
+    /** Must be called with eventStateLock held. Returns jobs that were detached from the active source. */
+    private fun clearActiveSourceUnsafe(): List<Job> {
+        val jobs =
+            listOfNotNull(
+                sourceLoadedJob,
+                seekCompletionJob,
+                audioTrackSelectionJob,
+                subtitleTrackSelectionJob,
+            )
+        sourceLoadedJob = null
+        seekCompletionJob = null
+        audioTrackSelectionJob = null
+        subtitleTrackSelectionJob = null
         activeSourceSessionId = 0L
         sourceLoadedSessionId = 0L
+        return jobs
     }
 
     private fun emitPlaybackEvent(factory: (Long, Long) -> PlaybackEvent) {
@@ -708,7 +975,13 @@ internal class EventingVideoPlayerState(
     }
 
     companion object {
-        private const val SOURCE_LOAD_POLL_ATTEMPTS = 100
+        private const val DISPOSED_MESSAGE = "VideoPlayerState has been disposed"
         private val SOURCE_LOAD_POLL_INTERVAL = 50.milliseconds
+        private val SOURCE_MONITOR_POLL_INTERVAL = 250.milliseconds
+        private const val SEEK_COMPLETION_POLL_ATTEMPTS = 250
+        private val SEEK_COMPLETION_POLL_INTERVAL = 20.milliseconds
+        private val SEEK_COMPLETION_TOLERANCE = 250.milliseconds
+        private const val TRACK_SELECTION_CONFIRMATION_POLL_ATTEMPTS = 250
+        private val TRACK_SELECTION_CONFIRMATION_POLL_INTERVAL = 20.milliseconds
     }
 }

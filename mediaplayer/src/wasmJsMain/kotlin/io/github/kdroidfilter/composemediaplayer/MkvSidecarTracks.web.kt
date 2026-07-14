@@ -6,20 +6,22 @@ import kotlinx.browser.document
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.w3c.dom.HTMLScriptElement
 import org.w3c.dom.HTMLVideoElement
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.js
+import kotlin.time.Duration.Companion.seconds
 
 private const val MATROSKA_SUBTITLES_SCRIPT_ID = "compose-media-player-matroska-subtitles"
-private const val MATROSKA_SUBTITLES_SCRIPT_URL =
-    "https://cdn.jsdelivr.net/npm/matroska-subtitles@3.x/dist/matroska-subtitles.min.js"
 private const val MKV_TRACK_PROBE_RANGE_HEADER = "bytes=0-65535"
+private val MATROSKA_SCRIPT_LOAD_TIMEOUT = 15.seconds
 
 internal const val MKV_AUDIO_TRACK_ID_PREFIX = "mkv:audio:"
 internal const val MKV_SUBTITLE_TRACK_ID_PREFIX = "mkv:subtitle:"
 
 private var matroskaSubtitlesScriptLoad: CompletableDeferred<Boolean>? = null
+private var matroskaSubtitlesScriptKey: String? = null
 
 internal fun String.isLikelyMkvSource(): Boolean {
     val clean = substringBefore('?').substringBefore('#').lowercase()
@@ -51,7 +53,7 @@ internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
                 if (hasMkvSubtitleTracks(this@configureMkvSidecarTracks)) {
                     scope.launch {
                         if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
-                        ensureMatroskaSubtitlesScriptLoaded()
+                        ensureMatroskaSubtitlesModuleLoaded()
                         ensureAssRendererScriptLoaded()
                     }
                 }
@@ -66,31 +68,48 @@ internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
     )
 }
 
-private suspend fun ensureMatroskaSubtitlesScriptLoaded(): Boolean {
+internal suspend fun ensureMatroskaSubtitlesModuleLoaded(): Boolean {
+    val scriptUrl = WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.trim()
+    if (scriptUrl.isEmpty()) return false
     if (isMatroskaSubtitlesLoaded()) return true
-
-    matroskaSubtitlesScriptLoad?.let { return it.await() }
+    val integrity = WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity.trim()
+    val scriptKey = "$scriptUrl|$integrity"
+    matroskaSubtitlesScriptLoad
+        ?.takeIf { matroskaSubtitlesScriptKey == scriptKey }
+        ?.let { pending ->
+            return withTimeoutOrNull(MATROSKA_SCRIPT_LOAD_TIMEOUT) { pending.await() } == true &&
+                isMatroskaSubtitlesLoaded()
+        }
 
     val deferred = CompletableDeferred<Boolean>()
     matroskaSubtitlesScriptLoad = deferred
+    matroskaSubtitlesScriptKey = scriptKey
 
+    val existingScript = document.getElementById(MATROSKA_SUBTITLES_SCRIPT_ID) as? HTMLScriptElement
     val script =
-        (document.getElementById(MATROSKA_SUBTITLES_SCRIPT_ID) as? HTMLScriptElement)
+        existingScript
+            ?.takeIf { it.getAttribute("data-source-key") == scriptKey }
             ?: (document.createElement("script") as HTMLScriptElement).apply {
+                existingScript?.parentNode?.removeChild(existingScript)
                 id = MATROSKA_SUBTITLES_SCRIPT_ID
-                src = MATROSKA_SUBTITLES_SCRIPT_URL
+                src = scriptUrl
+                setAttribute("data-source-key", scriptKey)
                 setAttribute("async", "true")
+                if (integrity.isNotEmpty()) {
+                    setAttribute("integrity", integrity)
+                    setAttribute("crossorigin", "anonymous")
+                }
             }
 
     if (script.getAttribute("data-loaded") == "true") {
-        deferred.complete(true)
+        deferred.complete(isMatroskaSubtitlesLoaded())
     } else {
         script.addEventListener("load", {
             script.setAttribute("data-loaded", "true")
-            deferred.complete(true)
+            deferred.complete(isMatroskaSubtitlesLoaded())
         })
         script.addEventListener("error", {
-            webVideoLogger.e { "Failed to load $MATROSKA_SUBTITLES_SCRIPT_URL" }
+            webVideoLogger.e { "Failed to load the configured Matroska subtitle parser" }
             deferred.complete(false)
         })
     }
@@ -99,8 +118,14 @@ private suspend fun ensureMatroskaSubtitlesScriptLoaded(): Boolean {
         (document.head ?: document.body)?.appendChild(script)
     }
 
-    val loaded = deferred.await()
-    if (!loaded) matroskaSubtitlesScriptLoad = null
+    val loaded = withTimeoutOrNull(MATROSKA_SCRIPT_LOAD_TIMEOUT) { deferred.await() } == true
+    if (!loaded) {
+        script.parentNode?.removeChild(script)
+        if (matroskaSubtitlesScriptLoad === deferred) {
+            matroskaSubtitlesScriptLoad = null
+            matroskaSubtitlesScriptKey = null
+        }
+    }
     return loaded && isMatroskaSubtitlesLoaded()
 }
 
@@ -482,7 +507,7 @@ internal suspend fun HTMLVideoElement.extractMkvSubtitleTrack(
         cancelMkvSubtitleExtraction()
         return
     }
-    if (!ensureMatroskaSubtitlesScriptLoaded()) return
+    if (!ensureMatroskaSubtitlesModuleLoaded()) return
 
     startMkvSubtitleExtraction(
         video = this,

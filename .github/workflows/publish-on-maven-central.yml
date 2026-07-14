@@ -1,57 +1,99 @@
-name: Publish to Maven Central
+name: Release Maven Artifacts
 
 on:
   push:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
+concurrency:
+  group: maven-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build-natives:
-    uses: ./.github/workflows/build-natives.yml
+  verify:
+    uses: ./.github/workflows/build-test.yml
 
-  publish:
-    needs: build-natives
-    runs-on: macos-latest
-
+  release:
+    needs: verify
+    runs-on: macos-15
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Checkout release tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
 
-      - name: Download all native libraries
-        uses: actions/download-artifact@v8
+      - name: Validate immutable SemVer tag
+        id: release_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ "$GITHUB_REF_NAME" != "v$version" || ! "$version" =~ $semver ]]; then
+            echo "Release tags must use immutable SemVer, for example v1.2.3." >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages:refs/remotes/origin/gh-pages
+            existing_paths="$(git ls-tree -r --name-only origin/gh-pages -- maven/io/github/shusek)"
+            if grep -Fq "/$version/" <<< "$existing_paths"; then
+              echo "Version $version already exists in the GitHub Pages Maven repository." >&2
+              exit 1
+            fi
+          fi
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare the version-preserving GitHub Pages repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          pages_dir="$RUNNER_TEMP/gh-pages"
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add "$pages_dir" origin/gh-pages
+          else
+            git worktree add --detach "$pages_dir"
+            git -C "$pages_dir" checkout --orphan gh-pages
+            git -C "$pages_dir" rm -rf . || true
+          fi
+          mkdir -p "$pages_dir/maven"
+
+      - name: Download verified native libraries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/
-          pattern: native-*
+          pattern: native-*-${{ github.sha }}
           merge-multiple: true
 
-      - name: Verify all natives present
+      - name: Verify complete native payload
+        shell: bash
         run: |
-          EXPECTED=(
-            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-aarch64/libNativeVideoPlayer.dylib"
-            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64/libNativeVideoPlayer.dylib"
-            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-x86-64/libNativeVideoPlayer.so"
-            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-aarch64/libNativeVideoPlayer.so"
-            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-x86-64/NativeVideoPlayer.dll"
-            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-arm64/NativeVideoPlayer.dll"
+          set -euo pipefail
+          expected=(
+            darwin-aarch64/libNativeVideoPlayer.dylib
+            darwin-x86-64/libNativeVideoPlayer.dylib
+            linux-x86-64/libNativeVideoPlayer.so
+            linux-aarch64/libNativeVideoPlayer.so
+            win32-x86-64/NativeVideoPlayer.dll
+            win32-arm64/NativeVideoPlayer.dll
           )
-          MISSING=0
-          for f in "${EXPECTED[@]}"; do
-            if [ -f "$f" ]; then
-              echo "OK: $f ($(wc -c < "$f") bytes)"
-            else
-              echo "MISSING: $f" >&2
-              MISSING=1
-            fi
+          for relative_path in "${expected[@]}"; do
+            path="mediaplayer/src/jvmMain/resources/composemediaplayer/native/$relative_path"
+            test -s "$path" || { echo "Missing native payload: $path" >&2; exit 1; }
           done
-          if [ "$MISSING" = "1" ]; then exit 1; fi
 
-      - name: Set up JDK
-        uses: actions/setup-java@v5
+      - name: Set up JDK 25
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
           java-version: '25'
-          distribution: 'temurin'
+          distribution: temurin
+          cache: gradle
 
       - name: Install Android NDK
+        shell: bash
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
@@ -60,11 +102,118 @@ jobs:
           fi
           "$SDKMANAGER" "ndk;29.0.14206865"
 
-      - name: Publish to Maven Central
-        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache
+      - name: Build and stage the GitHub Pages release
+        shell: bash
+        run: >-
+          ./gradlew :mediaplayer:publishAllPublicationsToGithubPagesRepository
+          :mediaplayer:verifyJvm25Bytecode
+          -PpublicationVersion="$RELEASE_VERSION"
+          -PgithubPagesMavenRepository="$RUNNER_TEMP/gh-pages/maven"
+          -PcomposeMediaPlayer.skipNativeBuild=true
+          --no-configuration-cache --no-daemon
+        env:
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNINGINMEMORYKEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNINGKEYID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNINGPASSWORD }}
+
+      - name: Rebuild complete GitHub Pages Maven metadata
+        shell: bash
+        run: >-
+          python3 .github/scripts/rebuild_maven_metadata.py
+          "$RUNNER_TEMP/gh-pages/maven"
+
+      - name: Verify staged Maven coordinates
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository="$RUNNER_TEMP/gh-pages/maven"
+          test -d "$repository/io/github/shusek"
+          if find "$repository" -type f -path '*/dev/*' -print -quit | grep -q .; then
+            echo "Mutable dev paths were found in release staging." >&2
+            exit 1
+          fi
+          if grep -R -n -E '<version>dev</version>|"version"[[:space:]]*:[[:space:]]*"dev"' "$repository"; then
+            echo "Mutable dev coordinates were found in release staging." >&2
+            exit 1
+          fi
+          found=0
+          while IFS= read -r pom; do
+            grep -Fq "<version>$RELEASE_VERSION</version>" "$pom" || {
+              echo "Unexpected project version in $pom" >&2
+              exit 1
+            }
+            found=$((found + 1))
+          done < <(find "$repository/io/github/shusek" -path "*/$RELEASE_VERSION/*.pom" -type f)
+          test "$found" -gt 0 || { echo "No staged POMs for $RELEASE_VERSION" >&2; exit 1; }
+
+          pages_dir="$RUNNER_TEMP/gh-pages"
+          manifest="$RUNNER_TEMP/maven-release-files.txt"
+          archive="$GITHUB_WORKSPACE/build/maven-release-$RELEASE_VERSION.tar.gz"
+          git -C "$pages_dir" add maven
+          git -C "$pages_dir" diff --cached --name-only --diff-filter=ACMRT -- maven |
+            grep -Ev '/maven-metadata\.xml(\.(md5|sha1|sha256|sha512))?$' > "$manifest"
+          test -s "$manifest" || { echo "No Maven repository changes were staged." >&2; exit 1; }
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          tar -C "$pages_dir" -czf "$archive" -T "$manifest"
+
+      - name: Upload immutable Maven release delta
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: maven-release-${{ steps.release_version.outputs.version }}-${{ github.sha }}
+          path: build/maven-release-${{ steps.release_version.outputs.version }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the verified release to Maven Central
+        shell: bash
+        run: >-
+          ./gradlew :mediaplayer:publishAndReleaseToMavenCentral
+          -PpublicationVersion="$RELEASE_VERSION"
+          -PcomposeMediaPlayer.skipNativeBuild=true
+          --no-configuration-cache --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVENCENTRALUSERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVENCENTRALPASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNINGINMEMORYKEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNINGKEYID }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNINGPASSWORD }}
+
+      - name: Publish staged repository to GitHub Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          pages_dir="$RUNNER_TEMP/gh-pages"
+          touch "$pages_dir/.nojekyll"
+          git -C "$pages_dir" add .nojekyll maven
+          if git -C "$pages_dir" diff --cached --quiet; then
+            echo "The release produced no GitHub Pages repository changes." >&2
+            exit 1
+          fi
+          git -C "$pages_dir" commit -m "Publish Maven release v$RELEASE_VERSION"
+          for attempt in 1 2 3; do
+            if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+              git fetch origin gh-pages:refs/remotes/origin/gh-pages
+              if ! git -C "$pages_dir" rebase -Xours origin/gh-pages; then
+                git -C "$pages_dir" rebase --abort
+                echo "GitHub Pages changed with a conflicting Maven delta." >&2
+                break
+              fi
+            fi
+            python3 .github/scripts/rebuild_maven_metadata.py "$pages_dir/maven"
+            git -C "$pages_dir" add maven
+            git -C "$pages_dir" commit --amend --no-edit
+            if ! find "$pages_dir/maven/io/github/shusek" \
+              -path "*/$RELEASE_VERSION/*.pom" -type f -print -quit | grep -q .; then
+              echo "Rebase lost the immutable Maven payload for $RELEASE_VERSION." >&2
+              break
+            fi
+            if git -C "$pages_dir" push origin HEAD:gh-pages; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "GitHub Pages push failed. Recover from the immutable Maven release delta artifact; do not republish Maven Central." >&2
+          exit 1

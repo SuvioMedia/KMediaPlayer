@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -8,6 +9,7 @@ import org.junit.Assume
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -167,6 +169,43 @@ class WindowsVideoPlayerStateTest {
             // Test clearing the error
             playerState.clearError()
             assertNull(playerState.error)
+        }
+    }
+
+    @Test
+    fun disposeIsIdempotentAndRejectsCommands() {
+        assumeWindows()
+        val playerState = WindowsVideoPlayerState()
+
+        playerState.dispose()
+        playerState.dispose()
+
+        val commands =
+            listOf<() -> Unit>(
+                { playerState.openUri("ignored.mp4") },
+                { playerState.play() },
+                { playerState.pause() },
+                { playerState.stop() },
+                { playerState.releaseSource() },
+                { playerState.seekToProgress(0.5f) },
+                { playerState.seekStart(0.5f) },
+                { playerState.restart() },
+                { playerState.clearError() },
+                { playerState.clearCache() },
+                { playerState.canPlaySource("ignored.mp4") },
+                { playerState.selectAudioTrack("missing") },
+                { playerState.selectSubtitleTrack("missing") },
+                { playerState.selectHlsQuality(null) },
+                { playerState.toggleFullscreen() },
+                { playerState.volume = 0.5f },
+                { playerState.loop = true },
+                { playerState.projection = VideoProjectionSettings() },
+                { playerState.onPlaybackEnded = null },
+            )
+
+        commands.forEach { command ->
+            val error = assertFailsWith<IllegalStateException> { command() }
+            assertEquals("VideoPlayerState has been disposed", error.message)
         }
     }
 }

@@ -7,6 +7,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+@Suppress("FunctionNaming")
 class PlayerCapabilitiesTest {
     @Test
     fun `canPlaySource rejects unsupported schemes and container formats`() {
@@ -23,7 +24,10 @@ class PlayerCapabilitiesTest {
 
         assertTrue(capabilities.canPlaySource("blob:https://example.test/video"))
         assertTrue(capabilities.canPlaySource("data:video/mp4;base64,AAA"))
-        assertTrue(capabilities.canPlaySource("https://example.test/live.m3u8"))
+        assertEquals(
+            capabilities.supportsHls,
+            capabilities.canPlaySource("https://example.test/live.m3u8"),
+        )
         assertTrue(capabilities.canPlaySource("file:///movie.mkv"))
     }
 

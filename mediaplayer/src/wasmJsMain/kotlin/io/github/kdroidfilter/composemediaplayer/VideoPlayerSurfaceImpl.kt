@@ -46,6 +46,29 @@ private const val DIAGNOSTICS_BITRATE_INDEX = 7
 private const val DIAGNOSTICS_NOTES_INDEX = 8
 private val playbackReadyEvents = setOf("seeked", "playing", "canplay", "canplaythrough")
 
+private data class ManagedVideoEventListener(
+    val event: String,
+    val handler: (Event) -> Unit,
+)
+
+private val managedVideoEventListeners =
+    mutableMapOf<HTMLVideoElement, MutableList<ManagedVideoEventListener>>()
+
+internal fun HTMLVideoElement.addManagedEventListener(
+    event: String,
+    handler: (Event) -> Unit,
+) {
+    addEventListener(event, handler)
+    managedVideoEventListeners.getOrPut(this) { mutableListOf() } +=
+        ManagedVideoEventListener(event = event, handler = handler)
+}
+
+private fun HTMLVideoElement.removeManagedEventListeners() {
+    managedVideoEventListeners.remove(this).orEmpty().forEach { registration ->
+        removeEventListener(registration.event, registration.handler)
+    }
+}
+
 // Cache mime type mappings for better performance
 internal val EXTENSION_TO_MIME_TYPE =
     mapOf(
@@ -107,63 +130,33 @@ internal fun HTMLVideoElement.safeSetCurrentTime(time: Double) {
 
 internal fun HTMLVideoElement.addEventListeners(
     scope: CoroutineScope,
-    playerState: VideoPlayerState,
-    events: Map<String, (Event) -> Unit>,
+    playerState: DefaultVideoPlayerState,
+    events: Map<String, (Event, Long) -> Unit>,
     loadingEvents: Map<String, Boolean> = emptyMap(),
-    shouldHandleEvent: () -> Boolean = { true },
+    captureMediaSessionId: () -> Long?,
+    shouldHandleEvent: (Long) -> Boolean,
 ) {
     events.forEach { (event, handler) ->
-        addEventListener(event) { domEvent ->
-            if (shouldHandleEvent()) handler(domEvent)
+        addManagedEventListener(event) { domEvent ->
+            val callbackMediaSessionId = captureMediaSessionId() ?: return@addManagedEventListener
+            if (shouldHandleEvent(callbackMediaSessionId)) handler(domEvent, callbackMediaSessionId)
         }
     }
 
-    loadingEvents.forEach { (event, isLoading) ->
-        if (playerState is DefaultVideoPlayerState) {
-            addEventListener(event) {
-                if (!shouldHandleEvent()) return@addEventListener
-                scope.launch {
-                    if (!shouldHandleEvent()) return@launch
-                    if (event == "seeking") {
-                        playerState.seekingState = isLoading
-                        playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                            PlaybackEvent.SeekStarted(
-                                mediaSessionId = sessionId,
-                                sampledAtMs = sampledAtMs,
-                                target = playerState.preciseCurrentTime,
-                            )
-                        }
-                    }
-                    playerState._isLoading = isLoading
-                    if (!isLoading) {
-                        if (event in playbackReadyEvents) {
-                            playerState.seekingState = false
-                            if (event == "seeked") {
-                                playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                                    PlaybackEvent.SeekCompleted(
-                                        mediaSessionId = sessionId,
-                                        sampledAtMs = sampledAtMs,
-                                        position = playerState.preciseCurrentTime,
-                                    )
-                                }
-                            } else {
-                                playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                                    PlaybackEvent.Recovered(
-                                        mediaSessionId = sessionId,
-                                        sampledAtMs = sampledAtMs,
-                                    )
-                                }
-                            }
-                        }
-                        playerState.clearError()
-                    } else if (event == "waiting") {
-                        playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                            PlaybackEvent.Stalled(
-                                mediaSessionId = sessionId,
-                                sampledAtMs = sampledAtMs,
-                            )
-                        }
-                    }
+    loadingEvents.forEach { (event, _) ->
+        addManagedEventListener(event) {
+            val callbackMediaSessionId = captureMediaSessionId() ?: return@addManagedEventListener
+            if (!shouldHandleEvent(callbackMediaSessionId)) return@addManagedEventListener
+            scope.launch {
+                if (!shouldHandleEvent(callbackMediaSessionId)) return@launch
+                when (event) {
+                    "seeking" -> playerState.onWebSeeking()
+                    "seeked" -> playerState.onWebSeeked()
+                    "waiting" -> playerState.onWebWaiting()
+                }
+                if (event in playbackReadyEvents) {
+                    playerState.onWebPlaybackReady()
+                    playerState.clearError()
                 }
             }
         }
@@ -433,11 +426,7 @@ internal fun createVideoElement(useCors: Boolean = true): HTMLVideoElement =
         style.setProperty("backface-visibility", "hidden", "important")
         style.display = "block"
 
-        if (useCors) {
-            crossOrigin = "anonymous"
-        } else {
-            removeAttribute("crossorigin")
-        }
+        configureCrossOrigin(useCors = useCors, useCredentials = false)
 
         setAttribute("playsinline", "")
         setAttribute("webkit-playsinline", "")
@@ -446,8 +435,26 @@ internal fun createVideoElement(useCors: Boolean = true): HTMLVideoElement =
         setAttribute("x-webkit-airplay", "allow")
     }
 
+/** Keeps the element's CORS mode aligned with the active retry mode and source credentials. */
+internal fun HTMLVideoElement.configureCrossOrigin(
+    useCors: Boolean,
+    useCredentials: Boolean,
+) {
+    when {
+        useCredentials -> crossOrigin = "use-credentials"
+        useCors -> crossOrigin = "anonymous"
+        else -> removeAttribute("crossorigin")
+    }
+}
+
 internal fun HTMLVideoElement.startPlaybackQualityDiagnostics(playerState: DefaultVideoPlayerState) {
+    val listenerMediaSessionId = playerState.mediaSessionId
     startPlaybackQualityDiagnostics(this) { row ->
+        if (!playerState.isCurrentMediaSession(listenerMediaSessionId) ||
+            !matchesCurrentMediaSession(listenerMediaSessionId, playerState.sourceUri)
+        ) {
+            return@startPlaybackQualityDiagnostics
+        }
         val diagnostics = parsePlaybackDiagnosticsRow(row)
         playerState.updateDiagnostics(diagnostics)
         playerState.renderingInfo.notes = diagnostics.notes
@@ -565,6 +572,27 @@ private fun markMediaSession(
 internal fun HTMLVideoElement.matchesCurrentSource(sourceUri: String?): Boolean =
     matchesCurrentSource(video = this, sourceUri = sourceUri)
 
+internal fun HTMLVideoElement.matchesCurrentMediaSession(
+    mediaSessionId: Long,
+    sourceUri: String?,
+): Boolean =
+    hasMediaSessionMarker(video = this, mediaSessionId = mediaSessionId, sourceUri = sourceUri) &&
+        matchesCurrentSource(sourceUri)
+
+@Suppress("UNUSED_PARAMETER")
+private fun hasMediaSessionMarker(
+    video: HTMLVideoElement,
+    mediaSessionId: Long,
+    sourceUri: String?,
+): Boolean =
+    js(
+        """
+        !!sourceUri &&
+            video.__composeMediaPlayerMediaSessionId === String(mediaSessionId) &&
+            video.__composeMediaPlayerSourceUri === sourceUri
+        """,
+    )
+
 @Suppress("UNUSED_PARAMETER")
 private fun matchesCurrentSource(
     video: HTMLVideoElement,
@@ -608,10 +636,35 @@ private fun stopPlaybackQualityDiagnostics(video: HTMLVideoElement): Unit =
         """,
     )
 
+internal fun HTMLVideoElement.cleanupWebVideoElement() {
+    stopPlaybackQualityDiagnostics()
+    safePause()
+    destroyHlsController()
+    destroyMkvSidecarTracks()
+    removeManagedEventListeners()
+    removeWebMediaTrackListeners(this)
+    clearVideoSource(this)
+}
+
+@Suppress("UNUSED_PARAMETER")
+private fun clearVideoSource(video: HTMLVideoElement): Unit =
+    js(
+        """
+        {
+            try { video.srcObject = null; } catch (_) {}
+            video.removeAttribute("src");
+            while (video.firstChild) video.removeChild(video.firstChild);
+            video.__composeMediaPlayerMediaSessionId = null;
+            video.__composeMediaPlayerSourceUri = "";
+            try { video.load(); } catch (_) {}
+        }
+        """,
+    )
+
 @Suppress("CyclomaticComplexMethod", "LongMethod")
 internal fun setupVideoElement(
     video: HTMLVideoElement,
-    playerState: VideoPlayerState,
+    playerState: DefaultVideoPlayerState,
     scope: CoroutineScope,
     useCors: Boolean = true,
     allowCorsRetry: Boolean = useCors,
@@ -624,14 +677,22 @@ internal fun setupVideoElement(
     playerState.metadata.audioChannels = null
     playerState.metadata.audioSampleRate = null
 
-    val shouldHandleCurrentSource = {
-        playerState !is DefaultVideoPlayerState || video.matchesCurrentSource(playerState.sourceUri)
+    val listenerMediaSessionId = playerState.mediaSessionId
+    val captureMediaSessionId = {
+        listenerMediaSessionId.takeIf {
+            !playerState.isDisposed &&
+                video.matchesCurrentMediaSession(listenerMediaSessionId, playerState.sourceUri)
+        }
+    }
+    val shouldHandleCurrentSource = { mediaSessionId: Long ->
+        playerState.isCurrentMediaSession(mediaSessionId) &&
+            video.matchesCurrentMediaSession(mediaSessionId, playerState.sourceUri)
     }
 
     val syncMediaTracks = {
-        if (playerState is DefaultVideoPlayerState && shouldHandleCurrentSource()) {
+        captureMediaSessionId()?.let { callbackMediaSessionId ->
             scope.launch {
-                if (!shouldHandleCurrentSource()) return@launch
+                if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@launch
                 playerState.syncWebMediaTracks(video)
                 video.applySelectedAudioTrack(playerState.currentAudioTrack)
                 video.applySelectedSubtitleTrack(
@@ -639,58 +700,56 @@ internal fun setupVideoElement(
                 )
             }
         }
+        Unit
     }
 
-    if (playerState is DefaultVideoPlayerState) {
-        video.startPlaybackQualityDiagnostics(playerState)
+    video.startPlaybackQualityDiagnostics(playerState)
 
-        video.addEventListeners(
-            scope = scope,
-            playerState = playerState,
-            events =
-                mapOf(
-                    "timeupdate" to { event -> playerState.onTimeUpdateEvent(event) },
-                    "ended" to {
-                        if (shouldHandleCurrentSource()) {
-                            scope.launch {
-                                if (!shouldHandleCurrentSource()) return@launch
-                                if (playerState.loop) {
-                                    video.safeSetCurrentTime(0.0)
-                                    video.safePlay()
-                                    playerState.sliderPos = 0f
-                                    playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                                        PlaybackEvent.PlaybackRestarted(
-                                            mediaSessionId = sessionId,
-                                            sampledAtMs = sampledAtMs,
-                                        )
-                                    }
-                                    playerState.onRestart?.invoke()
-                                } else {
-                                    playerState.pause()
-                                    playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                                        PlaybackEvent.PlaybackEnded(
-                                            mediaSessionId = sessionId,
-                                            sampledAtMs = sampledAtMs,
-                                        )
-                                    }
-                                    playerState.onPlaybackEnded?.invoke()
-                                }
+    video.addEventListeners(
+        scope = scope,
+        playerState = playerState,
+        events =
+            mapOf(
+                "timeupdate" to { event, _ -> playerState.onTimeUpdateEvent(event) },
+                "ended" to { _, callbackMediaSessionId ->
+                    scope.launch {
+                        if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@launch
+                        if (playerState.loop) {
+                            video.safeSetCurrentTime(0.0)
+                            video.safePlay()
+                            playerState.sliderPos = 0f
+                            playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
+                                PlaybackEvent.PlaybackRestarted(
+                                    mediaSessionId = sessionId,
+                                    sampledAtMs = sampledAtMs,
+                                )
                             }
+                            playerState.onRestart?.invoke()
+                        } else {
+                            playerState.pause()
+                            playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
+                                PlaybackEvent.PlaybackEnded(
+                                    mediaSessionId = sessionId,
+                                    sampledAtMs = sampledAtMs,
+                                )
+                            }
+                            playerState.onPlaybackEnded?.invoke()
                         }
-                    },
-                ),
-            loadingEvents =
-                mapOf(
-                    "seeking" to true,
-                    "waiting" to true,
-                    "playing" to false,
-                    "seeked" to false,
-                    "canplaythrough" to false,
-                    "canplay" to false,
-                ),
-            shouldHandleEvent = shouldHandleCurrentSource,
-        )
-    }
+                    }
+                },
+            ),
+        loadingEvents =
+            mapOf(
+                "seeking" to true,
+                "waiting" to true,
+                "playing" to false,
+                "seeked" to false,
+                "canplaythrough" to false,
+                "canplay" to false,
+            ),
+        captureMediaSessionId = captureMediaSessionId,
+        shouldHandleEvent = shouldHandleCurrentSource,
+    )
 
     val conditionalLoadingEvents =
         mapOf(
@@ -699,24 +758,18 @@ internal fun setupVideoElement(
         )
 
     conditionalLoadingEvents.forEach { (event, condition) ->
-        video.addEventListener(event) {
-            if (!shouldHandleCurrentSource()) return@addEventListener
+        video.addManagedEventListener(event) {
+            val callbackMediaSessionId = captureMediaSessionId() ?: return@addManagedEventListener
             scope.launch {
-                if (!shouldHandleCurrentSource()) return@launch
-                if (playerState is DefaultVideoPlayerState && condition()) {
+                if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@launch
+                if (condition()) {
                     mediaLoaded = true
                     playerState._isLoading = false
                     playerState.seekingState = false
                     playerState.updateBufferedRanges(readBufferedRangeRows(video))
                     playerState.clearError()
                     if (event == "loadedmetadata") {
-                        playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                            PlaybackEvent.SourceLoaded(
-                                mediaSessionId = sessionId,
-                                sampledAtMs = sampledAtMs,
-                                duration = video.duration.secondsAsDuration(),
-                            )
-                        }
+                        playerState.onWebSourceLoaded(video.duration.secondsAsDuration())
                     }
                 }
 
@@ -731,40 +784,35 @@ internal fun setupVideoElement(
     }
 
     listOf("loadeddata", "canplay", "canplaythrough").forEach { event ->
-        video.addEventListener(event) {
-            if (!shouldHandleCurrentSource()) return@addEventListener
+        video.addManagedEventListener(event) {
+            val callbackMediaSessionId = captureMediaSessionId() ?: return@addManagedEventListener
+            if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@addManagedEventListener
             mediaLoaded = true
-            if (playerState is DefaultVideoPlayerState) {
-                playerState.updateBufferedRanges(readBufferedRangeRows(video))
-                playerState.clearError()
-            }
+            playerState.updateBufferedRanges(readBufferedRangeRows(video))
+            playerState.clearError()
             syncMediaTracks()
         }
     }
-    video.addEventListener("playing") {
-        if (!shouldHandleCurrentSource()) return@addEventListener
+    video.addManagedEventListener("playing") {
+        val callbackMediaSessionId = captureMediaSessionId() ?: return@addManagedEventListener
+        if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@addManagedEventListener
         mediaLoaded = true
-        if (playerState is DefaultVideoPlayerState) {
-            playerState.seekingState = false
-            playerState.updateBufferedRanges(readBufferedRangeRows(video))
-            playerState.clearError()
-        }
+        playerState.seekingState = false
+        playerState.updateBufferedRanges(readBufferedRangeRows(video))
+        playerState.clearError()
     }
-    video.addEventListener("progress") {
-        if (!shouldHandleCurrentSource()) return@addEventListener
-        if (playerState is DefaultVideoPlayerState) {
-            playerState.updateBufferedRanges(readBufferedRangeRows(video))
-        }
+    video.addManagedEventListener("progress") {
+        val callbackMediaSessionId = captureMediaSessionId() ?: return@addManagedEventListener
+        if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@addManagedEventListener
+        playerState.updateBufferedRanges(readBufferedRangeRows(video))
     }
     addWebMediaTrackListeners(video, syncMediaTracks)
 
-    video.addEventListener("error") {
-        if (!shouldHandleCurrentSource()) return@addEventListener
+    video.addManagedEventListener("error") {
+        val callbackMediaSessionId = captureMediaSessionId() ?: return@addManagedEventListener
         scope.launch {
-            if (!shouldHandleCurrentSource()) return@launch
-            if (playerState is DefaultVideoPlayerState) {
-                playerState._isLoading = false
-            }
+            if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@launch
+            playerState._isLoading = false
             corsErrorDetected = true
 
             val error = video.error
@@ -778,13 +826,12 @@ internal fun setupVideoElement(
                 ) {
                     playerState.clearError()
                 } else {
-                    if (playerState is DefaultVideoPlayerState) {
-                        delay(500.milliseconds)
-                        if (mediaLoaded || video.readyState > 0 || video.duration > 0.0) {
-                            playerState.clearError()
-                        } else {
-                            playerState.setError(video.toVideoPlayerError(error, useCors, allowCorsRetry))
-                        }
+                    delay(500.milliseconds)
+                    if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@launch
+                    if (mediaLoaded || video.readyState > 0 || video.duration > 0.0) {
+                        playerState.clearError()
+                    } else {
+                        playerState.setError(video.toVideoPlayerError(error, useCors, allowCorsRetry))
                     }
                 }
             }
@@ -845,14 +892,15 @@ private fun HTMLVideoElement.toVideoPlayerError(
     }
 
 internal fun HTMLVideoElement.setupMetadataListener(
-    playerState: VideoPlayerState,
+    playerState: DefaultVideoPlayerState,
     onVideoRatioChange: (Float) -> Unit,
 ) {
-    addEventListener("loadedmetadata") {
-        if (playerState is DefaultVideoPlayerState &&
-            !matchesCurrentSource(playerState.sourceUri)
+    val listenerMediaSessionId = playerState.mediaSessionId
+    addManagedEventListener("loadedmetadata") {
+        if (!playerState.isCurrentMediaSession(listenerMediaSessionId) ||
+            !matchesCurrentMediaSession(listenerMediaSessionId, playerState.sourceUri)
         ) {
-            return@addEventListener
+            return@addManagedEventListener
         }
         val width = videoWidth
         val height = videoHeight
@@ -891,22 +939,20 @@ internal fun HTMLVideoElement.setupMetadataListener(
                 }
             }
 
-            if (playerState is DefaultVideoPlayerState) {
-                playerState.updateAspectRatio(aspectRatio)
-                playerState.updateAutoDetectedProjectionFromMetadata()
-                playerState.renderingInfo.update(
-                    container = playerState.metadata.mimeType,
-                    videoDecoder = "Browser native decoder (${width}x$height)",
-                    videoRenderer =
-                        if (playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)) {
-                            "HTMLVideoElement -> WebGL projection canvas"
-                        } else {
-                            "HTMLVideoElement + browser compositor"
-                        },
-                    audioRenderer = "Browser native audio",
-                    videoProjection = playerState.projection.renderingInfoLabel(),
-                )
-            }
+            playerState.updateAspectRatio(aspectRatio)
+            playerState.updateAutoDetectedProjectionFromMetadata()
+            playerState.renderingInfo.update(
+                container = playerState.metadata.mimeType,
+                videoDecoder = "Browser native decoder (${width}x$height)",
+                videoRenderer =
+                    if (playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)) {
+                        "HTMLVideoElement -> WebGL projection canvas"
+                    } else {
+                        "HTMLVideoElement + browser compositor"
+                    },
+                audioRenderer = "Browser native audio",
+                videoProjection = playerState.projection.renderingInfoLabel(),
+            )
         }
     }
 }
@@ -974,11 +1020,7 @@ internal fun VideoPlayerEffects(
                     val sourceKind = sourceUri.toWebMediaSourceKind()
                     val requestHeaders = playerState.requestHeaders
                     val useCredentials = requestHeaders.usesBrowserCredentials()
-                    if (useCredentials) {
-                        video.crossOrigin = "use-credentials"
-                    } else {
-                        video.removeAttribute("crossorigin")
-                    }
+                    video.configureCrossOrigin(useCors = useCors, useCredentials = useCredentials)
                     video.markMediaSession(mediaSessionId, sourceUri)
                     playerState.clearError()
                     if (sourceKind.allowsHlsController) {
@@ -1041,12 +1083,17 @@ internal fun VideoPlayerEffects(
         if (webPlayerState != null && video != null) {
             webPlayerState.preciseCurrentTimeProvider = { video.currentTime.secondsAsDuration() }
             webPlayerState.durationProvider = { video.duration.secondsAsDuration() }
+            webPlayerState.resetPlaybackCallback = {
+                video.safePause()
+                video.safeSetCurrentTime(0.0)
+            }
         }
 
         onDispose {
             if (webPlayerState != null) {
                 webPlayerState.preciseCurrentTimeProvider = null
                 webPlayerState.durationProvider = null
+                webPlayerState.resetPlaybackCallback = null
             }
         }
     }
@@ -1135,14 +1182,44 @@ internal fun VideoPlayerEffects(
 
         val playListener: (Event) -> Unit = playListener@{
             val webPlayerState = playerState as? DefaultVideoPlayerState
-            if (webPlayerState != null && !video.matchesCurrentSource(webPlayerState.sourceUri)) return@playListener
-            if (!playerState.isPlaying) scope.launch { playerState.play() }
+            if (webPlayerState == null) {
+                if (!playerState.isPlaying) scope.launch { playerState.play() }
+            } else {
+                val callbackMediaSessionId = webPlayerState.mediaSessionId
+                if (!video.matchesCurrentMediaSession(callbackMediaSessionId, webPlayerState.sourceUri)) {
+                    return@playListener
+                }
+                if (playerState.isPlaying) return@playListener
+                scope.launch {
+                    if (!webPlayerState.isCurrentMediaSession(callbackMediaSessionId) ||
+                        !video.matchesCurrentMediaSession(callbackMediaSessionId, webPlayerState.sourceUri)
+                    ) {
+                        return@launch
+                    }
+                    playerState.play()
+                }
+            }
         }
 
         val pauseListener: (Event) -> Unit = pauseListener@{
             val webPlayerState = playerState as? DefaultVideoPlayerState
-            if (webPlayerState != null && !video.matchesCurrentSource(webPlayerState.sourceUri)) return@pauseListener
-            if (playerState.isPlaying) scope.launch { playerState.pause() }
+            if (webPlayerState == null) {
+                if (playerState.isPlaying) scope.launch { playerState.pause() }
+            } else {
+                val callbackMediaSessionId = webPlayerState.mediaSessionId
+                if (!video.matchesCurrentMediaSession(callbackMediaSessionId, webPlayerState.sourceUri)) {
+                    return@pauseListener
+                }
+                if (!playerState.isPlaying) return@pauseListener
+                scope.launch {
+                    if (!webPlayerState.isCurrentMediaSession(callbackMediaSessionId) ||
+                        !video.matchesCurrentMediaSession(callbackMediaSessionId, webPlayerState.sourceUri)
+                    ) {
+                        return@launch
+                    }
+                    playerState.pause()
+                }
+            }
         }
 
         video.addEventListener("play", playListener)
@@ -1212,11 +1289,13 @@ internal fun VideoMediaTrackEffects(
 
     LaunchedEffect(
         videoElement,
+        playerState.mediaSessionId,
         playerState.subtitlesEnabled,
         playerState.currentSubtitleTrack?.id,
     ) {
         val video = videoElement ?: return@LaunchedEffect
-        if (!video.matchesCurrentSource(playerState.sourceUri)) return@LaunchedEffect
+        val mediaSessionId = playerState.mediaSessionId
+        if (!video.matchesCurrentMediaSession(mediaSessionId, playerState.sourceUri)) return@LaunchedEffect
         val track = if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null
         if (track?.id?.startsWith(MKV_SUBTITLE_TRACK_ID_PREFIX) == true) {
             video.extractMkvSubtitleTrack(track, playerState, scope)
@@ -1230,31 +1309,44 @@ internal fun VideoMediaTrackEffects(
         val refreshMkvSubtitleAfterSeek: (Event) -> Unit = {
             val track = if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null
             if (track?.id?.startsWith(MKV_SUBTITLE_TRACK_ID_PREFIX) == true) {
-                scope.launch {
-                    if (!video.matchesCurrentSource(playerState.sourceUri)) return@launch
-                    video.extractMkvSubtitleTrack(track, playerState, scope)
+                val callbackMediaSessionId = playerState.mediaSessionId
+                if (video.matchesCurrentMediaSession(callbackMediaSessionId, playerState.sourceUri)) {
+                    scope.launch {
+                        if (!playerState.isCurrentMediaSession(callbackMediaSessionId) ||
+                            !video.matchesCurrentMediaSession(callbackMediaSessionId, playerState.sourceUri)
+                        ) {
+                            return@launch
+                        }
+                        video.extractMkvSubtitleTrack(track, playerState, scope)
+                    }
                 }
             }
         }
 
         playerState.applyAudioTrackCallback = { track ->
-            if (video.matchesCurrentSource(playerState.sourceUri)) {
+            val callbackMediaSessionId = playerState.mediaSessionId
+            if (video.matchesCurrentMediaSession(callbackMediaSessionId, playerState.sourceUri)) {
                 video.applySelectedAudioTrack(track)
                 playerState.syncWebMediaTracks(video)
             }
         }
         playerState.applySubtitleTrackCallback = { track ->
-            if (video.matchesCurrentSource(playerState.sourceUri)) {
+            val callbackMediaSessionId = playerState.mediaSessionId
+            if (video.matchesCurrentMediaSession(callbackMediaSessionId, playerState.sourceUri)) {
                 video.applySelectedSubtitleTrack(track)
                 scope.launch {
-                    if (!video.matchesCurrentSource(playerState.sourceUri)) return@launch
+                    if (!playerState.isCurrentMediaSession(callbackMediaSessionId) ||
+                        !video.matchesCurrentMediaSession(callbackMediaSessionId, playerState.sourceUri)
+                    ) {
+                        return@launch
+                    }
                     video.extractMkvSubtitleTrack(track, playerState, scope)
                 }
                 playerState.syncWebMediaTracks(video)
             }
         }
 
-        if (video.matchesCurrentSource(playerState.sourceUri)) {
+        if (video.matchesCurrentMediaSession(playerState.mediaSessionId, playerState.sourceUri)) {
             playerState.syncWebMediaTracks(video)
             video.applySelectedAudioTrack(playerState.currentAudioTrack)
             video.applySelectedSubtitleTrack(

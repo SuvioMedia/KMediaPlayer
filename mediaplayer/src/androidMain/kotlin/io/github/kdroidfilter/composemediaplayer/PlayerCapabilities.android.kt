@@ -14,6 +14,8 @@ internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
         supportedUriSchemes = ANDROID_SUPPORTED_URI_SCHEMES,
     )
 
+internal actual fun platformSupportsHls(): Boolean = true
+
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
     platformPlayerCapabilities().canPlaySource(source)
 

@@ -32,14 +32,16 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
 ) {
-    if (playerState is DefaultVideoPlayerState) {
-        when (val delegate = playerState.delegate) {
-            is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-            is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-            is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-            else -> throw IllegalArgumentException("Unsupported player state type")
-        }
-    } else {
-        throw IllegalArgumentException("Unsupported player state type")
+    when (playerState) {
+        is PreviewableVideoPlayerState ->
+            VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
+        is DefaultVideoPlayerState ->
+            when (val delegate = playerState.delegate) {
+                is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, contentScale, overlay)
+                is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier, contentScale, overlay)
+                is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier, contentScale, overlay)
+                else -> error("Unsupported JVM player delegate: ${delegate::class}")
+            }
+        else -> error("Unsupported video player state: ${playerState::class}")
     }
 }

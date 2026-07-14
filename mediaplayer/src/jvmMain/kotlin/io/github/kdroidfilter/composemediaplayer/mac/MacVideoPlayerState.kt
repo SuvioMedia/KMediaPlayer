@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.DesktopPlayerLifecycle
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.EXTERNAL_FFMPEG_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
@@ -44,6 +45,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.normalizeUnixLocalFileUriForPlayback
 import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.requestHeadersJsonObjectString
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
@@ -66,6 +68,7 @@ import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -135,6 +138,9 @@ class MacVideoPlayerState(
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
 
+    /** Serializes native-player replacement/destruction with AWT surface attachment. */
+    private val nativeInstanceLock = Any()
+
     // Serial dispatcher for frame processing — ensures only one frame is processed at a time
     private val frameDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
@@ -150,9 +156,12 @@ class MacVideoPlayerState(
     private var surfaceHeight = 0
     private val isResizing = AtomicBoolean(false)
     private var resizeJob: Job? = null
+    private val resizeRequestToken = AtomicLong(0L)
 
     // Background worker threads and jobs
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val cleanupScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val lifecycle = DesktopPlayerLifecycle(ioScope, cleanupScope)
     private var playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var frameUpdateJob: Job? = null
     private var positionUpdateJob: Job? = null
@@ -176,6 +185,7 @@ class MacVideoPlayerState(
         private set
     private val libAssLock = Any()
     private val libAssSelectionToken = AtomicLong(0L)
+    private val completeLibAssExtractionJob = AtomicReference<Job?>(null)
     private var libAssRendererHandle: Long = 0L
     private var libAssSubtitleKey: String? = null
     private var libAssSubtitleSource: String? = null
@@ -266,11 +276,11 @@ class MacVideoPlayerState(
     override var volume: Float
         get() = _volumeState.value
         set(value) {
+            lifecycle.ensureUsable()
             val newValue = value.coerceIn(0f, 1f)
             if (_volumeState.value != newValue) {
                 _volumeState.value = newValue
-                // Launch a coroutine to apply the volume if the native player is available.
-                ioScope.launch {
+                lifecycle.launchSourceBoundControlOperation {
                     applyVolume()
                 }
             }
@@ -281,11 +291,11 @@ class MacVideoPlayerState(
     override var playbackSpeed: Float
         get() = _playbackSpeedState.value
         set(value) {
+            lifecycle.ensureUsable()
             val newValue = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             if (_playbackSpeedState.value != newValue) {
                 _playbackSpeedState.value = newValue
-                // Launch a coroutine to apply the playback speed if the native player is available.
-                ioScope.launch {
+                lifecycle.launchSourceBoundControlOperation {
                     applyPlaybackSpeed()
                 }
             }
@@ -309,7 +319,7 @@ class MacVideoPlayerState(
             System.setProperty("compose.interop.blending", "true")
         }
         macLogger.d { "Initializing video player" }
-        ioScope.launch {
+        lifecycle.launchControlOperation {
             initPlayer()
             startUIUpdateJob()
         }
@@ -334,35 +344,44 @@ class MacVideoPlayerState(
     }
 
     /** Initializes the native video player on the IO thread. */
-    private suspend fun initPlayer() =
-        ioScope
-            .launch {
-                macLogger.d { "initPlayer() - Creating native player" }
-                try {
-                    val ptr = MacNativeBridge.nCreatePlayer()
-                    if (ptr != 0L) {
-                        if (!playerPtrAtomic.compareAndSet(0L, ptr)) {
-                            MacNativeBridge.nDisposePlayer(ptr)
-                            return@launch
-                        }
-                        nativeBackendUsesLibVlc = false
-                        macLogger.d { "Native player created successfully" }
-                        applyVolume()
-                        applyPlaybackSpeed()
-                    } else {
-                        macLogger.e { "Error: Failed to create native player" }
-                        withContext(Dispatchers.Main) {
-                            error = VideoPlayerError.UnknownError("Failed to create native player")
+    private suspend fun initPlayer() {
+        macLogger.d { "initPlayer() - Creating native player" }
+        try {
+            val ptr = MacNativeBridge.nCreatePlayer()
+            if (ptr != 0L) {
+                val coroutineIsActive = currentCoroutineContext().isActive
+                val installed =
+                    synchronized(nativeInstanceLock) {
+                        if (lifecycle.isDisposed || !coroutineIsActive) {
+                            false
+                        } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
+                            nativeBackendUsesLibVlc = false
+                            true
+                        } else {
+                            false
                         }
                     }
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    macLogger.e { "Exception in initPlayer: ${e.message}" }
-                    withContext(Dispatchers.Main) {
-                        error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
-                    }
+                if (!installed) {
+                    MacNativeBridge.nDisposePlayer(ptr)
+                    return
                 }
-            }.join()
+                macLogger.d { "Native player created successfully" }
+                applyVolume()
+                applyPlaybackSpeed()
+            } else {
+                macLogger.e { "Error: Failed to create native player" }
+                withContext(Dispatchers.Main) {
+                    error = VideoPlayerError.UnknownError("Failed to create native player")
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            macLogger.e { "Exception in initPlayer: ${e.message}" }
+            withContext(Dispatchers.Main) {
+                error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
+            }
+        }
+    }
 
     /** Updates the frame rate information from the native player. */
     private suspend fun updateFrameRateInfo() {
@@ -403,39 +422,36 @@ class MacVideoPlayerState(
         }
     }
 
-    private fun normalizeLocalFileUriForPlayback(uri: String): String =
-        when {
-            uri.startsWith("file://localhost/") -> "/" + uri.removePrefix("file://localhost/")
-            uri.startsWith("file://") -> uri.removePrefix("file://")
-            uri.startsWith("file:") -> uri.removePrefix("file:")
-            else -> uri
-        }
+    private fun normalizeLocalFileUriForPlayback(uri: String): String = normalizeUnixLocalFileUriForPlayback(uri)
 
     override fun openUri(
         uri: String,
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
+        lifecycle.ensureUsable()
         macLogger.d { "openUri() - Opening URI: $uri, initializePlayerState: $initializePlayerState" }
 
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
-        lastUri = uri
-        lastRequestHeaders = sanitizedHeaders
-
-        // Check if this is a local file that doesn't exist
-        if (!checkExistsIfLocalFile(uri)) {
-            macLogger.e { "File does not exist: $uri" }
-            setPlayerError(VideoPlayerError.SourceError("File not found: $uri"))
-            return
-        }
-
-        // Update UI state first
-        ioScope.launch {
+        lifecycle.launchSourceOperation(
+            onScheduled = {
+                lastUri = uri
+                lastRequestHeaders = sanitizedHeaders
+                invalidateLibAssSelection()
+            },
+        ) { generation ->
+            if (!checkExistsIfLocalFile(uri)) {
+                macLogger.e { "File does not exist: $uri" }
+                setPlayerError(VideoPlayerError.SourceError("File not found: $uri"))
+                return@launchSourceOperation
+            }
+            lifecycle.ensureCurrentSource(generation)
             withContext(Dispatchers.Main) {
                 isLoading = true
                 error = null // Clear any previous errors only if we got this far
                 playbackSpeed = 1.0f
             }
+            lifecycle.ensureCurrentSource(generation)
 
             // Ensure heavy operations are performed in the background
             try {
@@ -443,6 +459,7 @@ class MacVideoPlayerState(
                 if (hasMedia || ffmpegHlsFallback != null) {
                     cleanupCurrentPlayback()
                 }
+                lifecycle.ensureCurrentSource(generation)
 
                 clearFfmpegFallbackTrackState()
                 ffmpegHlsSourceUri = null
@@ -454,6 +471,7 @@ class MacVideoPlayerState(
                 // Ensure player is initialized in the background
                 val libVlcBackend = resolveLibVlcBackendForUri(uri)
                 ensurePlayerInitialized(libVlcBackend)
+                lifecycle.ensureCurrentSource(generation)
 
                 val playableUri =
                     if (libVlcBackend != null) {
@@ -464,6 +482,7 @@ class MacVideoPlayerState(
 
                 // Open URI on IO thread and capture result
                 val result = openMediaUri(playableUri, sanitizedHeaders)
+                lifecycle.ensureCurrentSource(generation)
 
                 if (result) {
                     // Launch parallel background tasks
@@ -471,6 +490,7 @@ class MacVideoPlayerState(
                         launch { updateFrameRateInfo() }
                         launch { updateMetadata() }
                     }
+                    lifecycle.ensureCurrentSource(generation)
                     if (libVlcBackend != null) {
                         refreshLibVlcRuntimeTracksIfNeeded()
                     }
@@ -483,11 +503,13 @@ class MacVideoPlayerState(
 
                     // Update UI state on main thread
                     withContext(Dispatchers.Main) {
+                        if (!lifecycle.isCurrentSource(generation)) return@withContext
                         hasMedia = true
                         isLoading = false
                         // Set isPlaying based on the initializePlayerState parameter
                         isPlaying = initializePlayerState == InitialPlayerState.PLAY
                     }
+                    lifecycle.ensureCurrentSource(generation)
 
                     // Start background processes for frame updates
                     if (shouldUseNativeVideoSurface()) {
@@ -542,6 +564,7 @@ class MacVideoPlayerState(
         file: PlatformFile,
         initializePlayerState: InitialPlayerState,
     ) {
+        lifecycle.ensureUsable()
         openUri(file.file.path, initializePlayerState)
     }
 
@@ -549,19 +572,17 @@ class MacVideoPlayerState(
     private suspend fun cleanupCurrentPlayback() {
         macLogger.d { "cleanupCurrentPlayback() - Cleaning up current playback" }
         pauseInBackground()
-        stopFrameUpdates()
-        stopPositionUpdates()
-        stopBufferingCheck()
+        cancelAndResetPlayerScope(recreate = true)
+        invalidateLibAssSelection()
 
-        val ptrToDispose =
-            withContext(frameDispatcher) {
-                playerPtrAtomic.getAndSet(0L)
-            }
-
-        // Release resources outside of the mutex lock
-        if (ptrToDispose != 0L) {
+        withContext(frameDispatcher) {
             try {
-                MacNativeBridge.nDisposePlayer(ptrToDispose)
+                synchronized(nativeInstanceLock) {
+                    val ptrToDispose = playerPtrAtomic.getAndSet(0L)
+                    if (ptrToDispose != 0L) {
+                        MacNativeBridge.nDisposePlayer(ptrToDispose)
+                    }
+                }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 macLogger.e { "Error disposing player: ${e.message}" }
@@ -575,6 +596,18 @@ class MacVideoPlayerState(
         clearLibAssSubtitleRenderer()
         closeFfmpegHlsFallback()
         clearLibVlcTrackState()
+    }
+
+    private suspend fun cancelAndResetPlayerScope(recreate: Boolean) {
+        playerScope.coroutineContext[Job]?.cancelAndJoin()
+        frameUpdateJob = null
+        positionUpdateJob = null
+        bufferingCheckJob = null
+        seekInProgress = false
+        targetSeekTime = null
+        if (recreate && !lifecycle.isDisposed) {
+            playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        }
     }
 
     private fun setNativeHdrMetalPreferred(preferred: Boolean) {
@@ -598,13 +631,15 @@ class MacVideoPlayerState(
     }
 
     internal fun shouldUseHdrMetalSurface(): Boolean =
-        hdrMetalRequested &&
+        !lifecycle.isDisposed &&
+            hdrMetalRequested &&
             hdrMetalSurfaceAllowed &&
             !nativeBackendUsesLibVlc &&
             !usesLibAssSubtitleOverlay
 
     internal fun shouldUseLibVlcNativeSurface(): Boolean =
-        libVlcNativeSurfaceRequested &&
+        !lifecycle.isDisposed &&
+            libVlcNativeSurfaceRequested &&
             libVlcBackendActive &&
             libVlcRenderMode == MacLibVlcRenderMode.NATIVE_VIEW &&
             nativeBackendUsesLibVlc
@@ -615,52 +650,60 @@ class MacVideoPlayerState(
         component: Component,
         contentScaleMode: Int,
     ): Boolean {
-        if (!shouldUseHdrMetalSurface()) return false
-        val ptr = playerPtr
-        if (ptr == 0L || !MacNativeBridge.nIsHdrMetalAvailable(ptr)) return false
+        synchronized(nativeInstanceLock) {
+            if (!shouldUseHdrMetalSurface()) return false
+            val ptr = playerPtr
+            if (ptr == 0L || !MacNativeBridge.nIsHdrMetalAvailable(ptr)) return false
 
-        return runCatching {
-            MacNativeBridge.nAttachHdrMetalView(ptr, component).also { attached ->
-                if (attached) {
-                    MacNativeBridge.nSetHdrMetalContentScaleMode(ptr, contentScaleMode)
+            return runCatching {
+                MacNativeBridge.nAttachHdrMetalView(ptr, component).also { attached ->
+                    if (attached) {
+                        MacNativeBridge.nSetHdrMetalContentScaleMode(ptr, contentScaleMode)
+                    }
                 }
+            }.getOrElse { e ->
+                macLogger.e { "Failed to attach HDR Metal surface: ${e.message}" }
+                false
             }
-        }.getOrElse { e ->
-            macLogger.e { "Failed to attach HDR Metal surface: ${e.message}" }
-            false
         }
     }
 
     internal fun detachHdrMetalComponent(component: Component) {
-        val ptr = playerPtr
-        if (ptr == 0L) return
-        runCatching {
-            MacNativeBridge.nDetachHdrMetalView(ptr, component)
-        }.onFailure { e ->
-            macLogger.e { "Failed to detach HDR Metal surface: ${e.message}" }
+        synchronized(nativeInstanceLock) {
+            val ptr = playerPtr
+            if (ptr == 0L) return
+            runCatching {
+                MacNativeBridge.nDetachHdrMetalView(ptr, component)
+            }.onFailure { e ->
+                macLogger.e { "Failed to detach HDR Metal surface: ${e.message}" }
+            }
         }
     }
 
     internal fun attachLibVlcNativeComponent(component: Component): Boolean {
-        if (!shouldUseLibVlcNativeSurface()) return false
-        val ptr = playerPtr
-        if (ptr == 0L) return false
+        synchronized(nativeInstanceLock) {
+            if (!shouldUseLibVlcNativeSurface()) return false
+            val ptr = playerPtr
+            if (ptr == 0L) return false
 
-        return runCatching {
-            MacNativeBridge.nAttachLibVlcNativeView(ptr, component)
-        }.getOrElse { e ->
-            macLogger.e { "Failed to attach libVLC native surface: ${e.message}" }
-            false
+            return runCatching {
+                MacNativeBridge.nAttachLibVlcNativeView(ptr, component)
+            }.getOrElse { e ->
+                macLogger.e { "Failed to attach libVLC native surface: ${e.message}" }
+                false
+            }
         }
     }
 
     internal fun detachLibVlcNativeComponent(component: Component) {
-        val ptr = playerPtr
-        if (ptr == 0L) return
-        runCatching {
-            MacNativeBridge.nDetachLibVlcNativeView(ptr, component)
-        }.onFailure { e ->
-            macLogger.e { "Failed to detach libVLC native surface: ${e.message}" }
+        synchronized(nativeInstanceLock) {
+            val ptr = playerPtr
+            if (ptr == 0L) return
+            runCatching {
+                MacNativeBridge.nDetachLibVlcNativeView(ptr, component)
+            }.onFailure { e ->
+                macLogger.e { "Failed to detach libVLC native surface: ${e.message}" }
+            }
         }
     }
 
@@ -965,6 +1008,11 @@ class MacVideoPlayerState(
 
     private fun isCurrentLibAssSelection(selectionToken: Long): Boolean = libAssSelectionToken.get() == selectionToken
 
+    private fun invalidateLibAssSelection(): Long {
+        completeLibAssExtractionJob.getAndSet(null)?.cancel()
+        return libAssSelectionToken.incrementAndGet()
+    }
+
     private fun libAssSubtitleSourceLabel(
         track: SubtitleTrack,
         streamIndex: Int?,
@@ -983,8 +1031,6 @@ class MacVideoPlayerState(
         val sourceLabel = libAssSubtitleSourceLabel(track, streamIndex)
         withContext(Dispatchers.Main) {
             if (!isCurrentLibAssSelection(selectionToken)) return@withContext
-            currentSubtitleTrack = track
-            subtitlesEnabled = true
             usesLibAssSubtitleOverlay = false
             libAssSubtitleSource = sourceLabel
             renderingInfo.subtitleRenderer = "libass dynamic overlay (preparing)"
@@ -1018,6 +1064,7 @@ class MacVideoPlayerState(
         track: SubtitleTrack,
         streamIndex: Int?,
         selectionToken: Long,
+        sourceGeneration: Long,
     ): Boolean {
         val embeddedSourceUri =
             if (track.isEmbedded) {
@@ -1052,8 +1099,15 @@ class MacVideoPlayerState(
                 }
             }
 
-        if (!isCurrentLibAssSelection(selectionToken)) return false
-        val configured = installLibAssSubtitleData(track, streamIndex, subtitleData, selectionToken)
+        if (!lifecycle.isCurrentSource(sourceGeneration) || !isCurrentLibAssSelection(selectionToken)) return false
+        val configured =
+            installLibAssSubtitleData(
+                track = track,
+                streamIndex = streamIndex,
+                subtitleData = subtitleData,
+                selectionToken = selectionToken,
+                sourceGeneration = sourceGeneration,
+            )
         if (configured &&
             subtitleData.isPartial &&
             track.isEmbedded &&
@@ -1066,6 +1120,7 @@ class MacVideoPlayerState(
                 sourceUri = embeddedSourceUri,
                 requestHeaders = lastRequestHeaders,
                 selectionToken = selectionToken,
+                sourceGeneration = sourceGeneration,
             )
         }
         return configured
@@ -1076,6 +1131,7 @@ class MacVideoPlayerState(
         streamIndex: Int?,
         subtitleData: MacAssSubtitleData,
         selectionToken: Long,
+        sourceGeneration: Long,
     ): Boolean {
         if (subtitleData.content.isBlank()) {
             throw UnsupportedOperationException("The selected subtitle track could not be loaded or is empty.")
@@ -1095,7 +1151,9 @@ class MacVideoPlayerState(
         val key = "${track.id}|${track.src}|${streamIndex ?: -1}|${subtitleData.content.hashCode()}"
         val handle =
             synchronized(libAssLock) {
-                if (!isCurrentLibAssSelection(selectionToken)) return@synchronized 0L
+                if (!lifecycle.isCurrentSource(sourceGeneration) || !isCurrentLibAssSelection(selectionToken)) {
+                    return@synchronized 0L
+                }
                 var currentHandle = libAssRendererHandle
                 if (currentHandle == 0L) {
                     currentHandle = MacNativeBridge.nCreateLibAssRenderer(libAssPath)
@@ -1118,24 +1176,32 @@ class MacVideoPlayerState(
                 currentHandle
             }
 
-        if (handle == 0L || !isCurrentLibAssSelection(selectionToken)) return false
+        if (handle == 0L ||
+            !lifecycle.isCurrentSource(sourceGeneration) ||
+            !isCurrentLibAssSelection(selectionToken)
+        ) {
+            return false
+        }
 
         val sourceLabel = libAssSubtitleSourceLabel(track, streamIndex)
-        withContext(Dispatchers.Main) {
-            if (!isCurrentLibAssSelection(selectionToken)) return@withContext
-            currentSubtitleTrack = track
-            subtitlesEnabled = true
-            usesLibAssSubtitleOverlay = handle != 0L
-            libAssSubtitleSource = sourceLabel
-            renderingInfo.subtitleRenderer =
-                if (subtitleData.isPartial) {
-                    "libass dynamic overlay (fast range, completing)"
-                } else {
-                    "libass dynamic overlay"
+        val stateCommitted =
+            withContext(Dispatchers.Main) {
+                lifecycle.commitCurrentSource(sourceGeneration) {
+                    if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSource
+                    currentSubtitleTrack = track
+                    subtitlesEnabled = true
+                    usesLibAssSubtitleOverlay = handle != 0L
+                    libAssSubtitleSource = sourceLabel
+                    renderingInfo.subtitleRenderer =
+                        if (subtitleData.isPartial) {
+                            "libass dynamic overlay (fast range, completing)"
+                        } else {
+                            "libass dynamic overlay"
+                        }
+                    renderingInfo.subtitleSource = sourceLabel
                 }
-            renderingInfo.subtitleSource = sourceLabel
-        }
-        return handle != 0L
+            }
+        return stateCommitted
     }
 
     private fun startCompleteLibAssSubtitleExtraction(
@@ -1144,19 +1210,35 @@ class MacVideoPlayerState(
         sourceUri: String,
         requestHeaders: Map<String, String>,
         selectionToken: Long,
+        sourceGeneration: Long,
     ) {
-        ioScope.launch {
-            try {
-                val completeData =
-                    withContext(Dispatchers.IO) {
-                        MacEmbeddedAssExtractor.extractComplete(sourceUri, streamIndex, requestHeaders)
+        val extractionJob =
+            lifecycle.launchSourceBoundControlOperation { completeGeneration ->
+                if (completeGeneration != sourceGeneration) return@launchSourceBoundControlOperation
+                if (!isCurrentLibAssSelection(selectionToken)) return@launchSourceBoundControlOperation
+                try {
+                    val completeData =
+                        withContext(Dispatchers.IO) {
+                            MacEmbeddedAssExtractor.extractComplete(sourceUri, streamIndex, requestHeaders)
+                        }
+                    if (!lifecycle.isCurrentSource(sourceGeneration) || !isCurrentLibAssSelection(selectionToken)) {
+                        return@launchSourceBoundControlOperation
                     }
-                if (!isCurrentLibAssSelection(selectionToken)) return@launch
-                installLibAssSubtitleData(track, streamIndex, completeData, selectionToken)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                macLogger.e { "Complete ASS subtitle extraction failed: ${e.message}" }
+                    installLibAssSubtitleData(
+                        track = track,
+                        streamIndex = streamIndex,
+                        subtitleData = completeData,
+                        selectionToken = selectionToken,
+                        sourceGeneration = sourceGeneration,
+                    )
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    macLogger.e { "Complete ASS subtitle extraction failed: ${e.message}" }
+                }
             }
+        completeLibAssExtractionJob.getAndSet(extractionJob)?.cancel()
+        extractionJob.invokeOnCompletion {
+            completeLibAssExtractionJob.compareAndSet(extractionJob, null)
         }
     }
 
@@ -1335,22 +1417,29 @@ class MacVideoPlayerState(
 
         val wantsLibVlc = libVlcBackend != null
         val wantsLibVlcRenderMode = libVlcBackend?.renderMode
-        val existingPtr = playerPtr
-        if (existingPtr != 0L &&
-            (
-                nativeBackendUsesLibVlc != wantsLibVlc ||
-                    (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
-            )
-        ) {
-            val ptrToDispose = playerPtrAtomic.getAndSet(0L)
-            if (ptrToDispose != 0L) {
-                MacNativeBridge.nDisposePlayer(ptrToDispose)
+        val needsBackendReplacement =
+            synchronized(nativeInstanceLock) {
+                playerPtr != 0L &&
+                    (
+                        nativeBackendUsesLibVlc != wantsLibVlc ||
+                            (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
+                    )
             }
-            nativeBackendUsesLibVlc = false
-            nativeBackendLibVlcRenderMode = null
+        if (needsBackendReplacement) {
+            cancelAndResetPlayerScope(recreate = true)
+            withContext(frameDispatcher) {
+                synchronized(nativeInstanceLock) {
+                    val ptrToDispose = playerPtrAtomic.getAndSet(0L)
+                    if (ptrToDispose != 0L) {
+                        MacNativeBridge.nDisposePlayer(ptrToDispose)
+                    }
+                    nativeBackendUsesLibVlc = false
+                    nativeBackendLibVlcRenderMode = null
+                }
+            }
         }
 
-        if (playerPtr == 0L) {
+        if (synchronized(nativeInstanceLock) { playerPtr == 0L }) {
             val ptr =
                 if (libVlcBackend != null) {
                     MacNativeBridge.nCreateLibVlcPlayer(
@@ -1362,12 +1451,22 @@ class MacVideoPlayerState(
                     MacNativeBridge.nCreatePlayer()
                 }
             if (ptr != 0L) {
-                if (!playerPtrAtomic.compareAndSet(0L, ptr)) {
-                    // Another coroutine already initialized the player; discard ours
+                val coroutineIsActive = currentCoroutineContext().isActive
+                val installed =
+                    synchronized(nativeInstanceLock) {
+                        if (lifecycle.isDisposed || !coroutineIsActive) {
+                            false
+                        } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
+                            nativeBackendUsesLibVlc = wantsLibVlc
+                            nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                if (!installed) {
                     MacNativeBridge.nDisposePlayer(ptr)
                 } else {
-                    nativeBackendUsesLibVlc = wantsLibVlc
-                    nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
                     applyVolume()
                     applyPlaybackSpeed()
                 }
@@ -1511,7 +1610,7 @@ class MacVideoPlayerState(
         macLogger.d { "startFrameUpdates() - Starting frame updates" }
         stopFrameUpdates()
         frameUpdateJob =
-            ioScope.launch {
+            playerScope.launch {
                 while (isActive) {
                     ensureActive() // Check if coroutine is still active
                     updateFrameAsync()
@@ -1532,7 +1631,7 @@ class MacVideoPlayerState(
         macLogger.d { "startPositionUpdates() - Starting position updates" }
         stopPositionUpdates()
         positionUpdateJob =
-            ioScope.launch {
+            playerScope.launch {
                 while (isActive) {
                     ensureActive()
                     if (!userDragging) {
@@ -1555,7 +1654,7 @@ class MacVideoPlayerState(
         macLogger.d { "startBufferingCheck() - Starting buffering detection" }
         stopBufferingCheck()
         bufferingCheckJob =
-            ioScope.launch {
+            playerScope.launch {
                 while (isActive) {
                     ensureActive() // Check if coroutine is still active
                     checkBufferingState()
@@ -1784,15 +1883,15 @@ class MacVideoPlayerState(
     }
 
     override fun play() {
+        lifecycle.ensureUsable()
         macLogger.d { "play() - Starting playback" }
-        ioScope.launch {
-            val uri = lastUri
-            if (!hasMedia && uri != null) {
-                // Reload the media using the saved URI
-                openUri(uri, requestHeaders = lastRequestHeaders)
-                // The openUri method will start reading if the opening is successful
-            } else if (hasMedia) {
-                // If the media is already loaded, start playing in the background
+        val uri = lastUri
+        if (!hasMedia && uri != null) {
+            openUri(uri, requestHeaders = lastRequestHeaders)
+            return
+        }
+        lifecycle.launchControlOperation {
+            if (hasMedia) {
                 playInBackground()
             } else {
                 withContext(Dispatchers.Main) {
@@ -1832,8 +1931,9 @@ class MacVideoPlayerState(
     }
 
     override fun pause() {
+        lifecycle.ensureUsable()
         macLogger.d { "pause() - Pausing playback" }
-        ioScope.launch {
+        lifecycle.launchControlOperation {
             pauseInBackground()
         }
     }
@@ -1864,14 +1964,17 @@ class MacVideoPlayerState(
     }
 
     override fun stop() {
+        lifecycle.ensureUsable()
         macLogger.d { "stop() - Stopping playback" }
-        ioScope.launch {
+        lifecycle.launchSourceOperation(
+            onScheduled = { invalidateLibAssSelection() },
+        ) { generation ->
             if (ffmpegHlsFallback != null) {
                 cleanupCurrentPlayback()
             } else {
                 pauseInBackground()
                 if (hasMedia) {
-                    seekToAsync(0f)
+                    seekToAsync(0f, generation)
                 }
             }
             withContext(Dispatchers.Main) {
@@ -1884,11 +1987,29 @@ class MacVideoPlayerState(
         }
     }
 
+    override fun releaseSource() {
+        lifecycle.ensureUsable()
+        lifecycle.launchSourceOperation(
+            onScheduled = {
+                lastUri = null
+                lastRequestHeaders = emptyMap()
+                invalidateLibAssSelection()
+            },
+        ) {
+            cleanupCurrentPlayback()
+            clearFfmpegFallbackTrackState()
+            clearLibVlcTrackState()
+            resetState()
+        }
+    }
+
     override fun seekTo(time: Duration) {
+        lifecycle.ensureUsable()
         macLogger.d { "seekTo() - Seeking to time: $time" }
-        ioScope.launch {
+        lifecycle.launchSourceBoundControlOperation { generation ->
             delay(10.milliseconds) // Small delay to coalesce rapid seek events
-            seekToTimeAsync(time)
+            lifecycle.ensureCurrentSource(generation)
+            seekToTimeAsync(time, generation)
         }
     }
 
@@ -1898,91 +2019,111 @@ class MacVideoPlayerState(
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
+        lifecycle.ensureUsable()
         macLogger.d { "seekTo() - Seeking with slider value: $value" }
-        ioScope.launch {
+        lifecycle.launchSourceBoundControlOperation { generation ->
             delay(10.milliseconds) // Small delay to coalesce rapid seek events
+            lifecycle.ensureCurrentSource(generation)
             val duration = getDurationSafely()
             if (duration <= 0) {
-                withContext(Dispatchers.Main) {
-                    isLoading = false
-                }
-                return@launch
+                commitCurrentSourceOnMain(generation) { isLoading = false }
+                return@launchSourceBoundControlOperation
             }
             seekToSecondsAsync(
                 ((value / VideoPlayerState.SLIDER_SCALE).toDouble() * duration).coerceIn(0.0, duration),
+                generation,
             )
         }
     }
 
     /** Seeks to a position on a background thread. */
-    private suspend fun seekToAsync(value: Float) {
+    private suspend fun seekToAsync(
+        value: Float,
+        sourceGeneration: Long? = null,
+    ) {
         val duration = getDurationSafely()
         if (duration <= 0) {
-            withContext(Dispatchers.Main) {
-                isLoading = false
-            }
+            commitSeekStateOnMain(sourceGeneration) { isLoading = false }
             return
         }
         seekToSecondsAsync(
             ((value / VideoPlayerState.SLIDER_SCALE).toDouble() * duration).coerceIn(0.0, duration),
+            sourceGeneration,
         )
     }
 
-    private suspend fun seekToTimeAsync(time: Duration) {
+    private suspend fun seekToTimeAsync(
+        time: Duration,
+        sourceGeneration: Long? = null,
+    ) {
         val duration = getDurationSafely()
         if (duration <= 0) {
-            withContext(Dispatchers.Main) {
-                isLoading = false
-            }
+            commitSeekStateOnMain(sourceGeneration) { isLoading = false }
             return
         }
-        seekToSecondsAsync(time.toDouble(kotlin.time.DurationUnit.SECONDS).coerceIn(0.0, duration))
+        seekToSecondsAsync(
+            time.toDouble(kotlin.time.DurationUnit.SECONDS).coerceIn(0.0, duration),
+            sourceGeneration,
+        )
     }
 
-    private suspend fun seekToSecondsAsync(seekTime: Double) {
-        withContext(Dispatchers.Main) {
-            isLoading = true
-        }
+    private suspend fun seekToSecondsAsync(
+        seekTime: Double,
+        sourceGeneration: Long? = null,
+    ) {
+        if (!commitSeekStateOnMain(sourceGeneration) { isLoading = true }) return
 
         try {
+            sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
             val duration = getDurationSafely()
             if (duration <= 0) {
-                withContext(Dispatchers.Main) {
-                    isLoading = false
-                }
+                commitSeekStateOnMain(sourceGeneration) { isLoading = false }
                 return
             }
 
-            withContext(Dispatchers.Main) {
-                seekInProgress = true
-                targetSeekTime = seekTime
-                sliderPos =
-                    (seekTime / duration * VideoPlayerState.SLIDER_SCALE)
-                        .toFloat()
-                        .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
+            if (!commitSeekStateOnMain(sourceGeneration) {
+                    seekInProgress = true
+                    targetSeekTime = seekTime
+                    sliderPos =
+                        (seekTime / duration * VideoPlayerState.SLIDER_SCALE)
+                            .toFloat()
+                            .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
+                }
+            ) {
+                return
             }
 
             lastFrameUpdateTime = System.currentTimeMillis()
 
+            sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
             val ptr = playerPtr
-            if (ptr == 0L) return
+            if (ptr == 0L) {
+                commitSeekStateOnMain(sourceGeneration) {
+                    isLoading = false
+                    seekInProgress = false
+                    targetSeekTime = null
+                }
+                return
+            }
             MacNativeBridge.nSeekTo(ptr, seekTime)
+            sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
 
             if (isPlaying) {
                 MacNativeBridge.nPlay(ptr)
                 // Reduce delay to update frame faster for local videos
                 delay(10.milliseconds)
+                sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
                 if (!shouldUseNativeVideoSurface()) {
                     updateFrameAsync()
                 }
                 // Reduced timeout delay from 2000ms to 300ms
-                ioScope.launch {
+                playerScope.launch {
                     delay(300.milliseconds)
-                    if (seekInProgress) {
-                        macLogger.d { "seekToAsync() - Forcing end of seek after timeout" }
-                        seekInProgress = false
-                        targetSeekTime = null
-                        withContext(Dispatchers.Main) {
+                    commitSeekStateOnMain(sourceGeneration) {
+                        if (seekInProgress) {
+                            macLogger.d { "seekToAsync() - Forcing end of seek after timeout" }
+                            seekInProgress = false
+                            targetSeekTime = null
                             isLoading = false
                         }
                     }
@@ -1991,7 +2132,7 @@ class MacVideoPlayerState(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error in seekToAsync: ${e.message}" }
-            withContext(Dispatchers.Main) {
+            commitSeekStateOnMain(sourceGeneration) {
                 isLoading = false
                 seekInProgress = false
                 targetSeekTime = null
@@ -1999,67 +2140,82 @@ class MacVideoPlayerState(
         }
     }
 
+    private suspend fun commitSeekStateOnMain(
+        sourceGeneration: Long?,
+        block: () -> Unit,
+    ): Boolean =
+        if (sourceGeneration == null) {
+            withContext(Dispatchers.Main) { block() }
+            true
+        } else {
+            commitCurrentSourceOnMain(sourceGeneration, block)
+        }
+
     override fun dispose() {
         macLogger.d { "dispose() - Releasing resources" }
-        // Cancel all background tasks first
-        stopFrameUpdates()
-        stopPositionUpdates()
-        stopBufferingCheck()
-        uiUpdateJob?.cancel()
-        playerScope.cancel()
+        val cleanupJob =
+            lifecycle.dispose {
+                cancelAndResetPlayerScope(recreate = false)
+                clearLibAssSubtitleRenderer()
 
-        val fallbackToClose = ffmpegHlsFallback
-        ffmpegHlsFallback = null
-        ffmpegHlsFallbackDurationSeconds = null
-        ffmpegHlsSourceUri = null
-        ffmpegHlsSelectedAudioStreamIndex = null
-        ffmpegHlsSelectedSubtitleStreamIndex = null
-        ffmpegHlsPlaybackOffsetSeconds = 0.0
-        libVlcBackendActive = false
-        libVlcSourceUri = null
-        libVlcTrackInfo = null
-        libVlcSelectedAudioStreamIndex = null
-        libVlcSelectedSubtitleStreamIndex = null
-        libVlcRenderMode = null
-        nativeBackendUsesLibVlc = false
-        nativeBackendLibVlcRenderMode = null
-        libVlcNativeSurfaceRequested = false
+                val fallbackToClose = ffmpegHlsFallback
+                ffmpegHlsFallback = null
+                ffmpegHlsFallbackDurationSeconds = null
+                ffmpegHlsSourceUri = null
+                ffmpegHlsSelectedAudioStreamIndex = null
+                ffmpegHlsSelectedSubtitleStreamIndex = null
+                ffmpegHlsPlaybackOffsetSeconds = 0.0
+                libVlcBackendActive = false
+                libVlcSourceUri = null
+                libVlcTrackInfo = null
+                libVlcSelectedAudioStreamIndex = null
+                libVlcSelectedSubtitleStreamIndex = null
+                libVlcRenderMode = null
+                libVlcNativeSurfaceRequested = false
 
-        // Clear the pointer atomically so no background task can use it
-        val ptrToDispose = playerPtrAtomic.getAndSet(0L)
+                val ptrToDispose =
+                    withContext(frameDispatcher) {
+                        val ptr = synchronized(nativeInstanceLock) { playerPtrAtomic.getAndSet(0L) }
+                        try {
+                            skiaBitmapA?.close()
+                            skiaBitmapB?.close()
+                            skiaBitmapA = null
+                            skiaBitmapB = null
+                            skiaBitmapWidth = 0
+                            skiaBitmapHeight = 0
+                            nextSkiaBitmapA = true
+                        } catch (e: Exception) {
+                            macLogger.e { "Error releasing bitmaps: ${e.message}" }
+                        }
+                        ptr
+                    }
 
-        // Release bitmaps on the frame dispatcher (rendering accesses them there)
-        // then dispose the native player — all on a background thread to avoid
-        // blocking the main/UI thread.
-        Thread {
-            try {
-                // Close bitmaps (not thread-safe with rendering, but frame updates
-                // are already cancelled above and playerPtr is zeroed)
-                skiaBitmapA?.close()
-                skiaBitmapB?.close()
-                skiaBitmapA = null
-                skiaBitmapB = null
-                skiaBitmapWidth = 0
-                skiaBitmapHeight = 0
-                nextSkiaBitmapA = true
-            } catch (e: Exception) {
-                macLogger.e { "Error releasing bitmaps: ${e.message}" }
-            }
-
-            if (ptrToDispose != 0L) {
-                macLogger.d { "dispose() - Disposing native player" }
-                try {
-                    MacNativeBridge.nDisposePlayer(ptrToDispose)
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    macLogger.e { "Error disposing player: ${e.message}" }
+                if (ptrToDispose != 0L) {
+                    macLogger.d { "dispose() - Disposing native player" }
+                    try {
+                        synchronized(nativeInstanceLock) {
+                            MacNativeBridge.nDisposePlayer(ptrToDispose)
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        macLogger.e { "Error disposing player: ${e.message}" }
+                    }
                 }
+
+                nativeBackendUsesLibVlc = false
+                nativeBackendLibVlcRenderMode = null
+                fallbackToClose?.close()
+                resetState()
+                onPlaybackEnded = null
+                onRestart = null
             }
-
-            fallbackToClose?.close()
-        }.start()
-
-        ioScope.cancel()
+        cleanupJob?.invokeOnCompletion {
+            try {
+                cleanupScope.cancel()
+            } catch (_: Exception) {
+                // Cleanup has already completed; cancellation is best-effort.
+            }
+        }
     }
 
     /** Resets the player's state. */
@@ -2184,7 +2340,23 @@ class MacVideoPlayerState(
         }
     }
 
+    private suspend fun commitCurrentSourceOnMain(
+        generation: Long,
+        block: () -> Unit,
+    ): Boolean =
+        withContext(Dispatchers.Main) {
+            lifecycle.commitCurrentSource(generation, block)
+        }
+
+    private fun errorForTrackOperation(e: Exception): VideoPlayerError =
+        if (e is UnsupportedOperationException) {
+            VideoPlayerError.CodecError("Error: ${e.message}")
+        } else {
+            VideoPlayerError.SourceError("Error: ${e.message}")
+        }
+
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        lifecycle.ensureUsable()
         if (track != null && availableAudioTracks.none { it.id == track.id }) {
             return TrackSelectionResult.NotFound(track.id)
         }
@@ -2196,8 +2368,8 @@ class MacVideoPlayerState(
                 ?.let(::libVlcTrackStreamIndex)
 
         if (track != null && selectedLibVlcStreamIndex != null) {
-            ioScope.launch {
-                selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                selectLibVlcAudioTrack(track, selectedLibVlcStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
@@ -2209,14 +2381,14 @@ class MacVideoPlayerState(
                 ?.let(::externalHlsTrackStreamIndex)
 
         if (track != null && selectedStreamIndex != null) {
-            ioScope.launch {
-                switchFfmpegAudioTrack(track, selectedStreamIndex)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                switchFfmpegAudioTrack(track, selectedStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
 
-        ioScope.launch {
-            withContext(Dispatchers.Main) {
+        lifecycle.launchSourceBoundControlOperation { generation ->
+            commitCurrentSourceOnMain(generation) {
                 currentAudioTrack = track
             }
         }
@@ -2226,38 +2398,41 @@ class MacVideoPlayerState(
     private suspend fun selectLibVlcAudioTrack(
         track: AudioTrack,
         streamIndex: Int,
+        generation: Long,
     ) {
-        libVlcSelectedAudioStreamIndex = streamIndex
-        withContext(Dispatchers.Main) {
-            currentAudioTrack = track
-        }
-
         val ordinal =
             libVlcTrackInfo
                 ?.audioStreams
                 ?.firstOrNull { it.streamIndex == streamIndex }
                 ?.ordinal
-                ?: return
         val ptr = playerPtr
-        if (ptr != 0L) {
-            MacNativeBridge.nSelectLibVlcAudioTrack(ptr, ordinal)
+        val applied = ordinal != null && ptr != 0L && MacNativeBridge.nSelectLibVlcAudioTrack(ptr, ordinal)
+        lifecycle.ensureCurrentSource(generation)
+        commitCurrentSourceOnMain(generation) {
+            if (applied) {
+                libVlcSelectedAudioStreamIndex = streamIndex
+                currentAudioTrack = track
+            } else {
+                error = VideoPlayerError.CodecError("Failed to select libVLC audio track: ${track.id}")
+            }
         }
     }
 
     private suspend fun switchFfmpegAudioTrack(
         track: AudioTrack,
         streamIndex: Int,
+        generation: Long,
     ) {
         val sourceUri = ffmpegHlsSourceUri
         if (sourceUri == null) {
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 currentAudioTrack = track
             }
             return
         }
 
         if (ffmpegHlsSelectedAudioStreamIndex == streamIndex) {
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 currentAudioTrack = track
             }
             return
@@ -2276,26 +2451,32 @@ class MacVideoPlayerState(
                 sliderPos
             }
         try {
-            withContext(Dispatchers.Main) {
-                isLoading = true
-                error = null
-                currentAudioTrack = track
-                sliderPos = restartSliderPos
-                _positionText.value = formatTime(restartPositionSeconds.secondsAsDuration())
+            val loadingCommitted =
+                commitCurrentSourceOnMain(generation) {
+                    isLoading = true
+                    error = null
+                    sliderPos = restartSliderPos
+                    _positionText.value = formatTime(restartPositionSeconds.secondsAsDuration())
+                }
+            if (!loadingCommitted) {
+                return
             }
 
             cleanupCurrentPlayback()
+            lifecycle.ensureCurrentSource(generation)
             ensurePlayerInitialized()
+            lifecycle.ensureCurrentSource(generation)
 
             ffmpegHlsSelectedAudioStreamIndex = streamIndex
             ffmpegHlsSelectedSubtitleStreamIndex = selectedSubtitleStreamIndex
             ffmpegHlsPlaybackOffsetSeconds = restartPositionSeconds
             val playableUri = prepareUriForMacPlayback(sourceUri, lastRequestHeaders)
             val opened = openMediaUri(playableUri, lastRequestHeaders)
+            lifecycle.ensureCurrentSource(generation)
             if (!opened) {
                 closeFfmpegHlsFallback()
                 clearFfmpegFallbackTrackState()
-                withContext(Dispatchers.Main) {
+                commitCurrentSourceOnMain(generation) {
                     isLoading = false
                     error = VideoPlayerError.SourceError("Failed to switch audio track")
                 }
@@ -2311,10 +2492,15 @@ class MacVideoPlayerState(
                 applyOutputScaling()
             }
 
-            withContext(Dispatchers.Main) {
-                hasMedia = true
-                isLoading = false
-                isPlaying = shouldResumePlayback
+            val selectionCommitted =
+                commitCurrentSourceOnMain(generation) {
+                    currentAudioTrack = track
+                    hasMedia = true
+                    isLoading = false
+                    isPlaying = shouldResumePlayback
+                }
+            if (!selectionCommitted) {
+                return
             }
 
             if (shouldUseNativeVideoSurface()) {
@@ -2338,16 +2524,22 @@ class MacVideoPlayerState(
             macLogger.e { "switchFfmpegAudioTrack() - Exception: ${e.message}" }
             closeFfmpegHlsFallback()
             clearFfmpegFallbackTrackState()
-            handleError(e)
+            commitCurrentSourceOnMain(generation) {
+                isLoading = false
+                error = errorForTrackOperation(e)
+            }
         }
     }
 
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
+        lifecycle.ensureUsable()
         if (track == null && libVlcBackendActive) {
-            val selectionToken = libAssSelectionToken.incrementAndGet()
-            ioScope.launch {
+            var selectionToken = 0L
+            lifecycle.launchSourceBoundControlOperation(
+                onScheduled = { selectionToken = invalidateLibAssSelection() },
+            ) { generation ->
                 clearLibAssSubtitleRenderer(selectionToken)
-                disableLibVlcSubtitles()
+                disableLibVlcSubtitles(generation)
             }
             return TrackSelectionResult.Disabled
         }
@@ -2362,8 +2554,11 @@ class MacVideoPlayerState(
                 ?.let(::libVlcTrackStreamIndex)
 
         if (track != null && selectedLibVlcStreamIndex != null) {
-            ioScope.launch {
-                selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex)
+            var selectionToken = 0L
+            lifecycle.launchSourceBoundControlOperation(
+                onScheduled = { selectionToken = invalidateLibAssSelection() },
+            ) { generation ->
+                selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex, selectionToken, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
@@ -2375,25 +2570,33 @@ class MacVideoPlayerState(
                 ?.let(::externalHlsTrackStreamIndex)
 
         if (track != null && selectedStreamIndex != null) {
-            libAssSelectionToken.incrementAndGet()
-            ioScope.launch {
-                switchFfmpegSubtitleTrack(track, selectedStreamIndex)
+            lifecycle.launchSourceBoundControlOperation(
+                onScheduled = { invalidateLibAssSelection() },
+            ) { generation ->
+                switchFfmpegSubtitleTrack(track, selectedStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
 
         if (track != null && isAssLikeTrack(track)) {
-            val selectionToken = libAssSelectionToken.incrementAndGet()
-            ioScope.launch {
+            var selectionToken = 0L
+            lifecycle.launchSourceBoundControlOperation(
+                onScheduled = { selectionToken = invalidateLibAssSelection() },
+            ) { generation ->
                 try {
                     markLibAssSubtitlePreparing(track, streamIndex = null, selectionToken)
-                    configureLibAssSubtitleRenderer(track, streamIndex = null, selectionToken = selectionToken)
+                    configureLibAssSubtitleRenderer(
+                        track = track,
+                        streamIndex = null,
+                        selectionToken = selectionToken,
+                        sourceGeneration = generation,
+                    )
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
-                    if (isCurrentLibAssSelection(selectionToken)) {
+                    if (lifecycle.isCurrentSource(generation) && isCurrentLibAssSelection(selectionToken)) {
                         clearLibAssSubtitleRenderer(selectionToken)
-                        withContext(Dispatchers.Main) {
-                            if (!isCurrentLibAssSelection(selectionToken)) return@withContext
+                        commitCurrentSourceOnMain(generation) {
+                            if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
                             currentSubtitleTrack = null
                             subtitlesEnabled = false
                             error = VideoPlayerError.CodecError("ASS subtitle rendering failed: ${e.message}")
@@ -2404,10 +2607,12 @@ class MacVideoPlayerState(
             return TrackSelectionResult.Selected(track.id)
         }
 
-        val selectionToken = libAssSelectionToken.incrementAndGet()
-        ioScope.launch {
+        var selectionToken = 0L
+        lifecycle.launchSourceBoundControlOperation(
+            onScheduled = { selectionToken = invalidateLibAssSelection() },
+        ) { generation ->
             clearLibAssSubtitleRenderer(selectionToken)
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
             }
@@ -2418,25 +2623,36 @@ class MacVideoPlayerState(
     private suspend fun selectLibVlcSubtitleTrack(
         track: SubtitleTrack,
         streamIndex: Int,
+        selectionToken: Long,
+        generation: Long,
     ) {
         if (isAssLikeTrack(track)) {
-            val selectionToken = libAssSelectionToken.incrementAndGet()
             try {
-                libVlcSelectedSubtitleStreamIndex = streamIndex
                 markLibAssSubtitlePreparing(track, streamIndex, selectionToken)
-                if (!configureLibAssSubtitleRenderer(track, streamIndex, selectionToken)) return
-                libVlcSelectedSubtitleStreamIndex = streamIndex
+                if (!configureLibAssSubtitleRenderer(track, streamIndex, selectionToken, generation)) return
                 val ptr = playerPtr
-                if (ptr != 0L) {
-                    MacNativeBridge.nDisableLibVlcSubtitles(ptr)
+                val nativeSubtitlesDisabled = ptr != 0L && MacNativeBridge.nDisableLibVlcSubtitles(ptr)
+                lifecycle.ensureCurrentSource(generation)
+                if (!nativeSubtitlesDisabled) {
+                    clearLibAssSubtitleRenderer(selectionToken)
+                    commitCurrentSourceOnMain(generation) {
+                        if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
+                        currentSubtitleTrack = null
+                        subtitlesEnabled = false
+                        error = VideoPlayerError.CodecError("Failed to disable libVLC subtitles")
+                    }
+                    return
+                }
+                lifecycle.commitCurrentSource(generation) {
+                    libVlcSelectedSubtitleStreamIndex = streamIndex
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                if (isCurrentLibAssSelection(selectionToken)) {
+                if (lifecycle.isCurrentSource(generation) && isCurrentLibAssSelection(selectionToken)) {
                     clearLibAssSubtitleRenderer(selectionToken)
-                    libVlcSelectedSubtitleStreamIndex = null
-                    withContext(Dispatchers.Main) {
-                        if (!isCurrentLibAssSelection(selectionToken)) return@withContext
+                    commitCurrentSourceOnMain(generation) {
+                        if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
+                        libVlcSelectedSubtitleStreamIndex = null
                         currentSubtitleTrack = null
                         subtitlesEnabled = false
                         error = VideoPlayerError.CodecError("ASS subtitle rendering failed: ${e.message}")
@@ -2446,10 +2662,9 @@ class MacVideoPlayerState(
             return
         }
 
-        libAssSelectionToken.incrementAndGet()
         val sourceUri = libVlcSourceUri
         if (sourceUri == null) {
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 currentSubtitleTrack = null
                 subtitlesEnabled = false
                 error = VideoPlayerError.SourceError("No libVLC source is available for subtitle rendering")
@@ -2466,18 +2681,22 @@ class MacVideoPlayerState(
             streamIndex = streamIndex,
             selectedAudioStreamIndex = libVlcSelectedAudioStreamIndex,
             failureMessage = "Failed to switch subtitle track through the external HLS renderer",
+            generation = generation,
         )
     }
 
-    private suspend fun disableLibVlcSubtitles() {
-        libVlcSelectedSubtitleStreamIndex = null
+    private suspend fun disableLibVlcSubtitles(generation: Long) {
         val ptr = playerPtr
-        if (ptr != 0L) {
-            MacNativeBridge.nDisableLibVlcSubtitles(ptr)
-        }
-        withContext(Dispatchers.Main) {
-            subtitlesEnabled = false
-            currentSubtitleTrack = null
+        val applied = ptr != 0L && MacNativeBridge.nDisableLibVlcSubtitles(ptr)
+        lifecycle.ensureCurrentSource(generation)
+        commitCurrentSourceOnMain(generation) {
+            if (applied) {
+                libVlcSelectedSubtitleStreamIndex = null
+                subtitlesEnabled = false
+                currentSubtitleTrack = null
+            } else {
+                error = VideoPlayerError.CodecError("Failed to disable libVLC subtitles")
+            }
         }
     }
 
@@ -2503,10 +2722,11 @@ class MacVideoPlayerState(
     private suspend fun switchFfmpegSubtitleTrack(
         track: SubtitleTrack?,
         streamIndex: Int?,
+        generation: Long,
     ) {
         val sourceUri = ffmpegHlsSourceUri
         if (sourceUri == null) {
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
             }
@@ -2514,7 +2734,7 @@ class MacVideoPlayerState(
         }
 
         if (ffmpegHlsSelectedSubtitleStreamIndex == streamIndex) {
-            withContext(Dispatchers.Main) {
+            commitCurrentSourceOnMain(generation) {
                 currentSubtitleTrack = track
                 subtitlesEnabled = track != null
             }
@@ -2527,6 +2747,7 @@ class MacVideoPlayerState(
             streamIndex = streamIndex,
             selectedAudioStreamIndex = ffmpegHlsSelectedAudioStreamIndex,
             failureMessage = "Failed to switch subtitle track",
+            generation = generation,
         )
     }
 
@@ -2536,6 +2757,7 @@ class MacVideoPlayerState(
         streamIndex: Int?,
         selectedAudioStreamIndex: Int?,
         failureMessage: String,
+        generation: Long,
     ) {
         val shouldResumePlayback = isPlaying
         val restartPositionSeconds = getPositionSafely()
@@ -2551,7 +2773,7 @@ class MacVideoPlayerState(
         try {
             if (track != null) {
                 if (!ExternalHlsFallbackSupport.hasSubtitleRenderer()) {
-                    withContext(Dispatchers.Main) {
+                    commitCurrentSourceOnMain(generation) {
                         isLoading = false
                         currentSubtitleTrack = null
                         subtitlesEnabled = false
@@ -2567,27 +2789,32 @@ class MacVideoPlayerState(
                 }
             }
 
-            withContext(Dispatchers.Main) {
-                isLoading = true
-                error = null
-                currentSubtitleTrack = track
-                subtitlesEnabled = track != null
-                sliderPos = restartSliderPos
-                _positionText.value = formatTime(restartPositionSeconds.secondsAsDuration())
+            val loadingCommitted =
+                commitCurrentSourceOnMain(generation) {
+                    isLoading = true
+                    error = null
+                    sliderPos = restartSliderPos
+                    _positionText.value = formatTime(restartPositionSeconds.secondsAsDuration())
+                }
+            if (!loadingCommitted) {
+                return
             }
 
             cleanupCurrentPlayback()
+            lifecycle.ensureCurrentSource(generation)
             ensurePlayerInitialized()
+            lifecycle.ensureCurrentSource(generation)
 
             ffmpegHlsSelectedAudioStreamIndex = selectedAudioStreamIndex
             ffmpegHlsSelectedSubtitleStreamIndex = streamIndex
             ffmpegHlsPlaybackOffsetSeconds = restartPositionSeconds
             val playableUri = prepareUriForMacPlayback(sourceUri, lastRequestHeaders)
             val opened = openMediaUri(playableUri, lastRequestHeaders)
+            lifecycle.ensureCurrentSource(generation)
             if (!opened) {
                 closeFfmpegHlsFallback()
                 clearFfmpegFallbackTrackState()
-                withContext(Dispatchers.Main) {
+                commitCurrentSourceOnMain(generation) {
                     isLoading = false
                     error = VideoPlayerError.SourceError(failureMessage)
                 }
@@ -2603,10 +2830,16 @@ class MacVideoPlayerState(
                 applyOutputScaling()
             }
 
-            withContext(Dispatchers.Main) {
-                hasMedia = true
-                isLoading = false
-                isPlaying = shouldResumePlayback
+            val selectionCommitted =
+                commitCurrentSourceOnMain(generation) {
+                    currentSubtitleTrack = track
+                    subtitlesEnabled = track != null
+                    hasMedia = true
+                    isLoading = false
+                    isPlaying = shouldResumePlayback
+                }
+            if (!selectionCommitted) {
+                return
             }
 
             if (shouldUseNativeVideoSurface()) {
@@ -2630,17 +2863,22 @@ class MacVideoPlayerState(
             macLogger.e { "switchMacHlsSubtitleTrack() - Exception: ${e.message}" }
             closeFfmpegHlsFallback()
             clearFfmpegFallbackTrackState()
-            handleError(e)
+            commitCurrentSourceOnMain(generation) {
+                isLoading = false
+                error = errorForTrackOperation(e)
+            }
         }
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
+        lifecycle.ensureUsable()
         val externalTrack = track.copy(isEmbedded = false)
         _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
         _availableSubtitleTracks.add(externalTrack)
     }
 
     override fun removeSubtitleTrack(trackId: String) {
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
         if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
@@ -2649,6 +2887,7 @@ class MacVideoPlayerState(
     }
 
     override fun clearExternalSubtitleTracks() {
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.isExternal }
         if (selectedTrack?.isExternal == true) {
@@ -2657,24 +2896,27 @@ class MacVideoPlayerState(
     }
 
     override fun disableSubtitles(): TrackSelectionResult {
-        val selectionToken = libAssSelectionToken.incrementAndGet()
+        lifecycle.ensureUsable()
         val selectedTrack = currentSubtitleTrack
-        subtitlesEnabled = false
-        currentSubtitleTrack = null
         if (usesLibAssSubtitleOverlay || libAssSubtitleSource != null) {
-            ioScope.launch {
-                withContext(Dispatchers.Main) {
-                    if (!isCurrentLibAssSelection(selectionToken)) return@withContext
+            var selectionToken = 0L
+            lifecycle.launchSourceBoundControlOperation(
+                onScheduled = { selectionToken = invalidateLibAssSelection() },
+            ) { generation ->
+                commitCurrentSourceOnMain(generation) {
+                    if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
                     usesLibAssSubtitleOverlay = false
                     renderingInfo.subtitleRenderer = null
                     renderingInfo.subtitleSource = null
                 }
                 clearLibAssSubtitleRenderer(selectionToken)
                 if (libVlcBackendActive) {
-                    libVlcSelectedSubtitleStreamIndex = null
-                    val ptr = playerPtr
-                    if (ptr != 0L) {
-                        MacNativeBridge.nDisableLibVlcSubtitles(ptr)
+                    disableLibVlcSubtitles(generation)
+                } else {
+                    commitCurrentSourceOnMain(generation) {
+                        if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
+                        subtitlesEnabled = false
+                        currentSubtitleTrack = null
                     }
                 }
             }
@@ -2682,45 +2924,43 @@ class MacVideoPlayerState(
         }
 
         if (libVlcBackendActive && selectedTrack?.id?.let(::isMacLibVlcSubtitleTrackId) == true) {
-            ioScope.launch {
+            var selectionToken = 0L
+            lifecycle.launchSourceBoundControlOperation(
+                onScheduled = { selectionToken = invalidateLibAssSelection() },
+            ) { generation ->
                 clearLibAssSubtitleRenderer(selectionToken)
-                disableLibVlcSubtitles()
+                disableLibVlcSubtitles(generation)
             }
             return TrackSelectionResult.Disabled
         }
 
         if (ffmpegHlsSourceUri != null && ffmpegHlsSelectedSubtitleStreamIndex != null) {
-            ioScope.launch {
-                switchFfmpegSubtitleTrack(track = null, streamIndex = null)
+            lifecycle.launchSourceBoundControlOperation(
+                onScheduled = { invalidateLibAssSelection() },
+            ) { generation ->
+                switchFfmpegSubtitleTrack(track = null, streamIndex = null, generation = generation)
             }
             return TrackSelectionResult.Disabled
         }
+        invalidateLibAssSelection()
+        subtitlesEnabled = false
+        currentSubtitleTrack = null
         return TrackSelectionResult.Disabled
     }
 
     override fun clearError() {
+        lifecycle.ensureUsable()
         macLogger.d { "clearError() - Clearing error" }
-
-        // Use runBlocking to ensure the error is cleared immediately
-        // This is important for tests that expect the error to be cleared synchronously
-        runBlocking {
-            withContext(Dispatchers.Main) {
-                error = null
-            }
-        }
+        error = null
     }
 
     /**
      * Toggles the fullscreen state of the video player
      */
     override fun toggleFullscreen() {
+        lifecycle.ensureUsable()
         // Update the state immediately for test synchronization
         isFullscreen = !isFullscreen
-
-        // Launch any additional background work if needed
-        ioScope.launch {
-            // Any additional work related to fullscreen toggle can go here
-        }
     }
 
     /**
@@ -2732,21 +2972,25 @@ class MacVideoPlayerState(
         width: Int,
         height: Int,
     ) {
+        lifecycle.ensureUsable()
         if (width <= 0 || height <= 0) return
         if (width == surfaceWidth && height == surfaceHeight) return
 
         surfaceWidth = width
         surfaceHeight = height
 
+        val requestToken = resizeRequestToken.incrementAndGet()
         isResizing.set(true)
         resizeJob?.cancel()
         resizeJob =
-            ioScope.launch {
-                delay(120.milliseconds)
+            lifecycle.launchSourceBoundControlOperation {
                 try {
+                    delay(120.milliseconds)
                     applyOutputScaling()
                 } finally {
-                    isResizing.set(false)
+                    if (resizeRequestToken.get() == requestToken) {
+                        isResizing.set(false)
+                    }
                 }
             }
     }

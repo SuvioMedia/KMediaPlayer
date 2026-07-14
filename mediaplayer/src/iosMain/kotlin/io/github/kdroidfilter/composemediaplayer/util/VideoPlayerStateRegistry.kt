@@ -4,32 +4,27 @@ import androidx.compose.runtime.Stable
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 
 /**
- * Registry for sharing VideoPlayerState instances between views.
- * This is used to pass the player state to the fullscreen view.
+ * Compatibility registry retained for applications compiled against 1.x.
+ *
+ * The library no longer uses a global registry for fullscreen playback. New code should pass
+ * [VideoPlayerState] directly to the surface that renders it.
  */
 @Stable
+@Deprecated(
+    message = "The fullscreen implementation no longer requires a global player-state registry.",
+)
 object VideoPlayerStateRegistry {
     private var registeredState: VideoPlayerState? = null
 
-    /**
-     * Register a VideoPlayerState instance to be shared.
-     *
-     * @param state The VideoPlayerState to register
-     */
+    /** Registers a state for legacy integrations. */
     fun registerState(state: VideoPlayerState) {
         registeredState = state
     }
 
-    /**
-     * Get the registered VideoPlayerState instance.
-     *
-     * @return The registered VideoPlayerState or null if none is registered
-     */
+    /** Returns the state registered by a legacy integration, if any. */
     fun getRegisteredState(): VideoPlayerState? = registeredState
 
-    /**
-     * Clear the registered VideoPlayerState instance.
-     */
+    /** Removes the state registered by a legacy integration. */
     fun clearRegisteredState() {
         registeredState = null
     }

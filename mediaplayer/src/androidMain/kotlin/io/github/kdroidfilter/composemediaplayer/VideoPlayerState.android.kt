@@ -7,8 +7,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Rational
 import android.view.Surface
 import android.view.View
@@ -32,8 +36,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
@@ -54,6 +56,9 @@ import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -104,6 +109,24 @@ fun rememberVideoPlayerState(
     return playerState
 }
 
+@Composable
+@UnstableApi
+fun rememberRenderableVideoPlayerState(
+    audioMode: AudioMode = AudioMode(),
+    cacheConfig: CacheConfig = CacheConfig(),
+    playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+    androidMediaSourceProvider: AndroidMediaSourceProvider,
+): RenderableVideoPlayerState {
+    val playerState =
+        rememberVideoPlayerState(
+            audioMode = audioMode,
+            cacheConfig = cacheConfig,
+            playbackOptions = playbackOptions,
+            androidMediaSourceProvider = androidMediaSourceProvider,
+        )
+    return remember(playerState) { playerState.asRenderableVideoPlayerState() }
+}
+
 @UnstableApi
 private fun createConfiguredVideoPlayerState(
     audioMode: AudioMode = AudioMode(),
@@ -120,12 +143,20 @@ private fun createConfiguredVideoPlayerState(
         )
     }
 
-private inline fun createAndroidVideoPlayerState(createState: () -> VideoPlayerState): VideoPlayerState =
+internal inline fun createAndroidVideoPlayerState(
+    ensureContextAvailable: () -> Unit = { ContextProvider.getContext() },
+    createState: () -> VideoPlayerState,
+): VideoPlayerState {
     try {
-        createState()
-    } catch (e: IllegalStateException) {
-        missingAndroidContextPlayerState()
+        ensureContextAvailable()
+    } catch (_: IllegalStateException) {
+        return missingAndroidContextPlayerState()
     }
+
+    // Do not turn unrelated initialization failures into an inert preview player. Once the context is available,
+    // constructor failures are real errors and must remain visible to the caller.
+    return createState()
+}
 
 private fun missingAndroidContextPlayerState(): VideoPlayerState =
     PreviewableVideoPlayerState(
@@ -207,7 +238,7 @@ internal fun DefaultVideoPlayerState.detachActivity(activity: Activity) {
 }
 
 internal fun DefaultVideoPlayerState.onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
-    isPipActive = isInPictureInPictureMode
+    updatePipActiveFromPlatform(isInPictureInPictureMode)
 }
 
 private fun DefaultVideoPlayerState.attachedActivity(): Activity? = AndroidPlayerActivityRegistry.activityFor(this)
@@ -223,6 +254,55 @@ private fun shouldUseConservativeAndroidCodecHandling(): Boolean =
         Build.MODEL in conservativeCodecHandlingDevices ||
         Build.MANUFACTURER.equals("mediatek", ignoreCase = true)
 
+internal enum class AndroidAudioFocusStrategy {
+    EXCLUSIVE,
+    MIX,
+    DUCK_OTHERS,
+}
+
+internal fun AudioMode.androidAudioFocusStrategy(): AndroidAudioFocusStrategy =
+    when (interruptionMode) {
+        InterruptionMode.DoNotMix -> AndroidAudioFocusStrategy.EXCLUSIVE
+        InterruptionMode.MixWithOthers -> AndroidAudioFocusStrategy.MIX
+        InterruptionMode.DuckOthers -> AndroidAudioFocusStrategy.DUCK_OTHERS
+    }
+
+private data class AndroidSourceSpec(
+    val mediaItem: MediaItem,
+    val requestHeaders: Map<String, String>,
+)
+
+internal data class ScreenLockResumeTicket(
+    val sourceGeneration: Long,
+    val playbackIntentGeneration: Long,
+)
+
+internal fun ScreenLockResumeTicket.isCurrent(
+    sourceGeneration: Long,
+    playbackIntentGeneration: Long,
+    hasMedia: Boolean,
+    isDisposed: Boolean,
+): Boolean =
+    !isDisposed &&
+        hasMedia &&
+        this.sourceGeneration == sourceGeneration &&
+        this.playbackIntentGeneration == playbackIntentGeneration
+
+internal inline fun initializeAndroidPlayerResources(
+    initializePlayer: () -> Unit,
+    registerReceiver: () -> Unit,
+    cleanup: () -> Unit,
+) {
+    var completed = false
+    try {
+        initializePlayer()
+        registerReceiver()
+        completed = true
+    } finally {
+        if (!completed) cleanup()
+    }
+}
+
 @Suppress("LargeClass", "TooManyFunctions")
 @UnstableApi
 @Stable
@@ -233,6 +313,7 @@ open class DefaultVideoPlayerState(
 ) : VideoPlayerState {
     companion object {
         private const val PERCENT_SCALE = 100f
+        private const val PLAYER_THREAD_DISPATCH_TIMEOUT_MS = 5_000L
     }
 
     private val context: Context = ContextProvider.getContext()
@@ -244,15 +325,60 @@ open class DefaultVideoPlayerState(
     override val playbackEvents = playbackEventDispatcher.events
 
     // Protection against race conditions
+    @Volatile
     private var isPlayerReleased = false
     private val playerInitializationLock = Any()
     private var playerListener: Player.Listener? = null
+    private var sourceGeneration = 0L
+    private var currentSourceSpec: AndroidSourceSpec? = null
     private var sourceLoadedSessionId = 0L
     private var wasStalled = false
+    private var cacheLease: VideoCache.Lease? = null
+
+    private val audioFocusStrategy = audioMode.androidAudioFocusStrategy()
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var duckAudioFocusRequest: AudioFocusRequest? = null
+    private var hasDuckAudioFocus = false
+    private var isDuckedByAnotherApp = false
+    private val duckAudioFocusChangeListener =
+        AudioManager.OnAudioFocusChangeListener { focusChange ->
+            coroutineScope.launch {
+                synchronized(playerInitializationLock) {
+                    if (isPlayerReleased) return@synchronized
+                    when (focusChange) {
+                        AudioManager.AUDIOFOCUS_GAIN -> {
+                            if (hasDuckAudioFocus) {
+                                isDuckedByAnotherApp = false
+                                applyPlayerVolume()
+                            }
+                        }
+
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                            if (hasDuckAudioFocus) {
+                                isDuckedByAnotherApp = true
+                                applyPlayerVolume()
+                            }
+                        }
+
+                        AudioManager.AUDIOFOCUS_LOSS,
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+                        -> {
+                            hasDuckAudioFocus = false
+                            isDuckedByAnotherApp = false
+                            invalidateScreenAutoResume()
+                            exoPlayer?.pause()
+                            applyPlayerVolume()
+                        }
+                    }
+                }
+            }
+        }
 
     // Screen lock detection
     private var screenLockReceiver: BroadcastReceiver? = null
-    private var wasPlayingBeforeScreenLock: Boolean = false
+    private var playbackIntentGeneration = 0L
+    private var screenLockResumeTicket: ScreenLockResumeTicket? = null
+    private var screenResumeJob: Job? = null
 
     private var _hasMedia by mutableStateOf(false)
     override val hasMedia: Boolean get() = _hasMedia
@@ -271,13 +397,14 @@ open class DefaultVideoPlayerState(
     override val capabilities: PlayerCapabilities
         get() = platformPlayerCapabilities().copy(supportsPiP = isPipSupported)
 
-    private var _metadata = VideoMetadata()
+    private val _metadata = VideoMetadata()
     override val metadata: VideoMetadata get() = _metadata
     private var projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
     private var _projection by mutableStateOf(playbackOptions.projection.normalized())
     override var projection: VideoProjectionSettings
         get() = _projection
         set(value) {
+            checkNotDisposed()
             projectionAutoDetectionEnabled = false
             applyProjectionSettings(value)
         }
@@ -285,18 +412,21 @@ open class DefaultVideoPlayerState(
     override var projectionView: VideoProjectionViewSettings
         get() = _projectionView
         set(value) {
+            checkNotDisposed()
             _projectionView = value.normalized()
         }
     private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
     override var projectionViewControlMode: VideoProjectionViewControlMode
         get() = _projectionViewControlMode
         set(value) {
+            checkNotDisposed()
             _projectionViewControlMode = value
         }
     private var _projectionTextureCrop by mutableStateOf(playbackOptions.projectionTextureCrop.normalized())
     override var projectionTextureCrop: VideoTextureCrop
         get() = _projectionTextureCrop
         set(value) {
+            checkNotDisposed()
             _projectionTextureCrop = value.normalized()
             applyProjectionSettings(projection)
         }
@@ -309,12 +439,24 @@ open class DefaultVideoPlayerState(
         )
 
     // Subtitle state
-    override var subtitlesEnabled by mutableStateOf(false)
-    override var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
+    private var _subtitlesEnabled by mutableStateOf(false)
+    override var subtitlesEnabled: Boolean
+        get() = _subtitlesEnabled
+        set(value) {
+            checkNotDisposed()
+            _subtitlesEnabled = value
+        }
+    private var _currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
+    override var currentSubtitleTrack: SubtitleTrack?
+        get() = _currentSubtitleTrack
+        set(value) {
+            checkNotDisposed()
+            _currentSubtitleTrack = value
+        }
     private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
     override val availableSubtitleTracks: List<SubtitleTrack>
         get() = _availableSubtitleTracks
-    override var subtitleTextStyle by mutableStateOf(
+    private var _subtitleTextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
             fontSize = 18.sp,
@@ -322,12 +464,36 @@ open class DefaultVideoPlayerState(
             textAlign = TextAlign.Center,
         ),
     )
+    override var subtitleTextStyle: TextStyle
+        get() = _subtitleTextStyle
+        set(value) {
+            checkNotDisposed()
+            _subtitleTextStyle = value
+        }
 
-    override var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
-    override var subtitleOffset by mutableStateOf(Duration.ZERO)
+    private var _subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override var subtitleBackgroundColor: Color
+        get() = _subtitleBackgroundColor
+        set(value) {
+            checkNotDisposed()
+            _subtitleBackgroundColor = value
+        }
+    private var _subtitleOffset by mutableStateOf(Duration.ZERO)
+    override var subtitleOffset: Duration
+        get() = _subtitleOffset
+        set(value) {
+            checkNotDisposed()
+            _subtitleOffset = value
+        }
 
     // Audio track state
-    override var currentAudioTrack by mutableStateOf<AudioTrack?>(null)
+    private var _currentAudioTrack by mutableStateOf<AudioTrack?>(null)
+    override var currentAudioTrack: AudioTrack?
+        get() = _currentAudioTrack
+        set(value) {
+            checkNotDisposed()
+            _currentAudioTrack = value
+        }
     private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
     override val availableAudioTracks: List<AudioTrack>
         get() = _availableAudioTracks
@@ -336,6 +502,8 @@ open class DefaultVideoPlayerState(
     private var projectionVideoSurface: Surface? = null
 
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult {
+        if (!isOnPlayerThread()) return runOnPlayerThreadBlocking { selectAudioTrack(track) }
+        checkNotDisposed()
         val player = exoPlayer
         if (track == null) {
             currentAudioTrack = null
@@ -384,8 +552,23 @@ open class DefaultVideoPlayerState(
         return TrackSelectionResult.Selected(track.id)
     }
 
+    override fun selectAudioTrack(trackId: String?): TrackSelectionResult {
+        if (!isOnPlayerThread()) return runOnPlayerThreadBlocking { selectAudioTrack(trackId) }
+        checkNotDisposed()
+        return trackId
+            ?.let { id ->
+                availableAudioTracks
+                    .firstOrNull { it.id == id }
+                    ?.let(::selectAudioTrack)
+                    ?: TrackSelectionResult.NotFound(id)
+            }
+            ?: selectAudioTrack(null as AudioTrack?)
+    }
+
     // Select an external subtitle track
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
+        if (!isOnPlayerThread()) return runOnPlayerThreadBlocking { selectSubtitleTrack(track) }
+        checkNotDisposed()
         if (track == null) {
             return disableSubtitles()
         }
@@ -441,7 +624,22 @@ open class DefaultVideoPlayerState(
         return TrackSelectionResult.Selected(track.id)
     }
 
+    override fun selectSubtitleTrack(trackId: String?): TrackSelectionResult {
+        if (!isOnPlayerThread()) return runOnPlayerThreadBlocking { selectSubtitleTrack(trackId) }
+        checkNotDisposed()
+        return trackId
+            ?.let { id ->
+                availableSubtitleTracks
+                    .firstOrNull { it.id == id }
+                    ?.let(::selectSubtitleTrack)
+                    ?: TrackSelectionResult.NotFound(id)
+            }
+            ?: selectSubtitleTrack(null as SubtitleTrack?)
+    }
+
     override fun disableSubtitles(): TrackSelectionResult {
+        if (!isOnPlayerThread()) return runOnPlayerThreadBlocking(::disableSubtitles)
+        checkNotDisposed()
         currentSubtitleTrack = null
         subtitlesEnabled = false
 
@@ -470,12 +668,22 @@ open class DefaultVideoPlayerState(
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
+        if (!isOnPlayerThread()) {
+            runOnPlayerThreadBlocking { addSubtitleTrack(track) }
+            return
+        }
+        checkNotDisposed()
         val externalTrack = track.copy(isEmbedded = false)
         _availableSubtitleTracks.removeAll { it.id == externalTrack.id }
         _availableSubtitleTracks.add(externalTrack)
     }
 
     override fun removeSubtitleTrack(trackId: String) {
+        if (!isOnPlayerThread()) {
+            runOnPlayerThreadBlocking { removeSubtitleTrack(trackId) }
+            return
+        }
+        checkNotDisposed()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.id == trackId && it.isExternal }
         if (selectedTrack?.id == trackId && selectedTrack.isExternal) {
@@ -484,6 +692,11 @@ open class DefaultVideoPlayerState(
     }
 
     override fun clearExternalSubtitleTracks() {
+        if (!isOnPlayerThread()) {
+            runOnPlayerThreadBlocking(::clearExternalSubtitleTracks)
+            return
+        }
+        checkNotDisposed()
         val selectedTrack = currentSubtitleTrack
         _availableSubtitleTracks.removeAll { it.isExternal }
         if (selectedTrack?.isExternal == true) {
@@ -580,6 +793,126 @@ open class DefaultVideoPlayerState(
         }
     }
 
+    private fun checkNotDisposed() {
+        check(!isPlayerReleased) { "VideoPlayerState has been disposed" }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun <T> runOnPlayerThreadBlocking(block: () -> T): T {
+        val looper = exoPlayer?.applicationLooper ?: Looper.getMainLooper()
+        if (Looper.myLooper() == looper) return block()
+
+        val completed = CountDownLatch(1)
+        var value: T? = null
+        var failure: Throwable? = null
+        val handler = Handler(looper)
+        val operation =
+            Runnable {
+                try {
+                    value = block()
+                } catch (throwable: Throwable) {
+                    failure = throwable
+                } finally {
+                    completed.countDown()
+                }
+            }
+        check(handler.post(operation)) { "Unable to dispatch operation to the Android player thread." }
+        if (!completed.await(PLAYER_THREAD_DISPATCH_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            handler.removeCallbacks(operation)
+            error("Timed out dispatching operation to the Android player thread.")
+        }
+        failure?.let { throw it }
+        @Suppress("UNCHECKED_CAST")
+        return value as T
+    }
+
+    private fun isOnPlayerThread(): Boolean {
+        val looper = exoPlayer?.applicationLooper ?: Looper.getMainLooper()
+        return Looper.myLooper() == looper
+    }
+
+    private fun invalidateScreenAutoResume() {
+        playbackIntentGeneration += 1
+        screenLockResumeTicket = null
+        screenResumeJob?.cancel()
+        screenResumeJob = null
+    }
+
+    private fun installSourceListener(player: ExoPlayer): Long {
+        playerListener?.let(player::removeListener)
+        sourceGeneration += 1
+        val generation = sourceGeneration
+        createPlayerListener(generation).also { listener ->
+            playerListener = listener
+            player.addListener(listener)
+        }
+        return generation
+    }
+
+    private fun invalidateSourceCallbacks(player: ExoPlayer?) {
+        sourceGeneration += 1
+        playerListener?.let { listener ->
+            runCatching { player?.removeListener(listener) }
+        }
+        playerListener = null
+    }
+
+    private fun isCurrentSourceCallback(generation: Long): Boolean =
+        !isPlayerReleased && generation == sourceGeneration && currentSourceSpec != null
+
+    private fun requestDuckAudioFocus(): Boolean {
+        if (audioFocusStrategy != AndroidAudioFocusStrategy.DUCK_OTHERS || hasDuckAudioFocus) return true
+        val result =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val request =
+                    duckAudioFocusRequest ?: AudioFocusRequest
+                        .Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(
+                            android.media.AudioAttributes
+                                .Builder()
+                                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE)
+                                .build(),
+                        ).setOnAudioFocusChangeListener(duckAudioFocusChangeListener)
+                        .build()
+                        .also { duckAudioFocusRequest = it }
+                audioManager.requestAudioFocus(request)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.requestAudioFocus(
+                    duckAudioFocusChangeListener,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+                )
+            }
+        hasDuckAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        if (hasDuckAudioFocus) {
+            isDuckedByAnotherApp = false
+            applyPlayerVolume()
+        }
+        return hasDuckAudioFocus
+    }
+
+    private fun abandonDuckAudioFocus() {
+        if (audioFocusStrategy != AndroidAudioFocusStrategy.DUCK_OTHERS) return
+        if (hasDuckAudioFocus) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                duckAudioFocusRequest?.let(audioManager::abandonAudioFocusRequest)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(duckAudioFocusChangeListener)
+            }
+        }
+        hasDuckAudioFocus = false
+        isDuckedByAnotherApp = false
+        applyPlayerVolume()
+    }
+
+    private fun applyPlayerVolume() {
+        val focusMultiplier = if (isDuckedByAnotherApp) 0.2f else 1f
+        exoPlayer?.volume = _volume * focusMultiplier
+    }
+
     private fun updateNativeSubtitleVisibility() {
         playerView?.subtitleView?.visibility =
             if (subtitlesEnabled && currentSubtitleTrack?.isEmbedded == true) {
@@ -594,8 +927,13 @@ open class DefaultVideoPlayerState(
     override var volume: Float
         get() = _volume
         set(value) {
+            checkNotDisposed()
             _volume = value.coerceIn(0f, 1f)
-            exoPlayer?.volume = _volume
+            if (!isPlayerReleased) {
+                runOnPlayerThreadBlocking {
+                    if (!isPlayerReleased) applyPlayerVolume()
+                }
+            }
         }
 
     // Slider position
@@ -603,22 +941,48 @@ open class DefaultVideoPlayerState(
     override var sliderPos: Float
         get() = _sliderPos
         set(value) {
+            checkNotDisposed()
             _sliderPos = value.coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
         }
 
     // User interaction states
-    override var userDragging by mutableStateOf(false)
+    private var _userDragging by mutableStateOf(false)
+    override var userDragging: Boolean
+        get() = _userDragging
+        set(value) {
+            checkNotDisposed()
+            _userDragging = value
+        }
 
-    override var onPlaybackEnded: (() -> Unit)? = null
-    override var onRestart: (() -> Unit)? = null
+    private var playbackEndedCallback: (() -> Unit)? = null
+    override var onPlaybackEnded: (() -> Unit)?
+        get() = playbackEndedCallback
+        set(value) {
+            checkNotDisposed()
+            playbackEndedCallback = value
+        }
+    private var restartCallback: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)?
+        get() = restartCallback
+        set(value) {
+            checkNotDisposed()
+            restartCallback = value
+        }
 
     // Loop control
     private var _loop by mutableStateOf(false)
     override var loop: Boolean
         get() = _loop
         set(value) {
+            checkNotDisposed()
             _loop = value
-            exoPlayer?.repeatMode = if (value) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+            if (!isPlayerReleased) {
+                runOnPlayerThreadBlocking {
+                    if (!isPlayerReleased) {
+                        exoPlayer?.repeatMode = if (value) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+                    }
+                }
+            }
         }
 
     // Playback speed control
@@ -626,9 +990,14 @@ open class DefaultVideoPlayerState(
     override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
+            checkNotDisposed()
             _playbackSpeed = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
-            exoPlayer?.let { player ->
-                player.playbackParameters = PlaybackParameters(_playbackSpeed)
+            if (!isPlayerReleased) {
+                runOnPlayerThreadBlocking {
+                    if (!isPlayerReleased) {
+                        exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
+                    }
+                }
             }
         }
 
@@ -641,10 +1010,17 @@ open class DefaultVideoPlayerState(
     override var isFullscreen: Boolean
         get() = _isFullscreen
         set(value) {
+            checkNotDisposed()
             _isFullscreen = value
         }
 
-    var isPipFullScreen by mutableStateOf(false)
+    private var _isPipFullScreen by mutableStateOf(false)
+    var isPipFullScreen: Boolean
+        get() = _isPipFullScreen
+        set(value) {
+            checkNotDisposed()
+            _isPipFullScreen = value
+        }
 
     // Time tracking
     private var _currentTime by mutableStateOf(Duration.ZERO)
@@ -679,12 +1055,64 @@ open class DefaultVideoPlayerState(
             return false
         }
 
-    override var isPipEnabled by mutableStateOf(false)
-    override var isPipActive by mutableStateOf(false)
+    private var _isPipEnabled by mutableStateOf(false)
+    override var isPipEnabled: Boolean
+        get() = _isPipEnabled
+        set(value) {
+            checkNotDisposed()
+            _isPipEnabled = value
+        }
+    private var _isPipActive by mutableStateOf(false)
+    override var isPipActive: Boolean
+        get() = _isPipActive
+        set(value) {
+            checkNotDisposed()
+            _isPipActive = value
+        }
+
+    internal fun updatePipActiveFromPlatform(value: Boolean) {
+        if (!isPlayerReleased) _isPipActive = value
+    }
 
     init {
-        initializePlayer()
-        registerScreenLockReceiver()
+        runOnPlayerThreadBlocking {
+            initializeAndroidPlayerResources(
+                initializePlayer = ::initializePlayer,
+                registerReceiver = ::registerScreenLockReceiver,
+                cleanup = ::cleanupFailedInitialization,
+            )
+        }
+    }
+
+    private fun cleanupFailedInitialization() {
+        synchronized(playerInitializationLock) {
+            isPlayerReleased = true
+            sourceGeneration += 1L
+            currentSourceSpec = null
+            screenResumeJob?.cancel()
+            screenResumeJob = null
+            screenLockResumeTicket = null
+            stopPositionUpdates()
+            abandonDuckAudioFocus()
+            unregisterScreenLockReceiver()
+
+            val player = exoPlayer
+            val listener = playerListener
+            playerListener = null
+            playerView?.player = null
+            playerView = null
+            projectionVideoSurface = null
+            if (player != null) {
+                listener?.let { currentListener -> runCatching { player.removeListener(currentListener) } }
+                runCatching { player.stop() }
+                runCatching { player.clearMediaItems() }
+                runCatching { player.release() }
+            }
+            exoPlayer = null
+        }
+        coroutineScope.cancel()
+        runCatching { cacheLease?.close() }
+        cacheLease = null
     }
 
     private fun registerScreenLockReceiver() {
@@ -697,41 +1125,8 @@ open class DefaultVideoPlayerState(
                     intent: Intent?,
                 ) {
                     when (intent?.action) {
-                        Intent.ACTION_SCREEN_OFF -> {
-                            androidVideoLogger.d { "Screen turned off (locked)" }
-                            synchronized(playerInitializationLock) {
-                                if (!isPlayerReleased && exoPlayer != null) {
-                                    wasPlayingBeforeScreenLock = _isPlaying
-                                    if (_isPlaying) {
-                                        try {
-                                            androidVideoLogger.d { "Pausing playback due to screen lock" }
-                                            exoPlayer?.pause()
-                                        } catch (e: Exception) {
-                                            androidVideoLogger.e { "Error pausing on screen lock: ${e.message}" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Intent.ACTION_SCREEN_ON -> {
-                            androidVideoLogger.d { "Screen turned on (unlocked)" }
-                            synchronized(playerInitializationLock) {
-                                if (!isPlayerReleased && wasPlayingBeforeScreenLock && exoPlayer != null) {
-                                    try {
-                                        // Add a small delay to ensure the system is ready
-                                        coroutineScope.launch {
-                                            delay(200.milliseconds)
-                                            if (!isPlayerReleased) {
-                                                androidVideoLogger.d { "Resuming playback after screen unlock" }
-                                                exoPlayer?.play()
-                                            }
-                                        }
-                                    } catch (e: Exception) {
-                                        androidVideoLogger.e { "Error resuming after screen unlock: ${e.message}" }
-                                    }
-                                }
-                            }
-                        }
+                        Intent.ACTION_SCREEN_OFF -> handleScreenTurnedOff()
+                        Intent.ACTION_SCREEN_ON -> handleScreenTurnedOn()
                     }
                 }
             }
@@ -743,6 +1138,55 @@ open class DefaultVideoPlayerState(
             }
         context.registerReceiver(screenLockReceiver, filter)
         androidVideoLogger.d { "Screen lock receiver registered" }
+    }
+
+    internal fun handleScreenTurnedOff() {
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                if (isPlayerReleased || exoPlayer == null) return@synchronized
+                screenResumeJob?.cancel()
+                screenResumeJob = null
+                screenLockResumeTicket =
+                    if (_isPlaying && _hasMedia) {
+                        ScreenLockResumeTicket(sourceGeneration, playbackIntentGeneration)
+                    } else {
+                        null
+                    }
+                if (screenLockResumeTicket != null) {
+                    androidVideoLogger.d { "Pausing playback due to screen lock" }
+                    exoPlayer?.pause()
+                    abandonDuckAudioFocus()
+                }
+            }
+        }
+    }
+
+    internal fun handleScreenTurnedOn() {
+        runOnPlayerThreadBlocking {
+            val ticket =
+                synchronized(playerInitializationLock) {
+                    if (isPlayerReleased) return@synchronized null
+                    screenLockResumeTicket.also { screenLockResumeTicket = null }
+                } ?: return@runOnPlayerThreadBlocking
+            screenResumeJob?.cancel()
+            screenResumeJob =
+                coroutineScope.launch {
+                    delay(200.milliseconds)
+                    synchronized(playerInitializationLock) {
+                        if (
+                            ticket.isCurrent(
+                                sourceGeneration = sourceGeneration,
+                                playbackIntentGeneration = playbackIntentGeneration,
+                                hasMedia = _hasMedia,
+                                isDisposed = isPlayerReleased,
+                            )
+                        ) {
+                            androidVideoLogger.d { "Resuming playback after screen unlock" }
+                            if (requestDuckAudioFocus()) exoPlayer?.play()
+                        }
+                    }
+                }
+        }
     }
 
     private fun unregisterScreenLockReceiver() {
@@ -790,7 +1234,8 @@ open class DefaultVideoPlayerState(
                     }
                 }
 
-            val manageFocus = audioMode.interruptionMode == InterruptionMode.DoNotMix
+            val manageFocus = audioFocusStrategy == AndroidAudioFocusStrategy.EXCLUSIVE
+            val handleBecomingNoisy = audioFocusStrategy != AndroidAudioFocusStrategy.MIX
             val audioAttributes =
                 AudioAttributes
                     .Builder()
@@ -802,14 +1247,18 @@ open class DefaultVideoPlayerState(
                 ExoPlayer
                     .Builder(context)
                     .setRenderersFactory(renderersFactory)
-                    .setHandleAudioBecomingNoisy(manageFocus)
-                    .setWakeMode(if (manageFocus) C.WAKE_MODE_LOCAL else C.WAKE_MODE_NONE)
+                    .setHandleAudioBecomingNoisy(handleBecomingNoisy)
+                    .setWakeMode(if (handleBecomingNoisy) C.WAKE_MODE_LOCAL else C.WAKE_MODE_NONE)
                     .setAudioAttributes(audioAttributes, manageFocus)
                     .setPauseAtEndOfMediaItems(false)
                     .setReleaseTimeoutMs(2000) // Increase the release timeout
 
             if (cacheConfig.enabled) {
-                val cacheDataSourceFactory = buildCachingDataSourceFactory(context, cacheConfig.maxCacheSizeBytes)
+                val lease =
+                    cacheLease ?: VideoCache.acquire(context, cacheConfig.maxCacheSizeBytes).also {
+                        cacheLease = it
+                    }
+                val cacheDataSourceFactory = buildAndroidDataSourceFactory(context, lease.cache)
                 playerBuilder.setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
             }
 
@@ -817,20 +1266,20 @@ open class DefaultVideoPlayerState(
                 playerBuilder
                     .build()
                     .apply {
-                        val listener = createPlayerListener()
-                        playerListener = listener
-                        addListener(listener)
                         volume = _volume
                         projectionVideoSurface?.let(::setVideoSurface)
+                        playerView?.let { view ->
+                            view.player = this
+                            view.subtitleView?.setStyle(CaptionStyleCompat.DEFAULT)
+                        }
                     }
         }
     }
 
-    private fun createPlayerListener() =
+    private fun createPlayerListener(generation: Long) =
         object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                // Add a safety check
-                if (isPlayerReleased) return
+                if (!isCurrentSourceCallback(generation)) return
 
                 when (playbackState) {
                     Player.STATE_BUFFERING -> {
@@ -882,6 +1331,7 @@ open class DefaultVideoPlayerState(
                         _isLoading = false
                         _isSeeking = false
                         stopPositionUpdates()
+                        abandonDuckAudioFocus()
                         _isPlaying = false
                         emitPlaybackEvent { sessionId, sampledAtMs ->
                             PlaybackEvent.PlaybackEnded(
@@ -900,7 +1350,7 @@ open class DefaultVideoPlayerState(
             }
 
             override fun onIsPlayingChanged(playing: Boolean) {
-                if (!isPlayerReleased) {
+                if (isCurrentSourceCallback(generation)) {
                     _isPlaying = playing
                     if (playing) {
                         startPositionUpdates()
@@ -915,6 +1365,7 @@ open class DefaultVideoPlayerState(
                 newPosition: Player.PositionInfo,
                 reason: Int,
             ) {
+                if (!isCurrentSourceCallback(generation)) return
                 if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION && _loop) {
                     emitPlaybackEvent { sessionId, sampledAtMs ->
                         PlaybackEvent.PlaybackRestarted(
@@ -937,6 +1388,7 @@ open class DefaultVideoPlayerState(
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (!isCurrentSourceCallback(generation)) return
                 if (videoSize.width > 0 && videoSize.height > 0) {
                     _aspectRatio = videoSize.width.toFloat() / videoSize.height.toFloat()
                     _metadata.width = videoSize.width
@@ -954,7 +1406,7 @@ open class DefaultVideoPlayerState(
             }
 
             override fun onTracksChanged(tracks: Tracks) {
-                if (!isPlayerReleased) {
+                if (isCurrentSourceCallback(generation)) {
                     exoPlayer?.let { player ->
                         syncAvailableMediaTracks(player)
                     }
@@ -962,6 +1414,8 @@ open class DefaultVideoPlayerState(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                if (!isCurrentSourceCallback(generation)) return
+                val resumePlaybackAfterRecovery = exoPlayer?.playWhenReady == true
                 androidVideoLogger.e { "Player error occurred: ${error.errorCode} - ${error.message}" }
 
                 // Create a detailed error report
@@ -988,7 +1442,7 @@ open class DefaultVideoPlayerState(
                     -> {
                         setError(VideoPlayerError.CodecError("Decoder error: ${error.message}"))
                         // Attempt recovery for codec errors
-                        attemptPlayerRecovery()
+                        attemptPlayerRecovery(resumePlayback = resumePlaybackAfterRecovery)
                     }
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
@@ -1007,42 +1461,49 @@ open class DefaultVideoPlayerState(
                 _isPlaying = false
                 _isLoading = false
                 _isSeeking = false
+                abandonDuckAudioFocus()
             }
         }
 
-    private fun attemptPlayerRecovery() {
+    internal fun attemptPlayerRecovery(
+        delayBeforeRecovery: Duration = 100.milliseconds,
+        resumePlayback: Boolean = exoPlayer?.playWhenReady == true,
+    ): Job =
         coroutineScope.launch {
-            delay(100.milliseconds) // Small delay to let the system clean up
+            val expectedGeneration = sourceGeneration
+            val expectedPlaybackIntentGeneration = playbackIntentGeneration
+            delay(delayBeforeRecovery)
 
             synchronized(playerInitializationLock) {
-                if (!isPlayerReleased) {
+                if (
+                    !isPlayerReleased &&
+                    expectedGeneration == sourceGeneration &&
+                    expectedPlaybackIntentGeneration == playbackIntentGeneration
+                ) {
                     exoPlayer?.let { player ->
                         val currentPosition = player.currentPosition
-                        val currentMediaItem = player.currentMediaItem
-                        val wasPlaying = player.isPlaying
+                        val sourceSpec = currentSourceSpec ?: return@let
 
                         try {
-                            // Remove the listener before releasing
-                            playerListener?.let { player.removeListener(it) }
-
-                            // Release the current player
-                            player.release()
-
-                            // Reinitialize
+                            invalidateSourceCallbacks(player)
+                            playerView?.player = null
+                            runCatching { player.stop() }
+                            try {
+                                player.release()
+                            } finally {
+                                exoPlayer = null
+                            }
                             initializePlayer()
 
-                            // Restore the media item and position
-                            currentMediaItem?.let {
-                                exoPlayer?.apply {
-                                    setMediaItem(it)
-                                    prepare()
-                                    seekTo(currentPosition)
-                                    // Restore the playback state if needed
-                                    if (wasPlaying) {
-                                        play()
-                                    } else {
-                                        pause()
-                                    }
+                            exoPlayer?.apply {
+                                installSourceListener(this)
+                                setSource(sourceSpec)
+                                prepare()
+                                seekTo(currentPosition)
+                                if (resumePlayback && requestDuckAudioFocus()) {
+                                    play()
+                                } else {
+                                    pause()
                                 }
                             }
                         } catch (e: Exception) {
@@ -1053,7 +1514,6 @@ open class DefaultVideoPlayerState(
                 }
             }
         }
-    }
 
     private fun startPositionUpdates() {
         stopPositionUpdates()
@@ -1088,32 +1548,41 @@ open class DefaultVideoPlayerState(
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String>,
     ) {
-        resetProjectionForSource(uri)
-        val mediaItemBuilder = MediaItem.Builder().setUri(uri)
-        val mediaItem = mediaItemBuilder.build()
-        openFromMediaItem(mediaItem, initializePlayerState, requestHeaders)
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                invalidateScreenAutoResume()
+                resetProjectionForSource(uri)
+                openFromMediaItem(MediaItem.Builder().setUri(uri).build(), initializePlayerState, requestHeaders)
+            }
+        }
     }
 
     override fun openFile(
         file: PlatformFile,
         initializePlayerState: InitialPlayerState,
     ) {
-        val mediaItemBuilder = MediaItem.Builder()
-        val videoUri: Uri =
-            when (val androidFile = file.androidFile) {
-                is AndroidFile.UriWrapper -> androidFile.uri
-                is AndroidFile.FileWrapper -> Uri.fromFile(androidFile.file)
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                invalidateScreenAutoResume()
+                val videoUri: Uri =
+                    when (val androidFile = file.androidFile) {
+                        is AndroidFile.UriWrapper -> androidFile.uri
+                        is AndroidFile.FileWrapper -> Uri.fromFile(androidFile.file)
+                    }
+                val mediaItem = MediaItem.Builder().setUri(videoUri).build()
+                resetProjectionForSource(videoUri.toString())
+                openFromMediaItem(mediaItem, initializePlayerState)
             }
-        mediaItemBuilder.setUri(videoUri)
-        val mediaItem = mediaItemBuilder.build()
-        resetProjectionForSource(videoUri.toString())
-        openFromMediaItem(mediaItem, initializePlayerState)
+        }
     }
 
     override fun openAsset(
         fileName: String,
         initializePlayerState: InitialPlayerState,
     ) {
+        checkNotDisposed()
         openUri(fileName.normalizedAssetUri(), initializePlayerState)
     }
 
@@ -1122,68 +1591,77 @@ open class DefaultVideoPlayerState(
         initializePlayerState: InitialPlayerState,
         requestHeaders: Map<String, String> = emptyMap(),
     ) {
-        synchronized(playerInitializationLock) {
-            if (isPlayerReleased) return
-
-            exoPlayer?.let { player ->
-                val previousSessionId = mediaSessionId
-                val hadPreviousSource = _hasMedia
-                val sessionId = nextMediaSessionId()
-                val sourceUri =
-                    mediaItem
-                        .localConfiguration
-                        ?.uri
-                        ?.toString()
-                        ?.takeIf { it.isNotBlank() }
-                        ?: mediaItem.mediaId
-                sourceLoadedSessionId = 0L
-                wasStalled = false
-                if (hadPreviousSource) {
-                    emitSourceReleasedForSession(previousSessionId)
-                }
-                emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
-                    PlaybackEvent.SourcePreparing(
-                        mediaSessionId = eventSessionId,
-                        sampledAtMs = sampledAtMs,
-                        uri = sourceUri,
-                    )
-                }
-                player.stop()
-                player.clearMediaItems()
-                try {
-                    clearErrorState()
-                    resetStates(keepMedia = true)
-                    updateRenderingInfo()
-
-                    // Extract metadata before preparing the player
-                    extractMediaItemMetadata(mediaItem)
-
-                    val mediaSource = createMediaSource(mediaItem, requestHeaders)
-                    if (mediaSource == null) {
-                        player.setMediaItem(mediaItem)
-                    } else {
-                        player.setMediaSource(mediaSource)
-                    }
-                    player.prepare()
-                    player.volume = volume
-                    player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
-
-                    // Control the initial playback state
-                    if (initializePlayerState == InitialPlayerState.PLAY) {
-                        player.play()
-                        _hasMedia = true
-                    } else {
-                        player.pause()
-                        _isPlaying = false
-                        _hasMedia = true
-                    }
-                } catch (e: Exception) {
-                    androidVideoLogger.d { "Error opening media: ${e.message}" }
-                    _isPlaying = false
-                    _hasMedia = false
-                    setError(VideoPlayerError.SourceError("Failed to load media: ${e.message}"))
-                }
+        checkNotDisposed()
+        exoPlayer?.let { player ->
+            val previousSessionId = mediaSessionId
+            val hadPreviousSource = currentSourceSpec != null
+            val sessionId = nextMediaSessionId()
+            val sourceUri =
+                mediaItem
+                    .localConfiguration
+                    ?.uri
+                    ?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: mediaItem.mediaId
+            sourceLoadedSessionId = 0L
+            wasStalled = false
+            if (hadPreviousSource) {
+                emitSourceReleasedForSession(previousSessionId)
             }
+            emitPlaybackEventForSession(sessionId) { eventSessionId, sampledAtMs ->
+                PlaybackEvent.SourcePreparing(
+                    mediaSessionId = eventSessionId,
+                    sampledAtMs = sampledAtMs,
+                    uri = sourceUri,
+                )
+            }
+            invalidateSourceCallbacks(player)
+            stopPositionUpdates()
+            abandonDuckAudioFocus()
+            player.stop()
+            player.clearMediaItems()
+            try {
+                clearErrorState()
+                resetStates(keepMedia = true)
+                updateRenderingInfo()
+                val sourceSpec = AndroidSourceSpec(mediaItem, requestHeaders.sanitizedRequestHeaders())
+                currentSourceSpec = sourceSpec
+                installSourceListener(player)
+                _hasMedia = true
+
+                // Extract metadata before preparing the player
+                extractMediaItemMetadata(mediaItem)
+
+                player.setSource(sourceSpec)
+                player.prepare()
+                player.volume = volume
+                player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+
+                // Control the initial playback state
+                if (initializePlayerState == InitialPlayerState.PLAY) {
+                    if (requestDuckAudioFocus()) player.play()
+                } else {
+                    player.pause()
+                    _isPlaying = false
+                }
+            } catch (e: Exception) {
+                androidVideoLogger.d { "Error opening media: ${e.message}" }
+                invalidateSourceCallbacks(player)
+                currentSourceSpec = null
+                runCatching { player.clearMediaItems() }
+                _isPlaying = false
+                _hasMedia = false
+                setError(VideoPlayerError.SourceError("Failed to load media: ${e.message}"))
+            }
+        }
+    }
+
+    private fun ExoPlayer.setSource(sourceSpec: AndroidSourceSpec) {
+        val mediaSource = createMediaSource(sourceSpec.mediaItem, sourceSpec.requestHeaders)
+        if (mediaSource == null) {
+            setMediaItem(sourceSpec.mediaItem)
+        } else {
+            setMediaSource(mediaSource)
         }
     }
 
@@ -1200,20 +1678,21 @@ open class DefaultVideoPlayerState(
     ): MediaSource? =
         requestHeaders
             .takeIf { it.isNotEmpty() }
-            ?.mediaSourceFactory()
-            ?.createMediaSource(mediaItem)
-
-    private fun Map<String, String>.mediaSourceFactory(): DefaultMediaSourceFactory {
-        val httpFactory =
-            DefaultHttpDataSource
-                .Factory()
-                .setDefaultRequestProperties(sanitizedRequestHeaders())
-        return DefaultMediaSourceFactory(DefaultDataSource.Factory(context, httpFactory))
-    }
+            ?.let { headers ->
+                DefaultMediaSourceFactory(
+                    buildAndroidDataSourceFactory(
+                        context = context,
+                        cache = cacheLease?.cache,
+                        requestHeaders = headers,
+                    ),
+                )
+            }?.createMediaSource(mediaItem)
 
     override fun play() {
-        synchronized(playerInitializationLock) {
-            if (!isPlayerReleased) {
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                invalidateScreenAutoResume()
                 exoPlayer?.let { player ->
                     if (player.mediaItemCount == 0) return@let
                     if (player.playbackState == Player.STATE_IDLE) {
@@ -1221,23 +1700,24 @@ open class DefaultVideoPlayerState(
                     } else if (player.playbackState == Player.STATE_ENDED) {
                         player.seekTo(0)
                     }
-                    player.play()
-                    _hasMedia = true
+                    if (requestDuckAudioFocus()) player.play()
                 }
             }
         }
     }
 
     override fun restart() {
-        synchronized(playerInitializationLock) {
-            if (!isPlayerReleased) {
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                invalidateScreenAutoResume()
                 exoPlayer?.let { player ->
                     if (player.mediaItemCount == 0) return@let
                     if (player.playbackState == Player.STATE_IDLE) {
                         player.prepare()
                     }
                     player.seekTo(0)
-                    player.play()
+                    if (requestDuckAudioFocus()) player.play()
                     emitPlaybackEvent { sessionId, sampledAtMs ->
                         PlaybackEvent.PlaybackRestarted(
                             mediaSessionId = sessionId,
@@ -1250,27 +1730,52 @@ open class DefaultVideoPlayerState(
     }
 
     override fun pause() {
-        synchronized(playerInitializationLock) {
-            if (!isPlayerReleased) {
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                invalidateScreenAutoResume()
                 exoPlayer?.pause()
+                abandonDuckAudioFocus()
             }
         }
     }
 
     override fun stop() {
-        synchronized(playerInitializationLock) {
-            if (!isPlayerReleased) {
-                val releasedSessionId = mediaSessionId
-                val hadMedia = _hasMedia
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                invalidateScreenAutoResume()
+                abandonDuckAudioFocus()
                 exoPlayer?.let { player ->
                     player.stop()
                     player.seekTo(0)
                 }
-                _hasMedia = false
                 resetStates(keepMedia = true)
-                sourceLoadedSessionId = 0L
                 wasStalled = false
-                if (hadMedia) {
+            }
+        }
+    }
+
+    override fun releaseSource() {
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                val releasedSessionId = mediaSessionId
+                val hadSource = currentSourceSpec != null
+                invalidateScreenAutoResume()
+                val player = exoPlayer
+                invalidateSourceCallbacks(player)
+                currentSourceSpec = null
+                stopPositionUpdates()
+                abandonDuckAudioFocus()
+                if (player != null) {
+                    runCatching { player.stop() }
+                        .onFailure { androidVideoLogger.e { "Error stopping released source: ${it.message}" } }
+                    runCatching { player.clearMediaItems() }
+                        .onFailure { androidVideoLogger.e { "Error clearing released source: ${it.message}" } }
+                }
+                resetStates()
+                if (hadSource) {
                     emitSourceReleasedForSession(releasedSessionId)
                     nextMediaSessionId()
                 }
@@ -1279,10 +1784,12 @@ open class DefaultVideoPlayerState(
     }
 
     fun togglePipFullScreen() {
+        checkNotDisposed()
         isPipFullScreen = !isPipFullScreen
     }
 
     override suspend fun enterPip(): PipResult {
+        checkNotDisposed()
         if (!isPipSupported) return PipResult.NotSupported
         if (!isPipEnabled) return PipResult.NotEnabled
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return PipResult.NotPossible
@@ -1317,40 +1824,58 @@ open class DefaultVideoPlayerState(
     }
 
     override fun seekTo(time: Duration) {
-        if (!isPlayerReleased) {
-            val player = exoPlayer ?: return
-            if (player.mediaItemCount == 0) return
-            val targetTime =
-                when {
-                    time < Duration.ZERO -> Duration.ZERO
-                    _duration > Duration.ZERO && time > _duration -> _duration
-                    else -> time
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                val player = exoPlayer ?: return@synchronized
+                if (player.mediaItemCount == 0) return@synchronized
+                val targetTime =
+                    when {
+                        time < Duration.ZERO -> Duration.ZERO
+                        _duration > Duration.ZERO && time > _duration -> _duration
+                        else -> time
+                    }
+                _isSeeking = true
+                emitPlaybackEvent { sessionId, sampledAtMs ->
+                    PlaybackEvent.SeekStarted(
+                        mediaSessionId = sessionId,
+                        sampledAtMs = sampledAtMs,
+                        target = targetTime,
+                    )
                 }
-            _isSeeking = true
-            emitPlaybackEvent { sessionId, sampledAtMs ->
-                PlaybackEvent.SeekStarted(
-                    mediaSessionId = sessionId,
-                    sampledAtMs = sampledAtMs,
-                    target = targetTime,
-                )
-            }
-            player.seekTo(targetTime.inWholeMilliseconds)
-            coroutineScope.launch {
-                delay(250.milliseconds)
-                _isSeeking = false
+                player.seekTo(targetTime.inWholeMilliseconds)
+                val expectedGeneration = sourceGeneration
+                coroutineScope.launch {
+                    delay(250.milliseconds)
+                    if (expectedGeneration == sourceGeneration && !isPlayerReleased) _isSeeking = false
+                }
             }
         }
     }
 
     override fun seekToProgress(progress: Float) {
+        checkNotDisposed()
         if (_duration > Duration.ZERO) {
             seekTo(_duration * progress.coerceIn(0f, 1f).toDouble())
         }
     }
 
+    override fun seekStart(value: Float) {
+        checkNotDisposed()
+        userDragging = true
+        sliderPos = value
+    }
+
+    override fun seekFinished() {
+        checkNotDisposed()
+        seekToProgress(sliderPos / VideoPlayerState.SLIDER_SCALE)
+        userDragging = false
+    }
+
     @Suppress("OVERRIDE_DEPRECATION")
     override fun seekTo(value: Float) {
-        if (_duration > Duration.ZERO && !isPlayerReleased) {
+        checkNotDisposed()
+        if (_duration > Duration.ZERO) {
             val fraction = (value / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
             val targetTime = _duration * fraction
             seekTo(targetTime)
@@ -1358,22 +1883,32 @@ open class DefaultVideoPlayerState(
     }
 
     override fun clearError() {
+        checkNotDisposed()
         clearErrorState()
     }
 
-    override fun clearCache(): CacheClearResult =
-        if (!cacheConfig.enabled) {
+    override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
+        checkNotDisposed()
+        return HlsQualitySelectionResult.NotSupported
+    }
+
+    override fun clearCache(): CacheClearResult {
+        checkNotDisposed()
+        return if (!cacheConfig.enabled) {
             CacheClearResult.Disabled
         } else {
             try {
-                VideoCache.clear(context, cacheConfig.maxCacheSizeBytes)
+                val lease = cacheLease ?: return CacheClearResult.Failed("Android video cache is not initialized.")
+                lease.clear()
                 CacheClearResult.Cleared
             } catch (e: Exception) {
                 CacheClearResult.Failed(e.message ?: "Failed to clear Android video cache.")
             }
         }
+    }
 
     override fun toggleFullscreen() {
+        checkNotDisposed()
         _isFullscreen = !_isFullscreen
     }
 
@@ -1713,14 +2248,14 @@ open class DefaultVideoPlayerState(
         wasStalled = false
         _aspectRatio = 16f / 9f
         _playbackSpeed = 1.0f
-        _metadata = VideoMetadata()
+        resetMetadata()
         updateRenderingInfo()
         exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
-        currentAudioTrack = null
+        _currentAudioTrack = null
         _availableAudioTracks.clear()
-        if (currentSubtitleTrack?.isEmbedded == true) {
-            currentSubtitleTrack = null
-            subtitlesEnabled = false
+        if (_currentSubtitleTrack?.isEmbedded == true) {
+            _currentSubtitleTrack = null
+            _subtitlesEnabled = false
         }
         _availableSubtitleTracks.removeAll { it.isEmbedded }
         updateNativeSubtitleVisibility()
@@ -1730,38 +2265,79 @@ open class DefaultVideoPlayerState(
         }
     }
 
+    private fun resetMetadata() {
+        _metadata.title = null
+        _metadata.duration = null
+        _metadata.width = null
+        _metadata.height = null
+        _metadata.bitrate = null
+        _metadata.frameRate = null
+        _metadata.mimeType = null
+        _metadata.audioChannels = null
+        _metadata.audioSampleRate = null
+    }
+
+    @Suppress("TooGenericExceptionCaught")
     override fun dispose() {
+        val player: ExoPlayer?
+        val listener: Player.Listener?
+        val releasedSessionId: Long
+        val hadSource: Boolean
         synchronized(playerInitializationLock) {
-            val releasedSessionId = mediaSessionId
-            val hadMedia = _hasMedia
+            if (isPlayerReleased) return
             isPlayerReleased = true
-            stopPositionUpdates()
-            coroutineScope.cancel()
-            playerView?.player = null
-            playerView = null
-            projectionVideoSurface = null
-
-            try {
-                exoPlayer?.let { player ->
-                    // Remove the listener specifically
-                    playerListener?.let { listener ->
-                        player.removeListener(listener)
-                    }
-                    player.stop()
-                    player.clearMediaItems()
-                    player.release()
-                }
-            } catch (e: Exception) {
-                androidVideoLogger.e { "Error during player disposal: ${e.message}" }
-            }
-
+            releasedSessionId = mediaSessionId
+            hadSource = currentSourceSpec != null
+            currentSourceSpec = null
+            sourceGeneration += 1
+            invalidateScreenAutoResume()
+            player = exoPlayer
+            listener = playerListener
             playerListener = null
-            exoPlayer = null
-            unregisterScreenLockReceiver()
-            resetStates()
-            if (hadMedia) {
-                emitSourceReleasedForSession(releasedSessionId)
+        }
+
+        val releaseAttempted = AtomicBoolean(false)
+        try {
+            runOnPlayerThreadBlocking {
+                stopPositionUpdates()
+                abandonDuckAudioFocus()
+                playerView?.player = null
+                playerView = null
+                projectionVideoSurface = null
+                unregisterScreenLockReceiver()
+                if (player != null) {
+                    listener?.let { currentListener ->
+                        runCatching { player.removeListener(currentListener) }
+                            .onFailure { androidVideoLogger.e { "Error removing player listener: ${it.message}" } }
+                    }
+                    runCatching { player.stop() }
+                        .onFailure { androidVideoLogger.e { "Error stopping disposed player: ${it.message}" } }
+                    runCatching { player.clearMediaItems() }
+                        .onFailure { androidVideoLogger.e { "Error clearing disposed player: ${it.message}" } }
+                    releaseAttempted.set(true)
+                    runCatching { player.release() }
+                        .onFailure { androidVideoLogger.e { "Error releasing disposed player: ${it.message}" } }
+                }
+                exoPlayer = null
+                resetStates()
+                if (hadSource) emitSourceReleasedForSession(releasedSessionId)
             }
+        } catch (dispatchFailure: Throwable) {
+            androidVideoLogger.e { "Error dispatching player disposal: ${dispatchFailure.message}" }
+            if (player != null && !releaseAttempted.get()) {
+                // The normal path always uses ExoPlayer's application looper. This is a last-resort attempt for a
+                // looper that is already shutting down; release must never be skipped because an earlier step failed.
+                runCatching { player.release() }
+                    .onFailure { androidVideoLogger.e { "Fallback player release failed: ${it.message}" } }
+            }
+        } finally {
+            exoPlayer = null
+            playbackEndedCallback = null
+            restartCallback = null
+            coroutineScope.cancel()
+            runCatching { cacheLease?.close() }
+                .onFailure { androidVideoLogger.e { "Error releasing video cache lease: ${it.message}" } }
+            cacheLease = null
         }
     }
 }

@@ -59,12 +59,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
+import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
-import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
@@ -78,7 +79,7 @@ import kotlin.time.Duration.Companion.seconds
 @Composable
 fun PlayerScreen(
     modifier: Modifier = Modifier,
-    playerState: VideoPlayerState = rememberVideoPlayerState(),
+    playerState: RenderableVideoPlayerState = rememberRenderableVideoPlayerState(),
     initialVideoUrl: String? = null,
     demoSubtitleEnabled: Boolean = true,
 ) {

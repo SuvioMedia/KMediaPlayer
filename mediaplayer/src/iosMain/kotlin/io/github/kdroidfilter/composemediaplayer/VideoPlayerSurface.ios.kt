@@ -28,7 +28,6 @@ import platform.AVFoundation.AVLayerVideoGravityResizeAspect
 import platform.AVFoundation.AVLayerVideoGravityResizeAspectFill
 import platform.AVFoundation.AVPlayer
 import platform.AVFoundation.AVPlayerLayer
-import platform.AVKit.AVPictureInPictureController
 import platform.CoreGraphics.CGRect
 import platform.CoreGraphics.CGRectMake
 import platform.Foundation.NSCoder
@@ -71,6 +70,14 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
 ) {
+    if (playerState is PreviewableVideoPlayerState) {
+        VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
+        return
+    }
+    require(playerState is DefaultVideoPlayerState) {
+        "Unsupported video player state: ${playerState::class}"
+    }
+
     // Set pauseOnDispose to false to prevent pausing during screen rotation
     VideoPlayerSurfaceImpl(
         playerState,
@@ -93,6 +100,34 @@ fun VideoPlayerSurfaceImpl(
     isInFullscreenView: Boolean = false,
     pauseOnDispose: Boolean = true,
 ) {
+    if (playerState is PreviewableVideoPlayerState) {
+        VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
+        return
+    }
+    require(playerState is DefaultVideoPlayerState) {
+        "Unsupported video player state: ${playerState::class}"
+    }
+    DefaultVideoPlayerSurfaceImpl(
+        playerState = playerState,
+        modifier = modifier,
+        contentScale = contentScale,
+        overlay = overlay,
+        isInFullscreenView = isInFullscreenView,
+        pauseOnDispose = pauseOnDispose,
+    )
+}
+
+@OptIn(ExperimentalForeignApi::class)
+@Suppress("CyclomaticComplexMethod")
+@Composable
+private fun DefaultVideoPlayerSurfaceImpl(
+    playerState: DefaultVideoPlayerState,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit,
+    isInFullscreenView: Boolean = false,
+    pauseOnDispose: Boolean = true,
+) {
     // Cleanup when deleting the view
     DisposableEffect(Unit) {
         onDispose {
@@ -107,7 +142,7 @@ fun VideoPlayerSurfaceImpl(
         }
     }
 
-    val currentPlayer = (playerState as? DefaultVideoPlayerState)?.player
+    val currentPlayer = playerState.player
     val usesProjectionRenderer =
         playerState.projection.usesIosSceneKitProjectionRenderer(playerState.projectionTextureCrop)
     IosProjectionDeviceMotionEffect(
@@ -138,10 +173,6 @@ fun VideoPlayerSurfaceImpl(
                                     textureCrop = playerState.projectionTextureCrop,
                                     contentScale = contentScale,
                                 )
-                                (playerState as? DefaultVideoPlayerState)?.let { state ->
-                                    state.playerLayer = null
-                                    state.pipController = null
-                                }
                             }
                         } else {
                             PlayerUIView(frame = cValue<CGRect>()).apply {
@@ -149,12 +180,9 @@ fun VideoPlayerSurfaceImpl(
                                 backgroundColor = UIColor.blackColor
                                 clipsToBounds = true
 
-                                (playerState as? DefaultVideoPlayerState)?.let { state ->
-                                    val playerLayer = layer as? AVPlayerLayer ?: return@let
-                                    state.playerLayer = playerLayer
-                                    if (AVPictureInPictureController.isPictureInPictureSupported()) {
-                                        state.pipController = AVPictureInPictureController(playerLayer = playerLayer)
-                                    }
+                                val videoPlayerLayer = layer as? AVPlayerLayer
+                                if (videoPlayerLayer != null) {
+                                    playerState.bindPlayerLayer(videoPlayerLayer, isInFullscreenView)
                                 }
                             }
                         }
@@ -173,6 +201,9 @@ fun VideoPlayerSurfaceImpl(
                             }
                             is PlayerUIView -> {
                                 view.player = currentPlayer
+                                (view.layer as? AVPlayerLayer)?.let { layer ->
+                                    playerState.bindPlayerLayer(layer, isInFullscreenView)
+                                }
 
                                 // Hide or show the view depending on the presence of media
                                 view.hidden = !playerState.hasMedia
@@ -209,7 +240,10 @@ fun VideoPlayerSurfaceImpl(
                                     textureCrop = VideoTextureCrop(),
                                     contentScale = ContentScale.Fit,
                                 )
-                            is PlayerUIView -> view.player = null
+                            is PlayerUIView -> {
+                                (view.layer as? AVPlayerLayer)?.let(playerState::releasePlayerLayer)
+                                view.player = null
+                            }
                         }
                     },
                 )
