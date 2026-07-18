@@ -9,12 +9,15 @@ import kotlin.test.assertTrue
 class PlayerCapabilitiesJvmTest {
     @Test
     fun `platform backend reports only native container support`() {
+        val options = VideoPlaybackOptions(desktopVideoBackend = DesktopVideoBackend.PLATFORM)
         val capabilities =
-            jvmPlayerCapabilities(
-                VideoPlaybackOptions(desktopVideoBackend = DesktopVideoBackend.PLATFORM),
-            )
+            jvmPlayerCapabilities(options)
 
         assertEquals(CurrentPlatform.os == CurrentPlatform.OS.LINUX, capabilities.supportsMkv)
+        assertEquals(
+            capabilities,
+            defaultVideoPlayerBackend(playbackOptions = options).info.capabilities,
+        )
     }
 
     @Test

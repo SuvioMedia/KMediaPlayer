@@ -6,15 +6,14 @@ import android.view.Display
 import android.view.WindowManager
 import com.kdroid.androidcontextprovider.ContextProvider
 
-internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
+internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOptions): PlayerCapabilities =
     PlayerCapabilities(
         supportsMkv = true,
+        supportsHls = true,
         supportsPiP = isAndroidPictureInPictureSupported(),
         hdr = queryAndroidHdrCapabilities(),
         supportedUriSchemes = ANDROID_SUPPORTED_URI_SCHEMES,
     )
-
-internal actual fun platformSupportsHls(): Boolean = true
 
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
     platformPlayerCapabilities().canPlaySource(source)

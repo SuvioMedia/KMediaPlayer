@@ -92,12 +92,23 @@ dependencyResolutionManagement {
                 }
             }
             filter {
-                includeGroup("io.github.shusek")
+                includeModule("io.github.shusek", "composemediaplayer-core")
+                includeModule("io.github.shusek", "composemediaplayer-core-android")
+                includeModule("io.github.shusek", "composemediaplayer-core-jvm")
+                includeModule("io.github.shusek", "composemediaplayer")
+                includeModule("io.github.shusek", "composemediaplayer-android")
+                includeModule("io.github.shusek", "composemediaplayer-jvm")
+                includeModule("io.github.shusek", "composemediaplayer-mpv")
+                includeModule("io.github.shusek", "composemediaplayer-mpv-android")
+                includeModule("io.github.shusek", "composemediaplayer-mpv-jvm")
             }
         }
     }
 }
+include(":mediaplayer-core")
 include(":mediaplayer")
+include(":mediaplayer-mpv")
 include(":consumer-smoke")
+include(":consumer-smoke-mpv")
 include(":sample:composeApp")
 include(":androidApp")

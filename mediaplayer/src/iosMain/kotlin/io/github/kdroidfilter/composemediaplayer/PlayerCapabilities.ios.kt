@@ -2,14 +2,13 @@ package io.github.kdroidfilter.composemediaplayer
 
 import platform.AVKit.AVPictureInPictureController
 
-internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
+internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOptions): PlayerCapabilities =
     PlayerCapabilities(
         supportsMkv = false,
+        supportsHls = true,
         supportsPiP = AVPictureInPictureController.isPictureInPictureSupported(),
         supportedUriSchemes = IOS_SUPPORTED_URI_SCHEMES,
     )
-
-internal actual fun platformSupportsHls(): Boolean = true
 
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
     platformPlayerCapabilities().canPlaySource(source)

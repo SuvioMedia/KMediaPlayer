@@ -1,5 +1,11 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
 
+import org.gradle.api.DefaultTask
+import org.gradle.api.Project
+import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.provider.SetProperty
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.TaskAction
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnLockMismatchReport
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnPlugin
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnRootEnvSpec
@@ -22,6 +28,40 @@ plugins {
     alias(libs.plugins.vannitktech.maven.publish).apply(false)
     alias(libs.plugins.detekt)
     alias(libs.plugins.ktlint)
+}
+
+abstract class VerifyBackendModuleBoundaries : DefaultTask() {
+    @get:Input
+    abstract val coreDependencies: SetProperty<String>
+
+    @get:Input
+    abstract val defaultPlayerDependencies: SetProperty<String>
+
+    @get:Input
+    abstract val mpvBackendDependencies: SetProperty<String>
+
+    @TaskAction
+    fun verifyBoundaries() {
+        val core = coreDependencies.get()
+        val defaultPlayer = defaultPlayerDependencies.get()
+        val mpvBackend = mpvBackendDependencies.get()
+
+        check(":mediaplayer-core" in defaultPlayer) {
+            "The default player must consume the backend-neutral :mediaplayer-core contracts."
+        }
+        check(":mediaplayer-core" in mpvBackend) {
+            "The MPV backend must consume the backend-neutral :mediaplayer-core contracts."
+        }
+        check(":mediaplayer-mpv" !in defaultPlayer) {
+            ":mediaplayer must not depend on the optional :mediaplayer-mpv implementation."
+        }
+        check(":mediaplayer" !in mpvBackend) {
+            ":mediaplayer-mpv must not depend on the default :mediaplayer implementation."
+        }
+        check(core.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
+            ":mediaplayer-core must not depend on a player implementation."
+        }
+    }
 }
 
 rootProject.plugins.withType<YarnPlugin> {
@@ -64,6 +104,8 @@ tasks.register("consumerSmokeTest") {
     dependsOn(
         ":consumer-smoke:compileAndroidMain",
         ":consumer-smoke:jvmTest",
+        ":consumer-smoke-mpv:compileAndroidMain",
+        ":consumer-smoke-mpv:jvmTest",
     )
 }
 
@@ -71,10 +113,37 @@ tasks.register("publishConsumerSmokeArtifacts") {
     group = "verification"
     description = "Publishes the KMP, JVM and Android variants used by the isolated consumer smoke project."
     dependsOn(
+        ":mediaplayer-core:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-core:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-core:publishAndroidPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-mpv:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-mpv:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-mpv:publishAndroidPublicationToConsumerSmokeRepository",
     )
+}
+
+val verifyBackendModuleBoundaries = tasks.register<VerifyBackendModuleBoundaries>("verifyBackendModuleBoundaries") {
+    group = "verification"
+    description = "Rejects dependencies that couple the default player and optional backend implementations."
+}
+
+gradle.projectsEvaluated {
+    fun Project.projectDependencyPaths(): Set<String> =
+        configurations
+            .flatMap { configuration ->
+                configuration.dependencies
+                    .withType(ProjectDependency::class.java)
+                    .map(ProjectDependency::getPath)
+            }.toSet()
+
+    verifyBackendModuleBoundaries.configure {
+        coreDependencies.set(project(":mediaplayer-core").projectDependencyPaths())
+        defaultPlayerDependencies.set(project(":mediaplayer").projectDependencyPaths())
+        mpvBackendDependencies.set(project(":mediaplayer-mpv").projectDependencyPaths())
+    }
 }
 
 // Code quality

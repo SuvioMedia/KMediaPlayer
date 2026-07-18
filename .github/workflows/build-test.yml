@@ -64,7 +64,9 @@ jobs:
 
       - name: Test desktop JVM on ${{ matrix.label }}
         run: >-
-          ${{ matrix.gradle }} :mediaplayer:compileKotlinJvm :mediaplayer:jvmTest
+          ${{ matrix.gradle }} :mediaplayer-core:jvmTest
+          :mediaplayer:compileKotlinJvm :mediaplayer:jvmTest
+          :mediaplayer-mpv:jvmTest
           --project-prop composeMediaPlayer.skipNativeBuild=true --no-daemon --continue
 
       - name: Upload JVM test reports
@@ -75,6 +77,10 @@ jobs:
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
+            mediaplayer-core/build/reports/tests/
+            mediaplayer-core/build/test-results/
+            mediaplayer-mpv/build/reports/tests/
+            mediaplayer-mpv/build/test-results/
           if-no-files-found: warn
 
   android:
@@ -101,7 +107,10 @@ jobs:
 
       - name: Build and test Android
         run: >-
-          ./gradlew :mediaplayer:compileAndroidMain :mediaplayer:testAndroidHostTest
+          ./gradlew :mediaplayer-core:compileAndroidMain
+          :mediaplayer-core:testAndroidHostTest
+          :mediaplayer:compileAndroidMain :mediaplayer:testAndroidHostTest
+          :mediaplayer-mpv:compileAndroidMain :mediaplayer-mpv:testAndroidHostTest
           :androidApp:assembleDebug --no-daemon --continue
 
       - name: Upload Android test reports
@@ -112,6 +121,10 @@ jobs:
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
+            mediaplayer-core/build/reports/tests/
+            mediaplayer-core/build/test-results/
+            mediaplayer-mpv/build/reports/tests/
+            mediaplayer-mpv/build/test-results/
           if-no-files-found: warn
 
   ios:
@@ -147,7 +160,9 @@ jobs:
 
       - name: Build and test iOS Simulator
         run: >-
-          ./gradlew :mediaplayer:compileKotlinIosArm64
+          ./gradlew :mediaplayer-core:compileKotlinIosArm64
+          :mediaplayer-core:iosSimulatorArm64Test
+          :mediaplayer:compileKotlinIosArm64
           :mediaplayer:iosSimulatorArm64Test --no-daemon --continue
 
       - name: Upload iOS test results
@@ -158,6 +173,8 @@ jobs:
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
+            mediaplayer-core/build/reports/tests/
+            mediaplayer-core/build/test-results/
           if-no-files-found: warn
 
   wasm-js:
@@ -174,7 +191,9 @@ jobs:
           cache: gradle
 
       - name: Test Wasm in headless Chrome
-        run: ./gradlew :mediaplayer:wasmJsBrowserTest --no-daemon
+        run: >-
+          ./gradlew :mediaplayer-core:wasmJsBrowserTest
+          :mediaplayer:wasmJsBrowserTest --no-daemon --continue
 
       - name: Upload Wasm test results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -184,6 +203,8 @@ jobs:
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
+            mediaplayer-core/build/reports/tests/
+            mediaplayer-core/build/test-results/
           if-no-files-found: warn
 
   consumer:
@@ -210,6 +231,8 @@ jobs:
       - name: Publish isolated consumer fixtures
         run: >-
           ./gradlew publishConsumerSmokeArtifacts :mediaplayer:verifyJvm25Bytecode
+          :mediaplayer-core:verifyJvm25Bytecode
+          :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion=0.0.0-consumer.${{ github.sha }}
           -PcomposeMediaPlayer.skipNativeBuild=true
           --no-configuration-cache --no-daemon --continue
@@ -239,7 +262,9 @@ jobs:
 
       - name: Run formatting and static analysis
         run: >-
-          ./gradlew ktlintCheck detekt
+          ./gradlew :mediaplayer-core:ktlintCheck
+          :mediaplayer:ktlintCheck :mediaplayer-mpv:ktlintCheck
+          :mediaplayer:detekt verifyBackendModuleBoundaries
           -PcomposeMediaPlayer.skipNativeBuild=true --no-daemon --continue
 
   abi:
@@ -275,7 +300,9 @@ jobs:
 
       - name: Validate JVM and KLIB ABI on a fully supported host
         run: >-
-          ./gradlew :mediaplayer:checkKotlinAbi
+          ./gradlew :mediaplayer-core:checkKotlinAbi
+          :mediaplayer:checkKotlinAbi
+          :mediaplayer-mpv:checkKotlinAbi
           -PcomposeMediaPlayer.skipNativeBuild=true --no-daemon --continue
 
   verification-complete:

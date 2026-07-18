@@ -35,6 +35,8 @@ actual fun VideoPlayerSurface(
     when (playerState) {
         is PreviewableVideoPlayerState ->
             VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
+        is VideoPlayerSurfaceProvider ->
+            playerState.RenderVideoPlayerSurface(modifier, contentScale, overlay)
         is DefaultVideoPlayerState ->
             when (val delegate = playerState.delegate) {
                 is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, contentScale, overlay)

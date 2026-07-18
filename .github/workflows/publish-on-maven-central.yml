@@ -123,8 +123,12 @@ jobs:
       - name: Build and stage the GitHub Pages release
         shell: bash
         run: >-
-          ./gradlew :mediaplayer:publishAllPublicationsToGithubPagesRepository
+          ./gradlew :mediaplayer-core:publishAllPublicationsToGithubPagesRepository
+          :mediaplayer:publishAllPublicationsToGithubPagesRepository
+          :mediaplayer-mpv:publishAllPublicationsToGithubPagesRepository
+          :mediaplayer-core:verifyJvm25Bytecode
           :mediaplayer:verifyJvm25Bytecode
+          :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion="$RELEASE_VERSION"
           -PgithubPagesMavenRepository="$RUNNER_TEMP/gh-pages/maven"
           -PcomposeMediaPlayer.skipNativeBuild=true
@@ -160,6 +164,16 @@ jobs:
           done < <(find "$repository/io/github/shusek" -path "*/$RELEASE_VERSION/*.pom" -type f)
           test "$found" -gt 0 || { echo "No staged POMs for $RELEASE_VERSION" >&2; exit 1; }
 
+          expected_coordinates=(
+            composemediaplayer-core
+            composemediaplayer
+            composemediaplayer-mpv
+          )
+          for artifact_id in "${expected_coordinates[@]}"; do
+            pom="$repository/io/github/shusek/$artifact_id/$RELEASE_VERSION/$artifact_id-$RELEASE_VERSION.pom"
+            test -s "$pom" || { echo "Missing staged coordinate: io.github.shusek:$artifact_id:$RELEASE_VERSION" >&2; exit 1; }
+          done
+
           pages_dir="$RUNNER_TEMP/gh-pages"
           manifest="$RUNNER_TEMP/maven-release-files.txt"
           archive="$GITHUB_WORKSPACE/build/maven-release-$RELEASE_VERSION.tar.gz"
@@ -182,18 +196,16 @@ jobs:
         id: maven_central
         shell: bash
         env:
-          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVENCENTRALUSERNAME }}
-          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVENCENTRALPASSWORD }}
-          SIGNING_IN_MEMORY_KEY: ${{ secrets.SIGNINGINMEMORYKEY }}
-          SIGNING_KEY_ID: ${{ secrets.SIGNINGKEYID }}
-          SIGNING_PASSWORD: ${{ secrets.SIGNINGPASSWORD }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
+          MAVEN_SIGNING_PASSWORD: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
         run: |
           set -euo pipefail
           if [[ -n "$MAVEN_CENTRAL_USERNAME" &&
                 -n "$MAVEN_CENTRAL_PASSWORD" &&
-                -n "$SIGNING_IN_MEMORY_KEY" &&
-                -n "$SIGNING_KEY_ID" &&
-                -n "$SIGNING_PASSWORD" ]]; then
+                -n "$MAVEN_SIGNING_KEY" &&
+                -n "$MAVEN_SIGNING_PASSWORD" ]]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -244,13 +256,15 @@ jobs:
         if: steps.maven_central.outputs.configured == 'true'
         shell: bash
         run: >-
-          ./gradlew :mediaplayer:publishAndReleaseToMavenCentral
+          ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
+          :mediaplayer:publishAndReleaseToMavenCentral
+          :mediaplayer-mpv:publishAndReleaseToMavenCentral
           -PpublicationVersion="$RELEASE_VERSION"
+          -PreleaseSigningEnabled=true
           -PcomposeMediaPlayer.skipNativeBuild=true
           --no-configuration-cache --no-daemon
         env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVENCENTRALUSERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVENCENTRALPASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNINGINMEMORYKEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNINGKEYID }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNINGPASSWORD }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}

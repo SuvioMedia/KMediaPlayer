@@ -29,6 +29,7 @@ This repository is a personal fork maintained for my own projects and integratio
 - [Supported Video Formats](#-supported-video-formats)
 - [Supported Codec Checks](#-supported-codec-checks)
 - [Installation](#-installation)
+  - [Optional MPV backend](#optional-mpv-backend)
 - [Compatibility Table](#-compatibility-table)
 - [Getting Started](#-getting-started)
   - [Initialization](#initialization)
@@ -78,6 +79,10 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 - **Video Caching**: Opt-in Media3 disk caching on Android, ideal for scroll-based UIs.
 - **3D/VR Projection**: Configure and auto-detect flat 3D, VR180, VR360, fisheye, and EAC projection modes. Android renders VR360 through Media3's spherical GL surface and other projected modes through an OpenGL shader surface, iOS renders projected modes through SceneKit, Web renders projected sources through WebGL, and desktop JVM canvas paths use a Skia shader renderer.
 - **Error handling** Simple error handling for network or playback issues.
+- **Optional MPV backend**: `composemediaplayer-mpv` is an Android/JVM adapter
+  with libass-based ASS/SSA subtitle support. The default artifact has no MPV
+  dependency; applications add the adapter only to the platform source sets
+  where they select it.
 
 ## ✨ Supported Video Formats
 | Format | Windows                                                                                                           | Linux  | macOS & iOS                                                       | Android | WASM |
@@ -158,12 +163,109 @@ dependencies {
 
 - **Build JDK and desktop runtime:** Java 25 or newer. Desktop JVM classes are intentionally published as Java 25 bytecode; Java 17/21 are not supported.
 - **Gradle:** use the checked-in Gradle 9.6.1 wrapper, whose distribution checksum is verified.
-- **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `1.0.x` line.
+- **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `2.0.x` line.
 - **Android:** the library is built and verified with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`.
+- **Android MPV adapter:** `composemediaplayer-mpv` uses `minSdk = 28` and publishes ARM runtimes only.
 - **iOS:** an Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
 - **Linux desktop runtime:** install GStreamer 1.x core, base libraries, and the plugins required by the media formats you use. On Debian/Ubuntu the CI baseline is `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-base`, and `gstreamer1.0-plugins-good`.
 - **Building the Linux JNI bridge:** additionally install CMake, `pkg-config`, a C compiler, full JDK 25 JNI headers, `libgstreamer1.0-dev`, and `libgstreamer-plugins-base1.0-dev`.
 - **Building the macOS/Windows bridges:** use full JDK 25 JNI headers plus Xcode/Swift on macOS or Visual Studio with CMake on Windows.
+
+### Optional MPV backend
+
+MPV is a separate adapter artifact. The dependency direction is:
+
+`composemediaplayer` → `composemediaplayer-core` ← `composemediaplayer-mpv`
+
+The main artifact never imports MPV. Both modules share only the state, event,
+capability, backend-factory, and renderer SPI from `composemediaplayer-core`.
+The MPV adapter carries the matching KMediaMpv runtime transitively, so the
+application does not add KMediaMpv coordinates separately.
+
+This dependency inversion is the reason for the `2.0.0` major version. Existing
+applications can keep depending on `composemediaplayer`; it re-exports `core`
+transitively. Backend authors may depend directly on `composemediaplayer-core`
+and do not pull the default Media3/AVPlayer/JNI implementations.
+
+Add the adapter only to supported platform source sets:
+
+```kotlin
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("io.github.shusek:composemediaplayer:<player-version>")
+        }
+        androidMain.dependencies {
+            implementation("io.github.shusek:composemediaplayer-mpv:<player-version>")
+        }
+        jvmMain.dependencies {
+            implementation("io.github.shusek:composemediaplayer-mpv:<player-version>")
+        }
+    }
+}
+```
+
+The MPV-specific wiring below belongs in `androidMain` or `jvmMain`. If a
+library targets only Android and desktop JVM, it may put the adapter in
+`commonMain` instead.
+
+An MPV-only application does not need `composemediaplayer` at all. Depend on
+`composemediaplayer-mpv` (which brings `composemediaplayer-core` transitively)
+and render with `BackendVideoPlayerSurface`. This avoids pulling Media3,
+AVPlayer, or the default desktop JNI implementations:
+
+```kotlin
+val playerState = rememberMpvVideoPlayerState()
+
+BackendVideoPlayerSurface(
+    playerState = playerState,
+    modifier = Modifier.fillMaxSize(),
+)
+```
+
+Then select MPV explicitly:
+
+```kotlin
+val playerState = rememberMpvVideoPlayerState()
+
+VideoPlayerSurface(
+    playerState = playerState,
+    modifier = Modifier.fillMaxSize(),
+    contentScale = ContentScale.Fit,
+)
+```
+
+Call `inspectMpvBackend()` before creating the state when the application wants
+to present its own unsupported-device message.
+
+For dependency injection, select the implementation in the application
+composition root without exposing it to the rest of the app:
+
+```kotlin
+val backend: VideoPlayerBackend = mpvVideoPlayerBackend()
+val playerState = rememberVideoPlayerState(backend)
+```
+
+`inspectMpvBackend()` reports a missing runtime, unsupported target, or rejected
+native payload without falling back silently. `rememberVideoPlayerState()`
+continues to select the normal platform backend.
+
+The verified runtime supports Android API 28+ on `arm64-v8a` and
+`armeabi-v7a`, Linux on x86_64 and ARM64, and macOS on ARM64. Android x86,
+Android x86_64, and macOS x86_64 are intentionally not published. The bundled
+runtime has networking disabled, so use local media and subtitle files. Desktop
+applications run on Java 25 with `--enable-native-access=ALL-UNNAMED`.
+
+The core, default player, and adapter code remain under this repository's own
+license. The separately
+licensed [KMediaMpv](https://github.com/Shusek/KMediaMpv) artifacts carry the
+reviewed native payload, notices, exact corresponding source, and recipient
+relinking path required for the LGPL components. Only the KMediaMpv/native
+boundary is subject to those separate terms; the application and the
+backend-neutral player modules are not relicensed as LGPL.
+
+See [Player backend architecture](docs/backend-architecture.md) for the module
+rules and the checklist for implementing another backend.
 
 The repository commits Kotlin/Wasm Yarn lockfiles. CI fails instead of silently replacing them when an npm dependency changes; run `./gradlew kotlinWasmUpgradeYarnLock` after an intentional npm update and review the resulting lockfile diff.
 
@@ -173,6 +275,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 
 | Library Version | Kotlin Version | Compose Version | Java | Android toolchain |
 |-----------------|----------------|-----------------|------|-------------------|
+| 2.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 1.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23 |
 | 0.9.0           | 2.3.20         | 1.10.3          | See release | See release |
 | 0.8.6           | 2.3.0          | 1.9.3           | See release | See release |

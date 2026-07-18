@@ -33,21 +33,16 @@ tasks.named("detekt") {
     dependsOn(tasks.withType<Detekt>().matching { it.name.endsWith("SourceSet") })
 }
 
-val ref = System.getenv("GITHUB_REF") ?: ""
-val tagVersion =
-    if (ref.startsWith("refs/tags/")) {
-        val tag = ref.removePrefix("refs/tags/")
-        if (tag.startsWith("v")) tag.substring(1) else tag
-    } else {
-        null
-    }
 val projectVersion =
     providers.gradleProperty("publicationVersion").orNull
-        ?: System.getenv("VERSION")
-        ?: tagVersion
         ?: "dev"
 val projectGroup = "io.github.shusek"
 val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+val releaseSigningEnabled =
+    providers
+        .gradleProperty("releaseSigningEnabled")
+        .map(String::toBoolean)
+        .getOrElse(false)
 
 group = projectGroup
 version = projectVersion
@@ -112,6 +107,7 @@ kotlin {
             isStatic = false
             @OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
             transitiveExport = false
+            export(project(":mediaplayer-core"))
         }
 
         // Maps custom Xcode configuration to NativeBuildType
@@ -119,13 +115,16 @@ kotlin {
         xcodeConfigurationToNativeBuildType["CUSTOM_RELEASE"] = NativeBuildType.RELEASE
     }
 
+    sourceSets.configureEach {
+        languageSettings.optIn(
+            "io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi",
+        )
+    }
+
     sourceSets {
         commonMain.dependencies {
-            api(libs.compose.runtime)
-            api(libs.compose.ui)
+            api(project(":mediaplayer-core"))
             implementation(libs.compose.foundation)
-            api(libs.kotlinx.coroutines.core)
-            api(libs.filekit.core)
             implementation(libs.kotlinx.datetime)
         }
 
@@ -204,7 +203,6 @@ val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources/compo
 val skipNativeBuild =
     providers
         .gradleProperty("composeMediaPlayer.skipNativeBuild")
-        .orElse(providers.environmentVariable("COMPOSE_MEDIA_PLAYER_SKIP_NATIVE_BUILD"))
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
 
@@ -355,7 +353,7 @@ mavenPublishing {
     publishToMavenCentral()
 
     // Local/consumer publications stay unsigned. Release CI provides the in-memory key explicitly.
-    if (!System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey").isNullOrBlank()) {
+    if (releaseSigningEnabled) {
         signAllPublications()
     }
 }
