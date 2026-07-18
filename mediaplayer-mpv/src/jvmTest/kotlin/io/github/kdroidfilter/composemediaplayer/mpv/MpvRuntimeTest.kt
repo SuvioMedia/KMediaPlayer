@@ -19,12 +19,7 @@ class MpvRuntimeTest {
     fun transitiveRuntimeMatchesThePublishedDesktopMatrix() {
         val osName = System.getProperty("os.name").lowercase()
         val architecture = System.getProperty("os.arch").lowercase()
-        val isSupported =
-            (osName.contains("mac") && architecture in setOf("aarch64", "arm64")) ||
-                (
-                    osName.contains("linux") &&
-                        architecture in setOf("amd64", "x86_64", "aarch64", "arm64")
-                )
+        val isSupported = isBundledMpvDesktopSupported(osName, architecture)
 
         val availability = inspectMpvBackend()
         if (isSupported) {
@@ -33,6 +28,17 @@ class MpvRuntimeTest {
             val unavailable = assertIs<MpvBackendAvailability.Unavailable>(availability)
             assertEquals(MpvBackendUnavailableReason.UNSUPPORTED_PLATFORM, unavailable.reason)
         }
+    }
+
+    @Test
+    fun bundledDesktopMatrixRejectsPlatformsWithoutPublishedPayloads() {
+        assertTrue(isBundledMpvDesktopSupported("Linux", "amd64"))
+        assertTrue(isBundledMpvDesktopSupported("Linux", "aarch64"))
+        assertTrue(isBundledMpvDesktopSupported("Mac OS X", "arm64"))
+
+        assertFalse(isBundledMpvDesktopSupported("Windows 11", "amd64"))
+        assertFalse(isBundledMpvDesktopSupported("Mac OS X", "x86_64"))
+        assertFalse(isBundledMpvDesktopSupported("Linux", "x86"))
     }
 
     @Test

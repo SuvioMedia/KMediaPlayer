@@ -165,6 +165,15 @@ internal fun resolveMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRuntime =
     }
 
 private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRuntime {
+    if (!isBundledMpvDesktopSupported()) {
+        throw MpvRuntimeResolutionFailure(
+            reason = MpvUnavailableReason.UNSUPPORTED_PLATFORM,
+            guidance =
+                "The bundled KMediaMpv runtime does not support this desktop. " +
+                    "Supported targets are Linux x86_64/ARM64 and macOS ARM64.",
+        )
+    }
+
     try {
         val fontsDirectory = config.subtitleFontsDirectory
         val resolution =
@@ -213,6 +222,22 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
             cause = failure,
         )
     }
+}
+
+internal fun isBundledMpvDesktopSupported(
+    osName: String = System.getProperty("os.name"),
+    architecture: String = System.getProperty("os.arch"),
+): Boolean {
+    val normalizedOsName = osName.lowercase()
+    val normalizedArchitecture = architecture.lowercase()
+    return (
+        normalizedOsName.contains("mac") &&
+            normalizedArchitecture in setOf("aarch64", "arm64")
+    ) ||
+        (
+            normalizedOsName.contains("linux") &&
+                normalizedArchitecture in setOf("amd64", "x86_64", "aarch64", "arm64")
+        )
 }
 
 internal fun MpvRuntimeException.Reason.toMpvUnavailableReason(): MpvUnavailableReason =
