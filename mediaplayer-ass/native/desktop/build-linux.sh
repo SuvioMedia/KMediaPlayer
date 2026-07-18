@@ -150,6 +150,7 @@ mkdir -p "$PREFIX"
 
 meson setup "$TARGET_ROOT/freetype" "$FREETYPE_SOURCE" \
     --prefix "$PREFIX" \
+    --libdir lib \
     --default-library static \
     --buildtype release \
     -Dbrotli=disabled \
@@ -163,6 +164,7 @@ meson install -C "$TARGET_ROOT/freetype"
 
 meson setup "$TARGET_ROOT/harfbuzz" "$HARFBUZZ_SOURCE" \
     --prefix "$PREFIX" \
+    --libdir lib \
     --default-library static \
     --buildtype release \
     -Dglib=disabled \
@@ -188,6 +190,7 @@ meson install -C "$TARGET_ROOT/harfbuzz"
 
 meson setup "$TARGET_ROOT/fribidi" "$FRIBIDI_SOURCE" \
     --prefix "$PREFIX" \
+    --libdir lib \
     --default-library shared \
     --buildtype release \
     -Ddocs=false \
@@ -219,6 +222,7 @@ PKG_CONFIG_PATH_VALUE="$PREFIX/lib/pkgconfig:$PREFIX/lib64/pkgconfig"
 env PKG_CONFIG_PATH="$PKG_CONFIG_PATH_VALUE" \
     meson setup "$TARGET_ROOT/libass" "$LIBASS_SOURCE" \
         --prefix "$PREFIX" \
+        --libdir lib \
         --default-library shared \
         --buildtype release \
         -Dfontconfig=enabled \
