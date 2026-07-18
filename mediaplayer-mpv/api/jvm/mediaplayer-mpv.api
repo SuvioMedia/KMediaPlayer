@@ -1,0 +1,108 @@
+public abstract interface class io/github/kdroidfilter/composemediaplayer/MpvBackendAvailability {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Available : io/github/kdroidfilter/composemediaplayer/MpvBackendAvailability {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Available;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Available;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Available;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBackend ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Unavailable : io/github/kdroidfilter/composemediaplayer/MpvBackendAvailability {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;Ljava/lang/String;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Unavailable;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Unavailable;Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGuidance ()Ljava/lang/String;
+	public final fun getReason ()Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableException : java/lang/IllegalStateException {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Unavailable;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Unavailable;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAvailability ()Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability$Unavailable;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason : java/lang/Enum {
+	public static final field INITIALIZATION_FAILED Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+	public static final field INVALID_RUNTIME Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+	public static final field RUNTIME_DEPENDENCY_MISSING Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+	public static final field UNSUPPORTED_DEVICE Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+	public static final field UNSUPPORTED_PLATFORM Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/MpvBackendUnavailableReason;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions {
+	public static final field $stable I
+	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions$Companion;
+	public static final field DEFAULT_MAX_DESKTOP_RENDER_PIXELS I
+	public static final field MAX_DESKTOP_RENDER_PIXELS I
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;ZZI)V
+	public synthetic fun <init> (Ljava/lang/String;ZZIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun component4 ()I
+	public final fun copy (Ljava/lang/String;ZZI)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;Ljava/lang/String;ZZIILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxDesktopRenderPixels ()I
+	public final fun getPreserveAssStyles ()Z
+	public final fun getSubtitleFontsDirectory ()Ljava/lang/String;
+	public final fun getUseEmbeddedFonts ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions$Companion {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvPlaybackOptionsKt {
+	public static final fun mpvVideoPlayerBackend (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerBackend;
+	public static synthetic fun mpvVideoPlayerBackend$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerBackend;
+	public static final fun rememberMpvVideoPlayerState (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;Landroidx/compose/runtime/Composer;II)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions_jvmKt {
+	public static final fun createMpvVideoPlayerState (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public static synthetic fun createMpvVideoPlayerState$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public static final fun inspectMpvBackend (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability;
+	public static synthetic fun inspectMpvBackend$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvVideoPlayerBackend : io/github/kdroidfilter/composemediaplayer/VideoPlayerBackend {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/MpvVideoPlayerBackend;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvVideoPlayerBackend;Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvVideoPlayerBackend;
+	public fun createPlayerState ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getInfo ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerBackendInfo;
+	public final fun getOptions ()Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/mpv/ComposableSingletons$MpvVideoPlayerSurfaceKt {
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/mpv/ComposableSingletons$MpvVideoPlayerSurfaceKt;
+	public fun <init> ()V
+	public final fun getLambda$201422425$io_github_shusek_mediaplayer_mpv ()Lkotlin/jvm/functions/Function2;
+}
+

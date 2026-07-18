@@ -37,14 +37,13 @@ actual fun createVideoPlayerState(
     playbackOptions: VideoPlaybackOptions,
 ): VideoPlayerState = DefaultVideoPlayerState(playbackOptions)
 
-internal actual fun platformPlayerCapabilities(): PlayerCapabilities =
+internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOptions): PlayerCapabilities =
     PlayerCapabilities(
         supportsMkv = canPlayWebMimeType(MATROSKA_MIME_TYPE),
+        supportsHls = isWebHlsPlaybackSupported(),
         supportsPiP = isWebPictureInPictureSupported(),
         supportedUriSchemes = WEB_SUPPORTED_URI_SCHEMES,
     )
-
-internal actual fun platformSupportsHls(): Boolean = isWebHlsPlaybackSupported()
 
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
     canPlayWebSource(

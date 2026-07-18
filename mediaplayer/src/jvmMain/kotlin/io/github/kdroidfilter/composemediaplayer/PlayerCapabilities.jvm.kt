@@ -3,12 +3,14 @@ package io.github.kdroidfilter.composemediaplayer
 import io.github.kdroidfilter.composemediaplayer.mac.MacNativeBridge
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 
-internal actual fun platformPlayerCapabilities(): PlayerCapabilities = jvmPlayerCapabilities(VideoPlaybackOptions())
+internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOptions): PlayerCapabilities =
+    jvmPlayerCapabilities(playbackOptions)
 
 internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): PlayerCapabilities =
     when (CurrentPlatform.os) {
         CurrentPlatform.OS.WINDOWS ->
             PlayerCapabilities(
+                supportsHls = true,
                 supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(
@@ -19,6 +21,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
             )
         CurrentPlatform.OS.MAC ->
             PlayerCapabilities(
+                supportsHls = true,
                 supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(
@@ -30,6 +33,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
             )
         CurrentPlatform.OS.LINUX ->
             PlayerCapabilities(
+                supportsHls = true,
                 supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(
@@ -39,8 +43,6 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                     ),
             )
     }
-
-internal actual fun platformSupportsHls(): Boolean = true
 
 private val JVM_SUPPORTED_URI_SCHEMES = setOf("file", "http", "https")
 

@@ -33,7 +33,11 @@ jobs:
       # Generate Dokka Documentation
       - name: Generate Dokka Docs
         run: |
-          ./gradlew :mediaplayer:dokkaGenerateHtml
+          ./gradlew \
+            :mediaplayer-core:dokkaGenerateHtml \
+            :mediaplayer:dokkaGenerateHtml \
+            :mediaplayer-mpv:dokkaGenerateHtml \
+            --no-daemon --continue
 
       # Build the Kotlin/Compose Example
       - name: Build Kotlin/Compose Example
@@ -41,15 +45,18 @@ jobs:
           ./gradlew :sample:composeApp:wasmJsBrowserDistribution
 
       # Prepare a common structure for deployment
-      # Place the docs at the root and the example in /sample
+      # Place the default-player docs at the root, optional module docs in
+      # dedicated paths, and the example in /sample.
       - name: Prepare files for deployment
         run: |
-          mkdir -p build/final
-          # Copy the docs into build/final (root of the site)
-          cp -r mediaplayer/build/dokka/html/* build/final
+          set -euo pipefail
+          mkdir -p build/final/core build/final/mpv build/final/sample
 
-          # Create the /sample folder in build/final
-          mkdir -p build/final/sample
+          # Preserve the existing default-player documentation URL.
+          cp -r mediaplayer/build/dokka/html/* build/final
+          cp -r mediaplayer-core/build/dokka/html/* build/final/core
+          cp -r mediaplayer-mpv/build/dokka/html/* build/final/mpv
+
           cp -r sample/composeApp/build/dist/wasmJs/productionExecutable/* build/final/sample
 
       - name: Upload documentation site artifact

@@ -74,6 +74,14 @@ actual fun VideoPlayerSurface(
         VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
         return
     }
+    if (playerState is VideoPlayerSurfaceProvider) {
+        playerState.RenderVideoPlayerSurface(
+            modifier = modifier,
+            contentScale = contentScale,
+            overlay = overlay,
+        )
+        return
+    }
     require(playerState is DefaultVideoPlayerState) {
         "Unsupported video player state: ${playerState::class}"
     }
@@ -102,6 +110,14 @@ fun VideoPlayerSurfaceImpl(
 ) {
     if (playerState is PreviewableVideoPlayerState) {
         VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
+        return
+    }
+    if (playerState is VideoPlayerSurfaceProvider) {
+        playerState.RenderVideoPlayerSurface(
+            modifier = modifier,
+            contentScale = contentScale,
+            overlay = overlay,
+        )
         return
     }
     require(playerState is DefaultVideoPlayerState) {
