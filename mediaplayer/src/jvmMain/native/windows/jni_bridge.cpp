@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 #include <windows.h>
 
 // ---------------------------------------------------------------------------
@@ -339,6 +340,147 @@ static jint JNICALL jni_SetOutputSize(JNIEnv*, jclass, jlong handle, jint width,
                   : E_INVALIDARG;
 }
 
+static jint JNICALL jni_ConfigureHdrOutput(
+    JNIEnv* env,
+    jclass,
+    jlong handle,
+    jintArray integerConfiguration,
+    jfloatArray floatingConfiguration
+) {
+    if (!handle || !integerConfiguration) return E_INVALIDARG;
+    const jsize integerCount = env->GetArrayLength(integerConfiguration);
+    const jsize floatingCount = floatingConfiguration ? env->GetArrayLength(floatingConfiguration) : 0;
+    std::vector<jint> integers(static_cast<size_t>(integerCount));
+    std::vector<jfloat> values(static_cast<size_t>(floatingCount));
+    if (integerCount > 0) env->GetIntArrayRegion(integerConfiguration, 0, integerCount, integers.data());
+    if (floatingCount > 0) env->GetFloatArrayRegion(floatingConfiguration, 0, floatingCount, values.data());
+    if (env->ExceptionCheck()) return E_INVALIDARG;
+    return ConfigureHdrOutput(
+        toInstance(handle),
+        reinterpret_cast<const int32_t*>(integers.data()),
+        integers.size(),
+        reinterpret_cast<const float*>(values.data()),
+        values.size());
+}
+
+static jboolean JNICALL jni_AttachHdrOutput(JNIEnv* env, jclass, jlong handle, jobject component) {
+    if (!handle || !component) return JNI_FALSE;
+    HWND hwnd = awtComponentHwnd(env, component);
+    if (!hwnd) return JNI_FALSE;
+    return SUCCEEDED(AttachHdrOutput(toInstance(handle), hwnd)) ? JNI_TRUE : JNI_FALSE;
+}
+
+static void JNICALL jni_DetachHdrOutput(JNIEnv*, jclass, jlong handle, jobject) {
+    if (handle) DetachHdrOutput(toInstance(handle));
+}
+
+static jint JNICALL jni_RenderHdrFrame(JNIEnv*, jclass, jlong handle) {
+    return handle ? RenderHdrFrame(toInstance(handle)) : E_INVALIDARG;
+}
+
+static jint JNICALL jni_GetHdrOutputStatus(
+    JNIEnv* env,
+    jclass,
+    jlong handle,
+    jintArray integerStatus,
+    jfloatArray luminanceStatus
+) {
+    if (!handle || !integerStatus || !luminanceStatus ||
+        env->GetArrayLength(integerStatus) < 10 || env->GetArrayLength(luminanceStatus) < 3) {
+        return E_INVALIDARG;
+    }
+    HdrOutputStatus status{};
+    const HRESULT hr = GetHdrOutputStatus(toInstance(handle), &status);
+    if (FAILED(hr)) return hr;
+    const jint integers[10] = {
+        status.displayQueried ? 1 : 0,
+        status.advancedColorEnabled ? 1 : 0,
+        status.swapChainConfigured ? 1 : 0,
+        status.firstFramePresented ? 1 : 0,
+        status.p010InputConfirmed ? 1 : 0,
+        static_cast<jint>(status.bitsPerColor),
+        static_cast<jint>(status.displayColorSpace),
+        static_cast<jint>(status.swapChainColorSpace),
+        static_cast<jint>(status.monitorGeneration),
+        static_cast<jint>(status.lastError),
+    };
+    const jfloat luminance[3] = {
+        status.minLuminanceNits,
+        status.maxLuminanceNits,
+        status.maxFullFrameLuminanceNits,
+    };
+    env->SetIntArrayRegion(integerStatus, 0, 10, integers);
+    env->SetFloatArrayRegion(luminanceStatus, 0, 3, luminance);
+    return hr;
+}
+
+static jintArray JNICALL jni_GetDecodedVideoColorInfo(JNIEnv* env, jclass, jlong handle) {
+    if (!handle) return nullptr;
+    int32_t nativeValues[7] = {};
+    GetDecodedVideoColorInfo(toInstance(handle), nativeValues);
+    jint values[7] = {};
+    for (size_t index = 0; index < 7; ++index) values[index] = static_cast<jint>(nativeValues[index]);
+    jintArray result = env->NewIntArray(7);
+    if (!result) return nullptr;
+    env->SetIntArrayRegion(result, 0, 7, values);
+    return env->ExceptionCheck() ? nullptr : result;
+}
+
+static jlongArray JNICALL jni_GetVideoPlaybackDiagnostics(JNIEnv* env, jclass, jlong handle) {
+    if (!handle) return nullptr;
+    int64_t nativeValues[5] = {};
+    GetVideoPlaybackDiagnostics(toInstance(handle), nativeValues);
+    jlong values[5] = {};
+    for (size_t index = 0; index < 5; ++index) {
+        values[index] = static_cast<jlong>(nativeValues[index]);
+    }
+    jlongArray result = env->NewLongArray(5);
+    if (!result) return nullptr;
+    env->SetLongArrayRegion(result, 0, 5, values);
+    return env->ExceptionCheck() ? nullptr : result;
+}
+
+static jintArray JNICALL jni_ProbeVideoColorInfo(
+    JNIEnv* env,
+    jclass,
+    jstring url,
+    jstring requestHeaders
+) {
+    if (!url) return nullptr;
+    const jchar* urlChars = env->GetStringChars(url, nullptr);
+    if (!urlChars) return nullptr;
+
+    const jchar* headerChars = nullptr;
+    if (requestHeaders) {
+        headerChars = env->GetStringChars(requestHeaders, nullptr);
+        if (!headerChars) {
+            env->ReleaseStringChars(url, urlChars);
+            return nullptr;
+        }
+    }
+
+    int32_t nativeValues[7] = {};
+    const HRESULT hr = ProbeVideoColorInfoWithHeaders(
+        reinterpret_cast<const wchar_t*>(urlChars),
+        headerChars ? reinterpret_cast<const wchar_t*>(headerChars) : nullptr,
+        nativeValues);
+
+    if (headerChars) {
+        env->ReleaseStringChars(requestHeaders, headerChars);
+    }
+    env->ReleaseStringChars(url, urlChars);
+    if (FAILED(hr)) return nullptr;
+
+    jint values[7] = {};
+    for (size_t index = 0; index < 7; ++index) {
+        values[index] = static_cast<jint>(nativeValues[index]);
+    }
+    jintArray result = env->NewIntArray(7);
+    if (!result) return nullptr;
+    env->SetIntArrayRegion(result, 0, 7, values);
+    return env->ExceptionCheck() ? nullptr : result;
+}
+
 static jlong JNICALL jni_CreateLibVlcInstance(
     JNIEnv* env,
     jclass,
@@ -572,6 +714,14 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nGetVideoMetadata"),    const_cast<char*>("(J[C[C[J[I[F[Z)I"),             (void*)jni_GetVideoMetadata },
     { const_cast<char*>("nWrapPointer"),         const_cast<char*>("(JJ)Ljava/nio/ByteBuffer;"),    (void*)jni_WrapPointer },
     { const_cast<char*>("nSetOutputSize"),      const_cast<char*>("(JII)I"),                       (void*)jni_SetOutputSize },
+    { const_cast<char*>("nConfigureHdrOutput"), const_cast<char*>("(J[I[F)I"),                    (void*)jni_ConfigureHdrOutput },
+    { const_cast<char*>("nAttachHdrOutput"),    const_cast<char*>("(JLjava/awt/Component;)Z"),     (void*)jni_AttachHdrOutput },
+    { const_cast<char*>("nDetachHdrOutput"),    const_cast<char*>("(JLjava/awt/Component;)V"),     (void*)jni_DetachHdrOutput },
+    { const_cast<char*>("nRenderHdrFrame"),     const_cast<char*>("(J)I"),                         (void*)jni_RenderHdrFrame },
+    { const_cast<char*>("nGetHdrOutputStatus"), const_cast<char*>("(J[I[F)I"),                    (void*)jni_GetHdrOutputStatus },
+    { const_cast<char*>("nGetDecodedVideoColorInfo"), const_cast<char*>("(J)[I"),              (void*)jni_GetDecodedVideoColorInfo },
+    { const_cast<char*>("nGetVideoPlaybackDiagnostics"), const_cast<char*>("(J)[J"),            (void*)jni_GetVideoPlaybackDiagnostics },
+    { const_cast<char*>("nProbeVideoColorInfo"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)[I"), (void*)jni_ProbeVideoColorInfo },
     { const_cast<char*>("nCreateLibVlcInstance"), const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;Z)J"), (void*)jni_CreateLibVlcInstance },
     { const_cast<char*>("nDestroyLibVlcInstance"), const_cast<char*>("(J)V"),                       (void*)jni_DestroyLibVlcInstance },
     { const_cast<char*>("nOpenLibVlcMediaWithHeaders"), const_cast<char*>("(JLjava/lang/String;Ljava/lang/String;Z)I"), (void*)jni_OpenLibVlcMediaWithHeaders },

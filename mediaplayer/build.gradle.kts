@@ -2,6 +2,7 @@
 
 import dev.detekt.gradle.Detekt
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.tasks.Delete
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
@@ -33,11 +34,25 @@ tasks.named("detekt") {
     dependsOn(tasks.withType<Detekt>().matching { it.name.endsWith("SourceSet") })
 }
 
+tasks.matching { it.name == "checkKotlinAbi" }.configureEach {
+    mustRunAfter(tasks.matching { it.name == "updateKotlinAbi" })
+}
+
+val ref = System.getenv("GITHUB_REF") ?: ""
+val tagVersion =
+    if (ref.startsWith("refs/tags/")) {
+        val tag = ref.removePrefix("refs/tags/")
+        if (tag.startsWith("v")) tag.substring(1) else tag
+    } else {
+        null
+    }
 val projectVersion =
     providers.gradleProperty("publicationVersion").orNull
         ?: "dev"
 val projectGroup = "io.github.shusek"
 val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+val generatedAndroidColorResources = layout.buildDirectory.dir("generated/androidColor/resources")
+val generatedAndroidColorJniLibraries = layout.buildDirectory.dir("generated/androidColor/jniLibs")
 val releaseSigningEnabled =
     providers
         .gradleProperty("releaseSigningEnabled")
@@ -68,6 +83,10 @@ kotlin {
 
         withHostTest {
             isIncludeAndroidResources = true
+        }
+
+        withDeviceTest {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         }
 
         compilerOptions {
@@ -101,6 +120,7 @@ kotlin {
         summary = "A multiplatform video player library for Compose applications"
         homepage = "https://github.com/Shusek/KMediaPlayer"
         name = "ComposeMediaPlayer"
+        ios.deploymentTarget = "16.2"
 
         framework {
             baseName = "ComposeMediaPlayer"
@@ -108,6 +128,7 @@ kotlin {
             @OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
             transitiveExport = false
             export(project(":mediaplayer-core"))
+            export(project(":mediaplayer-extension-api"))
         }
 
         // Maps custom Xcode configuration to NativeBuildType
@@ -124,6 +145,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":mediaplayer-core"))
+            api(project(":mediaplayer-extension-api"))
             implementation(libs.compose.foundation)
             implementation(libs.kotlinx.datetime)
         }
@@ -133,17 +155,22 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
 
-        androidMain.dependencies {
-            implementation(libs.androidcontextprovider)
-            implementation(libs.kotlinx.coroutines.android)
-            api(libs.androidx.media3.exoplayer)
-            implementation(libs.androidx.media3.exoplayer.hls)
-            implementation(libs.androidx.media3.datasource)
-            implementation(libs.androidx.media3.database)
-            implementation(libs.androidx.media3.ui)
-            implementation(libs.androidx.activityCompose)
-            implementation(libs.androidx.core)
-            implementation(libs.androidx.lifecycle.runtime.ktx)
+        androidMain {
+            // AGP derives jniLibs as a sibling of each Android resource directory.
+            resources.srcDir(generatedAndroidColorResources)
+            dependencies {
+                implementation(libs.androidcontextprovider)
+                implementation(libs.kotlinx.coroutines.android)
+                api(libs.androidx.media3.exoplayer)
+                implementation(libs.androidx.media3.exoplayer.hls)
+                implementation(libs.androidx.media3.effect)
+                implementation(libs.androidx.media3.datasource)
+                implementation(libs.androidx.media3.database)
+                implementation(libs.androidx.media3.ui)
+                implementation(libs.androidx.activityCompose)
+                implementation(libs.androidx.core)
+                implementation(libs.androidx.lifecycle.runtime.ktx)
+            }
         }
 
         named("androidHostTest") {
@@ -155,9 +182,19 @@ kotlin {
             }
         }
 
-        jvmMain.dependencies {
-            implementation(libs.compose.ui)
-            implementation(libs.kotlinx.coroutines.swing)
+        named("androidDeviceTest") {
+            dependencies {
+                implementation(kotlin("test-junit"))
+                implementation(libs.androidx.test.runner)
+            }
+        }
+
+        jvmMain {
+            resources.exclude("composemediaplayer/native/darwin-x86-64/**")
+            dependencies {
+                implementation(libs.compose.ui)
+                implementation(libs.kotlinx.coroutines.swing)
+            }
         }
 
         jvmTest.dependencies {
@@ -179,7 +216,6 @@ kotlin {
         wasmJsMain.dependencies {
             implementation(libs.kotlinx.browser)
             implementation(libs.compose.ui)
-            implementation(npm("jassub", "2.5.1"))
             implementation(npm("hls.js", "1.6.16"))
         }
 
@@ -206,9 +242,138 @@ val skipNativeBuild =
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
 
+val androidSdkDirectory =
+    providers.environmentVariable("ANDROID_SDK_ROOT").orNull
+        ?: providers.environmentVariable("ANDROID_HOME").orNull
+        ?: file(
+            when {
+                Os.isFamily(Os.FAMILY_MAC) -> "${System.getProperty("user.home")}/Library/Android/sdk"
+                Os.isFamily(Os.FAMILY_WINDOWS) -> "${System.getenv("LOCALAPPDATA")}/Android/Sdk"
+                else -> "${System.getProperty("user.home")}/Android/Sdk"
+            },
+        ).absolutePath
+val androidNdkDirectory =
+    providers.environmentVariable("ANDROID_NDK_HOME").orNull
+        ?: providers.environmentVariable("ANDROID_NDK_ROOT").orNull
+        ?: file("$androidSdkDirectory/ndk/29.0.14206865").absolutePath
+val androidNdkHostTag =
+    when {
+        Os.isFamily(Os.FAMILY_MAC) -> "darwin-x86_64"
+        Os.isFamily(Os.FAMILY_WINDOWS) -> "windows-x86_64"
+        else -> "linux-x86_64"
+    }
+val androidClangSuffix = if (Os.isFamily(Os.FAMILY_WINDOWS)) ".cmd" else ""
+val androidColorNativeSource =
+    layout.projectDirectory.file("src/androidMain/native/color_surface/AndroidSurfaceDataSpace.c")
+val cleanUnsupportedAndroidNativeOutputs =
+    tasks.register<Delete>("cleanUnsupportedAndroidNativeOutputs") {
+        delete(
+            generatedAndroidColorJniLibraries.map { it.dir("x86") },
+            generatedAndroidColorJniLibraries.map { it.dir("x86_64") },
+        )
+    }
+
+fun registerAndroidColorBridgeBuild(
+    taskName: String,
+    abi: String,
+    clangPrefix: String,
+) = tasks.register<Exec>(taskName) {
+    description = "Builds the Android native surface dataspace bridge for $abi."
+    group = "build"
+    enabled = !skipNativeBuild
+    val outputLibrary =
+        generatedAndroidColorJniLibraries
+            .map { it.dir(abi).file("libcomposemediaplayer_android_color.so") }
+    inputs.file(androidColorNativeSource)
+    outputs.file(outputLibrary)
+    dependsOn(cleanUnsupportedAndroidNativeOutputs)
+    doFirst {
+        outputLibrary
+            .get()
+            .asFile.parentFile
+            .mkdirs()
+    }
+    commandLine(
+        "$androidNdkDirectory/toolchains/llvm/prebuilt/$androidNdkHostTag/bin/" +
+            "$clangPrefix$androidClangSuffix",
+        "-shared",
+        "-fPIC",
+        "-O2",
+        "-std=c11",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wl,--no-undefined",
+        androidColorNativeSource.asFile.absolutePath,
+        "-o",
+        outputLibrary.get().asFile.absolutePath,
+        "-landroid",
+        "-ldl",
+    )
+}
+
+val androidColorBridgeBuilds =
+    listOf(
+        registerAndroidColorBridgeBuild(
+            taskName = "buildAndroidArmV7ColorBridge",
+            abi = "armeabi-v7a",
+            clangPrefix = "armv7a-linux-androideabi23-clang",
+        ),
+        registerAndroidColorBridgeBuild(
+            taskName = "buildAndroidArm64ColorBridge",
+            abi = "arm64-v8a",
+            clangPrefix = "aarch64-linux-android23-clang",
+        ),
+    )
+
+tasks.matching { it.name == "mergeAndroidMainJniLibFolders" }.configureEach {
+    dependsOn(androidColorBridgeBuilds)
+}
+
+val verifyAndroidArmNativeMatrix =
+    tasks.register("verifyAndroidArmNativeMatrix") {
+        group = "verification"
+        description = "Verifies that the Android AAR publishes native code for ARM ABIs only."
+        dependsOn(tasks.named("bundleAndroidMainAar"))
+
+        val aar = layout.buildDirectory.file("outputs/aar/${project.name}.aar")
+        inputs.file(aar)
+
+        doLast {
+            val expectedAbis = setOf("arm64-v8a", "armeabi-v7a")
+            ZipFile(aar.get().asFile).use { archive ->
+                val nativeEntries =
+                    archive
+                        .entries()
+                        .asSequence()
+                        .filter { entry ->
+                            !entry.isDirectory &&
+                                entry.name.startsWith("jni/") &&
+                                entry.name.endsWith("/libcomposemediaplayer_android_color.so")
+                        }.map { entry -> entry.name.removePrefix("jni/").substringBefore('/') }
+                        .toSet()
+                check(nativeEntries == expectedAbis) {
+                    "Unexpected Android native ABI matrix: expected=$expectedAbis, actual=$nativeEntries"
+                }
+                val intelEntries =
+                    archive
+                        .entries()
+                        .asSequence()
+                        .filter { entry ->
+                            !entry.isDirectory &&
+                                (entry.name.startsWith("jni/x86/") || entry.name.startsWith("jni/x86_64/"))
+                        }.map { it.name }
+                        .toList()
+                check(intelEntries.isEmpty()) {
+                    "The Android AAR contains unsupported Intel native payloads: $intelEntries"
+                }
+            }
+        }
+    }
+
 val buildNativeMacOs =
     tasks.register<Exec>("buildNativeMacOs") {
-        description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
+        description = "Compiles the Swift native library into a macOS arm64 dylib."
         group = "build"
         enabled = !skipNativeBuild && Os.isFamily(Os.FAMILY_MAC)
 
@@ -251,6 +416,9 @@ tasks.named("jvmProcessResources") {
 
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    providers.gradleProperty("kmediaPlayerHdrTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.test.hdrMedia", mediaPath)
+    }
 }
 
 val java25ClassFileVersion = 69
@@ -291,6 +459,38 @@ val verifyJvm25Bytecode =
             }
             check(verifiedClasses > 0) { "The JVM publication JAR contains no class files." }
             logger.lifecycle("Verified Java 25 bytecode for $verifiedClasses JVM classes.")
+        }
+    }
+
+val verifyJvmMacArmNativeMatrix =
+    tasks.register("verifyJvmMacArmNativeMatrix") {
+        group = "verification"
+        description = "Verifies that the JVM JAR publishes the macOS bridge for arm64 only."
+
+        val jvmJar = tasks.named<Jar>("jvmJar")
+        dependsOn(jvmJar)
+        val archiveFile = jvmJar.flatMap { it.archiveFile }
+        inputs.file(archiveFile)
+
+        doLast {
+            ZipFile(inputs.files.singleFile).use { archive ->
+                val armPath = "composemediaplayer/native/darwin-arm64/libNativeVideoPlayer.dylib"
+                check(archive.getEntry(armPath) != null) {
+                    "The JVM JAR is missing the macOS arm64 bridge: $armPath"
+                }
+                val intelEntries =
+                    archive
+                        .entries()
+                        .asSequence()
+                        .filter { entry ->
+                            !entry.isDirectory &&
+                                entry.name.startsWith("composemediaplayer/native/darwin-x86-64/")
+                        }.map { it.name }
+                        .toList()
+                check(intelEntries.isEmpty()) {
+                    "The JVM JAR contains unsupported Intel macOS payloads: $intelEntries"
+                }
+            }
         }
     }
 
@@ -358,16 +558,20 @@ mavenPublishing {
     }
 }
 
+val hdrPipelineMajorVersion = 2
+
 val validateReleaseVersion =
     tasks.register("validateReleaseVersion") {
         group = "verification"
         description = "Rejects mutable or non-SemVer versions before publishing a remote release."
         inputs.property("releaseVersion", projectVersion)
         inputs.property("releaseGroup", projectGroup)
+        inputs.property("hdrPipelineMajorVersion", hdrPipelineMajorVersion)
 
         doLast {
             val releaseVersion = inputs.properties.getValue("releaseVersion") as String
             val releaseGroup = inputs.properties.getValue("releaseGroup") as String
+            val hdrPipelineMajorVersion = inputs.properties.getValue("hdrPipelineMajorVersion") as Int
             val semverRegex =
                 Regex(
                     "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
@@ -379,8 +583,16 @@ val validateReleaseVersion =
                 "Release version '$releaseVersion' is not a valid immutable SemVer version. " +
                     "Use -PpublicationVersion=<major.minor.patch>."
             }
+            check('-' !in releaseVersion.substringBefore('+')) {
+                "KMediaPlayer 2.x does not publish preview, alpha, beta or release-candidate versions; " +
+                    "use a stable major.minor.patch version."
+            }
             check(releaseGroup == "io.github.shusek") {
                 "Release group must remain 'io.github.shusek', but was '$releaseGroup'."
+            }
+            val releaseMajorVersion = releaseVersion.substringBefore('.').toInt()
+            check(releaseMajorVersion >= hdrPipelineMajorVersion) {
+                "This branch contains the breaking KMediaPlayer 2.0 API and cannot be published as $releaseVersion."
             }
         }
     }

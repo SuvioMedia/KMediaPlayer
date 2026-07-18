@@ -4,7 +4,7 @@ internal enum class DesktopMkvPlaybackBackend(val label: String) {
     AUTO("Auto"),
     LIBVLC("libVLC canvas"),
     LIBVLC_NATIVE("libVLC native"),
-    FFMPEG_HLS("ffmpeg HLS"),
+    KMEDIA_BRIDGE_HLS("KMediaBridge HLS"),
     VLC_HLS("VLC HLS"),
 }
 

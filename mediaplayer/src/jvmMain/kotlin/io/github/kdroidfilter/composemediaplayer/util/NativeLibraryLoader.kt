@@ -112,14 +112,27 @@ internal fun nativePlatformFor(
             os.contains("mac") || os.contains("darwin") -> "darwin"
             else -> throw UnsupportedOperationException("Unsupported native platform: os=$os, arch=$arch")
         }
-    val architectureSuffix =
-        when (arch) {
-            "aarch64", "arm64" -> if (platform == "linux") "aarch64" else "arm64"
-            "amd64", "x86_64", "x86-64", "x64" -> "x86-64"
-            else -> throw UnsupportedOperationException("Unsupported native architecture: os=$os, arch=$arch")
-        }
+    val architectureSuffix = architectureSuffixFor(platform, os, arch)
     return "$platform-$architectureSuffix"
 }
+
+private fun architectureSuffixFor(
+    platform: String,
+    os: String,
+    arch: String,
+): String =
+    when (arch) {
+        "aarch64", "arm64" -> if (platform == "linux") "aarch64" else "arm64"
+        "amd64", "x86_64", "x86-64", "x64" ->
+            if (platform == "darwin") {
+                throw UnsupportedOperationException(
+                    "Unsupported native architecture: macOS requires arm64; arch=$arch",
+                )
+            } else {
+                "x86-64"
+            }
+        else -> throw UnsupportedOperationException("Unsupported native architecture: os=$os, arch=$arch")
+    }
 
 private fun String.isWindowsOsName(): Boolean = startsWith("windows")
 

@@ -7,8 +7,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
 import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.SubtitlePipelineExtension
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
+import io.github.kdroidfilter.composemediaplayer.ass.AssSubtitleExtension
 import io.github.kdroidfilter.composemediaplayer.createRenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.createVideoPlayerState
 import io.github.vinceglb.filekit.PlatformFile
@@ -31,6 +33,8 @@ fun PublishedLegacyVideoSurface(playerState: VideoPlayerState) {
 fun createPublishedVideoState(): RenderableVideoPlayerState = createRenderableVideoPlayerState()
 
 fun createLegacyPublishedVideoState(): VideoPlayerState = createVideoPlayerState()
+
+fun createPublishedAssSubtitleExtension(): SubtitlePipelineExtension = AssSubtitleExtension()
 
 fun playbackEvents(playerState: VideoPlayerState): SharedFlow<PlaybackEvent> = playerState.playbackEvents
 

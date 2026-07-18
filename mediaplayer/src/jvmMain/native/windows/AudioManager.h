@@ -15,6 +15,7 @@ namespace AudioManager {
 // responsible for freeing it (or transferring ownership to the instance
 // via VideoPlayerInstance::pSourceAudioFormat) after the call returns.
 HRESULT InitWASAPI(VideoPlayerInstance* pInstance, const WAVEFORMATEX* pSourceFormat);
+HRESULT GetDefaultAudioMixFormat(WAVEFORMATEX** ppMixFormat);
 HRESULT PreFillAudioBuffer(VideoPlayerInstance* pInstance);
 HRESULT StartAudioThread(VideoPlayerInstance* pInstance);
 void    StopAudioThread(VideoPlayerInstance* pInstance);

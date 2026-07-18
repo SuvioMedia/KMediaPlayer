@@ -81,6 +81,7 @@ fun PlayerScreen(
     modifier: Modifier = Modifier,
     playerState: RenderableVideoPlayerState = rememberRenderableVideoPlayerState(),
     initialVideoUrl: String? = null,
+    initialSubtitleUrl: String? = null,
     demoSubtitleEnabled: Boolean = true,
 ) {
     // Pause when leaving the screen, resume when coming back
@@ -111,6 +112,7 @@ fun PlayerScreen(
     // visible fails silently because iOS cannot stack two modals.
     var pendingPickVideo by remember { mutableStateOf(false) }
     var pendingPickSubtitle by remember { mutableStateOf(false) }
+    val demoSubtitleUrl = initialSubtitleUrl ?: DEFAULT_DEMO_ASS_SUBTITLE_URL
     var demoLoaded by remember { mutableStateOf(false) }
     var playbackEndedVisible by remember { mutableStateOf(false) }
 
@@ -154,7 +156,7 @@ fun PlayerScreen(
                     SubtitleTrack(
                         label = "ASS demo",
                         language = "en",
-                        src = DEFAULT_DEMO_ASS_SUBTITLE_URL,
+                        src = demoSubtitleUrl,
                         format = SubtitleFormat.ASS,
                     )
                 playerState.addSubtitleTrack(track)
@@ -166,10 +168,10 @@ fun PlayerScreen(
     }
 
     fun disableDemoSubtitleForNewSource() {
-        if (playerState.currentSubtitleTrack?.src == DEFAULT_DEMO_ASS_SUBTITLE_URL) {
+        if (playerState.currentSubtitleTrack?.src == demoSubtitleUrl) {
             playerState.disableSubtitles()
         }
-        playerState.removeSubtitleTrack(DEFAULT_DEMO_ASS_SUBTITLE_URL)
+        playerState.removeSubtitleTrack(demoSubtitleUrl)
     }
 
     // Launch pickers only after the sheet is gone
@@ -200,6 +202,20 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(playerState) {
+        playerState.colorPipelineStatus.collect { status ->
+            println("KMP_COLOR_PIPELINE_STATUS=$status")
+        }
+    }
+
+    LaunchedEffect(playerState.subtitlesEnabled, playerState.currentSubtitleTrack) {
+        val track = playerState.currentSubtitleTrack
+        println(
+            "KMP_SUBTITLE_STATUS=enabled=${playerState.subtitlesEnabled}," +
+                "selected=${track != null},embedded=${track?.isEmbedded},format=${track?.resolvedFormat()}",
+        )
+    }
+
     Box(modifier = modifier.background(Color.Black)) {
         // Video fills the entire area
         VideoPlayerSurface(
@@ -207,27 +223,29 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
             contentScale = selectedContentScale,
         ) {
-            if (playerState.isFullscreen) {
-                FullscreenOverlay(playerState)
-            } else {
-                AnimatedVisibility(
-                    visible = controlsVisible,
-                    enter = fadeIn(tween(250)),
-                    exit = fadeOut(tween(250)),
-                ) {
-                    ControlsOverlay(
-                        playerState = playerState,
-                        onSourceClick = { showSourceSheet = true },
-                        onSubtitlesClick = { showSubtitleSheet = true },
-                        onSettingsClick = { showSettingsSheet = true },
-                        onPipClick = { scope.launch { playerState.enterPip() } },
-                    )
+            when {
+                playerState.isPipActive -> Unit
+                playerState.isFullscreen -> FullscreenOverlay(playerState)
+                else -> {
+                    AnimatedVisibility(
+                        visible = controlsVisible,
+                        enter = fadeIn(tween(250)),
+                        exit = fadeOut(tween(250)),
+                    ) {
+                        ControlsOverlay(
+                            playerState = playerState,
+                            onSourceClick = { showSourceSheet = true },
+                            onSubtitlesClick = { showSubtitleSheet = true },
+                            onSettingsClick = { showSettingsSheet = true },
+                            onPipClick = { scope.launch { playerState.enterPip() } },
+                        )
+                    }
                 }
             }
         }
 
         // Empty state placeholder
-        if (!playerState.hasMedia && !playerState.isLoading) {
+        if (!playerState.isPipActive && !playerState.hasMedia && !playerState.isLoading) {
             Column(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -248,7 +266,7 @@ fun PlayerScreen(
         }
 
         // Loading
-        if (playerState.isLoading) {
+        if (!playerState.isPipActive && playerState.isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center),
                 color = Color.White.copy(alpha = 0.8f),
@@ -257,7 +275,7 @@ fun PlayerScreen(
         }
 
         // Error snackbar
-        playerState.error?.let { error ->
+        playerState.error?.takeUnless { playerState.isPipActive }?.let { error ->
             Snackbar(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -278,6 +296,8 @@ fun PlayerScreen(
                         is VideoPlayerError.NoSourceError -> "Source: ${error.message}"
                         is VideoPlayerError.TimeoutError -> "Timeout: ${error.message}"
                         is VideoPlayerError.HlsError -> "HLS: ${error.message}"
+                        is VideoPlayerError.ColorPipelineError ->
+                            "Color pipeline (${error.reason.name}): ${error.message}"
                         is VideoPlayerError.UnknownError -> "Error: ${error.message}"
                     },
                     maxLines = 2,
@@ -286,7 +306,12 @@ fun PlayerScreen(
             }
         }
 
-        if (playbackEndedVisible && playerState.hasMedia && playerState.error == null) {
+        if (
+            !playerState.isPipActive &&
+            playbackEndedVisible &&
+            playerState.hasMedia &&
+            playerState.error == null
+        ) {
             Snackbar(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)

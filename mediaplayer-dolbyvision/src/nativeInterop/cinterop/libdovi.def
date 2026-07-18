@@ -1,0 +1,4 @@
+package = io.github.kdroidfilter.composemediaplayer.dolbyvision.native
+headers = composemediaplayer_libdovi.h
+headerFilter = composemediaplayer_libdovi.h
+staticLibraries = libcomposemediaplayer_libdovi.a

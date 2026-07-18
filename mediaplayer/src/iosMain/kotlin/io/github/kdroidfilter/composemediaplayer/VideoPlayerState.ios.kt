@@ -22,12 +22,21 @@ import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import platform.AVFoundation.*
 import platform.AVKit.AVPictureInPictureController
 import platform.CoreGraphics.CGFloat
 import platform.CoreMedia.CMTimeGetSeconds
 import platform.CoreMedia.CMTimeMake
 import platform.CoreMedia.CMTimeMakeWithSeconds
+import platform.Foundation.KMPAVPlayerAvailableHDRModesDidChangeNotification
+import platform.Foundation.KMPAVPlayerEligibleForHDRPlaybackDidChangeNotification
 import platform.Foundation.NSKeyValueChangeNewKey
 import platform.Foundation.NSKeyValueObservingOptionNew
 import platform.Foundation.NSKeyValueObservingOptions
@@ -40,6 +49,8 @@ import platform.Foundation.removeObserver
 import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDidEnterBackgroundNotification
 import platform.UIKit.UIApplicationWillEnterForegroundNotification
+import platform.UIKit.UIScreen
+import platform.UIKit.UIView
 import platform.darwin.NSEC_PER_SEC
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
@@ -53,6 +64,7 @@ actual fun createVideoPlayerState(
 ): VideoPlayerState = DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions)
 
 private val iosLogger = TaggedLogger("iOSVideoPlayerState")
+private const val DOLBY_VISION_PROFILE_7 = 7
 
 internal class IosSurfaceOwnership<T : Any> {
     private data class Binding<T : Any>(
@@ -93,8 +105,34 @@ open class DefaultVideoPlayerState(
     private val cacheConfig: CacheConfig = CacheConfig(),
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
+    private val platformCapabilities = platformPlayerCapabilities()
+    private val colorPipelineController = VideoColorPipelineController(playbackOptions, platformCapabilities)
+
+    internal fun subtitlePipelineExtensionFor(track: SubtitleTrack): IosSubtitlePipelineExtension? =
+        playbackOptions.extensions
+            .filterIsInstance<IosSubtitlePipelineExtension>()
+            .firstOrNull { extension -> extension.supportsSubtitleFormat(track.resolvedFormat()) }
+
+    override val colorPipelineStatus: StateFlow<VideoColorPipelineStatus> = colorPipelineController.status
+    private var activeDisplayColorCapabilities = DisplayColorCapabilities()
+    private var activeDecoderColorCapabilities = DecoderColorCapabilities()
+    private var activeSourceColorInfo = VideoColorInfo()
+    private var observedHdr10PlusInfo: Hdr10PlusInfo? = null
+    private val hdr10PlusMetadataProbe = AppleHdr10PlusMetadataProbe()
+    private val unavailableProjectionHdrRanges = mutableSetOf<VideoDynamicRange>()
+    private val projectionRendererOutputs = mutableMapOf<UIView, VideoDynamicRange>()
+    private var projectionRendererFallbackDetail: String? = null
+    private var lastColorRefreshSecond = Long.MIN_VALUE
     private var projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
     private var projectionSourceUri: String = ""
+    private val sourcePipelineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var sourcePreparationJob: Job? = null
+    private var sourceConversionAttemptGeneration: Long? = null
+    private var allowAutomaticDolbyVisionConversion = true
+    private var preparedPipelineSource: PreparedVideoPipelineSource? = null
+    private var preparedPipelineOriginalColorInfo: VideoColorInfo? = null
+    private var activeSourceUri: String = ""
+    private var activeSourceRequestHeaders: Map<String, String> = emptyMap()
     private var _projection by mutableStateOf(playbackOptions.projection.normalized())
     override var projection: VideoProjectionSettings
         get() = _projection
@@ -221,7 +259,9 @@ open class DefaultVideoPlayerState(
         get() = _isFullscreen
         set(value) {
             ensureNotDisposed()
+            if (_isFullscreen == value) return
             _isFullscreen = value
+            applyActiveColorSurface()
         }
 
     override val isPipSupported: Boolean
@@ -248,7 +288,14 @@ open class DefaultVideoPlayerState(
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     override val error: VideoPlayerError? get() = _error
     override val capabilities: PlayerCapabilities
-        get() = platformPlayerCapabilities().copy(supportsPiP = isPipSupported)
+        get() =
+            platformCapabilities
+                .copy(
+                    supportsPiP = isPipSupported,
+                    decoderColorCapabilities = activeDecoderColorCapabilities,
+                    displayColorCapabilities = activeDisplayColorCapabilities,
+                    rendererColorCapabilities = activeAppleRendererColorCapabilities(),
+                ).withPipelineExtensions(playbackOptions)
 
     // Observable instance of AVPlayer
     var player: AVPlayer? by mutableStateOf(null)
@@ -260,11 +307,18 @@ open class DefaultVideoPlayerState(
     internal var pipController: AVPictureInPictureController? = null
         private set
     private val surfaceOwnership = IosSurfaceOwnership<AVPlayerLayer>()
+    private val playerLayerScreens = mutableMapOf<AVPlayerLayer, UIScreen>()
+    private val projectionSurfaceOwnership = IosSurfaceOwnership<UIView>()
+    private val projectionViewScreens = mutableMapOf<UIView, UIScreen>()
+    private val projectionViewUsesProjection = mutableMapOf<UIView, Boolean>()
     private val pipLayerBindings = mutableListOf<IosPipLayerBinding>()
+    private var playerLayerReadyObserver: KVOObservation? = null
+    private var observedReadyPlayerLayer: AVPlayerLayer? = null
 
     internal fun bindPlayerLayer(
         layer: AVPlayerLayer,
         isFullscreen: Boolean,
+        screen: UIScreen,
     ) {
         if (isDisposed) {
             layer.player = null
@@ -272,6 +326,7 @@ open class DefaultVideoPlayerState(
         }
         layer.player = player
         surfaceOwnership.bind(layer, isFullscreen)
+        playerLayerScreens[layer] = screen
         if (pipLayerBindings.none { it.layer === layer }) {
             pipLayerBindings +=
                 IosPipLayerBinding(
@@ -290,23 +345,522 @@ open class DefaultVideoPlayerState(
     internal fun releasePlayerLayer(layer: AVPlayerLayer) {
         layer.player = null
         surfaceOwnership.release(layer)
+        playerLayerScreens.remove(layer)
         pipLayerBindings.removeAll { it.layer === layer }
         applyActivePlayerLayer()
     }
 
+    internal fun bindProjectionView(
+        view: UIView,
+        isFullscreen: Boolean,
+        isProjection: Boolean,
+    ) {
+        if (isDisposed) return
+        projectionSurfaceOwnership.bind(view, isFullscreen)
+        projectionViewScreens[view] = view.window?.screen ?: UIScreen.mainScreen
+        projectionViewUsesProjection[view] = isProjection
+        applyActiveColorSurface()
+    }
+
+    internal fun releaseProjectionView(view: UIView) {
+        projectionSurfaceOwnership.release(view)
+        projectionViewScreens.remove(view)
+        projectionViewUsesProjection.remove(view)
+        projectionRendererOutputs.remove(view)
+        applyActiveColorSurface()
+    }
+
+    internal fun onAppleProjectionRendererConfigured(
+        view: UIView,
+        outputDynamicRange: VideoDynamicRange,
+    ) {
+        if (isDisposed || projectionSurfaceOwnership.activeOwner !== view) return
+        projectionRendererOutputs[view] = outputDynamicRange
+        if (outputDynamicRange == VideoDynamicRange.HDR10 || outputDynamicRange == VideoDynamicRange.HLG) {
+            unavailableProjectionHdrRanges.remove(outputDynamicRange)
+        }
+        if (
+            activeSourceColorInfo.dynamicRange == VideoDynamicRange.HDR10_PLUS &&
+            outputDynamicRange == VideoDynamicRange.HDR10 &&
+            colorPipelineStatus.value.plannedMetadataHandling == DynamicMetadataHandling.APPLIED_BY_RENDERER
+        ) {
+            unavailableProjectionHdrRanges.remove(VideoDynamicRange.HDR10_PLUS)
+        }
+        if (_error is VideoPlayerError.ColorPipelineError) clearErrorState()
+        applyActiveColorSurface()
+    }
+
+    internal fun onAppleProjectionHdrUnavailable(
+        view: UIView,
+        outputDynamicRange: VideoDynamicRange,
+        detail: String,
+    ) {
+        if (isDisposed || projectionSurfaceOwnership.activeOwner !== view) return
+        if (
+            outputDynamicRange == VideoDynamicRange.HDR10 ||
+            outputDynamicRange == VideoDynamicRange.HDR10_PLUS ||
+            outputDynamicRange == VideoDynamicRange.HLG
+        ) {
+            unavailableProjectionHdrRanges += outputDynamicRange
+        }
+        projectionRendererOutputs.remove(view)
+        projectionRendererFallbackDetail = detail
+        applyActiveColorSurface()
+    }
+
+    internal fun onAppleProjectionHdr10PlusObserved(
+        view: UIView,
+        info: Hdr10PlusInfo,
+    ) {
+        if (isDisposed || projectionSurfaceOwnership.activeOwner !== view) return
+        applyObservedHdr10Plus(item = player?.currentItem ?: return, info = info, projectionView = view)
+    }
+
+    private fun applyObservedHdr10Plus(
+        item: AVPlayerItem,
+        info: Hdr10PlusInfo,
+        projectionView: UIView? = null,
+    ) {
+        if (
+            preparedPipelineOriginalColorInfo != null ||
+            activeSourceColorInfo.transfer != VideoColorTransfer.PQ ||
+            (
+                activeSourceColorInfo.dynamicRange != VideoDynamicRange.HDR10 &&
+                    activeSourceColorInfo.dynamicRange != VideoDynamicRange.HDR10_PLUS
+            )
+        ) {
+            return
+        }
+        if (
+            observedHdr10PlusInfo == info &&
+            VideoDynamicRange.HDR10_PLUS !in unavailableProjectionHdrRanges
+        ) {
+            return
+        }
+        observedHdr10PlusInfo = info
+        activeSourceColorInfo =
+            activeSourceColorInfo.copy(
+                dynamicRange = VideoDynamicRange.HDR10_PLUS,
+                hdr10Plus = info,
+            )
+        activeDecoderColorCapabilities =
+            activeDecoderColorCapabilities.copy(
+                isKnown = true,
+                supportedDynamicRanges =
+                    activeDecoderColorCapabilities.supportedDynamicRanges +
+                        setOf(VideoDynamicRange.HDR10, VideoDynamicRange.HDR10_PLUS),
+                maxBitDepth = activeDecoderColorCapabilities.maxBitDepth ?: activeSourceColorInfo.bitDepth,
+            )
+        unavailableProjectionHdrRanges.remove(VideoDynamicRange.HDR10_PLUS)
+        projectionView?.let(projectionRendererOutputs::remove)
+        projectionRendererFallbackDetail = null
+        colorPipelineController.updateSource(
+            source = activeSourceColorInfo,
+            decoderName = colorPipelineStatus.value.decoderName ?: "AVFoundation system decoder",
+            decoderCapabilities = activeDecoderColorCapabilities,
+            isLive = !CMTimeGetSeconds(item.duration).isFinite(),
+            isDrmProtected = item.asset.hasProtectedContent,
+        )
+        applyActiveColorSurface()
+    }
+
+    internal fun onAppleProjectionRendererFailed(
+        view: UIView,
+        detail: String,
+    ) {
+        if (isDisposed || projectionSurfaceOwnership.activeOwner !== view) return
+        projectionRendererOutputs.remove(view)
+        applyActiveColorSurface()
+        desiredPlayback = false
+        player?.pause()
+        _isPlaying = false
+        _isLoading = false
+        setError(
+            VideoPlayerError.ColorPipelineError(
+                reason = ColorPipelineFallbackReason.RENDERER_CONFIGURATION_FAILED,
+                message = detail,
+            ),
+        )
+    }
+
     private fun applyActivePlayerLayer() {
         val activeLayer = surfaceOwnership.activeOwner
+        if (observedReadyPlayerLayer !== activeLayer) {
+            playerLayerReadyObserver?.invalidate()
+            playerLayerReadyObserver = null
+            observedReadyPlayerLayer = activeLayer
+            if (activeLayer != null) {
+                playerLayerReadyObserver =
+                    activeLayer.observe("readyForDisplay") {
+                        dispatch_async(dispatch_get_main_queue()) {
+                            if (!isDisposed && surfaceOwnership.activeOwner === activeLayer) {
+                                applyActiveColorSurface()
+                            }
+                        }
+                    }
+            }
+        }
         playerLayer = activeLayer
         pipController = pipLayerBindings.firstOrNull { it.layer === activeLayer }?.controller
         activeLayer?.player = player
         pipController?.setCanStartPictureInPictureAutomaticallyFromInline(_isPipEnabled)
+        applyActiveColorSurface()
     }
 
     private fun clearPlayerLayers() {
+        playerLayerReadyObserver?.invalidate()
+        playerLayerReadyObserver = null
+        observedReadyPlayerLayer = null
         surfaceOwnership.clear().forEach { layer -> layer.player = null }
+        playerLayerScreens.clear()
+        projectionSurfaceOwnership.clear()
+        projectionViewScreens.clear()
+        projectionViewUsesProjection.clear()
+        projectionRendererOutputs.clear()
         pipLayerBindings.clear()
         playerLayer = null
         pipController = null
+        applyActiveColorSurface()
+    }
+
+    private fun applyActiveColorSurface() {
+        val projectionView = projectionSurfaceOwnership.activeOwner
+        val usesProjection = projectionView?.let(projectionViewUsesProjection::get) == true
+        val activeLayer = surfaceOwnership.activeOwner.takeIf { projectionView == null }
+        val screen =
+            when {
+                projectionView != null ->
+                    projectionView.window?.screen
+                        ?: projectionViewScreens[projectionView]
+                activeLayer != null ->
+                    (activeLayer.delegate as? UIView)?.window?.screen
+                        ?: playerLayerScreens[activeLayer]
+                else -> null
+            }
+        activeDisplayColorCapabilities =
+            screen?.toAppleDisplayColorCapabilities() ?: DisplayColorCapabilities()
+        val rendererCapabilities =
+            if (projectionView != null) {
+                activeAppleRendererColorCapabilities()
+            } else {
+                queryAppleProjectionRendererColorCapabilities(includesControlledRenderer = false)
+            }
+        val sourceCompatibleHdrRange = activeSourceColorInfo.appleProjectionCompatibleHdrRange
+        val runtimeFallbackApplies =
+            usesProjection &&
+                sourceCompatibleHdrRange != null &&
+                activeDisplayColorCapabilities.supports(sourceCompatibleHdrRange) &&
+                !rendererCapabilities.supportsControlled(sourceCompatibleHdrRange, isProjection = true)
+        val plan =
+            colorPipelineController.updateOutput(
+                displayCapabilities = activeDisplayColorCapabilities,
+                rendererCapabilities = rendererCapabilities,
+                conversionCapabilities = platformCapabilities.colorConversionCapabilities,
+                surfaceKind =
+                    when {
+                        projectionView != null -> VideoSurfaceKind.CONTROLLED_GPU_SURFACE
+                        activeLayer != null -> VideoSurfaceKind.NATIVE_LAYER
+                        else -> VideoSurfaceKind.UNKNOWN
+                    },
+                nativeSurfaceAvailable = activeLayer != null,
+                isProjection = usesProjection,
+                verification =
+                    if (
+                        activeLayer?.readyForDisplay == true &&
+                        activeLayer.isAppleDynamicRangeConfigured(
+                            hdr = playbackOptions.dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR,
+                        )
+                    ) {
+                        ColorPipelineVerification.SYSTEM_REPORTED
+                    } else {
+                        ColorPipelineVerification.NONE
+                    },
+                platformRuntimeFallbackReason =
+                    ColorPipelineFallbackReason.HDR_PROJECTION_UNAVAILABLE.takeIf { runtimeFallbackApplies },
+                platformRuntimeDetail = projectionRendererFallbackDetail.takeIf { runtimeFallbackApplies },
+            )
+        val configuredProjectionOutput = projectionView?.let(projectionRendererOutputs::get)
+        if (
+            projectionView != null &&
+            configuredProjectionOutput != null &&
+            plan?.outputDynamicRange == configuredProjectionOutput
+        ) {
+            colorPipelineController.updateOutput(
+                displayCapabilities = activeDisplayColorCapabilities,
+                rendererCapabilities = rendererCapabilities,
+                conversionCapabilities = platformCapabilities.colorConversionCapabilities,
+                surfaceKind = VideoSurfaceKind.CONTROLLED_GPU_SURFACE,
+                nativeSurfaceAvailable = false,
+                isProjection = usesProjection,
+                verification = ColorPipelineVerification.RENDERER_CONFIGURED,
+                platformRuntimeFallbackReason =
+                    ColorPipelineFallbackReason.HDR_PROJECTION_UNAVAILABLE.takeIf { runtimeFallbackApplies },
+                platformRuntimeDetail = projectionRendererFallbackDetail.takeIf { runtimeFallbackApplies },
+            )
+        }
+        reportRequiredColorPipelineError()
+    }
+
+    private fun activeAppleRendererColorCapabilities(): RendererColorCapabilities =
+        queryAppleProjectionRendererColorCapabilities(
+            unavailableHdrRanges = unavailableProjectionHdrRanges,
+            includesNativeSurface = false,
+        )
+
+    private fun reportRequiredColorPipelineError() {
+        val pipelineError = colorPipelineController.pipelineErrorOrNull() ?: return
+        if (_error == pipelineError) return
+        desiredPlayback = false
+        player?.pause()
+        _isPlaying = false
+        _isLoading = false
+        setError(pipelineError)
+    }
+
+    private fun refreshSourceColorPipeline(item: AVPlayerItem) {
+        val rawDecodedColorInfo =
+            item
+                .activeVideoAssetTrack()
+                ?.toAppleVideoColorInfo()
+                ?: VideoColorInfo()
+        updateHdr10PlusMetadataProbe(item, rawDecodedColorInfo)
+        if (
+            rawDecodedColorInfo.transfer != VideoColorTransfer.PQ ||
+            (
+                rawDecodedColorInfo.dynamicRange != VideoDynamicRange.HDR10 &&
+                    rawDecodedColorInfo.dynamicRange != VideoDynamicRange.HDR10_PLUS
+            )
+        ) {
+            observedHdr10PlusInfo = null
+        }
+        val decodedColorInfo =
+            observedHdr10PlusInfo
+                ?.takeIf {
+                    rawDecodedColorInfo.transfer == VideoColorTransfer.PQ &&
+                        rawDecodedColorInfo.dynamicRange == VideoDynamicRange.HDR10
+                }?.let { info ->
+                    rawDecodedColorInfo.copy(
+                        dynamicRange = VideoDynamicRange.HDR10_PLUS,
+                        hdr10Plus = info,
+                    )
+                } ?: rawDecodedColorInfo
+        val sourceColorInfo = preparedPipelineOriginalColorInfo ?: decodedColorInfo
+        val decoderColorInfo = preparedPipelineSource?.outputColorInfo ?: decodedColorInfo
+        val appliedDolbyVisionProfileMapping =
+            preparedPipelineOriginalColorInfo?.profile7To81MappingOrNull(decoderColorInfo)
+        val decoderCapabilities =
+            if (decoderColorInfo.dynamicRange != VideoDynamicRange.UNKNOWN) {
+                DecoderColorCapabilities(
+                    isKnown = true,
+                    supportedDynamicRanges = setOf(decoderColorInfo.dynamicRange),
+                    maxBitDepth = decoderColorInfo.bitDepth,
+                    supportedDolbyVisionProfiles =
+                        decoderColorInfo.dolbyVision
+                            ?.profile
+                            ?.let { setOf(it) }
+                            .orEmpty(),
+                    isDolbyVisionProfileSupportKnown =
+                        decoderColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION,
+                )
+            } else {
+                DecoderColorCapabilities()
+            }
+        if (activeSourceColorInfo != sourceColorInfo) {
+            unavailableProjectionHdrRanges.clear()
+            projectionRendererOutputs.clear()
+            projectionRendererFallbackDetail = null
+        }
+        activeSourceColorInfo = sourceColorInfo
+        activeDecoderColorCapabilities = decoderCapabilities
+        colorPipelineController.updateSource(
+            source = sourceColorInfo,
+            decoderInput = decoderColorInfo,
+            appliedDolbyVisionProfileMapping = appliedDolbyVisionProfileMapping,
+            decoderName =
+                if (preparedPipelineOriginalColorInfo != null) {
+                    "libdovi Profile 7 to 8.1 resource bridge -> AVFoundation"
+                } else {
+                    "AVFoundation system decoder"
+                },
+            decoderCapabilities = decoderCapabilities,
+            isLive = !CMTimeGetSeconds(item.duration).isFinite(),
+            isDrmProtected = item.asset.hasProtectedContent,
+            allowAutomaticDolbyVisionConversion = allowAutomaticDolbyVisionConversion,
+        )
+        applyActiveColorSurface()
+    }
+
+    private fun updateHdr10PlusMetadataProbe(
+        item: AVPlayerItem,
+        rawDecodedColorInfo: VideoColorInfo,
+    ) {
+        val isFlatSystemLayer = !projection.usesIosSceneKitProjectionRenderer(projectionTextureCrop)
+        val isPqCandidate =
+            rawDecodedColorInfo.transfer == VideoColorTransfer.PQ &&
+                (
+                    rawDecodedColorInfo.dynamicRange == VideoDynamicRange.HDR10 ||
+                        rawDecodedColorInfo.dynamicRange == VideoDynamicRange.HDR10_PLUS
+                )
+        if (isFlatSystemLayer && isPqCandidate && preparedPipelineOriginalColorInfo == null) {
+            hdr10PlusMetadataProbe.attach(item)
+        } else {
+            hdr10PlusMetadataProbe.detach()
+        }
+    }
+
+    /** Prefer the currently enabled AVPlayerItemTrack so adaptive HLS range switches are observed. */
+    private fun AVPlayerItem.activeVideoAssetTrack(): AVAssetTrack? =
+        tracks
+            .asSequence()
+            .mapNotNull { (it as? AVPlayerItemTrack)?.assetTrack }
+            .firstOrNull { it.mediaType == AVMediaTypeVideo }
+            ?: (asset.tracksWithMediaType(AVMediaTypeVideo).firstOrNull() as? AVAssetTrack)
+
+    private fun shouldProbeSourceConversion(): Boolean =
+        playbackOptions.dolbyVisionPolicy == DolbyVisionPolicy.CONVERT_PROFILE_7_TO_8_1
+
+    private fun shouldPrepareSourceConversion(): Boolean =
+        shouldProbeSourceConversion() ||
+            (
+                playbackOptions.dolbyVisionPolicy == DolbyVisionPolicy.AUTO &&
+                    allowAutomaticDolbyVisionConversion &&
+                    colorPipelineController.currentPlan?.route == ColorPipelineRoute.DOLBY_VISION_CONVERSION
+            )
+
+    private fun maybePrepareExtendedSource(
+        item: AVPlayerItem,
+        observedPlayer: AVPlayer,
+        generation: Long,
+    ): Boolean {
+        if (!shouldPrepareSourceConversion() || preparedPipelineSource != null) return false
+        val automaticConversion = playbackOptions.dolbyVisionPolicy == DolbyVisionPolicy.AUTO
+        val dolbyVision = activeSourceColorInfo.dolbyVision
+        if (
+            activeSourceColorInfo.dynamicRange != VideoDynamicRange.DOLBY_VISION ||
+            dolbyVision?.profile != DOLBY_VISION_PROFILE_7
+        ) {
+            return false
+        }
+        if (sourceConversionAttemptGeneration == generation) return true
+        sourceConversionAttemptGeneration = generation
+        sourcePreparationJob?.cancel()
+        observedPlayer.pause()
+        _hasMedia = false
+        _isLoading = true
+        val resumePositionSeconds = CMTimeGetSeconds(item.currentTime()).takeIf(Double::isFinite) ?: 0.0
+        val originalSource = activeSourceColorInfo
+        sourcePreparationJob =
+            sourcePipelineScope.launch {
+                val preparation =
+                    playbackOptions.prepareSourceWithExtensions(
+                        VideoPipelineSourceRequest(
+                            uri = activeSourceUri,
+                            requestHeaders = activeSourceRequestHeaders,
+                            source = originalSource,
+                            dynamicRangePolicy = playbackOptions.dynamicRangePolicy,
+                            dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+                            isLive = !CMTimeGetSeconds(item.duration).isFinite(),
+                            isDrmProtected = item.asset.hasProtectedContent,
+                            automaticDolbyVisionConversionAllowed = automaticConversion,
+                        ),
+                    )
+                if (!isCurrentSource(generation, observedPlayer, item)) {
+                    (preparation as? VideoPipelineSourcePreparation.Ready)?.source?.close()
+                    return@launch
+                }
+                when (preparation) {
+                    is VideoPipelineSourcePreparation.Ready ->
+                        installPreparedIosSource(
+                            preparation.source,
+                            originalSource,
+                            resumePositionSeconds,
+                        )
+                    is VideoPipelineSourcePreparation.Rejected ->
+                        rejectPreparedIosSource(
+                            preparation.reason,
+                            preparation.detail,
+                            automaticConversion = automaticConversion,
+                        )
+                    VideoPipelineSourcePreparation.NotApplicable ->
+                        rejectPreparedIosSource(
+                            ColorPipelineFallbackReason.DOLBY_VISION_CONVERTER_UNAVAILABLE,
+                            "No installed iOS source extension can perform the requested Profile 7 conversion.",
+                            automaticConversion = automaticConversion,
+                        )
+                }
+            }
+        return true
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun installPreparedIosSource(
+        prepared: PreparedVideoPipelineSource,
+        originalSource: VideoColorInfo,
+        resumePositionSeconds: Double,
+    ) {
+        val iosSource = prepared as? IosPreparedVideoPipelineSource
+        if (iosSource == null) {
+            prepared.close()
+            rejectPreparedIosSource(
+                ColorPipelineFallbackReason.DOLBY_VISION_CONVERTER_UNAVAILABLE,
+                "The installed converter did not provide an AVFoundation source.",
+            )
+            return
+        }
+        try {
+            val item = iosSource.createPlayerItem()
+            cleanupCurrentPlayer()
+            preparedPipelineSource = iosSource
+            preparedPipelineOriginalColorInfo = originalSource
+            val generation = nextSourceGeneration()
+            sourceConversionAttemptGeneration = generation
+            val replacementPlayer = createIosPlayer(item)
+            player = replacementPlayer
+            applyActivePlayerLayer()
+            setupObservers(replacementPlayer, item, generation)
+            if (resumePositionSeconds > 0.0) {
+                replacementPlayer.seekToTime(CMTimeMakeWithSeconds(resumePositionSeconds, NSEC_PER_SEC.toInt()))
+            }
+            replacementPlayer.pause()
+            _isLoading = true
+        } catch (error: Exception) {
+            prepared.close()
+            preparedPipelineSource = null
+            preparedPipelineOriginalColorInfo = null
+            rejectPreparedIosSource(
+                ColorPipelineFallbackReason.DOLBY_VISION_CONVERTER_UNAVAILABLE,
+                "Failed to install the converted AVFoundation source: " +
+                    (error.message ?: error::class.simpleName.orEmpty()),
+            )
+        }
+    }
+
+    private fun rejectPreparedIosSource(
+        reason: ColorPipelineFallbackReason,
+        detail: String,
+        automaticConversion: Boolean = false,
+    ) {
+        if (automaticConversion) {
+            allowAutomaticDolbyVisionConversion = false
+            player?.currentItem?.let(::refreshSourceColorPipeline)
+            val fallbackPlan = colorPipelineController.currentPlan
+            if (fallbackPlan != null && fallbackPlan.route != ColorPipelineRoute.UNSUPPORTED) {
+                _hasMedia = true
+                _isLoading = false
+                if (desiredPlayback) player?.play()
+                iosLogger.d {
+                    "Automatic Profile 7 to 8.1 conversion was unavailable; " +
+                        "continuing with ${fallbackPlan.route}: $detail"
+                }
+                return
+            }
+        }
+        desiredPlayback = false
+        player?.pause()
+        _isPlaying = false
+        _isLoading = false
+        _hasMedia = false
+        setError(VideoPlayerError.ColorPipelineError(reason, detail))
     }
 
     // Periodic observer for position updates (≈60 fps)
@@ -323,6 +877,8 @@ open class DefaultVideoPlayerState(
     // App lifecycle notification observers
     private var backgroundObserver: Any? = null
     private var foregroundObserver: Any? = null
+    private var hdrModesObserver: Any? = null
+    private var hdrEligibilityObserver: Any? = null
 
     // Flag to track if player was playing before going to background
     private var foregroundResumeGeneration: Long? = null
@@ -340,6 +896,22 @@ open class DefaultVideoPlayerState(
     private var wasStalled = false
 
     init {
+        hdrModesObserver =
+            NSNotificationCenter.defaultCenter.addObserverForName(
+                name = KMPAVPlayerAvailableHDRModesDidChangeNotification(),
+                `object` = null,
+                queue = NSOperationQueue.mainQueue,
+            ) { _ ->
+                if (!isDisposed) applyActiveColorSurface()
+            }
+        hdrEligibilityObserver =
+            NSNotificationCenter.defaultCenter.addObserverForName(
+                name = KMPAVPlayerEligibleForHDRPlaybackDidChangeNotification(),
+                `object` = null,
+                queue = NSOperationQueue.mainQueue,
+            ) { _ ->
+                if (!isDisposed) applyActiveColorSurface()
+            }
         if (cacheConfig.enabled) {
             iosLogger.w {
                 "iOS video caching is disabled because AVPlayer does not use an isolated library-owned URL cache"
@@ -429,6 +1001,18 @@ open class DefaultVideoPlayerState(
 
                     val currentSeconds = CMTimeGetSeconds(time)
                     val durationSeconds = CMTimeGetSeconds(item.duration)
+                    val currentWholeSecond = currentSeconds.takeIf(Double::isFinite)?.toLong()
+                    if (currentWholeSecond != null && currentWholeSecond != lastColorRefreshSecond) {
+                        lastColorRefreshSecond = currentWholeSecond
+                        hdr10PlusMetadataProbe
+                            .metadataAt(
+                                itemTime = time,
+                                presentationTimeUs = currentSeconds.secondsToMicroseconds(),
+                            )?.let { info ->
+                                applyObservedHdr10Plus(item = item, info = info)
+                            }
+                        refreshSourceColorPipeline(item)
+                    }
                     val currentTime = currentSeconds.secondsAsDuration()
                     val duration = durationSeconds.secondsAsDuration()
                     _currentTime = currentTime
@@ -527,6 +1111,43 @@ open class DefaultVideoPlayerState(
         }
     }
 
+    private fun handleIosPlayerItemReady(
+        player: AVPlayer,
+        item: AVPlayerItem,
+        generation: Long,
+    ) {
+        refreshSourceColorPipeline(item)
+        if (maybePrepareExtendedSource(item, player, generation)) {
+            _hasMedia = false
+            _isLoading = true
+            return
+        }
+        _hasMedia = true
+        _isLoading = false
+        extractMetadata(item)
+        _metadata.duration?.let { duration ->
+            if (duration > Duration.ZERO) {
+                _duration = duration
+                _durationText = formatTime(duration)
+            }
+        }
+        if (sourceLoadedSessionId != mediaSessionId && mediaSessionId != 0L) {
+            sourceLoadedSessionId = mediaSessionId
+            emitPlaybackEvent { sessionId, sampledAtMs ->
+                PlaybackEvent.SourceLoaded(
+                    mediaSessionId = sessionId,
+                    sampledAtMs = sampledAtMs,
+                    duration = _duration,
+                )
+            }
+        }
+        if (desiredPlayback && player.rate == 0.0f) {
+            ensureAudioSession()
+            player.playImmediatelyAtRate(_playbackSpeed)
+        }
+        iosLogger.d { "Player Item Ready" }
+    }
+
     private fun setupObservers(
         player: AVPlayer,
         item: AVPlayerItem,
@@ -584,36 +1205,8 @@ open class DefaultVideoPlayerState(
                 dispatch_async(dispatch_get_main_queue()) {
                     if (!isCurrentSource(generation, player, item)) return@dispatch_async
                     when (currentStatus) {
-                        AVPlayerItemStatusReadyToPlay -> {
-                            _hasMedia = true
-                            _isLoading = false
-                            extractMetadata(item)
-                            _metadata.duration?.let { duration ->
-                                if (duration > Duration.ZERO) {
-                                    _duration = duration
-                                    _durationText = formatTime(duration)
-                                }
-                            }
-                            if (sourceLoadedSessionId != mediaSessionId && mediaSessionId != 0L) {
-                                sourceLoadedSessionId = mediaSessionId
-                                emitPlaybackEvent { sessionId, sampledAtMs ->
-                                    PlaybackEvent.SourceLoaded(
-                                        mediaSessionId = sessionId,
-                                        sampledAtMs = sampledAtMs,
-                                        duration = _duration,
-                                    )
-                                }
-                            }
-                            iosLogger.d { "Player Item Ready" }
-                        }
-                        AVPlayerItemStatusFailed -> {
-                            desiredPlayback = false
-                            releaseAudioSession()
-                            _isLoading = false
-                            _isPlaying = false
-                            setError(VideoPlayerError.SourceError("Playback failed"))
-                            iosLogger.e { "Player Item Failed" }
-                        }
+                        AVPlayerItemStatusReadyToPlay -> handleIosPlayerItemReady(player, item, generation)
+                        AVPlayerItemStatusFailed -> handleIosPlayerItemFailed()
                     }
                 }
             }
@@ -666,6 +1259,33 @@ open class DefaultVideoPlayerState(
             }
 
         setupAppLifecycleObservers(player, generation)
+    }
+
+    private fun handleIosPlayerItemFailed() {
+        val convertedSourceFailed = preparedPipelineSource != null
+        desiredPlayback = false
+        releaseAudioSession()
+        _isLoading = false
+        _isPlaying = false
+        _hasMedia = false
+        if (convertedSourceFailed) {
+            closePreparedPipelineSource()
+            setError(
+                VideoPlayerError.ColorPipelineError(
+                    ColorPipelineFallbackReason.DOLBY_VISION_CONVERTER_UNAVAILABLE,
+                    "AVFoundation rejected the converted Dolby Vision Profile 8.1 stream.",
+                ),
+            )
+        } else {
+            setError(VideoPlayerError.SourceError("Playback failed"))
+        }
+        iosLogger.e {
+            if (convertedSourceFailed) {
+                "Converted Dolby Vision player item failed"
+            } else {
+                "Player item failed"
+            }
+        }
     }
 
     private fun stopPositionUpdates() {
@@ -812,12 +1432,28 @@ open class DefaultVideoPlayerState(
      * Clean up all resources associated with the current player
      */
     private fun cleanupCurrentPlayer() {
+        hdr10PlusMetadataProbe.detach()
         stopPositionUpdates()
         removeObservers()
         player?.pause()
         player?.replaceCurrentItemWithPlayerItem(null)
         player = null
     }
+
+    private fun closePreparedPipelineSource() {
+        val prepared = preparedPipelineSource
+        preparedPipelineSource = null
+        preparedPipelineOriginalColorInfo = null
+        prepared?.close()
+    }
+
+    private fun createIosPlayer(item: AVPlayerItem): AVPlayer =
+        AVPlayer(playerItem = item).apply {
+            volume = this@DefaultVideoPlayerState.volume
+            actionAtItemEnd = AVPlayerActionAtItemEndNone
+            automaticallyWaitsToMinimizeStalling = true
+            allowsExternalPlayback = false
+        }
 
     /**
      * Opens a media source from the given URI.
@@ -839,12 +1475,28 @@ open class DefaultVideoPlayerState(
     ) {
         ensureNotDisposed()
         iosLogger.d { "openUri called with uri: $uri, initializePlayerState: $initializePlayerState" }
+        sourcePreparationJob?.cancel()
+        sourcePreparationJob = null
+        sourceConversionAttemptGeneration = null
+        allowAutomaticDolbyVisionConversion = true
+        closePreparedPipelineSource()
+        activeSourceUri = uri
+        activeSourceRequestHeaders = requestHeaders.sanitizedRequestHeaders()
         val generation = nextSourceGeneration()
         val previousSessionId = mediaSessionId
         val hadPreviousSource = _hasMedia || player != null
         val sessionId = nextMediaSessionId()
         sourceLoadedSessionId = 0L
         wasStalled = false
+        activeSourceColorInfo = VideoColorInfo()
+        observedHdr10PlusInfo = null
+        unavailableProjectionHdrRanges.clear()
+        projectionRendererOutputs.clear()
+        projectionRendererFallbackDetail = null
+        activeDecoderColorCapabilities = DecoderColorCapabilities()
+        lastColorRefreshSecond = Long.MIN_VALUE
+        colorPipelineController.resetSource()
+        applyActiveColorSurface()
         if (hadPreviousSource) {
             emitSourceReleasedForSession(previousSessionId)
         }
@@ -881,25 +1533,19 @@ open class DefaultVideoPlayerState(
         // AVPlayer handles async loading internally — metadata is extracted
         // safely in the KVO readyToPlay callback, avoiding ObjC exceptions
         // from accessing track properties on an unloaded/failed asset.
-        val asset = AVURLAsset.URLAssetWithURL(nsUrl, requestHeaders.avAssetOptions())
+        val asset = AVURLAsset.URLAssetWithURL(nsUrl, activeSourceRequestHeaders.avAssetOptions())
         val playerItem = AVPlayerItem(asset)
 
         nsUrl.lastPathComponent?.let { _metadata.title = it }
         updateAutoDetectedProjection()
 
-        val newPlayer =
-            AVPlayer(playerItem = playerItem).apply {
-                volume = this@DefaultVideoPlayerState.volume
-                actionAtItemEnd = AVPlayerActionAtItemEndNone
-                automaticallyWaitsToMinimizeStalling = true
-                allowsExternalPlayback = false
-            }
+        val newPlayer = createIosPlayer(playerItem)
 
         player = newPlayer
 
         setupObservers(newPlayer, playerItem, generation)
 
-        if (initializePlayerState == InitialPlayerState.PLAY) {
+        if (initializePlayerState == InitialPlayerState.PLAY && !shouldProbeSourceConversion()) {
             play()
         } else {
             newPlayer.pause()
@@ -925,6 +1571,21 @@ open class DefaultVideoPlayerState(
         desiredPlayback = true
         foregroundResumeGeneration = null
         foregroundResumePlayer = null
+        val awaitingConversionDecision =
+            shouldProbeSourceConversion() &&
+                preparedPipelineSource == null &&
+                (
+                    activeSourceColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN ||
+                        (
+                            activeSourceColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
+                                activeSourceColorInfo.dolbyVision?.profile == DOLBY_VISION_PROFILE_7
+                        )
+                )
+        if (awaitingConversionDecision) {
+            currentPlayer.pause()
+            _isLoading = true
+            return
+        }
         _hasMedia = currentItem != null
         ensureAudioSession()
 
@@ -1024,11 +1685,18 @@ open class DefaultVideoPlayerState(
         val releasedSessionId = mediaSessionId
         val hadSource = player != null || _hasMedia
         nextSourceGeneration()
+        sourcePreparationJob?.cancel()
+        sourcePreparationJob = null
+        sourceConversionAttemptGeneration = null
+        allowAutomaticDolbyVisionConversion = true
         desiredPlayback = false
         foregroundResumeGeneration = null
         foregroundResumePlayer = null
         releaseAudioSession()
         cleanupCurrentPlayer()
+        closePreparedPipelineSource()
+        activeSourceUri = ""
+        activeSourceRequestHeaders = emptyMap()
         _isPlaying = false
         _isLoading = false
         _isSeeking = false
@@ -1039,6 +1707,15 @@ open class DefaultVideoPlayerState(
         _durationText = "00:00"
         sliderPos = 0f
         resetMetadata()
+        activeSourceColorInfo = VideoColorInfo()
+        observedHdr10PlusInfo = null
+        unavailableProjectionHdrRanges.clear()
+        projectionRendererOutputs.clear()
+        projectionRendererFallbackDetail = null
+        activeDecoderColorCapabilities = DecoderColorCapabilities()
+        lastColorRefreshSecond = Long.MIN_VALUE
+        colorPipelineController.resetSource()
+        applyActiveColorSurface()
         sourceLoadedSessionId = 0L
         wasStalled = false
         if (hadSource) {
@@ -1152,7 +1829,7 @@ open class DefaultVideoPlayerState(
     override fun toggleFullscreen() {
         ensureNotDisposed()
         iosLogger.d { "toggleFullscreen called" }
-        _isFullscreen = !_isFullscreen
+        isFullscreen = !isFullscreen
     }
 
     override fun dispose() {
@@ -1161,12 +1838,20 @@ open class DefaultVideoPlayerState(
         val releasedSessionId = mediaSessionId
         val hadMedia = _hasMedia || player != null
         isDisposed = true
+        hdrModesObserver?.let(NSNotificationCenter.defaultCenter::removeObserver)
+        hdrModesObserver = null
+        hdrEligibilityObserver?.let(NSNotificationCenter.defaultCenter::removeObserver)
+        hdrEligibilityObserver = null
         nextSourceGeneration()
+        sourcePreparationJob?.cancel()
+        sourcePreparationJob = null
         desiredPlayback = false
         foregroundResumeGeneration = null
         foregroundResumePlayer = null
         releaseAudioSession()
         cleanupCurrentPlayer()
+        closePreparedPipelineSource()
+        sourcePipelineScope.cancel()
         clearPlayerLayers()
         _isPipActive = false
         _isPipEnabled = false
@@ -1181,6 +1866,13 @@ open class DefaultVideoPlayerState(
         }
 
         resetMetadata()
+        activeSourceColorInfo = VideoColorInfo()
+        observedHdr10PlusInfo = null
+        unavailableProjectionHdrRanges.clear()
+        projectionRendererOutputs.clear()
+        projectionRendererFallbackDetail = null
+        activeDecoderColorCapabilities = DecoderColorCapabilities()
+        colorPipelineController.resetSource()
         playbackEndedCallback = null
         restartCallback = null
     }
@@ -1249,7 +1941,14 @@ open class DefaultVideoPlayerState(
         _projection = value.normalized()
         renderingInfo.videoProjection = projection.renderingInfoLabel()
         renderingInfo.videoRenderer = projection.iosVideoRendererLabel(projectionTextureCrop)
-        renderingInfo.notes = null
+        renderingInfo.notes =
+            if (projection.requiresProjectionRenderer) {
+                "AVPlayerItemVideoOutput supplies P010/NV12 CoreVideo planes to the FP16 BT.2020 Metal " +
+                    "renderer; HDR is confirmed only after the first EDR command buffer completes."
+            } else {
+                null
+            }
+        player?.currentItem?.let(::refreshSourceColorPipeline) ?: applyActiveColorSurface()
     }
 
     // Audio track state. Native AVFoundation track selection can be added here later;
@@ -1496,3 +2195,11 @@ private fun NSObject.observe(
         keyPath = keyPath,
     )
 }
+
+private val VideoColorInfo.appleProjectionCompatibleHdrRange: VideoDynamicRange?
+    get() =
+        when (dynamicRange) {
+            VideoDynamicRange.HDR10, VideoDynamicRange.HDR10_PLUS -> VideoDynamicRange.HDR10
+            VideoDynamicRange.HLG -> VideoDynamicRange.HLG
+            else -> null
+        }

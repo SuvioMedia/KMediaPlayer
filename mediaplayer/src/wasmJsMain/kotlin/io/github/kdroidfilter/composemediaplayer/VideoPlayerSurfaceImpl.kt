@@ -20,6 +20,7 @@ import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
 import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import kotlinx.browser.document
+import kotlinx.browser.window
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -44,6 +45,8 @@ private const val DIAGNOSTICS_VIDEO_WIDTH_INDEX = 5
 private const val DIAGNOSTICS_VIDEO_HEIGHT_INDEX = 6
 private const val DIAGNOSTICS_BITRATE_INDEX = 7
 private const val DIAGNOSTICS_NOTES_INDEX = 8
+private const val DIAGNOSTICS_RENDERED_FRAMES_INDEX = 9
+private const val DIAGNOSTICS_MAX_AV_SYNC_MS_INDEX = 10
 private val playbackReadyEvents = setOf("seeked", "playing", "canplay", "canplaythrough")
 
 private data class ManagedVideoEventListener(
@@ -272,15 +275,14 @@ private fun DrawScope.drawVideoRatioRect(
 }
 
 @Composable
-internal fun SubtitleOverlay(playerState: VideoPlayerState) {
-    val subtitleTrack = playerState.currentSubtitleTrack
-    if (!playerState.subtitlesEnabled ||
-        subtitleTrack == null ||
-        subtitleTrack.isEmbedded ||
-        subtitleTrack.resolvedFormat().isAssFamily
-    ) {
-        return
-    }
+internal fun SubtitleOverlay(
+    playerState: VideoPlayerState,
+    suppressComposeAss: Boolean,
+) {
+    if (!playerState.subtitlesEnabled) return
+    val subtitleTrack = playerState.currentSubtitleTrack ?: return
+    if (subtitleTrack.isEmbedded) return
+    if (suppressComposeAss && subtitleTrack.resolvedFormat().isAssFamily) return
 
     val currentTime =
         if (playerState.userDragging) {
@@ -306,6 +308,7 @@ internal fun VideoBox(
     videoRatio: Float?,
     contentScale: ContentScale,
     isFullscreenMode: Boolean,
+    suppressComposeAss: Boolean,
     overlay: @Composable () -> Unit,
 ) {
     Box(
@@ -315,7 +318,7 @@ internal fun VideoBox(
                 .background(if (isFullscreenMode) Color.Black else Color.Transparent)
                 .videoRatioClip(videoRatio, contentScale),
     ) {
-        SubtitleOverlay(playerState)
+        SubtitleOverlay(playerState, suppressComposeAss)
         Box(modifier = Modifier.fillMaxSize()) {
             overlay()
         }
@@ -328,6 +331,7 @@ internal fun VideoContentLayout(
     modifier: Modifier,
     videoRatio: Float?,
     contentScale: ContentScale,
+    suppressComposeAss: Boolean,
     overlay: @Composable () -> Unit,
     videoElementContent: @Composable () -> Unit,
 ) {
@@ -338,7 +342,14 @@ internal fun VideoContentLayout(
                 .background(if (playerState.isFullscreen) Color.Black else Color.Transparent),
         contentAlignment = Alignment.Center,
     ) {
-        VideoBox(playerState, videoRatio, contentScale, playerState.isFullscreen, overlay)
+        VideoBox(
+            playerState = playerState,
+            videoRatio = videoRatio,
+            contentScale = contentScale,
+            isFullscreenMode = playerState.isFullscreen,
+            suppressComposeAss = suppressComposeAss,
+            overlay = overlay,
+        )
         videoElementContent()
     }
 }
@@ -473,6 +484,35 @@ private fun startPlaybackQualityDiagnostics(
                 clearInterval(video.__composeMediaPlayerQualityTimer);
                 video.__composeMediaPlayerQualityTimer = null;
             }
+            if (video.__composeMediaPlayerQualityFrameCallback &&
+                typeof video.cancelVideoFrameCallback === "function") {
+                video.cancelVideoFrameCallback(video.__composeMediaPlayerQualityFrameCallback);
+            }
+            video.__composeMediaPlayerQualityFrameCallback = 0;
+            video.__composeMediaPlayerPresentedFrames = 0;
+            video.__composeMediaPlayerMaximumAvSyncMs = 0;
+
+            if (typeof video.requestVideoFrameCallback === "function") {
+                const samplePresentedFrame = function(_, metadata) {
+                    video.__composeMediaPlayerPresentedFrames = Math.max(
+                        video.__composeMediaPlayerPresentedFrames || 0,
+                        Number(metadata && metadata.presentedFrames ? metadata.presentedFrames : 0)
+                    );
+                    if (metadata && Number.isFinite(metadata.mediaTime) && Number.isFinite(video.currentTime)) {
+                        const offsetMs = Math.abs(metadata.mediaTime - video.currentTime) * 1000;
+                        if (offsetMs <= 1000) {
+                            video.__composeMediaPlayerMaximumAvSyncMs = Math.max(
+                                video.__composeMediaPlayerMaximumAvSyncMs || 0,
+                                offsetMs
+                            );
+                        }
+                    }
+                    video.__composeMediaPlayerQualityFrameCallback =
+                        video.requestVideoFrameCallback(samplePresentedFrame);
+                };
+                video.__composeMediaPlayerQualityFrameCallback =
+                    video.requestVideoFrameCallback(samplePresentedFrame);
+            }
 
             const readQuality = function() {
                 let total = 0;
@@ -509,6 +549,20 @@ private fun startPlaybackQualityDiagnostics(
                     parts.push("8K HEVC needs browser hardware decode");
                 }
 
+                const presented = Number(video.__composeMediaPlayerPresentedFrames || 0);
+                const rendered = total > 0 ? Math.max(0, total - dropped) : presented;
+                const maximumAvSyncMs = Number(video.__composeMediaPlayerMaximumAvSyncMs || 0);
+                video.setAttribute("data-kmp-total-video-frames", String(total));
+                video.setAttribute("data-kmp-rendered-video-frames", String(rendered));
+                video.setAttribute("data-kmp-presented-video-frames", String(presented));
+                video.setAttribute("data-kmp-dropped-video-frames", String(dropped));
+                video.setAttribute("data-kmp-dropped-video-frames-percent", String(droppedRatio));
+                video.setAttribute("data-kmp-corrupted-video-frames", String(corrupted));
+                video.setAttribute(
+                    "data-kmp-maximum-av-sync-offset-ms",
+                    String(Math.round(maximumAvSyncMs * 1000) / 1000)
+                );
+
                 try {
                     onDiagnosticsChanged([
                         String(total),
@@ -519,7 +573,9 @@ private fun startPlaybackQualityDiagnostics(
                         String(video.videoWidth || 0),
                         String(video.videoHeight || 0),
                         "",
-                        encodeURIComponent(parts.join("; "))
+                        encodeURIComponent(parts.join("; ")),
+                        String(rendered),
+                        String(Math.round(maximumAvSyncMs * 1000) / 1000)
                     ].join("|"));
                 } catch (_) {
                 }
@@ -535,8 +591,10 @@ private fun parsePlaybackDiagnosticsRow(row: String): PlaybackDiagnostics {
     val columns = row.split('|')
     return PlaybackDiagnostics(
         totalVideoFrames = columns.getOrNull(DIAGNOSTICS_TOTAL_FRAMES_INDEX)?.toLongOrNull(),
+        renderedVideoFrames = columns.getOrNull(DIAGNOSTICS_RENDERED_FRAMES_INDEX)?.toLongOrNull(),
         droppedVideoFrames = columns.getOrNull(DIAGNOSTICS_DROPPED_FRAMES_INDEX)?.toLongOrNull(),
         corruptedVideoFrames = columns.getOrNull(DIAGNOSTICS_CORRUPTED_FRAMES_INDEX)?.toLongOrNull(),
+        maximumAvSyncOffsetMs = columns.getOrNull(DIAGNOSTICS_MAX_AV_SYNC_MS_INDEX)?.toFloatOrNull(),
         readyState = columns.getOrNull(DIAGNOSTICS_READY_STATE_INDEX)?.toIntOrNull(),
         networkState = columns.getOrNull(DIAGNOSTICS_NETWORK_STATE_INDEX)?.toIntOrNull(),
         videoWidth = columns.getOrNull(DIAGNOSTICS_VIDEO_WIDTH_INDEX)?.toIntOrNull()?.takeIf { it > 0 },
@@ -632,6 +690,11 @@ private fun stopPlaybackQualityDiagnostics(video: HTMLVideoElement): Unit =
                 clearInterval(video.__composeMediaPlayerQualityTimer);
                 video.__composeMediaPlayerQualityTimer = null;
             }
+            if (video.__composeMediaPlayerQualityFrameCallback &&
+                typeof video.cancelVideoFrameCallback === "function") {
+                video.cancelVideoFrameCallback(video.__composeMediaPlayerQualityFrameCallback);
+            }
+            video.__composeMediaPlayerQualityFrameCallback = 0;
         }
         """,
     )
@@ -787,9 +850,12 @@ internal fun setupVideoElement(
         video.addManagedEventListener(event) {
             val callbackMediaSessionId = captureMediaSessionId() ?: return@addManagedEventListener
             if (!shouldHandleCurrentSource(callbackMediaSessionId)) return@addManagedEventListener
+            // Clear stale transport/decode errors before evaluating the color pipeline. A
+            // REQUIRE_HDR error produced below must not be erased by the same media event.
+            playerState.clearError()
+            playerState.refreshWebVideoColorInfo(video)
             mediaLoaded = true
             playerState.updateBufferedRanges(readBufferedRangeRows(video))
-            playerState.clearError()
             syncMediaTracks()
         }
     }
@@ -1009,6 +1075,17 @@ internal fun VideoPlayerEffects(
         }
     }
 
+    DisposableEffect(playerState) {
+        val dynamicRangeQuery = window.matchMedia("(dynamic-range: high)")
+        val dynamicRangeChangeListener: (Event) -> Unit = {
+            (playerState as? DefaultVideoPlayerState)?.onWebDisplayColorCapabilitiesChanged()
+        }
+        dynamicRangeQuery.addEventListener("change", dynamicRangeChangeListener)
+        onDispose {
+            dynamicRangeQuery.removeEventListener("change", dynamicRangeChangeListener)
+        }
+    }
+
     // Handle source change effect
 
     if (playerState is DefaultVideoPlayerState) {
@@ -1022,6 +1099,7 @@ internal fun VideoPlayerEffects(
                     val useCredentials = requestHeaders.usesBrowserCredentials()
                     video.configureCrossOrigin(useCors = useCors, useCredentials = useCredentials)
                     video.markMediaSession(mediaSessionId, sourceUri)
+                    playerState.attachPreparedPipelineSource(video)
                     playerState.clearError()
                     if (sourceKind.allowsHlsController) {
                         video.destroyMkvSidecarTracks()
@@ -1059,6 +1137,7 @@ internal fun VideoPlayerEffects(
                     if (!playerState.isCurrentMediaSession(mediaSessionId)) return@let
                     if (playerState.isPlaying) video.safePlay() else video.safePause()
                 } else {
+                    playerState.detachPreparedPipelineSource(video)
                     playerState.applyHlsQualityCallback = null
                     video.safePause()
                     video.destroyHlsController()
@@ -1081,6 +1160,9 @@ internal fun VideoPlayerEffects(
         val video = videoElement
 
         if (webPlayerState != null && video != null) {
+            webPlayerState.applyPlaybackCallback = { shouldPlay ->
+                if (shouldPlay) video.safePlay() else video.safePause()
+            }
             webPlayerState.preciseCurrentTimeProvider = { video.currentTime.secondsAsDuration() }
             webPlayerState.durationProvider = { video.duration.secondsAsDuration() }
             webPlayerState.resetPlaybackCallback = {
@@ -1090,7 +1172,9 @@ internal fun VideoPlayerEffects(
         }
 
         onDispose {
+            if (video != null) webPlayerState?.detachPreparedPipelineSource(video)
             if (webPlayerState != null) {
+                webPlayerState.applyPlaybackCallback = null
                 webPlayerState.preciseCurrentTimeProvider = null
                 webPlayerState.durationProvider = null
                 webPlayerState.resetPlaybackCallback = null
@@ -1247,10 +1331,13 @@ internal fun VideoVolumeAndSpeedEffects(
 
     DisposableEffect(videoElement) {
         val video = videoElement ?: return@DisposableEffect onDispose {}
+        video.muted = playerState.volume <= 0f
+        video.volume = playerState.volume.toDouble()
 
         // Init video element state when video is loaded
         // Volume could be changed any time but playbackRate require video to be loaded
         val videoLoadedListener: (Event) -> Unit = {
+            video.muted = playerState.volume <= 0f
             video.volume = playerState.volume.toDouble()
             video.safeSetPlaybackRate(playerState.playbackSpeed)
         }
@@ -1261,6 +1348,7 @@ internal fun VideoVolumeAndSpeedEffects(
         // The video element will be updated in `videoLoadedListener`
         playerState.applyVolumeCallback = { value ->
             if (!playerState.isLoading) {
+                video.muted = value <= 0f
                 video.volume = value.toDouble()
             }
         }

@@ -2,62 +2,21 @@ package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Stable
 
-/**
- * Controls how video frames are rendered when more than one platform path is available.
- */
-enum class VideoOutputMode {
-    /**
-     * Use the platform default. On macOS this favors tone-mapped SDR for stable Compose rendering unless
-     * the legacy composemediaplayer.macos.hdrMetal property explicitly enables native HDR. On Windows and Linux,
-     * this keeps the platform/canvas path unless a source needs a fallback backend.
-     */
-    AUTO,
+internal fun PlayerCapabilities.withPipelineExtensions(options: VideoPlaybackOptions): PlayerCapabilities =
+    copy(
+        colorConversionCapabilities =
+            options.extensions.fold(colorConversionCapabilities) { accumulated, extension ->
+                accumulated.mergedWith(extension.status().colorConversionCapabilities)
+            },
+    )
 
-    /**
-     * Render through the normal Compose bitmap/canvas path without requesting HDR tone mapping.
-     */
-    COMPOSE_SDR,
-
-    /**
-     * Ask the platform decoder to map HDR sources into SDR before frames reach Compose.
-     */
-    TONE_MAPPED_SDR,
-
-    /**
-     * Prefer a native HDR/EDR platform surface when available. On macOS this selects the AVFoundation native HDR
-     * surface. On Windows and Linux with [DesktopVideoBackend.AUTO], this selects the libVLC native-view backend
-     * as a best-effort HDR-preserving path that avoids copying frames into Compose.
-     */
-    NATIVE_HDR,
-}
-
-/**
- * Controls how Dolby Vision streams are handled on platforms that expose more than one compatibility path.
- */
-enum class DolbyVisionMode {
-    /**
-     * Use the platform default and only apply compatibility workarounds when the implementation knows they are needed.
-     */
-    AUTO,
-
-    /**
-     * Keep Dolby Vision signaling intact and rely on the platform decoder/display path.
-     */
-    PASSTHROUGH,
-
-    /**
-     * Prefer an HDR10/HEVC-compatible path when the platform can fall back from Dolby Vision safely.
-     */
-    PREFER_HDR10_COMPATIBLE,
-
-    /**
-     * Request realtime Dolby Vision Profile 7 to Profile 8.1 conversion.
-     *
-     * This is only active on builds where [HdrCapabilities.supportsDolbyVisionProfile7To8Transcoding]
-     * is true. Other builds keep playback fail-safe and expose the unsupported request through diagnostics.
-     */
-    TRANSCODE_PROFILE_7_TO_8_1,
-}
+internal fun ColorConversionCapabilities.mergedWith(other: ColorConversionCapabilities): ColorConversionCapabilities =
+    ColorConversionCapabilities(
+        supportsDolbyVisionProfile7To8 = supportsDolbyVisionProfile7To8 || other.supportsDolbyVisionProfile7To8,
+        supportsHdr10PlusApplication = supportsHdr10PlusApplication || other.supportsHdr10PlusApplication,
+        supportsHdrToSdrSourceBridge = supportsHdrToSdrSourceBridge || other.supportsHdrToSdrSourceBridge,
+        supportsStreamingVOD = supportsStreamingVOD || other.supportsStreamingVOD,
+    )
 
 /**
  * Selects the JVM desktop playback backend.
@@ -84,7 +43,7 @@ enum class DesktopVideoBackend {
 
     /**
      * Use a user-installed libVLC backend with VLC rendering directly into a native desktop view. This avoids the
-     * Compose SDR frame-copy path, but HDR passthrough still depends on VLC, the OS compositor, GPU, and display.
+     * Compose frame-copy path but is not evidence of a configured HDR swapchain or HDR display output.
      */
     LIBVLC_NATIVE,
 }
@@ -106,12 +65,31 @@ enum class VideoProjectionDetectionMode {
 
 @Stable
 data class VideoPlaybackOptions(
-    val videoOutputMode: VideoOutputMode = VideoOutputMode.AUTO,
-    val dolbyVisionMode: DolbyVisionMode = DolbyVisionMode.AUTO,
+    val dynamicRangePolicy: DynamicRangePolicy = DynamicRangePolicy.AUTO,
+    val dolbyVisionPolicy: DolbyVisionPolicy = DolbyVisionPolicy.AUTO,
     val desktopVideoBackend: DesktopVideoBackend = DesktopVideoBackend.AUTO,
+    val extensions: List<VideoPipelineExtension> = emptyList(),
     val projection: VideoProjectionSettings = VideoProjectionSettings(),
     val projectionView: VideoProjectionViewSettings = VideoProjectionViewSettings(),
     val projectionViewControlMode: VideoProjectionViewControlMode = VideoProjectionViewControlMode.AUTO,
     val projectionTextureCrop: VideoTextureCrop = VideoTextureCrop(),
     val projectionDetectionMode: VideoProjectionDetectionMode = VideoProjectionDetectionMode.AUTO,
-)
+) {
+    init {
+        val invalidIds = extensions.map(VideoPipelineExtension::id).filter(String::isBlank)
+        require(invalidIds.isEmpty()) { "Video pipeline extension ids must not be blank." }
+
+        val duplicateIds =
+            extensions
+                .groupingBy(VideoPipelineExtension::id)
+                .eachCount()
+                .filterValues { count -> count > 1 }
+                .keys
+        require(duplicateIds.isEmpty()) {
+            "Video pipeline extension ids must be unique: ${duplicateIds.sorted().joinToString()}."
+        }
+    }
+
+    val extensionStatuses: List<VideoPipelineExtensionStatus>
+        get() = extensions.map(VideoPipelineExtension::status)
+}

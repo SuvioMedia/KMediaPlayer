@@ -281,6 +281,29 @@ DWORD WINAPI AudioThreadProc(LPVOID lpParam) {
 
 } // namespace
 
+HRESULT GetDefaultAudioMixFormat(WAVEFORMATEX** ppMixFormat) {
+    if (!ppMixFormat) return E_POINTER;
+    *ppMixFormat = nullptr;
+
+    IMMDeviceEnumerator* enumerator = MediaFoundation::GetDeviceEnumerator();
+    if (!enumerator) return E_FAIL;
+
+    ComPtr<IMMDevice> device;
+    HRESULT hr = enumerator->GetDefaultAudioEndpoint(
+        eRender, eConsole, device.GetAddressOf());
+    if (FAILED(hr)) return hr;
+
+    ComPtr<IAudioClient> audioClient;
+    hr = device->Activate(
+        __uuidof(IAudioClient),
+        CLSCTX_ALL,
+        nullptr,
+        reinterpret_cast<void**>(audioClient.GetAddressOf()));
+    if (FAILED(hr)) return hr;
+
+    return audioClient->GetMixFormat(ppMixFormat);
+}
+
 HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt) {
     if (!inst || !srcFmt) return E_INVALIDARG;
     if (inst->pAudioClient && inst->pRenderClient) {

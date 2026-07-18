@@ -42,6 +42,26 @@ class MpvRuntimeTest {
     }
 
     @Test
+    fun allMpvRuntimeSelectionsRejectIntelMacOs() {
+        assertTrue(isMpvDesktopPlatformSupported("Mac OS X", "arm64"))
+        assertFalse(isMpvDesktopPlatformSupported("Mac OS X", "x86_64"))
+        assertTrue(isMpvDesktopPlatformSupported("Linux", "x86_64"))
+
+        val failure =
+            assertFailsWith<MpvRuntimeResolutionFailure> {
+                resolveMpvRuntime(
+                    config =
+                        MpvRuntimeConfig(
+                            librarySource = MpvLibrarySource.SystemLibrary("mpv"),
+                        ),
+                    osName = "Mac OS X",
+                    architecture = "x86_64",
+                )
+            }
+        assertEquals(MpvUnavailableReason.UNSUPPORTED_PLATFORM, failure.reason)
+    }
+
+    @Test
     fun mapsBundledRuntimeReasonsWithoutParsingMessages() {
         MpvRuntimeException.Reason.entries.forEach { reason ->
             val expected =

@@ -35,8 +35,12 @@ jobs:
         run: |
           ./gradlew \
             :mediaplayer-core:dokkaGenerateHtml \
+            :mediaplayer-extension-api:dokkaGenerateHtml \
             :mediaplayer:dokkaGenerateHtml \
             :mediaplayer-mpv:dokkaGenerateHtml \
+            :mediaplayer-ass:dokkaGenerateHtml \
+            :mediaplayer-dolbyvision:dokkaGenerateHtml \
+            :mediaplayer-kmediabridge:dokkaGenerateHtml \
             --no-daemon --continue
 
       # Build the Kotlin/Compose Example
@@ -50,11 +54,22 @@ jobs:
       - name: Prepare files for deployment
         run: |
           set -euo pipefail
-          mkdir -p build/final/core build/final/mpv build/final/sample
+          mkdir -p \
+            build/final/core \
+            build/final/extensions/api \
+            build/final/extensions/ass \
+            build/final/extensions/dolbyvision \
+            build/final/extensions/kmediabridge \
+            build/final/mpv \
+            build/final/sample
 
           # Preserve the existing default-player documentation URL.
           cp -r mediaplayer/build/dokka/html/* build/final
           cp -r mediaplayer-core/build/dokka/html/* build/final/core
+          cp -r mediaplayer-extension-api/build/dokka/html/* build/final/extensions/api
+          cp -r mediaplayer-ass/build/dokka/html/* build/final/extensions/ass
+          cp -r mediaplayer-dolbyvision/build/dokka/html/* build/final/extensions/dolbyvision
+          cp -r mediaplayer-kmediabridge/build/dokka/html/* build/final/extensions/kmediabridge
           cp -r mediaplayer-mpv/build/dokka/html/* build/final/mpv
 
           cp -r sample/composeApp/build/dist/wasmJs/productionExecutable/* build/final/sample

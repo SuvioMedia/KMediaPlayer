@@ -17,7 +17,6 @@ import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnRootEnvSpec
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnRootExtension
-
 plugins {
     alias(libs.plugins.multiplatform).apply(false)
     alias(libs.plugins.android.library).apply(false)
@@ -35,19 +34,37 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
     abstract val coreDependencies: SetProperty<String>
 
     @get:Input
+    abstract val extensionApiDependencies: SetProperty<String>
+
+    @get:Input
     abstract val defaultPlayerDependencies: SetProperty<String>
+
+    @get:Input
+    abstract val defaultPlayerExternalDependencies: SetProperty<String>
 
     @get:Input
     abstract val mpvBackendDependencies: SetProperty<String>
 
+    @get:Input
+    abstract val optionalExtensionDependencies: SetProperty<String>
+
     @TaskAction
     fun verifyBoundaries() {
         val core = coreDependencies.get()
+        val extensionApi = extensionApiDependencies.get()
         val defaultPlayer = defaultPlayerDependencies.get()
+        val defaultPlayerExternal = defaultPlayerExternalDependencies.get()
         val mpvBackend = mpvBackendDependencies.get()
+        val optionalExtensions = optionalExtensionDependencies.get()
 
         check(":mediaplayer-core" in defaultPlayer) {
             "The default player must consume the backend-neutral :mediaplayer-core contracts."
+        }
+        check(":mediaplayer-extension-api" in defaultPlayer) {
+            "The default player must consume the lightweight :mediaplayer-extension-api contracts."
+        }
+        check(":mediaplayer-core" in extensionApi) {
+            "The extension API must consume the backend-neutral :mediaplayer-core contracts."
         }
         check(":mediaplayer-core" in mpvBackend) {
             "The MPV backend must consume the backend-neutral :mediaplayer-core contracts."
@@ -55,11 +72,29 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         check(":mediaplayer-mpv" !in defaultPlayer) {
             ":mediaplayer must not depend on the optional :mediaplayer-mpv implementation."
         }
+        check(defaultPlayerExternal.none { coordinate -> coordinate.startsWith("io.github.shusek:kmedia-bridge-") }) {
+            ":mediaplayer must not pull KMediaBridge or FFmpeg; configure :mediaplayer-kmediabridge explicitly."
+        }
         check(":mediaplayer" !in mpvBackend) {
             ":mediaplayer-mpv must not depend on the default :mediaplayer implementation."
         }
         check(core.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
             ":mediaplayer-core must not depend on a player implementation."
+        }
+        check(extensionApi.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
+            ":mediaplayer-extension-api must not depend on a player implementation."
+        }
+        check(optionalExtensions.none { edge -> edge.endsWith("->:mediaplayer") }) {
+            "Optional pipeline extensions must depend on :mediaplayer-extension-api, not on the default player."
+        }
+        setOf(
+            ":mediaplayer-ass",
+            ":mediaplayer-dolbyvision",
+            ":mediaplayer-kmediabridge",
+        ).forEach { extensionPath ->
+            check("$extensionPath->:mediaplayer-extension-api" in optionalExtensions) {
+                "$extensionPath must consume :mediaplayer-extension-api."
+            }
         }
     }
 }
@@ -104,6 +139,8 @@ tasks.register("consumerSmokeTest") {
     dependsOn(
         ":consumer-smoke:compileAndroidMain",
         ":consumer-smoke:jvmTest",
+        ":consumer-smoke-extensions:compileAndroidMain",
+        ":consumer-smoke-extensions:jvmTest",
         ":consumer-smoke-mpv:compileAndroidMain",
         ":consumer-smoke-mpv:jvmTest",
     )
@@ -116,19 +153,33 @@ tasks.register("publishConsumerSmokeArtifacts") {
         ":mediaplayer-core:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-core:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-core:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-extension-api:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-extension-api:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-extension-api:publishAndroidPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-ass:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-ass:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-ass:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-ass:verifyAndroidAssAar",
+        ":mediaplayer-dolbyvision:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-dolbyvision:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-dolbyvision:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-kmediabridge:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-kmediabridge:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-kmediabridge:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-mpv:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-mpv:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-mpv:publishAndroidPublicationToConsumerSmokeRepository",
     )
 }
 
-val verifyBackendModuleBoundaries = tasks.register<VerifyBackendModuleBoundaries>("verifyBackendModuleBoundaries") {
-    group = "verification"
-    description = "Rejects dependencies that couple the default player and optional backend implementations."
-}
+val verifyBackendModuleBoundaries =
+    tasks.register<VerifyBackendModuleBoundaries>("verifyBackendModuleBoundaries") {
+        group = "verification"
+        description = "Rejects dependencies that couple the default player and optional backend implementations."
+    }
 
 gradle.projectsEvaluated {
     fun Project.projectDependencyPaths(): Set<String> =
@@ -139,10 +190,33 @@ gradle.projectsEvaluated {
                     .map(ProjectDependency::getPath)
             }.toSet()
 
+    fun Project.externalDependencyCoordinates(): Set<String> =
+        configurations
+            .flatMap { configuration ->
+                configuration.dependencies.mapNotNull { dependency ->
+                    dependency.group
+                        ?.takeUnless(String::isBlank)
+                        ?.let { group -> "$group:${dependency.name}" }
+                }
+            }.toSet()
+
     verifyBackendModuleBoundaries.configure {
         coreDependencies.set(project(":mediaplayer-core").projectDependencyPaths())
+        extensionApiDependencies.set(project(":mediaplayer-extension-api").projectDependencyPaths())
         defaultPlayerDependencies.set(project(":mediaplayer").projectDependencyPaths())
+        defaultPlayerExternalDependencies.set(project(":mediaplayer").externalDependencyCoordinates())
         mpvBackendDependencies.set(project(":mediaplayer-mpv").projectDependencyPaths())
+        optionalExtensionDependencies.set(
+            setOf(
+                project(":mediaplayer-ass"),
+                project(":mediaplayer-dolbyvision"),
+                project(":mediaplayer-kmediabridge"),
+            ).flatMap { extensionProject ->
+                extensionProject
+                    .projectDependencyPaths()
+                    .map { dependencyPath -> "${extensionProject.path}->$dependencyPath" }
+            }.toSet(),
+        )
     }
 }
 

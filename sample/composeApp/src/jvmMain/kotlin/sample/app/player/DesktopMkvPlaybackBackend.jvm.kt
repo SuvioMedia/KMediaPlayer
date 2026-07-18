@@ -16,11 +16,10 @@ private var originalHlsBackend: String? = null
 internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackBackendOption> {
     if (!desktopMkvPlaybackBackendSelectionAvailable) return emptyList()
 
-    val tools = JvmMediaTools.query()
+    val tools = JvmMediaTools.query(desktopPipelineExtensions)
     val hasLibVlcCanvas = tools.libVlc.available
-    val hasHlsBackend =
-        (tools.ffmpeg.available && tools.ffprobe.available && tools.ffmpegWithSubtitlesFilter.available) ||
-            tools.vlc.available
+    val hasKMediaBridge = tools.kMediaBridge.available && tools.kMediaBridgeProbe.available
+    val hasHlsBackend = hasKMediaBridge || tools.vlc.available
 
     return listOf(
         DesktopMkvPlaybackBackendOption(
@@ -28,9 +27,11 @@ internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackB
             enabled = true,
             status =
                 if (hasLibVlcCanvas) {
-                    "Uses libVLC canvas first, then VLC HLS, with ffmpeg as the last fallback."
+                    "Uses libVLC canvas when selected and KMediaBridge for the bounded MKV/WebM HLS fallback."
+                } else if (hasKMediaBridge) {
+                    "Uses the bundled in-process KMediaBridge runtime; no ffmpeg executable is required."
                 } else if (hasHlsBackend) {
-                    "Uses VLC HLS when available, with ffmpeg as the last fallback."
+                    "Uses the optional VLC HLS fallback."
                 } else {
                     "No MKV helper detected; native formats can still play."
                 },
@@ -43,7 +44,7 @@ internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackB
         ),
         libVlcOption(tools),
         libVlcNativeOption(tools),
-        ffmpegHlsOption(tools),
+        kMediaBridgeHlsOption(tools),
         vlcHlsOption(tools),
     )
 }
@@ -65,9 +66,9 @@ internal actual fun applyDesktopMkvPlaybackBackend(backend: DesktopMkvPlaybackBa
             System.setProperty(FALLBACK_BACKEND_PROPERTY, "libvlc-native-view")
             System.clearProperty(HLS_BACKEND_PROPERTY)
         }
-        DesktopMkvPlaybackBackend.FFMPEG_HLS -> {
-            System.setProperty(FALLBACK_BACKEND_PROPERTY, "ffmpeg")
-            System.setProperty(HLS_BACKEND_PROPERTY, "ffmpeg")
+        DesktopMkvPlaybackBackend.KMEDIA_BRIDGE_HLS -> {
+            System.setProperty(FALLBACK_BACKEND_PROPERTY, "kmediabridge")
+            System.setProperty(HLS_BACKEND_PROPERTY, "kmediabridge")
         }
         DesktopMkvPlaybackBackend.VLC_HLS -> {
             System.setProperty(FALLBACK_BACKEND_PROPERTY, "vlc")
@@ -148,26 +149,29 @@ private fun libVlcNativeOption(tools: JvmMediaToolAvailability): DesktopMkvPlayb
     )
 }
 
-private fun ffmpegHlsOption(tools: JvmMediaToolAvailability): DesktopMkvPlaybackBackendOption {
-    val enabled = tools.ffmpeg.available && tools.ffprobe.available && tools.ffmpegWithSubtitlesFilter.available
+private fun kMediaBridgeHlsOption(tools: JvmMediaToolAvailability): DesktopMkvPlaybackBackendOption {
+    val enabled = tools.kMediaBridge.available && tools.kMediaBridgeProbe.available
     val status =
         when {
-            !tools.ffmpeg.available -> "Requires ffmpeg."
-            !tools.ffprobe.available -> "Requires ffprobe for duration and track selection."
-            tools.ffmpegWithSubtitlesFilter.available -> "Ready. ffmpeg with the subtitles filter detected."
-            else -> "ffmpeg detected; ASS subtitle burn-in needs the subtitles filter."
+            !tools.kMediaBridge.available -> "The configured KMediaBridge runtime is unavailable for this platform."
+            !tools.kMediaBridgeProbe.available -> "The KMediaBridge runtime does not expose its typed probe API."
+            tools.kMediaBridgeHdrToSdrToneMapping.available && tools.kMediaBridgeSubtitleBurnIn.available ->
+                "Ready: bounded remux, HDR-to-SDR tone mapping, and text subtitle burn-in."
+            tools.kMediaBridgeHdrToSdrToneMapping.available ->
+                "Ready: bounded remux and controlled HDR-to-SDR tone mapping."
+            tools.kMediaBridgeSubtitleBurnIn.available -> "Ready: bounded remux and text subtitle burn-in."
+            else -> "Ready: bounded remux without external executables."
         }
 
     return DesktopMkvPlaybackBackendOption(
-        backend = DesktopMkvPlaybackBackend.FFMPEG_HLS,
+        backend = DesktopMkvPlaybackBackend.KMEDIA_BRIDGE_HLS,
         enabled = enabled,
         status = status,
         installHint =
-            when {
-                !tools.ffmpeg.available -> "Install ffmpeg from https://ffmpeg.org/download.html"
-                !tools.ffprobe.available -> "Install the matching ffprobe binary from the same ffmpeg distribution."
-                tools.ffmpegWithSubtitlesFilter.available -> "ffmpeg: ${tools.ffmpegWithSubtitlesFilter.path}"
-                else -> "Install an ffmpeg build with libass/subtitles filter for ASS subtitles."
+            if (enabled) {
+                tools.kMediaBridge.detail
+            } else {
+                "Add the matching kmedia-bridge-ffmpeg-runtime-desktop artifact to the runtime classpath."
             },
     )
 }

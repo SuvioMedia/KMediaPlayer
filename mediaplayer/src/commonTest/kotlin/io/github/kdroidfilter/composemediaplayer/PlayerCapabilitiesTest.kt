@@ -55,21 +55,44 @@ class PlayerCapabilitiesTest {
     }
 
     @Test
-    fun `hdr capabilities expose HDR display only above SDR range`() {
-        assertFalse(HdrCapabilities(maxExtendedDynamicRange = 1f).hasHdrDisplay)
-        assertTrue(HdrCapabilities(maxExtendedDynamicRange = 1.5f).hasHdrDisplay)
+    fun `display capabilities expose HDR only from explicit dynamic ranges`() {
+        assertFalse(DisplayColorCapabilities(isKnown = true).supportsHdr)
+        assertTrue(
+            DisplayColorCapabilities(
+                isKnown = true,
+                supportedDynamicRanges = setOf(VideoDynamicRange.HDR10),
+            ).supportsHdr,
+        )
     }
 
     @Test
-    fun `hdr capabilities reject invalid extended dynamic range`() {
+    fun `display dynamic range support distinguishes unsupported from unknown`() {
+        val knownHdr10Display =
+            DisplayColorCapabilities(
+                isKnown = true,
+                supportedDynamicRanges = setOf(VideoDynamicRange.SDR, VideoDynamicRange.HDR10),
+            )
+        val unknownDisplay = DisplayColorCapabilities()
+
+        assertEquals(VideoDynamicRangeSupport.SUPPORTED, knownHdr10Display.supportFor(VideoDynamicRange.HDR10))
+        assertEquals(
+            VideoDynamicRangeSupport.UNSUPPORTED,
+            knownHdr10Display.supportFor(VideoDynamicRange.HDR10_PLUS),
+        )
+        assertEquals(VideoDynamicRangeSupport.UNKNOWN, unknownDisplay.supportFor(VideoDynamicRange.HDR10_PLUS))
+        assertEquals(VideoDynamicRangeSupport.UNKNOWN, knownHdr10Display.supportFor(VideoDynamicRange.UNKNOWN))
+    }
+
+    @Test
+    fun `display capabilities reject invalid luminance`() {
         assertFailsWith<IllegalArgumentException> {
-            HdrCapabilities(maxExtendedDynamicRange = 0.9f)
+            DisplayColorCapabilities(maxLuminanceNits = -1f)
         }
         assertFailsWith<IllegalArgumentException> {
-            HdrCapabilities(maxExtendedDynamicRange = Float.NaN)
+            DisplayColorCapabilities(maxLuminanceNits = Float.NaN)
         }
         assertFailsWith<IllegalArgumentException> {
-            HdrCapabilities(maxExtendedDynamicRange = Float.POSITIVE_INFINITY)
+            DisplayColorCapabilities(minLuminanceNits = 10f, maxLuminanceNits = 5f)
         }
     }
 

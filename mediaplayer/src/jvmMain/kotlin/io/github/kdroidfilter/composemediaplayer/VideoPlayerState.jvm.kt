@@ -9,6 +9,7 @@ import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 
 actual fun createVideoPlayerState(
@@ -47,7 +48,14 @@ open class DefaultVideoPlayerState(
         EventingVideoPlayerState(
             when (CurrentPlatform.os) {
                 CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState(playbackOptions)
-                CurrentPlatform.OS.MAC -> MacVideoPlayerState(playbackOptions)
+                CurrentPlatform.OS.MAC -> {
+                    if (!CurrentPlatform.isSupportedMacOsArchitecture) {
+                        throw UnsupportedOperationException(
+                            "Compose Media Player for macOS requires Apple Silicon (arm64).",
+                        )
+                    }
+                    MacVideoPlayerState(playbackOptions)
+                }
                 CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState(playbackOptions)
             },
         )
@@ -83,6 +91,7 @@ open class DefaultVideoPlayerState(
     override val playbackEvents: SharedFlow<PlaybackEvent> get() = delegate.playbackEvents
     override val diagnostics: PlaybackDiagnostics get() = delegate.diagnostics
     override val capabilities: PlayerCapabilities get() = delegate.capabilities
+    override val colorPipelineStatus: StateFlow<VideoColorPipelineStatus> get() = delegate.colorPipelineStatus
     override val error: VideoPlayerError? get() = delegate.error
     override var volume: Float
         get() = delegate.volume

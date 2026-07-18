@@ -23,11 +23,14 @@ ARCH=$(uname -m)
 case "$ARCH" in
     x86_64|amd64)
         echo "Output: $OUTPUT_DIR/linux-x86-64/libNativeVideoPlayer.so"
+        echo "Output: $OUTPUT_DIR/linux-x86-64/libKMediaPlayerVulkanProjection.so"
         ;;
     aarch64|arm64)
         echo "Output: $OUTPUT_DIR/linux-aarch64/libNativeVideoPlayer.so"
+        echo "Output: $OUTPUT_DIR/linux-aarch64/libKMediaPlayerVulkanProjection.so"
         ;;
     *)
         echo "Output: $OUTPUT_DIR/linux-$ARCH/libNativeVideoPlayer.so"
+        echo "Output: $OUTPUT_DIR/linux-$ARCH/libKMediaPlayerVulkanProjection.so"
         ;;
 esac

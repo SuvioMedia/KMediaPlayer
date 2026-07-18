@@ -6,9 +6,12 @@
 #include "AudioManager.h"
 #include "HLSPlayer.h"
 #include "NativeLogging.h"
+#include "WindowsHdrPresenter.h"
+#include "Hdr10PlusHevcParser.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mfapi.h>
 #include <mferror.h>
@@ -40,6 +43,8 @@ static constexpr UINT   kDefaultFrameRateNum    = 30;
 static constexpr UINT   kDefaultFrameRateDenom  = 1;
 static constexpr double kFrameSkipThreshold     = 3.0; // frame intervals
 static constexpr double kFrameAheadMinMs        = 1.0;
+static constexpr LONGLONG kHdrMetadataTimestampTolerance = 10000; // 1 ms in MF ticks.
+static constexpr int kHdrMetadataMaximumReadIterations = 128;
 
 // ---------------------------------------------------------------------------
 // Debug printing
@@ -209,20 +214,455 @@ static void ApplyCookieHeaderToWinInet(const wchar_t* url, const wchar_t* reques
     }
 }
 
+static void ResetHdrMetadataReaderState(VideoPlayerInstance* inst) {
+    if (!inst) return;
+    inst->pHdrMetadataPendingSample.Reset();
+    inst->llHdrMetadataPendingTimestamp = 0;
+    inst->hdrMetadataLastPayload.clear();
+    inst->llHdrMetadataLastTimestamp = (std::numeric_limits<LONGLONG>::min)();
+}
+
+static void UpdateHdrNalLengthSize(VideoPlayerInstance* inst, IMFMediaType* mediaType) {
+    if (!inst || !mediaType) return;
+    inst->hdrNalLengthSize = 4;
+
+    UINT32 sequenceHeaderSize = 0;
+    if (FAILED(mediaType->GetBlobSize(MF_MT_MPEG_SEQUENCE_HEADER, &sequenceHeaderSize)) ||
+        sequenceHeaderSize < 22 || sequenceHeaderSize > 1024 * 1024) {
+        return;
+    }
+    std::vector<BYTE> sequenceHeader(sequenceHeaderSize);
+    UINT32 copied = 0;
+    if (FAILED(mediaType->GetBlob(
+            MF_MT_MPEG_SEQUENCE_HEADER,
+            sequenceHeader.data(),
+            sequenceHeaderSize,
+            &copied)) ||
+        copied < 22 || sequenceHeader[0] != 1) {
+        return;
+    }
+    inst->hdrNalLengthSize = (sequenceHeader[21] & 0x03u) + 1u;
+}
+
+/**
+ * Opens a decoder-free reader over the same VOD source. It exposes compressed
+ * HEVC access units so HDR10+ SEI can be associated with the decoded P010
+ * sample by presentation timestamp. Failure is deliberately non-fatal: the
+ * Kotlin planner will switch this source to the static HDR10 route after the
+ * presenter reports metadata unavailable.
+ */
+static HRESULT OpenHdrMetadataReader(
+    VideoPlayerInstance* inst,
+    const wchar_t* url,
+    const wchar_t* requestHeaders,
+    bool isNetwork
+) {
+    if (!inst || !url || !inst->hdrPresenter ||
+        !inst->hdrPresenter->RequiresHdr10PlusMetadata()) {
+        return S_FALSE;
+    }
+
+    ComPtr<IMFAttributes> attributes;
+    HRESULT hr = MFCreateAttributes(attributes.GetAddressOf(), 4);
+    if (FAILED(hr)) return hr;
+    attributes->SetUINT32(MF_READWRITE_DISABLE_CONVERTERS, TRUE);
+    attributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, FALSE);
+    if (isNetwork) {
+        attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
+        hr = ApplyRequestHeadersToSourceReaderAttributes(attributes.Get(), requestHeaders);
+        if (FAILED(hr)) return hr;
+    }
+
+    ComPtr<IMFSourceReader> reader;
+    hr = MFCreateSourceReaderFromURL(url, attributes.Get(), reader.GetAddressOf());
+    if (FAILED(hr)) return hr;
+    hr = reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
+    if (SUCCEEDED(hr)) {
+        hr = reader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
+    }
+    if (FAILED(hr)) return hr;
+
+    ComPtr<IMFMediaType> hevcType;
+    for (DWORD typeIndex = 0; ; ++typeIndex) {
+        ComPtr<IMFMediaType> candidate;
+        hr = reader->GetNativeMediaType(
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+            typeIndex,
+            candidate.GetAddressOf());
+        if (hr == MF_E_NO_MORE_TYPES) break;
+        if (FAILED(hr)) return hr;
+        GUID majorType = GUID_NULL;
+        GUID subtype = GUID_NULL;
+        if (SUCCEEDED(candidate->GetGUID(MF_MT_MAJOR_TYPE, &majorType)) &&
+            SUCCEEDED(candidate->GetGUID(MF_MT_SUBTYPE, &subtype)) &&
+            majorType == MFMediaType_Video && subtype == MFVideoFormat_HEVC) {
+            hevcType = candidate;
+            break;
+        }
+    }
+    if (!hevcType) return MF_E_INVALIDMEDIATYPE;
+    hr = reader->SetCurrentMediaType(
+        MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+        nullptr,
+        hevcType.Get());
+    if (FAILED(hr)) return hr;
+
+    inst->pHdrMetadataReader = reader;
+    UpdateHdrNalLengthSize(inst, hevcType.Get());
+    ResetHdrMetadataReaderState(inst);
+    return S_OK;
+}
+
+static HRESULT ExtractHdr10PlusPayloadForTimestamp(
+    VideoPlayerInstance* inst,
+    LONGLONG targetTimestamp,
+    std::vector<uint8_t>& payload
+) {
+    payload.clear();
+    if (!inst || !inst->pHdrMetadataReader) {
+        return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+    }
+    if (inst->llHdrMetadataLastTimestamp == targetTimestamp &&
+        !inst->hdrMetadataLastPayload.empty()) {
+        payload.assign(
+            inst->hdrMetadataLastPayload.begin(),
+            inst->hdrMetadataLastPayload.end());
+        return S_OK;
+    }
+
+    for (int iteration = 0; iteration < kHdrMetadataMaximumReadIterations; ++iteration) {
+        ComPtr<IMFSample> compressedSample;
+        LONGLONG compressedTimestamp = 0;
+        if (inst->pHdrMetadataPendingSample) {
+            compressedTimestamp = inst->llHdrMetadataPendingTimestamp;
+            if (compressedTimestamp > targetTimestamp + kHdrMetadataTimestampTolerance) {
+                return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+            }
+            compressedSample = inst->pHdrMetadataPendingSample;
+            inst->pHdrMetadataPendingSample.Reset();
+            inst->llHdrMetadataPendingTimestamp = 0;
+        } else {
+            DWORD streamIndex = 0;
+            DWORD flags = 0;
+            HRESULT hr = inst->pHdrMetadataReader->ReadSample(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                0,
+                &streamIndex,
+                &flags,
+                &compressedTimestamp,
+                compressedSample.GetAddressOf());
+            if (FAILED(hr)) return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+            if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+                return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+            }
+            if (flags & (MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED |
+                         MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)) {
+                ComPtr<IMFMediaType> currentType;
+                if (SUCCEEDED(inst->pHdrMetadataReader->GetCurrentMediaType(
+                        MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                        currentType.GetAddressOf()))) {
+                    UpdateHdrNalLengthSize(inst, currentType.Get());
+                }
+            }
+            if (!compressedSample) continue;
+        }
+
+        LONGLONG sampleTime = 0;
+        if (SUCCEEDED(compressedSample->GetSampleTime(&sampleTime))) {
+            compressedTimestamp = sampleTime;
+        }
+        if (compressedTimestamp < targetTimestamp - kHdrMetadataTimestampTolerance) {
+            continue;
+        }
+        if (compressedTimestamp > targetTimestamp + kHdrMetadataTimestampTolerance) {
+            inst->pHdrMetadataPendingSample = compressedSample;
+            inst->llHdrMetadataPendingTimestamp = compressedTimestamp;
+            return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+        }
+
+        ComPtr<IMFMediaBuffer> contiguousBuffer;
+        if (FAILED(compressedSample->ConvertToContiguousBuffer(contiguousBuffer.GetAddressOf()))) {
+            return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+        }
+        BYTE* bytes = nullptr;
+        DWORD currentLength = 0;
+        if (FAILED(contiguousBuffer->Lock(&bytes, nullptr, &currentLength))) {
+            return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+        }
+        const bool found = Hdr10PlusHevc::ExtractPayload(
+            bytes,
+            currentLength,
+            static_cast<uint8_t>(inst->hdrNalLengthSize),
+            payload);
+        contiguousBuffer->Unlock();
+        if (!found) return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+
+        inst->hdrMetadataLastPayload.assign(payload.begin(), payload.end());
+        inst->llHdrMetadataLastTimestamp = targetTimestamp;
+        return S_OK;
+    }
+    return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+}
+
 // ---------------------------------------------------------------------------
 // MediaType change handler — extracted to kill duplication.
 // ---------------------------------------------------------------------------
+static const GUID& RequestedVideoSubtype(const VideoPlayerInstance* inst) {
+    return inst && inst->bHdrOutputRequested ? MFVideoFormat_P010 : MFVideoFormat_RGB32;
+}
+
+static int32_t DecodedBitDepth(IMFMediaType* mediaType) {
+    GUID subtype = GUID_NULL;
+    if (!mediaType || FAILED(mediaType->GetGUID(MF_MT_SUBTYPE, &subtype))) return 0;
+    if (subtype == MFVideoFormat_P010) return 10;
+    if (subtype == MFVideoFormat_P016) return 16;
+    if (subtype == MFVideoFormat_NV12 || subtype == MFVideoFormat_RGB32) return 8;
+    return 0;
+}
+
+static int32_t EncodedBitDepth(IMFMediaType* mediaType) {
+    const int32_t decodedBitDepth = DecodedBitDepth(mediaType);
+    if (decodedBitDepth > 0) return decodedBitDepth;
+
+    GUID subtype = GUID_NULL;
+    UINT32 profile = 0;
+    if (!mediaType ||
+        FAILED(mediaType->GetGUID(MF_MT_SUBTYPE, &subtype)) ||
+        FAILED(mediaType->GetUINT32(MF_MT_VIDEO_PROFILE, &profile))) {
+        return 0;
+    }
+    if (subtype != MFVideoFormat_HEVC && subtype != MFVideoFormat_HEVC_ES) return 0;
+
+    // Values follow eAVEncH265VProfile. The source reader exposes the same
+    // profile identifiers on compressed HEVC media types.
+    switch (profile) {
+    case 1:
+    case 6:
+    case 11:
+    case 16:
+    case 20:
+    case 21:
+        return 8;
+    case 2:
+    case 4:
+    case 7:
+    case 12:
+    case 14:
+    case 17:
+        return 10;
+    case 3:
+    case 5:
+    case 8:
+    case 9:
+    case 13:
+    case 15:
+    case 18:
+        return 12;
+    case 10:
+    case 19:
+    case 22:
+        return 16;
+    default:
+        return 0;
+    }
+}
+
+static int32_t DecodedPrimaries(IMFMediaType* mediaType) {
+    UINT32 value = MFVideoPrimaries_Unknown;
+    if (!mediaType || FAILED(mediaType->GetUINT32(MF_MT_VIDEO_PRIMARIES, &value))) return 0;
+    switch (value) {
+    case MFVideoPrimaries_BT470_2_SysM:
+    case MFVideoPrimaries_SMPTE170M:
+        return 1;
+    case MFVideoPrimaries_BT470_2_SysBG:
+        return 2;
+    case MFVideoPrimaries_BT709:
+        return 3;
+    case MFVideoPrimaries_BT2020:
+        return 4;
+    case MFVideoPrimaries_DCI_P3:
+        return 5;
+    default:
+        return 0;
+    }
+}
+
+static int32_t DecodedTransfer(IMFMediaType* mediaType) {
+    UINT32 value = MFVideoTransFunc_Unknown;
+    if (!mediaType || FAILED(mediaType->GetUINT32(MF_MT_TRANSFER_FUNCTION, &value))) return 0;
+    switch (value) {
+    case MFVideoTransFunc_2084:
+        return 4;
+    case MFVideoTransFunc_HLG:
+        return 5;
+    case MFVideoTransFunc_sRGB:
+        return 2;
+    case MFVideoTransFunc_10:
+        return 3;
+    case MFVideoTransFunc_18:
+    case MFVideoTransFunc_20:
+    case MFVideoTransFunc_22:
+    case MFVideoTransFunc_709:
+    case MFVideoTransFunc_240M:
+    case MFVideoTransFunc_28:
+    case MFVideoTransFunc_709_sym:
+    case MFVideoTransFunc_2020_const:
+    case MFVideoTransFunc_2020:
+    case MFVideoTransFunc_26:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int32_t DecodedMatrix(IMFMediaType* mediaType) {
+    UINT32 value = MFVideoTransferMatrix_Unknown;
+    if (!mediaType || FAILED(mediaType->GetUINT32(MF_MT_YUV_MATRIX, &value))) return 0;
+    switch (value) {
+    case 6: // MFVideoTransferMatrix_Identity (not named by older MinGW SDKs)
+        return 1;
+    case MFVideoTransferMatrix_BT601:
+        return 2;
+    case MFVideoTransferMatrix_BT709:
+        return 3;
+    case MFVideoTransferMatrix_BT2020_10:
+    case MFVideoTransferMatrix_BT2020_12:
+        return 4;
+    case 11: // MFVideoTransferMatrix_Chroma_const
+        return 5;
+    case 12: // MFVideoTransferMatrix_ICtCp
+        return 6;
+    default:
+        return 0;
+    }
+}
+
+static int32_t DecodedRange(IMFMediaType* mediaType) {
+    UINT32 value = MFNominalRange_Unknown;
+    if (!mediaType || FAILED(mediaType->GetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, &value))) return 0;
+    if (value == MFNominalRange_16_235 || value == MFNominalRange_Wide) return 1;
+    if (value == MFNominalRange_0_255 || value == MFNominalRange_Normal) return 2;
+    return 0;
+}
+
+static void UpdateDecodedVideoColorInfo(VideoPlayerInstance* inst, IMFMediaType* mediaType) {
+    if (!inst || !mediaType) return;
+    const int32_t bitDepth = DecodedBitDepth(mediaType);
+    const int32_t primaries = DecodedPrimaries(mediaType);
+    const int32_t transfer = DecodedTransfer(mediaType);
+    const int32_t matrix = DecodedMatrix(mediaType);
+    const int32_t range = DecodedRange(mediaType);
+    const int32_t previousTransfer = inst->decodedTransfer.load(std::memory_order_relaxed);
+    const int32_t authoritativeUnknowns =
+        (previousTransfer > 0 && transfer == 0) ||
+        (inst->decodedAuthoritativeUnknowns.load(std::memory_order_relaxed) != 0 && transfer == 0);
+    if (inst->decodedBitDepth.load(std::memory_order_relaxed) == bitDepth &&
+        inst->decodedPrimaries.load(std::memory_order_relaxed) == primaries &&
+        inst->decodedTransfer.load(std::memory_order_relaxed) == transfer &&
+        inst->decodedMatrix.load(std::memory_order_relaxed) == matrix &&
+        inst->decodedRange.load(std::memory_order_relaxed) == range &&
+        inst->decodedAuthoritativeUnknowns.load(std::memory_order_relaxed) == authoritativeUnknowns) {
+        return;
+    }
+    inst->decodedBitDepth.store(bitDepth, std::memory_order_relaxed);
+    inst->decodedPrimaries.store(primaries, std::memory_order_relaxed);
+    inst->decodedTransfer.store(transfer, std::memory_order_relaxed);
+    inst->decodedMatrix.store(matrix, std::memory_order_relaxed);
+    inst->decodedRange.store(range, std::memory_order_relaxed);
+    inst->decodedAuthoritativeUnknowns.store(authoritativeUnknowns, std::memory_order_relaxed);
+    const int32_t previousGeneration =
+        inst->decodedColorGeneration.load(std::memory_order_relaxed);
+    const int32_t generation =
+        previousGeneration == (std::numeric_limits<int32_t>::max)() ? 1 : previousGeneration + 1;
+    inst->decodedColorGeneration.store(generation, std::memory_order_release);
+}
+
+NATIVEVIDEOPLAYER_API HRESULT ProbeVideoColorInfoWithHeaders(
+    const wchar_t* url,
+    const wchar_t* requestHeaders,
+    int32_t outInfo[7]) {
+    if (!url || !url[0] || !outInfo) return E_INVALIDARG;
+    std::fill(outInfo, outInfo + 7, 0);
+
+    const bool isNetwork = IsNetworkUrl(url);
+    if (isNetwork) {
+        ApplyCookieHeaderToWinInet(url, requestHeaders);
+    }
+
+    ComPtr<IMFAttributes> attributes;
+    HRESULT hr = MFCreateAttributes(attributes.GetAddressOf(), 4);
+    if (FAILED(hr)) return hr;
+    hr = attributes->SetUINT32(MF_READWRITE_DISABLE_CONVERTERS, TRUE);
+    if (SUCCEEDED(hr)) {
+        hr = attributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, FALSE);
+    }
+    if (SUCCEEDED(hr) && isNetwork) {
+        hr = attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
+    }
+    if (SUCCEEDED(hr) && isNetwork) {
+        hr = ApplyRequestHeadersToSourceReaderAttributes(attributes.Get(), requestHeaders);
+    }
+    if (FAILED(hr)) return hr;
+
+    ComPtr<IMFSourceReader> reader;
+    hr = MFCreateSourceReaderFromURL(url, attributes.Get(), reader.GetAddressOf());
+    if (FAILED(hr)) return hr;
+    hr = reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
+    if (SUCCEEDED(hr)) {
+        hr = reader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
+    }
+    if (FAILED(hr)) return hr;
+
+    ComPtr<IMFMediaType> selectedType;
+    for (DWORD typeIndex = 0; ; ++typeIndex) {
+        ComPtr<IMFMediaType> candidate;
+        hr = reader->GetNativeMediaType(
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+            typeIndex,
+            candidate.GetAddressOf());
+        if (hr == MF_E_NO_MORE_TYPES) break;
+        if (FAILED(hr)) return hr;
+
+        GUID majorType = GUID_NULL;
+        if (FAILED(candidate->GetGUID(MF_MT_MAJOR_TYPE, &majorType)) ||
+            majorType != MFMediaType_Video) {
+            continue;
+        }
+        if (!selectedType) selectedType = candidate;
+        if (DecodedTransfer(candidate.Get()) > 0) {
+            selectedType = candidate;
+            break;
+        }
+    }
+    if (!selectedType) return MF_E_INVALIDMEDIATYPE;
+
+    outInfo[0] = 1;
+    outInfo[1] = EncodedBitDepth(selectedType.Get());
+    outInfo[2] = DecodedPrimaries(selectedType.Get());
+    outInfo[3] = DecodedTransfer(selectedType.Get());
+    outInfo[4] = DecodedMatrix(selectedType.Get());
+    outInfo[5] = DecodedRange(selectedType.Get());
+    outInfo[6] = 0;
+    return S_OK;
+}
+
 static void HandleMediaTypeChanges(VideoPlayerInstance* inst, DWORD flags) {
     if (flags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED) {
+        ComPtr<IMFMediaType> nativeType;
+        if (SUCCEEDED(inst->pSourceReader->GetNativeMediaType(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nativeType.GetAddressOf()))) {
+            UpdateDecodedVideoColorInfo(inst, nativeType.Get());
+        }
         ComPtr<IMFMediaType> newType;
         if (SUCCEEDED(MFCreateMediaType(newType.GetAddressOf()))) {
             newType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-            newType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+            newType->SetGUID(MF_MT_SUBTYPE, RequestedVideoSubtype(inst));
             inst->pSourceReader->SetCurrentMediaType(
                 MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, newType.Get());
         }
     }
-    if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
+    if (flags & (MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED |
+                 MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)) {
         ComPtr<IMFMediaType> current;
         if (SUCCEEDED(inst->pSourceReader->GetCurrentMediaType(
                 MF_SOURCE_READER_FIRST_VIDEO_STREAM, current.GetAddressOf()))) {
@@ -232,6 +672,7 @@ static void HandleMediaTypeChanges(VideoPlayerInstance* inst, DWORD flags) {
                 inst->videoWidth  = newW;
                 inst->videoHeight = newH;
             }
+            UpdateDecodedVideoColorInfo(inst, current.Get());
         }
     }
 }
@@ -338,6 +779,45 @@ static double ComputeReferenceMs(const VideoPlayerInstance* inst) {
     return static_cast<double>(now - start - pauseTotal) * inst->playbackSpeed.load(std::memory_order_relaxed);
 }
 
+static void RecordPresentedVideoSample(VideoPlayerInstance* inst, IMFSample* sample) {
+    if (!inst || !sample) return;
+    inst->renderedVideoFrames.fetch_add(1, std::memory_order_relaxed);
+    if (!inst->bHasAudio) return;
+
+    LONGLONG sampleTimestamp = 0;
+    if (FAILED(sample->GetSampleTime(&sampleTimestamp)) || sampleTimestamp < 0) return;
+    const double referenceMs = ComputeReferenceMs(inst);
+    const double sampleTimestampMs = sampleTimestamp / 10000.0;
+    const double offsetMs = std::abs(sampleTimestampMs - referenceMs);
+    const int64_t offsetMicros =
+        static_cast<int64_t>(std::llround(offsetMs * 1000.0));
+    int64_t previous =
+        inst->maximumAvSyncOffsetMicros.load(std::memory_order_relaxed);
+    bool updated = false;
+    while (offsetMicros > previous &&
+           !inst->maximumAvSyncOffsetMicros.compare_exchange_weak(
+               previous,
+               offsetMicros,
+               std::memory_order_relaxed,
+               std::memory_order_relaxed)) {
+    }
+    if (offsetMicros > previous) {
+        updated = true;
+    }
+    if (updated && offsetMs > 45.0) {
+        ComposeMediaPlayer::NativeLogging::Logf(
+            "[A/V] sample=%.3fms reference=%.3fms offset=%.3fms "
+            "audioSample=%.3fms audioPadding=%.3fms rendered=%lld\n",
+            sampleTimestampMs,
+            referenceMs,
+            offsetMs,
+            inst->llCurrentPosition.load(std::memory_order_relaxed) / 10000.0,
+            inst->audioLatencyMs.load(std::memory_order_relaxed),
+            static_cast<long long>(
+                inst->renderedVideoFrames.load(std::memory_order_relaxed)));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Read the next video frame. Returns a sample ready to be displayed or
 // nullptr when the frame is not yet due (caller should try again later).
@@ -349,7 +829,6 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
 
     const bool isPaused = (inst->llPauseStart.load(std::memory_order_relaxed) != 0);
     ComPtr<IMFSample> sample;
-    LONGLONG ts = 0;
 
     UINT frNum = kDefaultFrameRateNum, frDenom = kDefaultFrameRateDenom;
     GetVideoFrameRate(inst, &frNum, &frDenom);
@@ -361,7 +840,6 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
     if (inst->pCachedSample) {
         if (isPaused) {
             inst->pCachedSample.CopyTo(sample.GetAddressOf());
-            ts = inst->llCachedTimestamp;
         } else {
             const double frameTimeMs = inst->llCachedTimestamp / 10000.0;
             const double refMs = ComputeReferenceMs(inst);
@@ -380,7 +858,6 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
             sample = std::move(inst->pCachedSample);
             inst->pCachedSample.Reset();
             inst->llCachedInsertedAtMs = 0;
-            ts = inst->llCachedTimestamp;
         }
     }
 
@@ -415,6 +892,8 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
             }
 
             // Paused path: cache the first frame for initial display.
+            inst->totalVideoFrames.fetch_add(1, std::memory_order_relaxed);
+
             if (isPaused) {
                 if (!inst->bHasInitialFrame) {
                     s.CopyTo(inst->pCachedSample.ReleaseAndGetAddressOf());
@@ -423,7 +902,6 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
                     inst->bHasInitialFrame = true;
                 }
                 sample = std::move(s);
-                ts = sampleTs;
                 break;
             }
 
@@ -435,7 +913,6 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
             // No timestamp → hand it over unconditionally.
             if (sampleTs <= 0) {
                 sample = std::move(s);
-                ts = sampleTs;
                 break;
             }
 
@@ -444,6 +921,7 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
             const double diffMs = frameTimeMs - refMs;
 
             if (diffMs < lateThresholdMs) {
+                inst->droppedVideoFrames.fetch_add(1, std::memory_order_relaxed);
                 // Stale — discard and keep reading. Do not cache, do not
                 // deliver: we want to display what's happening NOW, not
                 // replay pre-seek keyframes or frames skipped during a
@@ -467,7 +945,6 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
 
             // In display window — deliver.
             sample = std::move(s);
-            ts = sampleTs;
             break;
         }
     }
@@ -522,6 +999,17 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
     if (!IsInitialized()) return OP_E_NOT_INITIALIZED;
 
     CloseMedia(pInstance);
+    pInstance->decodedBitDepth.store(0, std::memory_order_relaxed);
+    pInstance->decodedPrimaries.store(0, std::memory_order_relaxed);
+    pInstance->decodedTransfer.store(0, std::memory_order_relaxed);
+    pInstance->decodedMatrix.store(0, std::memory_order_relaxed);
+    pInstance->decodedRange.store(0, std::memory_order_relaxed);
+    pInstance->decodedAuthoritativeUnknowns.store(0, std::memory_order_relaxed);
+    const int32_t previousGeneration =
+        pInstance->decodedColorGeneration.load(std::memory_order_relaxed);
+    const int32_t resetGeneration =
+        previousGeneration == (std::numeric_limits<int32_t>::max)() ? 1 : previousGeneration + 1;
+    pInstance->decodedColorGeneration.store(resetGeneration, std::memory_order_release);
     pInstance->bEOF.store(false);
     pInstance->videoWidth = pInstance->videoHeight = 0;
     pInstance->bHasAudio = false;
@@ -536,6 +1024,9 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
         ApplyCookieHeaderToWinInet(url, requestHeaders);
     }
 
+    if (isNetwork && IsHLSUrl(url) && pInstance->bHdrOutputRequested)
+        return MF_E_UNSUPPORTED_BYTESTREAM_TYPE;
+
     if (isNetwork && IsHLSUrl(url))
         return OpenMediaHLS(pInstance, url, startPlayback);
 
@@ -544,11 +1035,14 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
     HRESULT hr = MFCreateAttributes(attrs.GetAddressOf(), 7);
     if (FAILED(hr)) return hr;
 
-    attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
-    attrs->SetUINT32(MF_SOURCE_READER_DISABLE_DXVA, FALSE);
-    attrs->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, GetDXGIDeviceManager());
-    attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
-    if (isNetwork) attrs->SetUINT32(MF_LOW_LATENCY, TRUE);
+    hr = attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+    if (SUCCEEDED(hr)) hr = attrs->SetUINT32(MF_SOURCE_READER_DISABLE_DXVA, FALSE);
+    IMFDXGIDeviceManager* dxgiManager = GetDXGIDeviceManager();
+    if (SUCCEEDED(hr) && !dxgiManager) hr = MF_E_NOT_INITIALIZED;
+    if (SUCCEEDED(hr)) hr = attrs->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, dxgiManager);
+    if (SUCCEEDED(hr)) hr = attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+    if (SUCCEEDED(hr) && isNetwork) hr = attrs->SetUINT32(MF_LOW_LATENCY, TRUE);
+    if (FAILED(hr)) return hr;
     if (isNetwork) {
         hr = ApplyRequestHeadersToSourceReaderAttributes(attrs.Get(), requestHeaders);
         if (FAILED(hr)) return hr;
@@ -561,7 +1055,7 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
         return hr;
     }
 
-    // ---- Video stream: RGB32 ----
+    // ---- Video stream: P010 on the controlled HDR route, RGB32 otherwise ----
     hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
     if (SUCCEEDED(hr))
         hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
@@ -572,7 +1066,7 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
         hr = MFCreateMediaType(type.GetAddressOf());
         if (SUCCEEDED(hr)) {
             type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-            type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+            type->SetGUID(MF_MT_SUBTYPE, RequestedVideoSubtype(pInstance));
             hr = pInstance->pSourceReader->SetCurrentMediaType(
                 MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, type.Get());
         }
@@ -587,6 +1081,20 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
                                &pInstance->videoWidth, &pInstance->videoHeight);
             pInstance->nativeWidth  = pInstance->videoWidth;
             pInstance->nativeHeight = pInstance->videoHeight;
+            UpdateDecodedVideoColorInfo(pInstance, current.Get());
+        }
+    }
+
+    if (pInstance->hdrPresenter && pInstance->hdrPresenter->RequiresHdr10PlusMetadata()) {
+        const HRESULT metadataHr = OpenHdrMetadataReader(
+            pInstance,
+            url,
+            requestHeaders,
+            isNetwork);
+        if (FAILED(metadataHr)) {
+            PrintHR("HDR10+ compressed metadata reader unavailable", metadataHr);
+            pInstance->pHdrMetadataReader.Reset();
+            ResetHdrMetadataReaderState(pInstance);
         }
     }
 
@@ -602,12 +1110,10 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
         if (nativeCh == 0)   nativeCh = 2;
         if (nativeSr == 0)   nativeSr = 48000;
 
-        auto tryAudioFormat = [&](UINT32 ch, UINT32 sr) -> bool {
-            ComPtr<IMFMediaType> wanted;
-            if (FAILED(MFCreateMediaType(wanted.GetAddressOf()))) return false;
-            ConfigureAudioType(wanted.Get(), ch, sr);
+        auto tryAudioMediaType = [&](IMFMediaType* wanted) -> bool {
+            if (!wanted) return false;
             if (FAILED(pInstance->pSourceReader->SetCurrentMediaType(
-                    MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, wanted.Get()))) return false;
+                    MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, wanted))) return false;
 
             ComPtr<IMFMediaType> actual;
             if (FAILED(pInstance->pSourceReader->GetCurrentMediaType(
@@ -633,10 +1139,36 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
             return true;
         };
 
-        if (!tryAudioFormat(nativeCh, nativeSr)) {
+        auto tryAudioFormat = [&](UINT32 ch, UINT32 sr) -> bool {
+            ComPtr<IMFMediaType> wanted;
+            if (FAILED(MFCreateMediaType(wanted.GetAddressOf()))) return false;
+            ConfigureAudioType(wanted.Get(), ch, sr);
+            return tryAudioMediaType(wanted.Get());
+        };
+
+        bool audioConfigured = false;
+        WAVEFORMATEX* mixFormat = nullptr;
+        if (SUCCEEDED(GetDefaultAudioMixFormat(&mixFormat)) && mixFormat) {
+            ComPtr<IMFMediaType> wanted;
+            const UINT32 mixFormatSize =
+                static_cast<UINT32>(sizeof(WAVEFORMATEX) + mixFormat->cbSize);
+            if (SUCCEEDED(MFCreateMediaType(wanted.GetAddressOf())) &&
+                SUCCEEDED(MFInitMediaTypeFromWaveFormatEx(
+                    wanted.Get(), mixFormat, mixFormatSize))) {
+                audioConfigured = tryAudioMediaType(wanted.Get());
+            }
+            CoTaskMemFree(mixFormat);
+        }
+
+        if (!audioConfigured) {
+            audioConfigured = tryAudioFormat(nativeCh, nativeSr);
+        }
+        if (!audioConfigured) {
             // Only retry with the canonical fallback if the first attempt
             // actually differed from it.
-            if (nativeCh != 2 || nativeSr != 48000) tryAudioFormat(2, 48000);
+            if (nativeCh != 2 || nativeSr != 48000) {
+                audioConfigured = tryAudioFormat(2, 48000);
+            }
         }
 
         // Dedicated audio SourceReader so the audio thread is never blocked
@@ -648,16 +1180,40 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
                 HRESULT hrA = MFCreateSourceReaderFromURL(
                     url, audioAttrs.Get(), pInstance->pSourceReaderAudio.ReleaseAndGetAddressOf());
                 if (SUCCEEDED(hrA) && pInstance->pSourceReaderAudio) {
-                    pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
-                    pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
-
-                    const UINT32 usedCh = pInstance->pSourceAudioFormat->nChannels;
-                    const UINT32 usedSr = pInstance->pSourceAudioFormat->nSamplesPerSec;
+                    HRESULT configureReaderHr =
+                        pInstance->pSourceReaderAudio->SetStreamSelection(
+                            MF_SOURCE_READER_ALL_STREAMS,
+                            FALSE);
+                    if (SUCCEEDED(configureReaderHr)) {
+                        configureReaderHr =
+                            pInstance->pSourceReaderAudio->SetStreamSelection(
+                                MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+                                TRUE);
+                    }
                     ComPtr<IMFMediaType> wanted;
-                    if (SUCCEEDED(MFCreateMediaType(wanted.GetAddressOf()))) {
-                        ConfigureAudioType(wanted.Get(), usedCh, usedSr);
-                        pInstance->pSourceReaderAudio->SetCurrentMediaType(
-                            MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, wanted.Get());
+                    if (SUCCEEDED(configureReaderHr)) {
+                        configureReaderHr = MFCreateMediaType(wanted.GetAddressOf());
+                    }
+                    if (SUCCEEDED(configureReaderHr)) {
+                        const UINT32 sourceFormatSize =
+                            static_cast<UINT32>(
+                                sizeof(WAVEFORMATEX) +
+                                pInstance->pSourceAudioFormat->cbSize);
+                        configureReaderHr = MFInitMediaTypeFromWaveFormatEx(
+                            wanted.Get(),
+                            pInstance->pSourceAudioFormat,
+                            sourceFormatSize);
+                    }
+                    if (SUCCEEDED(configureReaderHr)) {
+                        configureReaderHr =
+                            pInstance->pSourceReaderAudio->SetCurrentMediaType(
+                                MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+                                nullptr,
+                                wanted.Get());
+                    }
+                    if (FAILED(configureReaderHr)) {
+                        PrintHR("Failed to configure dedicated audio source reader", configureReaderHr);
+                        pInstance->pSourceReaderAudio.Reset();
                     }
                 } else {
                     PrintHR("Failed to create audio source reader", hrA);
@@ -711,6 +1267,9 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
 NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYTE** pData, DWORD* pDataSize) {
     if (!pInstance || !pData || !pDataSize) return OP_E_NOT_INITIALIZED;
 
+    // P010 HDR frames must never fall through to the JVM BGRA canvas.
+    if (pInstance->bHdrOutputRequested) return MF_E_INVALIDREQUEST;
+
     if (pInstance->pHLSPlayer)
         return pInstance->pHLSPlayer->ReadFrame(pData, pDataSize);
 
@@ -747,6 +1306,7 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYT
     pInstance->lockedCurrSize  = curSz;
     *pData = bytes;
     *pDataSize = curSz;
+    RecordPresentedVideoSample(pInstance, sample.Get());
     return S_OK;
 }
 
@@ -847,6 +1407,7 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(VideoPlayerInstance* pInstance,
     }
 
     ForceAlphaOpaque(pDst, (dstRowBytes * height) / 4);
+    RecordPresentedVideoSample(pInstance, sample.Get());
     return S_OK;
 }
 
@@ -940,6 +1501,15 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
         PropVariantClear(&var);
         if (wasPlaying) SignalResume(pInstance);
         return hr;
+    }
+    if (pInstance->pHdrMetadataReader) {
+        const HRESULT metadataSeekHr =
+            pInstance->pHdrMetadataReader->SetCurrentPosition(GUID_NULL, var);
+        ResetHdrMetadataReaderState(pInstance);
+        if (FAILED(metadataSeekHr)) {
+            PrintHR("HDR10+ metadata reader seek failed", metadataSeekHr);
+            pInstance->pHdrMetadataReader.Reset();
+        }
     }
 
     // Catch-up is now handled inside AcquireNextSample's internal loop; no
@@ -1075,7 +1645,14 @@ NATIVEVIDEOPLAYER_API HRESULT SetPlaybackState(VideoPlayerInstance* pInstance, B
         if (pInstance->pAudioClient && pInstance->bAudioInitialized) {
             ScopedLock lock(pInstance->csAudioFeed);
             hr = pInstance->pAudioClient->Start();
-            if (FAILED(hr)) PrintHR("Failed to start audio client", hr);
+            // SetPlaybackState(TRUE) is intentionally idempotent. WASAPI
+            // reports an already-running shared client as an error even
+            // though the requested state has been reached.
+            if (hr == AUDCLNT_E_NOT_STOPPED) {
+                hr = S_OK;
+            } else if (FAILED(hr)) {
+                PrintHR("Failed to start audio client", hr);
+            }
         }
 
         if (pInstance->bHasAudio && pInstance->bAudioInitialized && pInstance->pSourceReaderAudio) {
@@ -1141,6 +1718,9 @@ NATIVEVIDEOPLAYER_API void CloseMedia(VideoPlayerInstance* pInstance) {
     pInstance->pAudioEndpointVolume.Reset();
     pInstance->pSourceReader.Reset();
     pInstance->pSourceReaderAudio.Reset();
+    pInstance->pHdrMetadataReader.Reset();
+    ResetHdrMetadataReaderState(pInstance);
+    pInstance->hdrNalLengthSize = 4;
 
     if (pInstance->pSourceAudioFormat) {
         CoTaskMemFree(pInstance->pSourceAudioFormat);
@@ -1162,6 +1742,10 @@ NATIVEVIDEOPLAYER_API void CloseMedia(VideoPlayerInstance* pInstance) {
     pInstance->playbackSpeed.store(1.0f, std::memory_order_relaxed);
     pInstance->resampleFracPos = 0.0;
     pInstance->audioLatencyMs.store(0.0, std::memory_order_relaxed);
+    pInstance->totalVideoFrames.store(0, std::memory_order_relaxed);
+    pInstance->renderedVideoFrames.store(0, std::memory_order_relaxed);
+    pInstance->droppedVideoFrames.store(0, std::memory_order_relaxed);
+    pInstance->maximumAvSyncOffsetMicros.store(0, std::memory_order_relaxed);
     pInstance->bIsNetworkSource = false;
     pInstance->bIsLiveStream = false;
 }
@@ -1392,6 +1976,10 @@ NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT
         return hr;
     }
     if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
+    // The HDR presenter resizes its swapchain to the HWND. Reconfiguring the
+    // decoder here would risk inserting an RGB video processor into the P010
+    // path, so decoded HDR resolution remains native.
+    if (pInstance->bHdrOutputRequested) return S_OK;
 
     if (targetWidth == 0 || targetHeight == 0) {
         targetWidth  = pInstance->nativeWidth;
@@ -1436,4 +2024,124 @@ NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT
     pInstance->pCachedSample.Reset();
     pInstance->bHasInitialFrame = false;
     return S_OK;
+}
+
+// ---------------------------------------------------------------------------
+NATIVEVIDEOPLAYER_API HRESULT ConfigureHdrOutput(
+    VideoPlayerInstance* pInstance,
+    const int32_t* integerConfiguration,
+    size_t integerCount,
+    const float* floatingConfiguration,
+    size_t floatingCount) {
+    if (!pInstance) return E_INVALIDARG;
+    // A single negative transfer value explicitly restores the SDR/BGRA path.
+    if (integerConfiguration && integerCount == 1 && integerConfiguration[0] < 0) {
+        pInstance->bHdrOutputRequested = false;
+        if (pInstance->hdrPresenter) pInstance->hdrPresenter->Detach();
+        pInstance->hdrPresenter.reset();
+        return S_OK;
+    }
+    if (!pInstance->hdrPresenter) {
+        pInstance->hdrPresenter = std::make_unique<WindowsHdrPresenter>();
+    }
+    HRESULT hr = pInstance->hdrPresenter->Configure(
+        integerConfiguration, integerCount, floatingConfiguration, floatingCount);
+    if (SUCCEEDED(hr)) pInstance->bHdrOutputRequested = true;
+    return hr;
+}
+
+NATIVEVIDEOPLAYER_API HRESULT AttachHdrOutput(VideoPlayerInstance* pInstance, HWND hwnd) {
+    if (!pInstance || !pInstance->bHdrOutputRequested || !pInstance->hdrPresenter) {
+        return MF_E_NOT_INITIALIZED;
+    }
+    return pInstance->hdrPresenter->Attach(hwnd);
+}
+
+NATIVEVIDEOPLAYER_API void DetachHdrOutput(VideoPlayerInstance* pInstance) {
+    if (pInstance && pInstance->hdrPresenter) pInstance->hdrPresenter->Detach();
+}
+
+NATIVEVIDEOPLAYER_API HRESULT RenderHdrFrame(VideoPlayerInstance* pInstance) {
+    if (!pInstance || !pInstance->pSourceReader || !pInstance->hdrPresenter ||
+        !pInstance->bHdrOutputRequested) {
+        return MF_E_NOT_INITIALIZED;
+    }
+    if (pInstance->bEOF.load()) return S_FALSE;
+    const int32_t colorGenerationBefore =
+        pInstance->decodedColorGeneration.load(std::memory_order_acquire);
+    ComPtr<IMFSample> sample;
+    HRESULT hr = AcquireNextSample(pInstance, sample.GetAddressOf());
+    if (hr == S_FALSE || FAILED(hr) || !sample) return hr;
+    const int32_t colorGenerationAfter =
+        pInstance->decodedColorGeneration.load(std::memory_order_acquire);
+    if (colorGenerationAfter != colorGenerationBefore) {
+        pInstance->pCachedSample = sample;
+        sample->GetSampleTime(&pInstance->llCachedTimestamp);
+        pInstance->llCachedInsertedAtMs = GetCurrentTimeMs();
+        return S_FALSE;
+    }
+    std::vector<uint8_t> hdr10PlusPayload;
+    if (pInstance->hdrPresenter->RequiresHdr10PlusMetadata()) {
+        LONGLONG timestamp = 0;
+        if (FAILED(sample->GetSampleTime(&timestamp))) {
+            return OP_E_HDR10_PLUS_METADATA_UNAVAILABLE;
+        }
+        hr = ExtractHdr10PlusPayloadForTimestamp(pInstance, timestamp, hdr10PlusPayload);
+        if (FAILED(hr)) return hr;
+    }
+    hr = pInstance->hdrPresenter->Render(
+        sample.Get(),
+        pInstance->videoWidth,
+        pInstance->videoHeight,
+        hdr10PlusPayload.empty() ? nullptr : hdr10PlusPayload.data(),
+        hdr10PlusPayload.size());
+    if (hr == S_OK) RecordPresentedVideoSample(pInstance, sample.Get());
+    return hr;
+}
+
+NATIVEVIDEOPLAYER_API HRESULT GetHdrOutputStatus(
+    VideoPlayerInstance* pInstance,
+    HdrOutputStatus* status) {
+    if (!pInstance || !status || !pInstance->hdrPresenter) return E_INVALIDARG;
+    *status = pInstance->hdrPresenter->GetStatus();
+    return S_OK;
+}
+
+NATIVEVIDEOPLAYER_API void GetDecodedVideoColorInfo(
+    const VideoPlayerInstance* pInstance,
+    int32_t outInfo[7]) {
+    if (!outInfo) return;
+    std::fill(outInfo, outInfo + 7, 0);
+    if (!pInstance) return;
+    for (;;) {
+        const int32_t before = pInstance->decodedColorGeneration.load(std::memory_order_acquire);
+        outInfo[1] = pInstance->decodedBitDepth.load(std::memory_order_relaxed);
+        outInfo[2] = pInstance->decodedPrimaries.load(std::memory_order_relaxed);
+        outInfo[3] = pInstance->decodedTransfer.load(std::memory_order_relaxed);
+        outInfo[4] = pInstance->decodedMatrix.load(std::memory_order_relaxed);
+        outInfo[5] = pInstance->decodedRange.load(std::memory_order_relaxed);
+        outInfo[6] = pInstance->decodedAuthoritativeUnknowns.load(std::memory_order_relaxed);
+        const int32_t after = pInstance->decodedColorGeneration.load(std::memory_order_acquire);
+        if (before == after) {
+            outInfo[0] = after;
+            return;
+        }
+    }
+}
+
+NATIVEVIDEOPLAYER_API void GetVideoPlaybackDiagnostics(
+    const VideoPlayerInstance* pInstance,
+    int64_t outDiagnostics[5]) {
+    if (!outDiagnostics) return;
+    std::fill(outDiagnostics, outDiagnostics + 5, 0);
+    if (!pInstance) return;
+    outDiagnostics[0] = pInstance->totalVideoFrames.load(std::memory_order_relaxed);
+    outDiagnostics[1] = pInstance->renderedVideoFrames.load(std::memory_order_relaxed);
+    outDiagnostics[2] = pInstance->droppedVideoFrames.load(std::memory_order_relaxed);
+    outDiagnostics[3] = pInstance->maximumAvSyncOffsetMicros.load(std::memory_order_relaxed);
+    outDiagnostics[4] = pInstance->bHasAudio ? 1 : 0;
+}
+
+NATIVEVIDEOPLAYER_API HRESULT ValidateHdrPresenterShaders() {
+    return WindowsHdrPresenter::ValidateShaders();
 }

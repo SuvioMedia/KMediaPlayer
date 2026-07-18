@@ -7,6 +7,7 @@ internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOpt
         supportsMkv = false,
         supportsHls = true,
         supportsPiP = AVPictureInPictureController.isPictureInPictureSupported(),
+        rendererColorCapabilities = queryAppleProjectionRendererColorCapabilities(),
         supportedUriSchemes = IOS_SUPPORTED_URI_SCHEMES,
     )
 

@@ -56,13 +56,31 @@ jobs:
           pages_base="https://shusek.github.io/KMediaPlayer/maven/io/github/shusek"
           expected_coordinates=(
             composemediaplayer-core
+            composemediaplayer-extension-api
+            composemediaplayer-extension-api-android
+            composemediaplayer-extension-api-jvm
             composemediaplayer
             composemediaplayer-mpv
+            composemediaplayer-ass
+            composemediaplayer-ass-android
+            composemediaplayer-ass-iosarm64
+            composemediaplayer-ass-iossimulatorarm64
+            composemediaplayer-ass-jvm
+            composemediaplayer-dolbyvision
+            composemediaplayer-dolbyvision-android
+            composemediaplayer-dolbyvision-jvm
+            composemediaplayer-kmediabridge
+            composemediaplayer-kmediabridge-android
+            composemediaplayer-kmediabridge-jvm
           )
           for artifact_id in "${expected_coordinates[@]}"; do
             pom="$pages_base/$artifact_id/$version/$artifact_id-$version.pom"
             curl --fail --silent --show-error --location --head "$pom" >/dev/null
           done
+          ass_lgpl_materials="$pages_base/composemediaplayer-ass/$version/composemediaplayer-ass-$version-apple-lgpl-materials.zip"
+          curl --fail --silent --show-error --location --head "$ass_lgpl_materials" >/dev/null
+          desktop_ass_lgpl_materials="$pages_base/composemediaplayer-ass/$version/composemediaplayer-ass-$version-desktop-lgpl-materials.zip"
+          curl --fail --silent --show-error --location --head "$desktop_ass_lgpl_materials" >/dev/null
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$local_sha" >> "$GITHUB_OUTPUT"
@@ -96,15 +114,45 @@ jobs:
           pattern: native-*-${{ steps.release_ref.outputs.sha }}
           merge-multiple: true
 
+      - name: Download the verified JVM libdovi libraries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.release_run.outputs.run_id }}
+          path: mediaplayer-dolbyvision/src/jvmMain/resources/
+          pattern: libdovi-jvm-*-${{ steps.release_ref.outputs.sha }}
+          merge-multiple: true
+
+      - name: Download the verified Apple ASS payloads
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.release_run.outputs.run_id }}
+          path: mediaplayer-ass/build/generated/
+          pattern: apple-ass-${{ steps.release_ref.outputs.sha }}
+
+      - name: Download the verified Windows and Linux ASS payloads
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.release_run.outputs.run_id }}
+          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
+          pattern: desktop-ass-*-${{ steps.release_ref.outputs.sha }}
+          merge-multiple: true
+
       - name: Verify the recovered native payload
         shell: bash
         run: |
           set -euo pipefail
           expected=(
-            darwin-aarch64/libNativeVideoPlayer.dylib
-            darwin-x86-64/libNativeVideoPlayer.dylib
+            darwin-arm64/libNativeVideoPlayer.dylib
             linux-x86-64/libNativeVideoPlayer.so
             linux-aarch64/libNativeVideoPlayer.so
+            linux-x86-64/libKMediaPlayerVulkanProjection.so
+            linux-aarch64/libKMediaPlayerVulkanProjection.so
             win32-x86-64/NativeVideoPlayer.dll
             win32-arm64/NativeVideoPlayer.dll
           )
@@ -112,6 +160,23 @@ jobs:
             path="mediaplayer/src/jvmMain/resources/composemediaplayer/native/$relative_path"
             test -s "$path" || { echo "Missing verified native payload: $path" >&2; exit 1; }
           done
+
+          libdovi_expected=(
+            darwin-aarch64/libcomposemediaplayer_dovi.dylib
+            linux-x86-64/libcomposemediaplayer_dovi.so
+            linux-aarch64/libcomposemediaplayer_dovi.so
+            windows-x86-64/composemediaplayer_dovi.dll
+            windows-aarch64/composemediaplayer_dovi.dll
+          )
+          for relative_path in "${libdovi_expected[@]}"; do
+            path="mediaplayer-dolbyvision/src/jvmMain/resources/composemediaplayer/dolbyvision/native/$relative_path"
+            test -s "$path" || { echo "Missing verified libdovi payload: $path" >&2; exit 1; }
+          done
+
+          test ! -e mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64
+          test ! -e mediaplayer-dolbyvision/src/jvmMain/resources/composemediaplayer/dolbyvision/native/darwin-x86-64
+
+          bash .github/scripts/verify_apple_ass_payload.sh
 
       - name: Set up JDK 25
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
@@ -145,6 +210,11 @@ jobs:
           fi
           "$SDKMANAGER" "ndk;29.0.14206865"
 
+      - name: Install Rust targets for Android and Apple artifacts
+        run: >-
+          rustup target add armv7-linux-androideabi aarch64-linux-android
+          aarch64-apple-ios aarch64-apple-ios-sim wasm32-unknown-unknown
+
       - name: Require Maven Central credentials
         shell: bash
         env:
@@ -168,11 +238,16 @@ jobs:
         shell: bash
         run: >-
           ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
+          :mediaplayer-extension-api:publishAndReleaseToMavenCentral
           :mediaplayer:publishAndReleaseToMavenCentral
           :mediaplayer-mpv:publishAndReleaseToMavenCentral
+          :mediaplayer-ass:publishAndReleaseToMavenCentral
+          :mediaplayer-dolbyvision:publishAndReleaseToMavenCentral
+          :mediaplayer-kmediabridge:publishAndReleaseToMavenCentral
           -PpublicationVersion="${{ steps.release_ref.outputs.version }}"
           -PreleaseSigningEnabled=true
           -PcomposeMediaPlayer.skipNativeBuild=true
+          -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
           --no-configuration-cache --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}

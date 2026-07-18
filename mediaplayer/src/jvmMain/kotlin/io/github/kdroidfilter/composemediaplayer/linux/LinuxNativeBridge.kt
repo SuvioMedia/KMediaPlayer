@@ -10,9 +10,12 @@ import java.nio.ByteBuffer
  */
 internal object LinuxNativeBridge {
     /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the Linux .so. */
-    private const val EXPECTED_NATIVE_VERSION = 2
+    private const val EXPECTED_NATIVE_VERSION = 11
 
     init {
+        runCatching {
+            NativeLibraryLoader.load("KMediaPlayerVulkanProjection", LinuxNativeBridge::class.java)
+        }
         NativeLibraryLoader.load("NativeVideoPlayer", LinuxNativeBridge::class.java)
         val nativeVersion =
             runCatching { nGetNativeVersion() }
@@ -31,6 +34,62 @@ internal object LinuxNativeBridge {
 
     // Playback control
     @JvmStatic external fun nGetNativeVersion(): Int
+
+    @JvmStatic external fun nGetGStreamerRuntimeInfo(): IntArray?
+
+    @JvmStatic external fun nIsJbrWaylandAdapterAvailable(): Boolean
+
+    @JvmStatic external fun nIsVulkanProjectionRendererAvailable(): Boolean
+
+    @JvmStatic external fun nQueryVulkanCapabilities(): Int
+
+    /**
+     * Returns flags, resolved wl_output global id, minimum luminance x10000,
+     * maximum luminance and reference white, or null when the JBR connection
+     * cannot be queried safely.
+     */
+    @JvmStatic external fun nQueryJbrWaylandColorCapabilities(outputId: Int): LongArray?
+
+    @JvmStatic external fun nAttachWaylandHdrView(
+        handle: Long,
+        component: Component,
+    ): Boolean
+
+    @JvmStatic external fun nDetachWaylandHdrView(
+        handle: Long,
+        component: Component,
+    )
+
+    @JvmStatic external fun nAttachWaylandHdrProjectionView(
+        handle: Long,
+        component: Component,
+        integerConfiguration: IntArray,
+        floatingConfiguration: FloatArray,
+    ): Boolean
+
+    @JvmStatic external fun nUpdateWaylandHdrProjectionConfiguration(
+        handle: Long,
+        integerConfiguration: IntArray,
+        floatingConfiguration: FloatArray,
+    )
+
+    @JvmStatic external fun nGetWaylandHdrOutputState(handle: Long): Int
+
+    @JvmStatic external fun nGetDecodedVideoColorInfo(handle: Long): IntArray?
+
+    @JvmStatic external fun nGetWaylandOutputId(handle: Long): Int
+
+    @JvmStatic external fun nGetWaylandHdrOverlaySize(handle: Long): IntArray?
+
+    @JvmStatic external fun nUpdateWaylandHdrOverlay(
+        handle: Long,
+        pixelAddress: Long,
+        rowBytes: Int,
+        width: Int,
+        height: Int,
+    ): Int
+
+    @JvmStatic external fun nClearWaylandHdrOverlay(handle: Long)
 
     @JvmStatic external fun nCreatePlayer(): Long
 
@@ -157,6 +216,8 @@ internal object LinuxNativeBridge {
     @JvmStatic external fun nGetVideoBitrate(handle: Long): Long
 
     @JvmStatic external fun nGetVideoMimeType(handle: Long): String?
+
+    @JvmStatic external fun nGetVideoDecoderName(handle: Long): String?
 
     @JvmStatic external fun nGetAudioChannels(handle: Long): Int
 

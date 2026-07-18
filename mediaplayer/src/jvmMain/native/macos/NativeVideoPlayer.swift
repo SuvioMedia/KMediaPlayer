@@ -6,9 +6,8 @@ import Foundation
 import AppKit
 import Metal
 import QuartzCore
-import VideoToolbox
 
-private func hdrMetalLog(_ message: String) {
+func hdrMetalLog(_ message: String) {
     if let data = "HDR Metal: \(message)\n".data(using: .utf8) {
         FileHandle.standardError.write(data)
     }
@@ -29,221 +28,7 @@ private func nativeVideoLog(_ message: @autoclosure () -> String) {
     }
 }
 
-private final class HdrMetalVideoRenderer {
-    static var isAvailable: Bool {
-        MTLCreateSystemDefaultDevice() != nil
-    }
-
-    private let device: MTLDevice
-    private let commandQueue: MTLCommandQueue
-    private let ciContext: CIContext
-    private let outputColorSpace: CGColorSpace
-    let layer: CAMetalLayer
-
-    private weak var item: AVPlayerItem?
-    private var output: AVPlayerItemVideoOutput?
-    private var renderedFrameCount: Int = 0
-    private var skippedFrameCount: Int = 0
-    private var renderTimer: Timer?
-    private var contentScaleMode: Int32 = HdrMetalScaleMode.fit.rawValue
-
-    init?() {
-        guard let device = MTLCreateSystemDefaultDevice(),
-              let commandQueue = device.makeCommandQueue()
-        else {
-            return nil
-        }
-
-        self.device = device
-        self.commandQueue = commandQueue
-        self.ciContext = CIContext(mtlDevice: device)
-        self.outputColorSpace =
-            CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
-                ?? CGColorSpace(name: CGColorSpace.displayP3)
-                ?? CGColorSpaceCreateDeviceRGB()
-        self.layer = CAMetalLayer()
-
-        layer.device = device
-        layer.pixelFormat = .rgba16Float
-        layer.framebufferOnly = false
-        layer.isOpaque = true
-        layer.colorspace = outputColorSpace
-        layer.wantsExtendedDynamicRangeContent = true
-        layer.presentsWithTransaction = false
-        layer.displaySyncEnabled = true
-        layer.backgroundColor = NSColor.black.cgColor
-    }
-
-    func attach(to item: AVPlayerItem) {
-        if self.item === item, output != nil {
-            start()
-            return
-        }
-
-        detachFromItem()
-
-        let attrs: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_64RGBAHalf,
-            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
-            kCVPixelBufferMetalCompatibilityKey as String: true,
-        ]
-        let videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: attrs)
-        item.add(videoOutput)
-        videoOutput.requestNotificationOfMediaDataChange(withAdvanceInterval: 0.03)
-
-        self.item = item
-        self.output = videoOutput
-        renderedFrameCount = 0
-        skippedFrameCount = 0
-        start()
-    }
-
-    func detachFromItem() {
-        stop()
-        if let item = item, let output = output {
-            item.remove(output)
-        }
-        item = nil
-        output = nil
-    }
-
-    func setContentScaleMode(_ mode: Int32) {
-        contentScaleMode = mode
-    }
-
-    func setDrawableSize(width: Int32, height: Int32, scale: Double) {
-        guard width > 0, height > 0 else { return }
-        let backingScale = max(scale, 1.0)
-        let logicalSize = CGSize(width: CGFloat(width), height: CGFloat(height))
-        layer.bounds = CGRect(origin: .zero, size: logicalSize)
-        layer.frame = CGRect(origin: .zero, size: logicalSize)
-        layer.contentsScale = backingScale
-        layer.drawableSize =
-            CGSize(
-                width: logicalSize.width * backingScale,
-                height: logicalSize.height * backingScale
-            )
-    }
-
-    func start() {
-        guard renderTimer == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.renderFrame()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        renderTimer = timer
-    }
-
-    func stop() {
-        renderTimer?.invalidate()
-        renderTimer = nil
-    }
-
-    func renderCurrentFrame() {
-        guard let item = item else { return }
-        renderFrame(at: item.currentTime(), requireNewFrame: false)
-    }
-
-    private func renderFrame() {
-        guard let item = item else { return }
-        renderFrame(at: item.currentTime(), requireNewFrame: false)
-    }
-
-    private func renderFrame(at itemTime: CMTime, requireNewFrame: Bool) {
-        guard let output = output else { return }
-        if requireNewFrame && !output.hasNewPixelBuffer(forItemTime: itemTime) {
-            return
-        }
-
-        var displayTime = CMTime.invalid
-        guard let pixelBuffer = output.copyPixelBuffer(
-            forItemTime: itemTime,
-            itemTimeForDisplay: &displayTime
-        ) else {
-            skippedFrameCount += 1
-            if skippedFrameCount == 120 {
-                hdrMetalLog("no pixel buffers received from AVPlayerItemVideoOutput")
-            }
-            return
-        }
-
-        skippedFrameCount = 0
-        render(pixelBuffer)
-    }
-
-    private func render(_ pixelBuffer: CVPixelBuffer) {
-        guard layer.drawableSize.width > 0,
-              layer.drawableSize.height > 0,
-              let drawable = layer.nextDrawable(),
-              let commandBuffer = commandQueue.makeCommandBuffer()
-        else {
-            skippedFrameCount += 1
-            if skippedFrameCount == 120 {
-                hdrMetalLog("drawable or command buffer unavailable")
-            }
-            return
-        }
-
-        let targetRect =
-            CGRect(
-                x: 0,
-                y: 0,
-                width: drawable.texture.width,
-                height: drawable.texture.height
-            )
-        let image = scaledImage(CIImage(cvPixelBuffer: pixelBuffer), to: targetRect)
-        let background = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1)).cropped(to: targetRect)
-        let composited = image.composited(over: background).cropped(to: targetRect)
-
-        ciContext.render(
-            composited,
-            to: drawable.texture,
-            commandBuffer: commandBuffer,
-            bounds: targetRect,
-            colorSpace: outputColorSpace
-        )
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
-        renderedFrameCount += 1
-        if renderedFrameCount == 1 {
-            let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
-            hdrMetalLog("rendered first frame, pixel format \(format)")
-        }
-    }
-
-    private func scaledImage(_ image: CIImage, to targetRect: CGRect) -> CIImage {
-        let extent = image.extent
-        guard extent.width > 0, extent.height > 0, targetRect.width > 0, targetRect.height > 0 else {
-            return image
-        }
-
-        let scaleX = targetRect.width / extent.width
-        let scaleY = targetRect.height / extent.height
-        let scale: (x: CGFloat, y: CGFloat)
-        switch HdrMetalScaleMode(rawValue: contentScaleMode) ?? .fit {
-        case .fit:
-            let uniform = min(scaleX, scaleY)
-            scale = (uniform, uniform)
-        case .crop:
-            let uniform = max(scaleX, scaleY)
-            scale = (uniform, uniform)
-        case .fill:
-            scale = (scaleX, scaleY)
-        }
-
-        let scaledWidth = extent.width * scale.x
-        let scaledHeight = extent.height * scale.y
-        let dx = (targetRect.width - scaledWidth) / 2.0
-        let dy = (targetRect.height - scaledHeight) / 2.0
-
-        return image
-            .transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
-            .transformed(by: CGAffineTransform(scaleX: scale.x, y: scale.y))
-            .transformed(by: CGAffineTransform(translationX: dx, y: dy))
-    }
-}
-
-private enum HdrMetalScaleMode: Int32 {
+enum HdrMetalScaleMode: Int32 {
     case fit = 0
     case crop = 1
     case fill = 2
@@ -256,6 +41,292 @@ private func syncOnMain<T>(_ body: () -> T) -> T {
     return DispatchQueue.main.sync(execute: body)
 }
 
+private struct DolbyVisionConfiguration {
+    let profile: Int
+    let level: Int
+    let hasRpu: Bool
+    let hasEnhancementLayer: Bool
+    let hasBaseLayer: Bool
+    let baseLayerSignalCompatibilityId: Int?
+}
+
+private struct HLSVariantColorDescriptor {
+    let peakBitRate: Double?
+    let averageBitRate: Double?
+    let colorInfo: String
+
+    func relativeDistance(to indicatedBitRate: Double) -> Double? {
+        let declaredRates = [peakBitRate, averageBitRate].compactMap { rate in
+            rate.flatMap { $0 > 0 ? $0 : nil }
+        }
+        guard indicatedBitRate > 0, !declaredRates.isEmpty else { return nil }
+        return declaredRates.map { abs($0 - indicatedBitRate) / max($0, indicatedBitRate) }.min()
+    }
+}
+
+private func readUInt16BE(_ bytes: [UInt8], _ offset: Int) -> Int {
+    guard offset >= 0, offset + 1 < bytes.count else { return 0 }
+    return (Int(bytes[offset]) << 8) | Int(bytes[offset + 1])
+}
+
+private func readUInt32BE(_ bytes: [UInt8], _ offset: Int) -> UInt32 {
+    guard offset >= 0, offset + 3 < bytes.count else { return 0 }
+    return (UInt32(bytes[offset]) << 24)
+        | (UInt32(bytes[offset + 1]) << 16)
+        | (UInt32(bytes[offset + 2]) << 8)
+        | UInt32(bytes[offset + 3])
+}
+
+private func fourCCString(_ value: FourCharCode) -> String {
+    let bytes: [UInt8] = [
+        UInt8((value >> 24) & 0xff),
+        UInt8((value >> 16) & 0xff),
+        UInt8((value >> 8) & 0xff),
+        UInt8(value & 0xff),
+    ]
+    return String(bytes: bytes, encoding: .ascii) ?? ""
+}
+
+private func firstDataValue(_ value: Any?) -> Data? {
+    if let data = value as? Data { return data }
+    if let values = value as? [Data] { return values.first }
+    return nil
+}
+
+/** Returns bits per component; kCMFormatDescriptionExtension_Depth may instead be bits per pixel. */
+private func componentBitDepth(from extensions: NSDictionary, dynamicRange: String) -> Int {
+    if let atoms = extensions.object(forKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms)
+            as? NSDictionary,
+       let hevcConfiguration = firstDataValue(atoms.object(forKey: "hvcC")) {
+        let bytes = [UInt8](hevcConfiguration)
+        if bytes.count >= 19 {
+            // ISO/IEC 14496-15 HEVCDecoderConfigurationRecord stores these as minus eight.
+            let lumaDepth = 8 + Int(bytes[17] & 0x07)
+            let chromaDepth = 8 + Int(bytes[18] & 0x07)
+            if (8...16).contains(lumaDepth), (8...16).contains(chromaDepth) {
+                return max(lumaDepth, chromaDepth)
+            }
+        }
+    }
+
+    if let reportedDepth =
+        (extensions.object(forKey: kCMFormatDescriptionExtension_Depth) as? NSNumber)?.intValue,
+       (1...16).contains(reportedDepth) {
+        return reportedDepth
+    }
+
+    // HDR10 and the AVFoundation HLG/Dolby Vision profiles handled here use a 10-bit base layer.
+    return (dynamicRange == "HDR10" || dynamicRange == "HLG" || dynamicRange == "DOLBY_VISION") ? 10 : 0
+}
+
+private func dolbyVisionConfiguration(from extensions: NSDictionary) -> DolbyVisionConfiguration? {
+    guard let atoms = extensions.object(forKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms)
+        as? NSDictionary
+    else {
+        return nil
+    }
+    let data = firstDataValue(atoms.object(forKey: "dvcC"))
+        ?? firstDataValue(atoms.object(forKey: "dvvC"))
+    guard let data = data else { return nil }
+    let bytes = [UInt8](data)
+    guard bytes.count >= 4 else { return nil }
+    return DolbyVisionConfiguration(
+        profile: Int((bytes[2] >> 1) & 0x7f),
+        level: Int((bytes[2] & 0x01) << 5) | Int((bytes[3] >> 3) & 0x1f),
+        hasRpu: (bytes[3] & 0x04) != 0,
+        hasEnhancementLayer: (bytes[3] & 0x02) != 0,
+        hasBaseLayer: (bytes[3] & 0x01) != 0,
+        baseLayerSignalCompatibilityId: bytes.count >= 5 ? Int((bytes[4] >> 4) & 0x0f) : nil
+    )
+}
+
+/**
+ * Stable key/value representation consumed by the Kotlin bridge. Values come from the selected
+ * CMFormatDescription; no HDR mode is inferred merely from the codec being HEVC.
+ */
+private func colorInfoString(from formatDescription: CMFormatDescription) -> String {
+    let extensions = (CMFormatDescriptionGetExtensions(formatDescription) as NSDictionary?) ?? NSDictionary()
+    let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
+    let codec = fourCCString(mediaSubType)
+    let transferValue = extensions.object(forKey: kCMFormatDescriptionExtension_TransferFunction)
+    let transferDescription = transferValue.map { String(describing: $0) } ?? ""
+    let primariesValue = extensions.object(forKey: kCMFormatDescriptionExtension_ColorPrimaries)
+    let primariesDescription = primariesValue.map { String(describing: $0) } ?? ""
+    let matrixValue = extensions.object(forKey: kCMFormatDescriptionExtension_YCbCrMatrix)
+    let matrixDescription = matrixValue.map { String(describing: $0) } ?? ""
+    let dolbyVision = dolbyVisionConfiguration(from: extensions)
+    let isDolbyVisionCodec = mediaSubType == kCMVideoCodecType_DolbyVisionHEVC || codec == "dvhe"
+
+    let transfer: String
+    let dynamicRange: String
+    if isDolbyVisionCodec {
+        transfer = transferDescription.contains("2100_HLG") ? "HLG" : "PQ"
+        dynamicRange = "DOLBY_VISION"
+    } else if transferDescription.contains("2084") {
+        transfer = "PQ"
+        dynamicRange = "HDR10"
+    } else if transferDescription.contains("2100_HLG") {
+        transfer = "HLG"
+        dynamicRange = "HLG"
+    } else if transferDescription.contains("Linear") {
+        transfer = "LINEAR"
+        dynamicRange = "SDR"
+    } else if transferDescription.lowercased().contains("srgb") {
+        transfer = "SRGB"
+        dynamicRange = "SDR"
+    } else if !transferDescription.isEmpty {
+        transfer = "SDR"
+        dynamicRange = "SDR"
+    } else if mediaSubType == kCMVideoCodecType_H264 || mediaSubType == kCMVideoCodecType_MPEG4Video
+        || mediaSubType == kCMVideoCodecType_MPEG2Video
+    {
+        transfer = "SDR"
+        dynamicRange = "SDR"
+    } else {
+        transfer = "UNKNOWN"
+        dynamicRange = "UNKNOWN"
+    }
+
+    let primaries: String
+    if primariesDescription.contains("2020") {
+        primaries = "BT2020"
+    } else if primariesDescription.contains("P3_D65") || primariesDescription.contains("DCI_P3") {
+        primaries = "DISPLAY_P3"
+    } else if primariesDescription.contains("709") {
+        primaries = "BT709"
+    } else if primariesDescription.contains("EBU_3213") {
+        primaries = "BT601_625"
+    } else if primariesDescription.contains("SMPTE_C") {
+        primaries = "BT601_525"
+    } else {
+        primaries = "UNKNOWN"
+    }
+
+    let matrix: String
+    if matrixDescription.contains("2020") {
+        matrix = "BT2020_NCL"
+    } else if matrixDescription.contains("709") {
+        matrix = "BT709"
+    } else if matrixDescription.contains("601") || matrixDescription.contains("240M") {
+        matrix = "BT601"
+    } else {
+        matrix = "UNKNOWN"
+    }
+
+    let fullRangeValue = extensions.object(forKey: kCMFormatDescriptionExtension_FullRangeVideo)
+    let isFullRange = (fullRangeValue as? NSNumber)?.boolValue ?? false
+    let depth = componentBitDepth(from: extensions, dynamicRange: dynamicRange)
+
+    var fields = [
+        "dynamicRange=\(dynamicRange)",
+        "bitDepth=\(depth)",
+        "primaries=\(primaries)",
+        "transfer=\(transfer)",
+        "matrix=\(matrix)",
+        "range=\(isFullRange ? "FULL" : "LIMITED")",
+        "codec=\(codec)",
+    ]
+
+    if let data = extensions.object(forKey: kCMFormatDescriptionExtension_MasteringDisplayColorVolume) as? Data {
+        let bytes = [UInt8](data)
+        if bytes.count >= 24 {
+            // HEVC mastering_display_colour_volume() order is G, B, R, white point, max/min luminance.
+            fields += [
+                "masterRedX=\(Double(readUInt16BE(bytes, 8)) / 50_000.0)",
+                "masterRedY=\(Double(readUInt16BE(bytes, 10)) / 50_000.0)",
+                "masterGreenX=\(Double(readUInt16BE(bytes, 0)) / 50_000.0)",
+                "masterGreenY=\(Double(readUInt16BE(bytes, 2)) / 50_000.0)",
+                "masterBlueX=\(Double(readUInt16BE(bytes, 4)) / 50_000.0)",
+                "masterBlueY=\(Double(readUInt16BE(bytes, 6)) / 50_000.0)",
+                "masterWhiteX=\(Double(readUInt16BE(bytes, 12)) / 50_000.0)",
+                "masterWhiteY=\(Double(readUInt16BE(bytes, 14)) / 50_000.0)",
+                "masterMaxNits=\(Double(readUInt32BE(bytes, 16)) / 10_000.0)",
+                "masterMinNits=\(Double(readUInt32BE(bytes, 20)) / 10_000.0)",
+            ]
+        }
+    }
+    if let data = extensions.object(forKey: kCMFormatDescriptionExtension_ContentLightLevelInfo) as? Data {
+        let bytes = [UInt8](data)
+        if bytes.count >= 4 {
+            fields += [
+                "maxCll=\(readUInt16BE(bytes, 0))",
+                "maxFall=\(readUInt16BE(bytes, 2))",
+            ]
+        }
+    }
+    if isDolbyVisionCodec {
+        fields += [
+            "dvProfile=\(dolbyVision?.profile ?? 0)",
+            "dvLevel=\(dolbyVision?.level ?? 0)",
+            "dvHasRpu=\((dolbyVision?.hasRpu ?? false) ? 1 : 0)",
+            "dvHasEl=\((dolbyVision?.hasEnhancementLayer ?? false) ? 1 : 0)",
+            "dvHasBase=\((dolbyVision?.hasBaseLayer ?? false) ? 1 : 0)",
+        ]
+        if let compatibilityId = dolbyVision?.baseLayerSignalCompatibilityId {
+            fields.append("dvCompatibilityId=\(compatibilityId)")
+        }
+    }
+    return fields.joined(separator: ";")
+}
+
+/**
+ * A variant declaration is less detailed than a selected CMFormatDescription, but it is the
+ * authoritative adaptive-range signal exposed by AVFoundation for HLS. Do not infer HDR from
+ * HEVC alone: only AVVideoRange or an explicit Dolby Vision sample entry may select an HDR range.
+ */
+private func colorInfoString(from attributes: AVAssetVariant.VideoAttributes) -> String {
+    let codecs = attributes.codecTypes
+    let isDolbyVision = codecs.contains(kCMVideoCodecType_DolbyVisionHEVC)
+        || codecs.contains(0x64766865) // dvhe
+        || codecs.contains(0x64766831) // dvh1
+    let dynamicRange: String
+    let transfer: String
+    let primaries: String
+    let matrix: String
+    let bitDepth: Int
+
+    if isDolbyVision {
+        dynamicRange = "DOLBY_VISION"
+        transfer = attributes.videoRange == .hlg ? "HLG" : "PQ"
+        primaries = "BT2020"
+        matrix = "BT2020_NCL"
+        bitDepth = 10
+    } else if attributes.videoRange == .pq {
+        dynamicRange = "HDR10"
+        transfer = "PQ"
+        primaries = "BT2020"
+        matrix = "BT2020_NCL"
+        bitDepth = 10
+    } else if attributes.videoRange == .hlg {
+        dynamicRange = "HLG"
+        transfer = "HLG"
+        primaries = "BT2020"
+        matrix = "BT2020_NCL"
+        bitDepth = 10
+    } else {
+        dynamicRange = "SDR"
+        transfer = "SDR"
+        primaries = "UNKNOWN"
+        matrix = "UNKNOWN"
+        bitDepth = 8
+    }
+
+    var fields = [
+        "dynamicRange=\(dynamicRange)",
+        "bitDepth=\(bitDepth)",
+        "primaries=\(primaries)",
+        "transfer=\(transfer)",
+        "matrix=\(matrix)",
+        "range=LIMITED",
+    ]
+    if isDolbyVision {
+        // AVAssetVariant does not expose dvcC/dvvC. Keep profile/base-layer fields unknown while
+        // reporting the explicit DV sample entry and its RPU-bearing decoder route.
+        fields += ["dvProfile=0", "dvLevel=0", "dvHasRpu=1", "dvHasEl=0", "dvHasBase=0"]
+    }
+    return fields.joined(separator: ";")
+}
+
 /// Class that manages video playback and frame capture into an optimized shared buffer.
 /// Frame capture rate adapts to the lower of screen refresh rate and video frame rate.
 /// Includes full HLS (HTTP Live Streaming) support with adaptive bitrate streaming.
@@ -264,9 +335,14 @@ class MacVideoPlayer {
     private var videoOutput: AVPlayerItemVideoOutput?
     private var hdrMetalRenderer: HdrMetalVideoRenderer?
     private var hdrPlayerLayer: AVPlayerLayer?
+    private var hdr10PlusProbeItem: AVPlayerItem?
+    private var hdr10PlusProbeOutput: AVPlayerItemVideoOutput?
+    private var hdr10PlusProbeTimer: Timer?
     private var prefersHdrMetalOutput: Bool = false
     private var toneMapsHdrToSdr: Bool = false
-    private let useHdrPlayerLayerForSurface: Bool = true
+    private var usesMetalProjectionSurface: Bool = false
+    private var metalProjectionConfiguration: String?
+    private var useHdrPlayerLayerForSurface: Bool { !usesMetalProjectionSurface }
 
     // Timer for capturing frames at adaptive rate
     private var displayLink: Timer?
@@ -309,6 +385,8 @@ class MacVideoPlayer {
     private var videoTitle: String? = nil
     private var videoBitrate: Int64 = 0
     private var videoMimeType: String? = nil
+    private let videoColorInfoLock = NSLock()
+    private var videoColorInfo: String = "dynamicRange=UNKNOWN"
     private var audioChannels: Int = 0
     private var audioSampleRate: Int = 0
 
@@ -317,9 +395,23 @@ class MacVideoPlayer {
     private var availableBitrates: [Float] = []
     private var currentBitrate: Float = 0
     private var preferredPeakBitRate: Double = 0
+    private let hlsVariantColorLock = NSLock()
+    private var hlsVariantColorDescriptors: [HLSVariantColorDescriptor] = []
+    private var sourceGeneration: UInt64 = 0
     private var bufferStatus: Float = 0.0
     private var isBuffering: Bool = false
     private var networkStatus: String = "Unknown"
+
+    // Playback diagnostics are sampled independently from the Compose/JVM polling loop. The
+    // AVPlayerItemVideoOutput clock is compared with AVPlayer's active playback clock. New buffers
+    // sampled alongside AVPlayerLayer provide a real decoded/displayable-frame count; access-log
+    // drops are used when AVFoundation exposes them and otherwise inferred from the source clock.
+    private let playbackMetricsLock = NSLock()
+    private var metricsPlayedSeconds: Double = 0
+    private var metricsLastHostTime: CFTimeInterval?
+    private var metricsRenderedVideoFrames: Int64 = 0
+    private var metricsDroppedVideoFrames: Int64 = -1
+    private var metricsMaximumAvSyncOffsetSeconds: Double = -1
 
     // Observers for HLS monitoring
     private var playerItemObserver: NSKeyValueObservation?
@@ -343,6 +435,164 @@ class MacVideoPlayer {
     // HLS Error tracking
     private var lastError: String? = nil
     private var errorCount: Int = 0
+
+    private func setVideoColorInfo(_ value: String) {
+        videoColorInfoLock.lock()
+        videoColorInfo = value
+        videoColorInfoLock.unlock()
+    }
+
+    /**
+     * A PQ format description cannot distinguish static HDR10 from HDR10+. Promote the selected
+     * source only after the projection renderer has parsed a real per-frame ST 2094-40 payload.
+     */
+    private func promoteVideoColorInfoToHdr10Plus() {
+        videoColorInfoLock.lock()
+        defer { videoColorInfoLock.unlock() }
+        guard videoColorInfo.contains("dynamicRange=HDR10;"),
+              videoColorInfo.contains("transfer=PQ")
+        else {
+            return
+        }
+        videoColorInfo = videoColorInfo.replacingOccurrences(
+            of: "dynamicRange=HDR10;",
+            with: "dynamicRange=HDR10_PLUS;"
+        )
+        videoColorInfo += ";hdr10PlusAppId=4;hdr10PlusAppVersion=1;hdr10PlusPerFrame=1"
+    }
+
+    private func makeHdrMetalRenderer() -> HdrMetalVideoRenderer? {
+        let renderer = HdrMetalVideoRenderer()
+        renderer?.onHdr10PlusObserved = { [weak self] in
+            self?.promoteVideoColorInfoToHdr10Plus()
+        }
+        return renderer
+    }
+
+    private func attachHdr10PlusProbe(to item: AVPlayerItem) {
+        if hdr10PlusProbeItem === item, hdr10PlusProbeOutput != nil { return }
+        detachHdr10PlusProbe()
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+        ]
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: attributes)
+        output.suppressesPlayerRendering = false
+        item.add(output)
+        output.requestNotificationOfMediaDataChange(withAdvanceInterval: hdr10PlusProbeAdvanceSeconds)
+        hdr10PlusProbeItem = item
+        hdr10PlusProbeOutput = output
+        let timer = Timer(timeInterval: hdr10PlusProbeIntervalSeconds, repeats: true) { [weak self] _ in
+            self?.sampleHdr10PlusProbe()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        hdr10PlusProbeTimer = timer
+    }
+
+    private func sampleHdr10PlusProbe() {
+        guard let item = hdr10PlusProbeItem,
+              player?.currentItem === item,
+              let output = hdr10PlusProbeOutput
+        else {
+            return
+        }
+        let hostTime = CACurrentMediaTime()
+        let itemTime = output.itemTime(forHostTime: hostTime)
+        samplePlaybackMetrics(itemTime: itemTime, hostTime: hostTime)
+        guard output.hasNewPixelBuffer(forItemTime: itemTime) else { return }
+        var displayTime = CMTime.invalid
+        guard let pixelBuffer = output.copyPixelBuffer(
+            forItemTime: itemTime,
+            itemTimeForDisplay: &displayTime
+        ) else {
+            return
+        }
+        recordRenderedVideoFrame()
+        if HdrMetalVideoRenderer.containsValidHdr10PlusMetadata(pixelBuffer) {
+            promoteVideoColorInfoToHdr10Plus()
+        }
+    }
+
+    private func detachHdr10PlusProbe() {
+        hdr10PlusProbeTimer?.invalidate()
+        hdr10PlusProbeTimer = nil
+        if let item = hdr10PlusProbeItem, let output = hdr10PlusProbeOutput {
+            item.remove(output)
+        }
+        hdr10PlusProbeItem = nil
+        hdr10PlusProbeOutput = nil
+    }
+
+    private func resetPlaybackMetrics() {
+        playbackMetricsLock.lock()
+        metricsPlayedSeconds = 0
+        metricsLastHostTime = nil
+        metricsRenderedVideoFrames = 0
+        metricsDroppedVideoFrames = -1
+        metricsMaximumAvSyncOffsetSeconds = -1
+        playbackMetricsLock.unlock()
+    }
+
+    private func samplePlaybackMetrics(itemTime: CMTime, hostTime: CFTimeInterval) {
+        let playerSeconds: Double
+        if let timebase = player?.currentItem?.timebase {
+            playerSeconds = CMTimeGetSeconds(CMTimebaseGetTime(timebase))
+        } else {
+            playerSeconds = player.map { CMTimeGetSeconds($0.currentTime()) } ?? .nan
+        }
+        let videoSeconds = CMTimeGetSeconds(itemTime)
+        playbackMetricsLock.lock()
+        if isPlaying, let previousHostTime = metricsLastHostTime {
+            let elapsed = hostTime - previousHostTime
+            if elapsed > 0, elapsed <= maximumPlaybackMetricsSampleGapSeconds {
+                metricsPlayedSeconds += elapsed * Double(playbackSpeed)
+            }
+        }
+        metricsLastHostTime = hostTime
+        if metricsPlayedSeconds >= playbackMetricsWarmupSeconds,
+           playerSeconds.isFinite,
+           videoSeconds.isFinite {
+            let offset = abs(videoSeconds - playerSeconds)
+            if offset <= maximumValidAvSyncOffsetSeconds {
+                metricsMaximumAvSyncOffsetSeconds = max(metricsMaximumAvSyncOffsetSeconds, offset)
+            }
+        }
+        playbackMetricsLock.unlock()
+    }
+
+    private func updateDroppedVideoFrames(_ value: Int) {
+        guard value >= 0 else { return }
+        playbackMetricsLock.lock()
+        metricsDroppedVideoFrames = max(metricsDroppedVideoFrames, Int64(value))
+        playbackMetricsLock.unlock()
+    }
+
+    private func recordRenderedVideoFrame() {
+        playbackMetricsLock.lock()
+        metricsRenderedVideoFrames += 1
+        playbackMetricsLock.unlock()
+    }
+
+    func getPlaybackDiagnostics() -> String {
+        playbackMetricsLock.lock()
+        let playedSeconds = metricsPlayedSeconds
+        let renderedFrames = metricsRenderedVideoFrames
+        let reportedDroppedFrames = metricsDroppedVideoFrames
+        let maximumOffsetSeconds = metricsMaximumAvSyncOffsetSeconds
+        playbackMetricsLock.unlock()
+
+        let expectedFrames = videoFrameRate > 0 ? Int64(floor(playedSeconds * Double(videoFrameRate))) : -1
+        let inferredDroppedFrames = expectedFrames >= 0 ? max(0, expectedFrames - renderedFrames) : 0
+        let droppedFrames = reportedDroppedFrames >= 0
+            ? max(reportedDroppedFrames, inferredDroppedFrames)
+            : inferredDroppedFrames
+        let totalFrames = renderedFrames + droppedFrames
+        let maximumOffsetMs = maximumOffsetSeconds >= 0 ? maximumOffsetSeconds * 1_000 : -1
+        return "totalFrames=\(totalFrames);renderedFrames=\(renderedFrames);" +
+            "droppedFrames=\(droppedFrames);maxAvSyncMs=\(maximumOffsetMs);" +
+            "playedSeconds=\(playedSeconds)"
+    }
 
     init() {
         // Detect screen refresh rate
@@ -519,13 +769,16 @@ class MacVideoPlayer {
     /// Handles access log entries for HLS monitoring
     @objc private func handleAccessLog(_ notification: Notification) {
         guard let item = notification.object as? AVPlayerItem,
+              item === player?.currentItem,
               let accessLog = item.accessLog(),
               let lastEvent = accessLog.events.last else { return }
 
         // Update current bitrate
         if lastEvent.indicatedBitrate > 0 {
             currentBitrate = Float(lastEvent.indicatedBitrate)
+            updateSelectedHLSVariantColor(indicatedBitRate: lastEvent.indicatedBitrate)
         }
+        updateDroppedVideoFrames(lastEvent.numberOfDroppedVideoFrames)
 
         // Log HLS streaming statistics
         nativeVideoLog("""
@@ -567,24 +820,71 @@ class MacVideoPlayer {
         }
     }
 
-    /// Extracts available bitrates from HLS variants
-    private func extractHLSVariants(from asset: AVAsset) {
+    private func resetHLSVariantColorDescriptors() {
+        hlsVariantColorLock.lock()
+        hlsVariantColorDescriptors.removeAll(keepingCapacity: false)
+        hlsVariantColorLock.unlock()
+    }
+
+    private func replaceHLSVariantColorDescriptors(_ descriptors: [HLSVariantColorDescriptor]) {
+        hlsVariantColorLock.lock()
+        hlsVariantColorDescriptors = descriptors
+        hlsVariantColorLock.unlock()
+    }
+
+    private func updateSelectedHLSVariantColor(indicatedBitRate: Double) {
+        hlsVariantColorLock.lock()
+        let descriptors = hlsVariantColorDescriptors
+        hlsVariantColorLock.unlock()
+        guard !descriptors.isEmpty else { return }
+
+        let selected: HLSVariantColorDescriptor?
+        if descriptors.count == 1 {
+            selected = descriptors[0]
+        } else {
+            let ranked = descriptors.compactMap { descriptor -> (HLSVariantColorDescriptor, Double)? in
+                descriptor.relativeDistance(to: indicatedBitRate).map { (descriptor, $0) }
+            }.sorted { $0.1 < $1.1 }
+            // AVPlayerItemAccessLogEvent.indicatedBitrate should match the declared variant. A
+            // generous tolerance permits muxed audio rounding without guessing between variants.
+            selected = ranked.first.flatMap { $0.1 <= 0.10 ? $0.0 : nil }
+        }
+        if let selected = selected {
+            setVideoColorInfo(selected.colorInfo)
+        }
+    }
+
+    /// Extracts both quality choices and their declared dynamic range from HLS variants.
+    private func extractHLSVariants(from asset: AVAsset, generation: UInt64) {
         if #available(macOS 13.0, *) {
             Task {
                 do {
                     // For HLS streams, try to get variant information
                     if let urlAsset = asset as? AVURLAsset {
                         let variants = try await urlAsset.load(.variants)
-
-                        availableBitrates = []
+                        var bitrates: [Float] = []
+                        var colorDescriptors: [HLSVariantColorDescriptor] = []
                         for variant in variants {
                             if let peakBitRate = variant.peakBitRate {
-                                availableBitrates.append(Float(peakBitRate))
+                                bitrates.append(Float(peakBitRate))
+                            }
+                            if let attributes = variant.videoAttributes {
+                                colorDescriptors.append(
+                                    HLSVariantColorDescriptor(
+                                        peakBitRate: variant.peakBitRate,
+                                        averageBitRate: variant.averageBitRate,
+                                        colorInfo: colorInfoString(from: attributes)
+                                    )
+                                )
                             }
                         }
 
+                        guard sourceGeneration == generation else { return }
+                        availableBitrates = bitrates.sorted()
+                        replaceHLSVariantColorDescriptors(colorDescriptors)
+                        updateSelectedHLSVariantColor(indicatedBitRate: Double(currentBitrate))
+
                         if !availableBitrates.isEmpty {
-                            availableBitrates.sort()
                             nativeVideoLog("HLS: Available bitrates: \(availableBitrates)")
                         }
                     }
@@ -679,6 +979,10 @@ class MacVideoPlayer {
         videoTitle = nil
         videoBitrate = 0
         videoMimeType = nil
+        setVideoColorInfo("dynamicRange=UNKNOWN")
+        availableBitrates = []
+        currentBitrate = 0
+        resetHLSVariantColorDescriptors()
         audioChannels = 0
         audioSampleRate = 0
 
@@ -708,7 +1012,7 @@ class MacVideoPlayer {
 
         // For HLS streams, extract variant information
         if isHLSStream {
-            extractHLSVariants(from: asset)
+            extractHLSVariants(from: asset, generation: sourceGeneration)
             videoMimeType = "application/x-mpegURL"
         }
 
@@ -782,6 +1086,7 @@ class MacVideoPlayer {
                         // Get estimated data rate (bitrate) from format description
                         let formatDescriptions = try await videoTrack.load(.formatDescriptions)
                         if let formatDescription = formatDescriptions.first {
+                            setVideoColorInfo(colorInfoString(from: formatDescription))
                             let extensions = CMFormatDescriptionGetExtensions(formatDescription) as Dictionary?
                             if let dict = extensions,
                                let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
@@ -797,6 +1102,8 @@ class MacVideoPlayer {
 
                                 if mediaType == kCMMediaType_Video {
                                     switch mediaSubType {
+                                    case kCMVideoCodecType_DolbyVisionHEVC:
+                                        videoMimeType = "video/hevc"
                                     case kCMVideoCodecType_H264:
                                         videoMimeType = "video/h264"
                                     case kCMVideoCodecType_HEVC:
@@ -841,6 +1148,7 @@ class MacVideoPlayer {
 
                 if let formatDescriptions = videoTrack.formatDescriptions as? [CMFormatDescription],
                    let formatDescription = formatDescriptions.first {
+                    setVideoColorInfo(colorInfoString(from: formatDescription))
                     let extensions = CMFormatDescriptionGetExtensions(formatDescription) as Dictionary?
                     if let dict = extensions,
                        let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
@@ -856,6 +1164,8 @@ class MacVideoPlayer {
 
                         if mediaType == kCMMediaType_Video {
                             switch mediaSubType {
+                            case kCMVideoCodecType_DolbyVisionHEVC:
+                                videoMimeType = "video/hevc"
                             case kCMVideoCodecType_H264:
                                 videoMimeType = "video/h264"
                             case kCMVideoCodecType_HEVC:
@@ -955,6 +1265,8 @@ class MacVideoPlayer {
     func openUri(_ uri: String, requestHeaders: [String: String]) {
         isReadyForPlayback = false
         pendingPlay = false
+        sourceGeneration &+= 1
+        resetPlaybackMetrics()
 
         // Clean up previous observers
         cleanupObservers()
@@ -1145,36 +1457,7 @@ class MacVideoPlayer {
             setupHLSMonitoring(for: item)
         }
 
-        if prefersHdrMetalOutput, HdrMetalVideoRenderer.isAvailable {
-            videoOutput = nil
-            if useHdrPlayerLayerForSurface {
-                hdrMetalRenderer?.detachFromItem()
-            } else {
-                if hdrMetalRenderer == nil {
-                    hdrMetalRenderer = HdrMetalVideoRenderer()
-                }
-                hdrMetalRenderer?.attach(to: item)
-            }
-        } else {
-            var outputSettings: [String: Any] = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: frameWidth,
-                kCVPixelBufferHeightKey as String: frameHeight,
-                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
-            ]
-            if toneMapsHdrToSdr {
-                outputSettings[AVVideoColorPropertiesKey] = [
-                    AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
-                    AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
-                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
-                ]
-            }
-            videoOutput = AVPlayerItemVideoOutput(outputSettings: outputSettings)
-            if let output = videoOutput {
-                item.add(output)
-            }
-            hdrMetalRenderer?.attach(to: item)
-        }
+        configureVideoOutput(for: item)
 
         player = AVPlayer(playerItem: item)
         if prefersHdrMetalOutput, useHdrPlayerLayerForSurface {
@@ -1221,6 +1504,55 @@ class MacVideoPlayer {
         if self.pendingPlay {
             DispatchQueue.main.async {
                 self.play()
+            }
+        }
+    }
+
+    /** Reconfigures the current item when the requested native-HDR/SDR route changes at runtime. */
+    private func configureVideoOutput(for item: AVPlayerItem) {
+        if let previousOutput = videoOutput {
+            item.remove(previousOutput)
+            videoOutput = nil
+        }
+
+        if prefersHdrMetalOutput, HdrMetalVideoRenderer.isAvailable {
+            videoOutput = nil
+            if useHdrPlayerLayerForSurface {
+                hdrMetalRenderer?.detachFromItem()
+                attachHdr10PlusProbe(to: item)
+            } else {
+                detachHdr10PlusProbe()
+                if hdrMetalRenderer == nil {
+                    hdrMetalRenderer = makeHdrMetalRenderer()
+                }
+                if let configuration = metalProjectionConfiguration {
+                    _ = hdrMetalRenderer?.configure(configuration)
+                }
+                hdrMetalRenderer?.attach(to: item)
+            }
+        } else {
+            if useHdrPlayerLayerForSurface {
+                attachHdr10PlusProbe(to: item)
+            } else {
+                detachHdr10PlusProbe()
+            }
+            hdrMetalRenderer?.detachFromItem()
+            var outputSettings: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: frameWidth,
+                kCVPixelBufferHeightKey as String: frameHeight,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            ]
+            if toneMapsHdrToSdr {
+                outputSettings[AVVideoColorPropertiesKey] = [
+                    AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                    AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+                ]
+            }
+            videoOutput = AVPlayerItemVideoOutput(outputSettings: outputSettings)
+            if let output = videoOutput {
+                item.add(output)
             }
         }
     }
@@ -1548,6 +1880,13 @@ class MacVideoPlayer {
     /// Returns the video MIME type if available
     func getVideoMimeType() -> String? { return videoMimeType }
 
+    /// Returns a snapshot of the selected track's typed color description.
+    func getVideoColorInfo() -> String {
+        videoColorInfoLock.lock()
+        defer { videoColorInfoLock.unlock() }
+        return videoColorInfo
+    }
+
     /// Returns the number of audio channels
     func getAudioChannels() -> Int { return audioChannels }
 
@@ -1682,6 +2021,7 @@ class MacVideoPlayer {
     func dispose() {
         pause()
         cleanupObservers()
+        detachHdr10PlusProbe()
         hdrMetalRenderer?.detachFromItem()
         hdrMetalRenderer = nil
         hdrPlayerLayer?.player = nil
@@ -1711,11 +2051,12 @@ class MacVideoPlayer {
             return hdrPlayerLayer
         }
         if hdrMetalRenderer == nil {
-            hdrMetalRenderer = HdrMetalVideoRenderer()
+            hdrMetalRenderer = makeHdrMetalRenderer()
             if let item = player?.currentItem {
                 hdrMetalRenderer?.attach(to: item)
             }
         }
+        hdrMetalRenderer?.start()
         return hdrMetalRenderer?.layer
     }
 
@@ -1762,34 +2103,71 @@ class MacVideoPlayer {
         return HdrMetalVideoRenderer.isAvailable
     }
 
+    func isHdrOutputReady() -> Bool {
+        if useHdrPlayerLayerForSurface {
+            return hdrPlayerLayer?.isReadyForDisplay ?? false
+        }
+        return hdrMetalRenderer?.hasRenderedFrame ?? false
+    }
+
+    func getHdrRendererFailure() -> String? {
+        guard usesMetalProjectionSurface else { return nil }
+        return hdrMetalRenderer?.rendererFailureDetail
+    }
+
+    @discardableResult
+    func setHdrMetalProjectionConfiguration(_ serialized: String) -> Bool {
+        let enabled = serialized.split(separator: ";").contains("enabled=1")
+        let modeChanged = usesMetalProjectionSurface != enabled
+        usesMetalProjectionSurface = enabled
+        metalProjectionConfiguration = enabled ? serialized : nil
+
+        if enabled {
+            if hdrMetalRenderer == nil {
+                hdrMetalRenderer = makeHdrMetalRenderer()
+            }
+            guard hdrMetalRenderer?.configure(serialized) == true else { return false }
+            hdrPlayerLayer?.player = nil
+        } else {
+            hdrMetalRenderer?.detachFromItem()
+            if prefersHdrMetalOutput {
+                configureHdrPlayerLayer(with: player)
+            }
+        }
+
+        if modeChanged, prefersHdrMetalOutput, let item = player?.currentItem {
+            configureVideoOutput(for: item)
+        }
+        return true
+    }
+
     func setHdrMetalPreferred(_ preferred: Bool) {
+        guard prefersHdrMetalOutput != preferred else { return }
         prefersHdrMetalOutput = preferred
+        if let item = player?.currentItem {
+            configureVideoOutput(for: item)
+            if preferred, useHdrPlayerLayerForSurface {
+                configureHdrPlayerLayer(with: player)
+            } else {
+                hdrPlayerLayer?.player = nil
+            }
+        }
     }
 
     func setHdrToneMappingEnabled(_ enabled: Bool) {
+        guard toneMapsHdrToSdr != enabled else { return }
         toneMapsHdrToSdr = enabled
+        if !prefersHdrMetalOutput, let item = player?.currentItem {
+            configureVideoOutput(for: item)
+        }
     }
 }
 
-private func hdrCapabilitiesString() -> String {
-    let maxEdr = syncOnMain {
-        NSScreen.screens
-            .map { Double($0.maximumPotentialExtendedDynamicRangeColorComponentValue) }
-            .max() ?? 1.0
-    }
-    let hevcSupported = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
-    let hdrSupport = hevcSupported ? "SUPPORTED" : "UNKNOWN"
-    let nativeHdr = maxEdr > 1.0 ? 1 : 0
-    return [
-        "maxEdr=\(maxEdr)",
-        "native=\(nativeHdr)",
-        "toneMap=1",
-        "hdr=\(hdrSupport)",
-        "hdr10=\(hdrSupport)",
-        "hlg=\(hdrSupport)",
-        "dolbyVision=UNKNOWN",
-    ].joined(separator: ";")
-}
+private let hdr10PlusProbeAdvanceSeconds = 0.03
+private let hdr10PlusProbeIntervalSeconds = 1.0 / 120.0
+private let maximumPlaybackMetricsSampleGapSeconds = 1.0
+private let playbackMetricsWarmupSeconds = 1.0
+private let maximumValidAvSyncOffsetSeconds = 1.0
 
 /// MARK: - C Exported Functions for JNA
 
@@ -1964,9 +2342,31 @@ public func setHdrToneMappingEnabled(_ context: UnsafeMutableRawPointer?, _ enab
     }
 }
 
-@_cdecl("getHdrCapabilities")
-public func getHdrCapabilities() -> UnsafeMutablePointer<CChar>? {
-    strdup(hdrCapabilitiesString())
+@_cdecl("setHdrMetalProjectionConfiguration")
+public func setHdrMetalProjectionConfiguration(
+    _ context: UnsafeMutableRawPointer?,
+    _ configuration: UnsafePointer<CChar>?
+) -> Int32 {
+    guard let context = context,
+          let configuration = configuration,
+          let serialized = String(validatingUTF8: configuration)
+    else {
+        return 0
+    }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        player.setHdrMetalProjectionConfiguration(serialized) ? 1 : 0
+    }
+}
+
+@_cdecl("getHdrRendererFailure")
+public func getHdrRendererFailure(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        guard let detail = player.getHdrRendererFailure() else { return nil }
+        return UnsafePointer<CChar>(strdup(detail))
+    }
 }
 
 @_cdecl("setHdrMetalContentScaleMode")
@@ -1996,6 +2396,15 @@ public func isHdrMetalAvailable(_ context: UnsafeMutableRawPointer?) -> Int32 {
     }
 }
 
+@_cdecl("isHdrOutputReady")
+public func isHdrOutputReady(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        player.isHdrOutputReady() ? 1 : 0
+    }
+}
+
 @_cdecl("getVideoFrameRate")
 public func getVideoFrameRate(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
@@ -2015,6 +2424,13 @@ public func getCaptureFrameRate(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getCaptureFrameRate()
+}
+
+@_cdecl("getPlaybackDiagnostics")
+public func getPlaybackDiagnostics(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return UnsafePointer<CChar>(strdup(player.getPlaybackDiagnostics()))
 }
 
 @_cdecl("getVideoDuration")
@@ -2092,6 +2508,13 @@ public func getVideoMimeType(_ context: UnsafeMutableRawPointer?) -> UnsafePoint
         return UnsafePointer<CChar>(cString)
     }
     return nil
+}
+
+@_cdecl("getVideoColorInfo")
+public func getVideoColorInfo(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return UnsafePointer<CChar>(strdup(player.getVideoColorInfo()))
 }
 
 @_cdecl("getAudioChannels")

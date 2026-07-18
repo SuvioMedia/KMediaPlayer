@@ -411,152 +411,33 @@ internal class ExternalVlcHlsFallback(
         uri: String,
         requestHeaders: Map<String, String>,
     ): VlcProbeTrackInfo {
-        val ffprobe = ExternalFfmpegLocator.findFfprobe() ?: return VlcProbeTrackInfo()
-        val command =
-            mutableListOf(
-                ffprobe,
-                "-v",
-                "error",
-            )
-        requestHeaders.requestHeadersLineString().takeIf { it.isNotBlank() }?.let { headerLines ->
-            command += listOf("-headers", headerLines)
-        }
-        command +=
-            listOf(
-                "-show_entries",
-                "stream=index,codec_type,codec_name,channels,sample_rate,bit_rate:stream_tags=language,title:" +
-                    "stream_disposition=default:format=duration",
-                "-of",
-                "flat",
-                uri,
-            )
-        val process =
-            ProcessBuilder(command)
-                .redirectErrorStream(true)
-                .start()
-
-        if (!process.waitFor(12, TimeUnit.SECONDS)) {
-            process.destroyForcibly()
-            return VlcProbeTrackInfo()
-        }
-
-        if (process.exitValue() != 0) return VlcProbeTrackInfo()
-
-        return parseProbeTrackInfo(process.inputStream.bufferedReader().readText())
-    }
-
-    private fun parseProbeTrackInfo(output: String): VlcProbeTrackInfo {
-        val streamValues = linkedMapOf<Int, MutableMap<String, String>>()
-        var durationSeconds: Double? = null
-
-        for (line in output.lineSequence()) {
-            val key = line.substringBefore('=', missingDelimiterValue = "").trim()
-            val value = cleanProbeValue(line.substringAfter('=', missingDelimiterValue = "").trim())
-            if (key == "format.duration") {
-                durationSeconds = value.toFinitePositiveDoubleOrNull()
-                continue
-            }
-
-            val match = STREAM_FIELD_REGEX.matchEntire(key) ?: continue
-            val streamOrdinal = match.groupValues[1].toIntOrNull() ?: continue
-            val field = match.groupValues[2]
-            streamValues.getOrPut(streamOrdinal) { linkedMapOf() }[field] = value
-        }
-
-        val streams =
-            streamValues.values
-                .mapNotNull(::probeStreamFromValues)
-                .sortedBy { it.index }
-
-        val audioStreams =
-            streams
-                .filter { it.codecType == "audio" }
-                .mapIndexed { audioTrackNumber, stream -> stream.toAudioStream(audioTrackNumber) }
-
-        val subtitleStreams =
-            streams
-                .filter { it.codecType == "subtitle" }
-                .mapIndexedNotNull { subtitleTrackNumber, stream ->
-                    val format = subtitleFormatForCodec(stream.codecName) ?: return@mapIndexedNotNull null
-                    VlcSubtitleStream(
-                        streamIndex = stream.index,
-                        subtitleTrackNumber = subtitleTrackNumber,
+        val probe = JvmLibVlcMediaProbe.probe(uri, requestHeaders)
+        return VlcProbeTrackInfo(
+            durationSeconds = probe.durationSeconds,
+            audioStreams =
+                probe.audioStreams.map { stream ->
+                    VlcAudioStream(
+                        streamIndex = stream.streamIndex,
+                        audioTrackNumber = stream.ordinal,
                         track =
-                            SubtitleTrack(
-                                id = "$EXTERNAL_VLC_SUBTITLE_TRACK_ID_PREFIX${stream.index}",
-                                label = stream.displayLabel("Subtitles"),
-                                language = stream.language,
-                                src = "",
-                                format = format,
-                                isEmbedded = true,
+                            stream.track.copy(
+                                id = "$EXTERNAL_VLC_AUDIO_TRACK_ID_PREFIX${stream.streamIndex}",
                             ),
                     )
-                }
-
-        return VlcProbeTrackInfo(
-            durationSeconds = durationSeconds,
-            audioStreams = audioStreams,
-            subtitleStreams = subtitleStreams,
+                },
+            subtitleStreams =
+                probe.subtitleStreams.map { stream ->
+                    VlcSubtitleStream(
+                        streamIndex = stream.streamIndex,
+                        subtitleTrackNumber = stream.ordinal,
+                        track =
+                            stream.track.copy(
+                                id = "$EXTERNAL_VLC_SUBTITLE_TRACK_ID_PREFIX${stream.streamIndex}",
+                            ),
+                    )
+                },
         )
     }
-
-    private fun probeStreamFromValues(values: Map<String, String>): VlcProbeStream? {
-        val index = values["index"]?.toIntOrNull() ?: return null
-        return VlcProbeStream(
-            index = index,
-            codecType = values["codec_type"]?.lowercase(),
-            codecName = values["codec_name"]?.lowercase(),
-            channels = values["channels"]?.toIntOrNull(),
-            sampleRate = values["sample_rate"]?.toIntOrNull(),
-            bitRate = values["bit_rate"]?.toIntOrNull(),
-            language = values["tags.language"].orEmpty(),
-            title = values["tags.title"].orEmpty(),
-            isDefault = values["disposition.default"] == "1",
-        )
-    }
-
-    private fun VlcProbeStream.toAudioStream(audioTrackNumber: Int): VlcAudioStream =
-        VlcAudioStream(
-            streamIndex = index,
-            audioTrackNumber = audioTrackNumber,
-            track =
-                AudioTrack(
-                    id = "$EXTERNAL_VLC_AUDIO_TRACK_ID_PREFIX$index",
-                    label = displayLabel("Audio ${audioTrackNumber + 1}"),
-                    language = language,
-                    channels = channels,
-                    sampleRate = sampleRate,
-                    bitrate = bitRate,
-                    isDefault = isDefault,
-                ),
-        )
-
-    private fun VlcProbeStream.displayLabel(fallbackBase: String): String =
-        title.takeIf { it.isNotBlank() }
-            ?: buildString {
-                append(fallbackBase)
-                if (language.isNotBlank()) append(" ($language)")
-                codecName?.takeIf { it.isNotBlank() }?.let { append(" / $it") }
-            }
-
-    private fun cleanProbeValue(value: String): String {
-        if (value == "N/A") return ""
-        return value
-            .removeSurrounding("\"")
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\")
-    }
-
-    private fun String.toFinitePositiveDoubleOrNull(): Double? = toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
-
-    private fun subtitleFormatForCodec(codecName: String?): SubtitleFormat? =
-        when (codecName?.lowercase()) {
-            "ass" -> SubtitleFormat.ASS
-            "ssa" -> SubtitleFormat.SSA
-            "subrip" -> SubtitleFormat.SRT
-            "webvtt" -> SubtitleFormat.WEBVTT
-            else -> null
-        }
 
     private fun startLogReader(startedProcess: Process) {
         val reader =
@@ -626,7 +507,6 @@ internal class ExternalVlcHlsFallback(
         private const val MAX_LOG_CHARS = 8_000
         private const val MAX_ERROR_CHARS = 1_500
         private const val SEGMENT_FILE_PATTERN = "segment_########.ts"
-        private val STREAM_FIELD_REGEX = Regex("""streams\.stream\.(\d+)\.(.+)""")
     }
 }
 
@@ -634,18 +514,6 @@ private data class VlcProbeTrackInfo(
     val durationSeconds: Double? = null,
     val audioStreams: List<VlcAudioStream> = emptyList(),
     val subtitleStreams: List<VlcSubtitleStream> = emptyList(),
-)
-
-private data class VlcProbeStream(
-    val index: Int,
-    val codecType: String?,
-    val codecName: String?,
-    val channels: Int?,
-    val sampleRate: Int?,
-    val bitRate: Int?,
-    val language: String,
-    val title: String,
-    val isDefault: Boolean,
 )
 
 private data class VlcAudioStream(

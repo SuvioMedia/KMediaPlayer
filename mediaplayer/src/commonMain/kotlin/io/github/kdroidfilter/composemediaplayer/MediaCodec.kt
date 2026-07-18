@@ -86,6 +86,18 @@ class MediaSupportSnapshot internal constructor(
     val codecs: MediaCodecSupport,
     private val canPlaySourceQuery: (MediaSourceSpec) -> Boolean,
 ) {
+    /** Capabilities of the display active when this preflight snapshot was queried. */
+    val displayColorCapabilities: DisplayColorCapabilities
+        get() = capabilities.displayColorCapabilities
+
+    /** Dynamic ranges reported or independently verified for the active display. */
+    val supportedDynamicRanges: Set<VideoDynamicRange>
+        get() = displayColorCapabilities.supportedDynamicRanges
+
+    /** HDR-only subset of [supportedDynamicRanges]. */
+    val supportedHdrDynamicRanges: Set<VideoDynamicRange>
+        get() = supportedDynamicRanges.filterTo(mutableSetOf(), VideoDynamicRange::isHdrRange)
+
     val audioCodecs: Set<MediaCodec>
         get() = codecs.audioCodecs
 
@@ -96,6 +108,12 @@ class MediaSupportSnapshot internal constructor(
         get() = codecs.allCodecs
 
     fun isCodecSupported(codec: MediaCodec): Boolean = codecs.isSupported(codec)
+
+    fun dynamicRangeSupport(dynamicRange: VideoDynamicRange): VideoDynamicRangeSupport =
+        displayColorCapabilities.supportFor(dynamicRange)
+
+    fun isDynamicRangeSupported(dynamicRange: VideoDynamicRange): Boolean =
+        dynamicRangeSupport(dynamicRange) == VideoDynamicRangeSupport.SUPPORTED
 
     fun canPlaySource(
         uri: String,
@@ -126,6 +144,24 @@ object MediaSupport {
      * Queries player/source capabilities without creating a [VideoPlayerState].
      */
     suspend fun queryCapabilities(): PlayerCapabilities = platformPlayerCapabilities()
+
+    /** Queries capabilities of the display that would currently present video. */
+    suspend fun queryDisplayColorCapabilities(): DisplayColorCapabilities = queryCapabilities().displayColorCapabilities
+
+    /** Queries dynamic ranges reported or independently verified for the active display. */
+    suspend fun querySupportedDynamicRanges(): Set<VideoDynamicRange> =
+        queryDisplayColorCapabilities().supportedDynamicRanges
+
+    /** Queries only HDR dynamic ranges supported by the active display. */
+    suspend fun querySupportedHdrDynamicRanges(): Set<VideoDynamicRange> =
+        querySupportedDynamicRanges().filterTo(mutableSetOf(), VideoDynamicRange::isHdrRange)
+
+    /** Queries tri-state support for one display dynamic range. */
+    suspend fun queryDynamicRangeSupport(dynamicRange: VideoDynamicRange): VideoDynamicRangeSupport =
+        queryDisplayColorCapabilities().supportFor(dynamicRange)
+
+    suspend fun queryIsDynamicRangeSupported(dynamicRange: VideoDynamicRange): Boolean =
+        queryDynamicRangeSupport(dynamicRange) == VideoDynamicRangeSupport.SUPPORTED
 
     /**
      * Queries a snapshot of all audio and video codecs reported as supported.
@@ -179,3 +215,5 @@ internal expect suspend fun platformQuerySupportedAudioCodecs(): Set<MediaCodec>
 internal expect suspend fun platformQuerySupportedVideoCodecs(): Set<MediaCodec>
 
 internal expect fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean
+
+private fun VideoDynamicRange.isHdrRange(): Boolean = this != VideoDynamicRange.UNKNOWN && this != VideoDynamicRange.SDR

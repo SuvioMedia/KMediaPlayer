@@ -1,26 +1,19 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class ExternalHlsFallbackSupportTest {
     @Test
-    fun autoPrefersVlcWhenVlcAndFfmpegAreAvailable() {
-        withFakeExecutables { vlcPath, ffmpegPath ->
-            withSystemProperties(
-                mapOf(
-                    "composemediaplayer.vlc" to vlcPath.toString(),
-                    "composemediaplayer.ffmpeg" to ffmpegPath.toString(),
-                    "composemediaplayer.hlsFallbackBackend" to "auto",
-                    "composemediaplayer.macos.hlsFallbackBackend" to null,
-                    "composemediaplayer.windows.hlsFallbackBackend" to null,
-                    "composemediaplayer.linux.hlsFallbackBackend" to null,
-                ),
-            ) {
+    fun autoPrefersConfiguredBridgeRouteForContainerPlayback() {
+        withFakeVlc { vlcPath ->
+            withBackendProperties(vlcPath = vlcPath, configuredBackend = "auto") {
                 assertEquals(
-                    ExternalHlsFallbackBackend.VLC,
+                    ExternalHlsFallbackBackend.KMEDIA_BRIDGE,
                     ExternalHlsFallbackSupport.selectBackend(requiresSubtitleRendering = false),
                 )
             }
@@ -28,65 +21,125 @@ class ExternalHlsFallbackSupportTest {
     }
 
     @Test
-    fun configuredFfmpegBackendOverridesVlcFirstAutoSelection() {
-        withFakeExecutables { vlcPath, ffmpegPath ->
-            withSystemProperties(
-                mapOf(
-                    "composemediaplayer.vlc" to vlcPath.toString(),
-                    "composemediaplayer.ffmpeg" to ffmpegPath.toString(),
-                    "composemediaplayer.hlsFallbackBackend" to "ffmpeg",
-                    "composemediaplayer.macos.hlsFallbackBackend" to null,
-                    "composemediaplayer.windows.hlsFallbackBackend" to null,
-                    "composemediaplayer.linux.hlsFallbackBackend" to null,
-                ),
-            ) {
+    fun autoUsesVlcForSubtitlesWhenConfiguredBridgeCannotBurnThem() {
+        assertEquals(
+            ExternalHlsFallbackBackend.VLC,
+            selectAutomaticHlsFallbackBackend(
+                requiresSubtitleRendering = true,
+                canKMediaBridgeBurnSubtitles = false,
+                isVlcAvailable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun autoUsesConfiguredBridgeForSubtitlesWhenItCanBurnThem() {
+        assertEquals(
+            ExternalHlsFallbackBackend.KMEDIA_BRIDGE,
+            selectAutomaticHlsFallbackBackend(
+                requiresSubtitleRendering = true,
+                canKMediaBridgeBurnSubtitles = true,
+                isVlcAvailable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun configuredMediaBridgeBackendOverridesVlc() {
+        withFakeVlc { vlcPath ->
+            withBackendProperties(vlcPath = vlcPath, configuredBackend = "ffmpeg") {
                 assertEquals(
-                    ExternalHlsFallbackBackend.FFMPEG,
-                    ExternalHlsFallbackSupport.selectBackend(requiresSubtitleRendering = false),
+                    ExternalHlsFallbackBackend.KMEDIA_BRIDGE,
+                    ExternalHlsFallbackSupport.selectBackend(requiresSubtitleRendering = true),
                 )
             }
         }
     }
 
-    private fun withFakeExecutables(block: (Path, Path) -> Unit) {
-        val vlcPath = fakeExecutable("vlc")
-        val ffmpegPath = fakeExecutable("ffmpeg")
-        try {
-            block(vlcPath, ffmpegPath)
-        } finally {
-            Files.deleteIfExists(vlcPath)
-            Files.deleteIfExists(ffmpegPath)
+    @Test
+    fun unmanagedVlcIsNeverSelectedForHdr() {
+        withFakeVlc { vlcPath ->
+            withBackendProperties(vlcPath = vlcPath, configuredBackend = "auto") {
+                assertEquals(
+                    ExternalHlsFallbackBackend.KMEDIA_BRIDGE,
+                    ExternalHlsFallbackSupport.selectBackendForColor(
+                        inputColorInfo =
+                            VideoColorInfo(
+                                dynamicRange = VideoDynamicRange.HLG,
+                                bitDepth = 10,
+                                transfer = VideoColorTransfer.HLG,
+                            ),
+                        requiresSubtitleRendering = false,
+                    ),
+                )
+            }
         }
     }
 
-    private fun fakeExecutable(name: String): Path {
-        val path = Files.createTempFile(name, null)
-        Files.writeString(path, "#!/bin/sh\nexit 0\n")
-        path.toFile().setExecutable(true)
-        return path
+    @Test
+    fun autoUsesVlcForRemoteConfirmedSdrBecauseTheBridgeRouteIsLocalOnly() {
+        withFakeVlc { vlcPath ->
+            withBackendProperties(vlcPath = vlcPath, configuredBackend = "auto") {
+                assertEquals(
+                    ExternalHlsFallbackBackend.VLC,
+                    ExternalHlsFallbackSupport.selectBackendForInput(
+                        uri = "https://media.invalid/movie.mkv",
+                        inputColorInfo = VideoColorInfo(dynamicRange = VideoDynamicRange.SDR, bitDepth = 8),
+                        requiresSubtitleRendering = false,
+                    ),
+                )
+            }
+        }
     }
 
-    private fun withSystemProperties(
-        values: Map<String, String?>,
+    @Test
+    fun startRejectsInvalidTimeBeforeOpeningAnyRuntime() {
+        assertFailsWith<IllegalArgumentException> {
+            runBlocking {
+                ExternalHlsFallbackSupport.start(
+                    uri = "file:///does-not-matter.mkv",
+                    requestHeaders = emptyMap(),
+                    selectedAudioStreamIndex = null,
+                    selectedSubtitleStreamIndex = null,
+                    startTimeSeconds = Double.NaN,
+                )
+            }
+        }
+    }
+
+    private fun withFakeVlc(block: (Path) -> Unit) {
+        val vlcPath = Files.createTempFile("vlc", null)
+        Files.writeString(vlcPath, "#!/bin/sh\nexit 0\n")
+        vlcPath.toFile().setExecutable(true)
+        try {
+            block(vlcPath)
+        } finally {
+            Files.deleteIfExists(vlcPath)
+        }
+    }
+
+    private fun withBackendProperties(
+        vlcPath: Path,
+        configuredBackend: String,
         block: () -> Unit,
     ) {
+        val values =
+            mapOf(
+                "composemediaplayer.vlc" to vlcPath.toString(),
+                "composemediaplayer.hlsFallbackBackend" to configuredBackend,
+                "composemediaplayer.macos.hlsFallbackBackend" to null,
+                "composemediaplayer.windows.hlsFallbackBackend" to null,
+                "composemediaplayer.linux.hlsFallbackBackend" to null,
+            )
         val previous = values.keys.associateWith(System::getProperty)
         try {
             values.forEach { (key, value) ->
-                if (value == null) {
-                    System.clearProperty(key)
-                } else {
-                    System.setProperty(key, value)
-                }
+                if (value == null) System.clearProperty(key) else System.setProperty(key, value)
             }
             block()
         } finally {
             previous.forEach { (key, value) ->
-                if (value == null) {
-                    System.clearProperty(key)
-                } else {
-                    System.setProperty(key, value)
-                }
+                if (value == null) System.clearProperty(key) else System.setProperty(key, value)
             }
         }
     }

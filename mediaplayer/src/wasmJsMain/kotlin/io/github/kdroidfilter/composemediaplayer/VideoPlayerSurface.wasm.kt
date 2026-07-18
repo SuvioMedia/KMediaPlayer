@@ -35,13 +35,36 @@ actual fun VideoPlayerSurface(
 
     if (playerState.hasMedia) {
         val surfaceMediaSessionId = playerState.mediaSessionId
+        val subtitleTrack = playerState.currentSubtitleTrack
+        val subtitleExtension =
+            playerState.webSubtitlePipelineExtensions.firstOrNull { extension ->
+                subtitleTrack?.resolvedFormat()?.let(extension::supportsSubtitleFormat) == true
+            }
+        var styledSubtitleActive by
+            remember(surfaceMediaSessionId, subtitleTrack?.id, subtitleExtension?.id) {
+                mutableStateOf(false)
+            }
         var videoElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLVideoElement?>(null) }
         var videoRatio by remember(surfaceMediaSessionId) { mutableStateOf<Float?>(null) }
+        val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
         val usesProjectionRenderer =
             playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)
+        val usesControlledColorRenderer =
+            shouldUseWebControlledColorRenderer(
+                status = colorPipelineStatus,
+                usesProjectionRenderer = usesProjectionRenderer,
+            )
         val sourceKind = playerState.sourceUri?.toWebMediaSourceKind() ?: WebMediaSourceKind.EMPTY
         var useCors by remember(sourceKind, surfaceMediaSessionId) { mutableStateOf(sourceKind.shouldUseCors) }
         val scope = rememberCoroutineScope()
+
+        DisposableEffect(playerState, surfaceMediaSessionId, usesControlledColorRenderer, usesProjectionRenderer) {
+            playerState.bindWebColorSurface(
+                usesControlledColorRenderer = usesControlledColorRenderer,
+                isProjection = usesProjectionRenderer,
+            )
+            onDispose { playerState.unbindWebColorSurface() }
+        }
 
         WebProjectionDeviceMotionEffect(playerState = playerState, enabled = usesProjectionRenderer)
 
@@ -78,6 +101,7 @@ actual fun VideoPlayerSurface(
             modifier = modifier,
             videoRatio = videoRatio,
             contentScale = contentScale,
+            suppressComposeAss = styledSubtitleActive,
             overlay = overlay,
         ) {
             key(sourceKind, useCors, surfaceMediaSessionId) {
@@ -104,8 +128,12 @@ actual fun VideoPlayerSurface(
                     modifier = Modifier.fillMaxSize(),
                     update = { video ->
                         videoElement = video
-                        video.applyInteropBehindCanvas(hiddenForProjection = usesProjectionRenderer)
-                        video.applyContentScale(contentScale, videoRatio, hiddenForProjection = usesProjectionRenderer)
+                        video.applyInteropBehindCanvas(hiddenForProjection = usesControlledColorRenderer)
+                        video.applyContentScale(
+                            contentScale,
+                            videoRatio,
+                            hiddenForProjection = usesControlledColorRenderer,
+                        )
                     },
                     onRelease = { video ->
                         if (!video.currentTime.isNaN() && video.currentTime > 0.0) {
@@ -119,12 +147,15 @@ actual fun VideoPlayerSurface(
                 WebProjectionCanvas(
                     playerState = playerState,
                     videoElement = videoElement,
+                    enabled = usesControlledColorRenderer,
+                    isProjection = usesProjectionRenderer,
                     modifier = Modifier.fillMaxSize(),
                 )
-                AssSubtitleCanvas(
+                subtitleExtension?.SubtitleOverlay(
                     playerState = playerState,
                     videoElement = videoElement,
                     modifier = Modifier.fillMaxSize(),
+                    onActiveChanged = { active -> styledSubtitleActive = active },
                 )
             }
         }
@@ -135,42 +166,101 @@ actual fun VideoPlayerSurface(
 private fun WebProjectionCanvas(
     playerState: VideoPlayerState,
     videoElement: HTMLVideoElement?,
+    enabled: Boolean,
+    isProjection: Boolean,
     modifier: Modifier,
 ) {
-    if (!playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)) return
+    if (!enabled) return
+    val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
+    val sourceColorInfo = colorPipelineStatus.source
+    val plannedOutput = colorPipelineStatus.plannedOutputDynamicRange
+    val videoProjectionLabel = if (isProjection) playerState.projection.renderingInfoLabel() else null
+    if (
+        sourceColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN ||
+        plannedOutput == VideoDynamicRange.UNKNOWN
+    ) {
+        return
+    }
 
-    HtmlElementView(
-        factory = { createWebProjectionCanvasElement() },
-        modifier = modifier,
-        update = { canvas ->
-            canvas.applyWebProjectionCanvasStyle()
-            val video = videoElement
-            if (video != null) {
-                canvas.configureWebProjectionRenderer(
-                    video = video,
-                    projection = playerState.projection,
-                    projectionView = playerState.projectionView,
-                    textureCrop = playerState.projectionTextureCrop,
-                    onError = { message ->
-                        if (playerState is DefaultVideoPlayerState) {
-                            playerState.renderingInfo.update(
-                                videoRenderer = "HTMLVideoElement + browser compositor",
-                                notes = message,
-                                videoProjection = playerState.projection.renderingInfoLabel(),
-                            )
-                        }
-                    },
-                )
-                if (playerState is DefaultVideoPlayerState) {
-                    playerState.renderingInfo.update(
-                        videoRenderer = "HTMLVideoElement -> WebGL projection canvas",
-                        videoProjection = playerState.projection.renderingInfoLabel(),
+    key(plannedOutput) {
+        HtmlElementView(
+            factory = { createWebProjectionCanvasElement() },
+            modifier = modifier,
+            update = { canvas ->
+                canvas.applyWebProjectionCanvasStyle()
+                val video = videoElement
+                if (video != null) {
+                    canvas.configureWebProjectionRenderer(
+                        video = video,
+                        projection = playerState.projection,
+                        projectionView = playerState.projectionView,
+                        textureCrop = playerState.projectionTextureCrop,
+                        sourceColorInfo = sourceColorInfo,
+                        outputDynamicRange = plannedOutput,
+                        onConfigured = { outputRange, surfaceKind ->
+                            if (playerState is DefaultVideoPlayerState) {
+                                playerState.onWebColorRendererConfigured(outputRange, surfaceKind)
+                                playerState.renderingInfo.update(
+                                    videoRenderer =
+                                        if (
+                                            surfaceKind == VideoSurfaceKind.WEB_GPU_CANVAS &&
+                                            outputRange != VideoDynamicRange.SDR &&
+                                            outputRange != VideoDynamicRange.UNKNOWN
+                                        ) {
+                                            "HTMLVideoElement -> WebGPU FP16 HDR projection canvas"
+                                        } else if (surfaceKind == VideoSurfaceKind.WEB_GPU_CANVAS) {
+                                            "HTMLVideoElement -> WebGPU FP16 controlled SDR canvas"
+                                        } else if (isProjection) {
+                                            "HTMLVideoElement -> WebGL color-managed SDR projection canvas"
+                                        } else {
+                                            "HTMLVideoElement -> WebGL color-managed SDR canvas"
+                                        },
+                                    notes = null,
+                                    videoProjection = videoProjectionLabel,
+                                )
+                            }
+                        },
+                        onHdrUnavailable = { message ->
+                            if (playerState is DefaultVideoPlayerState) {
+                                playerState.onWebHdrRendererUnavailable(message)
+                                playerState.renderingInfo.update(
+                                    videoRenderer =
+                                        if (isProjection) {
+                                            "HTMLVideoElement -> controlled SDR projection fallback"
+                                        } else {
+                                            "HTMLVideoElement -> controlled SDR fallback"
+                                        },
+                                    notes = message,
+                                    videoProjection = videoProjectionLabel,
+                                )
+                            }
+                        },
+                        onError = { message ->
+                            if (playerState is DefaultVideoPlayerState) {
+                                playerState.onWebColorRendererFailed(message)
+                                playerState.renderingInfo.update(
+                                    videoRenderer = "HTMLVideoElement + browser compositor",
+                                    notes = message,
+                                    videoProjection = videoProjectionLabel,
+                                )
+                            }
+                        },
                     )
                 }
-            }
-        },
-        onRelease = { canvas ->
-            canvas.disposeWebProjectionRenderer()
-        },
-    )
+            },
+            onRelease = { canvas ->
+                canvas.disposeWebProjectionRenderer()
+            },
+        )
+    }
 }
+
+internal fun shouldUseWebControlledColorRenderer(
+    status: VideoColorPipelineStatus,
+    usesProjectionRenderer: Boolean,
+): Boolean =
+    usesProjectionRenderer ||
+        (
+            status.requestedDynamicRangePolicy == DynamicRangePolicy.FORCE_SDR &&
+                status.source.dynamicRange != VideoDynamicRange.SDR
+        )

@@ -1,0 +1,33 @@
+public final class io/github/kdroidfilter/composemediaplayer/AssSubtitleRendererConfig {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/AssSubtitleRendererConfig;
+	public final fun getDebug ()Z
+	public final fun getEnabled ()Z
+	public final fun getFallbackFontFamily ()Ljava/lang/String;
+	public final fun getFallbackFontUrl ()Ljava/lang/String;
+	public final fun getModernWasmUrl ()Ljava/lang/String;
+	public final fun getQueryFonts ()Z
+	public final fun getWasmUrl ()Ljava/lang/String;
+	public final fun getWorkerUrl ()Ljava/lang/String;
+	public final fun setDebug (Z)V
+	public final fun setEnabled (Z)V
+	public final fun setFallbackFontFamily (Ljava/lang/String;)V
+	public final fun setFallbackFontUrl (Ljava/lang/String;)V
+	public final fun setModernWasmUrl (Ljava/lang/String;)V
+	public final fun setQueryFonts (Z)V
+	public final fun setWasmUrl (Ljava/lang/String;)V
+	public final fun setWorkerUrl (Ljava/lang/String;)V
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/ass/AssSubtitleExtension : io/github/kdroidfilter/composemediaplayer/DesktopSubtitlePipelineExtension {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun createRenderer ()Lio/github/kdroidfilter/composemediaplayer/DesktopSubtitleRenderer;
+	public fun getAvailability ()Lio/github/kdroidfilter/composemediaplayer/VideoPipelineExtensionAvailability;
+	public fun getColorConversionCapabilities ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public fun getId ()Ljava/lang/String;
+	public fun getSupportedSubtitleFormats ()Ljava/util/Set;
+	public fun status ()Lio/github/kdroidfilter/composemediaplayer/VideoPipelineExtensionStatus;
+	public fun supportsSubtitleFormat (Lio/github/kdroidfilter/composemediaplayer/SubtitleFormat;)Z
+}
+

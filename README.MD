@@ -10,7 +10,7 @@
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Shusek/KMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/Shusek/KMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
 [![GitHub last commit](https://img.shields.io/github/last-commit/Shusek/KMediaPlayer)](https://github.com/Shusek/KMediaPlayer/commits/master)
 
-**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. Desktop native bridges are packaged in the JVM artifact and communicate through **pure JNI** — no JNA and no Java media bindings. Linux additionally requires a compatible GStreamer 1.x runtime and plugins to be installed on the host. The library leverages:
+**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. Desktop playback bridges are packaged in the JVM artifact and communicate through **pure JNI** — no JNA and no Java media bindings. The optional Windows/Linux ASS renderer uses Java 25's Foreign Function API to load its packaged libass runtime. Linux additionally requires a compatible GStreamer 1.x runtime and plugins to be installed on the host. The library leverages:
 
 - **GStreamer** (via JNI) for Linux
 - **Media Foundation** (via JNI) for Windows
@@ -48,6 +48,8 @@ This repository is a personal fork maintained for my own projects and integratio
   - [Using Subtitles](#using-subtitles)
     - [Supported Formats](#-supported-formats)
     - [Adding Subtitles from URL or Local File](#-adding-subtitles-from-url-or-local-file)
+    - [Android ASS/SSA subtitles with libass](#android-assssa-subtitles-with-libass)
+    - [Windows and Linux ASS/SSA subtitles with libass](#windows-and-linux-assssa-subtitles-with-libass)
     - [Browser ASS/SSA subtitles with JASSUB/libass](#browser-assssa-subtitles-with-jassublibass)
     - [Selecting Embedded Audio and Subtitle Tracks](#selecting-embedded-audio-and-subtitle-tracks)
     - [Customizing Subtitle Appearance](#-customizing-subtitle-appearance)
@@ -77,7 +79,8 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
 - **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
 - **Video Caching**: Opt-in Media3 disk caching on Android, ideal for scroll-based UIs.
-- **3D/VR Projection**: Configure and auto-detect flat 3D, VR180, VR360, fisheye, and EAC projection modes. Android renders VR360 through Media3's spherical GL surface and other projected modes through an OpenGL shader surface, iOS renders projected modes through SceneKit, Web renders projected sources through WebGL, and desktop JVM canvas paths use a Skia shader renderer.
+- **3D/VR Projection**: Configure and auto-detect flat 3D, VR180, VR360, fisheye, and EAC projection modes. Android uses Media3's controlled frame processor, Apple targets use Metal, Windows uses a Media Foundation/D3D11 P010 presenter, Linux uses an optional P010/DMABuf Vulkan presenter on supported Wayland systems, and Web progressively selects WebGPU HDR or a color-managed SDR fallback.
+- **Typed HDR pipeline**: `DynamicRangePolicy` selects a confirmed native HDR path, a controlled renderer, or a verified HDR-to-SDR fallback. `VideoColorPipelineStatus` reports source, decoder, active display, surface, metadata handling, planned output, confirmed output, and fallback reason separately.
 - **Error handling** Simple error handling for network or playback issues.
 - **Optional MPV backend**: `composemediaplayer-mpv` is an Android/JVM adapter
   with libass-based ASS/SSA subtitle support. The default artifact has no MPV
@@ -102,11 +105,15 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 
 > ‡ Browser HLS support uses the browser's native implementation when available and the bundled, version-locked `hls.js` dependency when Media Source Extensions are available.
 
-> † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC playback, or external HLS fallback backends when the platform backend cannot demux the source directly. libVLC supports both the Compose canvas path and an opt-in direct native-view path (`libvlc-native-view`) on macOS, Windows, and Linux. VLC/libVLC is preferred in `auto` mode; `ffmpeg` is the last fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
+> † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC, or the explicitly installed `composemediaplayer-kmediabridge` extension when the platform backend cannot demux the source directly. The default player contains no KMediaBridge or FFmpeg dependency. The optional bridge dynamically loads privately named LGPL FFmpeg libraries in-process—there is no `ffmpeg`/`ffprobe` executable or system installation. It remuxes compatible local video/audio into bounded-memory CMAF/HLS without re-encoding; the macOS runtime can also tone-map explicit HDR10/HDR10+/HLG to limited-range BT.709 for `FORCE_SDR` and burn embedded text subtitles for confirmed SDR input. Strictly validated HEVC Main 10 HDR10/HDR10+/HLG remains tagged as an HDR sample-copy route under HDR-preserving policies; the platform color pipeline still has to confirm the decoder, surface and display before reporting HDR output. Unsupported conversion requests fail closed or use an explicitly available VLC fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
-> macOS JVM also has an experimental opt-in HDR Metal rendering POC for AVFoundation-supported sources. Enable it with `-Dcomposemediaplayer.macos.hdrMetal=true` or `COMPOSE_MEDIA_PLAYER_MACOS_HDR_METAL=true`. See [macOS HDR Metal POC](docs/macos-hdr-metal-poc.md).
+> HDR recognition is not treated as proof of HDR output. In particular, a libVLC native child view on Windows or Linux is not a confirmed HDR route. `AUTO` uses a verified SDR tone-map when the native HDR requirements are unavailable, while `REQUIRE_HDR` returns a typed color-pipeline error. See [HDR pipeline and platform status](docs/hdr-pipeline.md).
 
-> On Windows and Linux JVM, `VideoOutputMode.NATIVE_HDR` selects the libVLC native-view path in `DesktopVideoBackend.AUTO` mode. This avoids copying frames into Compose and is the intended best-effort path for HDR sources, but actual HDR passthrough depends on VLC, the OS compositor, GPU drivers, display mode, and an HDR-capable display. `PlayerCapabilities.hdr` stays `UNKNOWN` there until a platform-specific HDR output detector is available.
+> iPhone and iPad are supported on a non-blocking [software-only best-effort basis](docs/ios-best-effort-readiness.md): device arm64 builds, Simulator tests and shared Metal references are required, but this project has no physical iOS hardware and makes no physical HDR, Dolby Vision, 4K60 or thermal-performance claim. Runtime color status therefore fails closed whenever Apple does not explicitly confirm the format, display and surface.
+
+> Flat Android video follows the platform-recommended MediaCodec + `SurfaceView` path; KMediaPlayer does not overwrite decoder buffers with a guessed dataspace. On Android 9+, a small read-only JNI bridge compares `ANativeWindow_getBuffersDataSpace()` with the decoded HDR10/HDR10+/HLG signal after the first frame. An exact match is `RENDERER_CONFIGURED`; Android 14+'s active HDR/SDR composition report is independent `SYSTEM_REPORTED` evidence and is retained only for the current decoded output signal, source, surface and display. Dolby Vision remains vendor-managed. If neither public signal confirms the route, `AUTO` uses a verified controlled or source-bridge SDR fallback when available, while `REQUIRE_HDR` fails instead of labeling inferred playback as HDR.
+
+> macOS JVM uses one native AVPlayer/EDR layer per player for flat AVFoundation-supported video. Runtime selection is controlled by the 2.0 color policy; see [macOS color pipeline](docs/macos-color-pipeline.md) for the current behavior.
 
 > Linux `libvlc-native-view` currently embeds VLC through an X11/XWayland xwindow. Native Wayland needs a separate `wl_surface` backend and is not implemented by this path.
 
@@ -128,9 +135,18 @@ val h264Supported = mediaSupport.isCodecSupported(MediaCodec.H264)
 val supportedVideoCodecs = mediaSupport.videoCodecs
 val supportedAudioCodecs = mediaSupport.audioCodecs
 val supportedCodecs = mediaSupport.allCodecs
+
+val supportedHdr = mediaSupport.supportedHdrDynamicRanges
+val hdr10PlusSupport = mediaSupport.dynamicRangeSupport(VideoDynamicRange.HDR10_PLUS)
+val showHdr10PlusSources = hdr10PlusSupport == VideoDynamicRangeSupport.SUPPORTED
 ```
 
 `MediaSupport.query()` checks the current platform contract for URI schemes and known container/adaptive formats such as MKV and HLS, plus codec support reported by the backend. On browser targets it also asks `HTMLVideoElement.canPlayType` for MIME types that the browser can report before playback.
+
+Display support is a preflight snapshot of the active output, not evidence that a future playback
+surface reached HDR. `UNSUPPORTED` means the platform produced a known capability set without that
+range; `UNKNOWN` remains distinct so strict source catalogs can require `SUPPORTED`. Query again
+after an HDMI or monitor change before filtering a new source list.
 
 > [!NOTE]
 > Media support can still depend on the device, OS version, browser, installed system components, or GStreamer plugins. Android and web targets query the current runtime where possible. Desktop and iOS expose conservative backend capability lists. Query methods are suspend functions so callers can run them from `LaunchedEffect`, `async`, `produceState`, or their own coroutine/lazy strategy.
@@ -159,15 +175,98 @@ dependencies {
 }
 ```
 
+Pipeline integrations are separate modules:
+
+```text
+composemediaplayer-ass ──────────┐
+composemediaplayer-dolbyvision ──┼──> composemediaplayer-extension-api ──> composemediaplayer-core
+composemediaplayer-kmediabridge ─┘                    ↑
+composemediaplayer ───────────────────────────────────┘
+```
+
+Normal applications receive `composemediaplayer-extension-api` transitively. Add it directly only
+when authoring an extension. An optional artifact has no effect until its stable extension instance
+is registered in `VideoPlaybackOptions.extensions`; `extensionStatuses` exposes its typed
+`AVAILABLE`, `DEGRADED`, or `UNAVAILABLE` runtime state without turning recognition into a
+capability claim.
+
+Full ASS/SSA presentation is an optional component. Add it with the same version as the core
+artifact and install its extension in the player options:
+
+```kotlin
+dependencies {
+    implementation("io.github.shusek:composemediaplayer-ass:<version>")
+}
+```
+
+```kotlin
+val playbackOptions = remember {
+    VideoPlaybackOptions(
+        extensions = listOf(AssSubtitleExtension()),
+    )
+}
+val playerState = rememberVideoPlayerState(playbackOptions = playbackOptions)
+```
+
+The dependency supplies the platform integration (and the bundled runtime on platforms documented
+as bundled) but does not take over subtitle rendering.
+Without `AssSubtitleExtension()`, ASS/SSA keeps the lightweight core fallback and the application
+does not receive libass or JASSUB from the core artifact. See the
+[ASS component documentation](mediaplayer-ass/README.md) for platform behavior and configuration.
+
+Android applications that opt into the KMediaBridge HDR-to-SDR source bridge add the adapter with
+the same version as KMediaPlayer and the separately versioned audited LGPL runtime:
+
+```kotlin
+dependencies {
+    implementation("io.github.shusek:composemediaplayer-kmediabridge:<version>")
+    runtimeOnly("io.github.shusek:kmedia-bridge-ffmpeg-runtime-android:0.4.2")
+}
+```
+
+Install `KMediaBridgeAndroidExtension()` in `VideoPlaybackOptions.extensions`. The adapter is also
+published for desktop JVM, where `KMediaBridgeDesktopExtension()` enables bounded container,
+sample-copy and controlled SDR routes. The default player has no KMediaBridge dependency. The
+runtime remains a separate KMediaBridge component with its own LGPL source and relinking materials;
+an explicitly selected external compatible runtime remains the application's responsibility. See the
+[KMediaBridge adapter documentation](mediaplayer-kmediabridge/README.md).
+
+The optional pinned `libdovi` bridge is published separately:
+
+```kotlin
+dependencies {
+    implementation("io.github.shusek:composemediaplayer-dolbyvision:<version>")
+}
+```
+
+It provides the pinned `libdovi` converter plus bounded playback bridges for unencrypted flat MP4,
+fMP4 HLS VOD, and Matroska on Android, iOS, JVM, and browser Wasm. The common Matroska path preserves
+AAC, Opus, AC-3, and E-AC-3; JVM can additionally use FFmpeg for compatible inputs outside that
+subset. Install `DolbyVisionExtension()` in `VideoPlaybackOptions.extensions` to opt in; live HLS
+and DRM fail closed. See [the component contract](mediaplayer-dolbyvision/README.md).
+With `DolbyVisionPolicy.AUTO`, confirmed native Profile 7 remains first choice; the bridge maps P7
+to P8.1 only when the active platform confirms P8 but not P7, before HDR10-base and managed-SDR
+fallbacks. Planned and confirmed profile/mapping fields expose the decision without claiming an
+unverified P8.1 output.
+
+The conversion bridge accepts selected fMP4 media playlists and master HLS VOD. Android, iOS, and
+JVM retain the selected variant's referenced VOD audio/subtitle renditions through their local HLS
+proxy. Browser Wasm preserves the declared default external fMP4 audio rendition with a separate,
+bounded Media Source buffer when its codec is supported; unsupported layouts fail closed instead
+of silently dropping audio. Its video/audio buffers use parsed fMP4 clocks for initial, seek, and
+discontinuity timestamp mapping, and a non-independent seek restarts only from a verified sync sample.
+
 ### Build and runtime requirements
 
 - **Build JDK and desktop runtime:** Java 25 or newer. Desktop JVM classes are intentionally published as Java 25 bytecode; Java 17/21 are not supported.
 - **Gradle:** use the checked-in Gradle 9.6.1 wrapper, whose distribution checksum is verified.
 - **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `2.0.x` line.
-- **Android:** the library is built and verified with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`.
+- **Android:** the library is built and verified for `arm64-v8a` and `armeabi-v7a` with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Android x86/x86_64 is unsupported. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`; HDR still depends on the device and active display.
 - **Android MPV adapter:** `composemediaplayer-mpv` uses `minSdk = 28` and publishes ARM runtimes only.
-- **iOS:** an Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
-- **Linux desktop runtime:** install GStreamer 1.x core, base libraries, and the plugins required by the media formats you use. On Debian/Ubuntu the CI baseline is `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-base`, and `gstreamer1.0-plugins-good`.
+- **iOS:** iOS 16.2 or newer is required. Published targets are `iosArm64` and `iosSimulatorArm64` only; Intel simulators are unsupported. An Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
+- **macOS JVM:** Apple Silicon and macOS 14 or newer are required by the native AVFoundation/Metal bridge.
+- **Windows JVM:** Windows 10 1809 (build 17763) or newer is required; confirmed HDR additionally requires an active Advanced Color output and the packaged P010/D3D11 presenter.
+- **Linux desktop runtime:** ordinary SDR playback uses system GStreamer 1.x core, base libraries, and the plugins required by the media formats you use. On Debian/Ubuntu the CI baseline is `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-base`, and `gstreamer1.0-plugins-good`. Confirmed HDR additionally requires JBR 25.0.3+, GStreamer 1.28.5+, `WLToolkit`, Wayland `color-management-v1`, and the advertised Vulkan/DMABuf/output capabilities. X11/XWayland is not a confirmed HDR route.
 - **Building the Linux JNI bridge:** additionally install CMake, `pkg-config`, a C compiler, full JDK 25 JNI headers, `libgstreamer1.0-dev`, and `libgstreamer-plugins-base1.0-dev`.
 - **Building the macOS/Windows bridges:** use full JDK 25 JNI headers plus Xcode/Swift on macOS or Visual Studio with CMake on Windows.
 
@@ -283,7 +382,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 | 0.7.11          | 2.2.0          | 1.8.2           | See release | See release |
 | 0.7.10          | 2.1.21         | 1.8.2           | See release | See release |
 
-The current build records the public Kotlin ABI in version control. `checkKotlinAbi`, the published-consumer smoke project, platform tests, and the Java 25 classfile check must all pass before the single release workflow publishes the same GAV and native payload to Maven Central and the GitHub Pages Maven mirror. To reproduce the isolated consumer check locally, first run `./gradlew publishConsumerSmokeArtifacts -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache`, then `./gradlew consumerSmokeTest -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache`.
+The current build records the public Kotlin ABI in version control. `checkKotlinAbi`, the published-consumer smoke project, platform tests, and the Java 25 classfile check must all pass before the single release workflow publishes the same GAV and native payload to Maven Central and the GitHub Pages Maven mirror. To reproduce the isolated consumer check locally, first run `./gradlew publishConsumerSmokeArtifacts -PpublicationVersion=0.0.0-consumer.local -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache`, then run `./gradlew consumerSmokeTest -PpublicationVersion=0.0.0-consumer.local -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache` in a separate Gradle invocation. The split is intentional: the Maven fixtures must exist before Gradle resolves the consumer configurations.
 
 The release workflow verifies the complete GitHub Pages staging repository and uploads an immutable release-delta artifact before it performs the irreversible Maven Central release. The delta intentionally excludes mutable `maven-metadata.xml` files. If Maven Central succeeds but the final `gh-pages` push fails after its retries, overlay that delta on the latest Pages repository, run `python3 .github/scripts/rebuild_maven_metadata.py <pages-worktree>/maven`, and publish the resulting commit; do **not** run the Maven Central publication again for the same version.
 
@@ -342,11 +441,11 @@ Available content scale options:
 > Surface type parameter is supported only for Android target.
 
 Available surface type options:
-- `SurfaceType.Auto` (default): uses TextureView for normal videos, Media3's spherical GL surface for equirectangular 360 Android playback, and the OpenGL projection surface for flat stereo, VR180, fisheye, and EAC playback.
+- `SurfaceType.Auto` (default): uses `SurfaceView` for flat video, which is Android's HDR-eligible system path, and the controlled Media3 frame processor for projected/stereo video.
 - `SurfaceType.SurfaceView`: uses SurfaceView for the player view, which is more performant for video playback but has limitations in terms of composability and animations.
 - `SurfaceType.TextureView`: uses TextureView for the player view, which allows for more complex composable layouts and animations.
 - `SurfaceType.SphericalGlSurfaceView`: uses Media3's spherical GL surface explicitly. This is intended for equirectangular 360 projection on Android.
-- `SurfaceType.ProjectedGlSurfaceView`: uses the Android OpenGL projection shader explicitly. This supports flat stereo, equirectangular, fisheye and EAC projection.
+- `SurfaceType.ProjectedGlSurfaceView`: uses `DefaultVideoFrameProcessor` and the Android projection GL effect explicitly. This supports flat stereo, equirectangular, fisheye and EAC projection.
 
 ```kotlin
 VideoPlayerSurface(
@@ -447,7 +546,24 @@ val nextPreset = playerState.projection.nextVideoProjectionPreset()
 
 Supported projection metadata includes flat 2D/3D, equirectangular 180/360, fisheye 180/190/200/220, and EAC 360 with mono, side-by-side, and over-under stereo layouts. A non-default `projectionTextureCrop` switches `SurfaceType.Auto` and canvas paths to projection renderers so the crop can be applied.
 
-On Android, `SurfaceType.Auto` switches equirectangular 360 sources with default texture crop to Media3's spherical GL surface and maps mono/SBS/OU stereo modes into Media3. Flat stereo, equirectangular 180, fisheye, EAC and cropped sources use the Android OpenGL projection surface. Android projected surfaces can use device rotation automatically unless `projectionViewControlMode` is set to `MANUAL`. iOS uses a SceneKit projection view for flat stereo, equirectangular, fisheye, EAC and cropped sources, with CoreMotion-backed viewport control in `AUTO`/`DEVICE_MOTION` modes. Web uses a WebGL projection canvas for flat stereo, equirectangular, fisheye, EAC and cropped sources, rendering stereo material as side-by-side output and reading `DeviceOrientationEvent` when the browser allows it. Remote web videos must be served with CORS headers when WebGL projection is enabled, because browsers block cross-origin video texture sampling otherwise. Some mobile browsers, especially iOS Safari, require a user permission gesture before device orientation events are delivered; the web renderer requests that permission on the first click, tap, or pointer release while device-motion projection control is active. Desktop JVM uses the same common projection settings, detection and presets; macOS, Windows and Linux Compose Canvas frame paths render flat stereo, equirectangular, fisheye, EAC and cropped sources through a Skia shader. Native desktop surfaces such as libVLC native-view and macOS HDR/EDR Metal remain native renderer paths and report that limitation through diagnostics.
+On Android, `SurfaceType.Auto` sends every projection mode through Media3's `DefaultVideoFrameProcessor` so PQ/HLG input cannot accidentally be drawn as washed-out SDR. HDR projection requires GLES3 plus `EXT_YUV_target`; HDR10/PQ and HLG outputs additionally require the matching EGL colorspace and use RGBA16F intermediates with an RGBA_1010102 output surface. `AUTO` and `PREFER_HDR` retry Media3's managed SDR tone mapping if HDR output setup fails, while `REQUIRE_HDR` reports a typed error. Flat video uses `SurfaceView`; `TextureView` is an explicit compositing opt-out and is not advertised as HDR. Android projected surfaces can use device rotation automatically unless `projectionViewControlMode` is set to `MANUAL`. iOS projections use `AVPlayerItemVideoOutput` to pull P010/NV12 frames into CoreVideo Metal textures. One `rgba16Float` shader handles flat stereo, equirectangular, fisheye, EAC, crops and CoreMotion-backed viewport control; HDR10/HLG is confirmed only after an EDR Metal frame completes, and runtime failure replans to controlled SDR unless `REQUIRE_HDR` was selected. Flat iOS playback keeps `AVPlayerLayer`; `FORCE_SDR` explicitly disables EDR on that layer so AVFoundation performs the SDR presentation. macOS JVM uses the same P010/NV12 and FP16 color/projection ordering in a per-player native Metal layer, follows the active `NSScreen`, and keeps Compose controls/subtitles in a separate overlay window.
+
+Windows requests Media Foundation hardware transforms and requires a decoded P010 GPU surface before
+its D3D11 projection/color shader feeds a flip-model swapchain; it does not invent a decoder
+component name that Media Foundation has not exposed. HDR uses an Advanced Color PQ/BT.2020 or
+scRGB swapchain. `FORCE_SDR`, and the retry after a non-strict HDR-output failure, instead run
+BT.2390 tone mapping and BT.2020-to-BT.709 gamut conversion in that same renderer before presenting
+an 8-bit dithered G22/BT.709 swapchain. These native MP4 routes do not depend on KMediaBridge. A
+route is confirmed only after the active `IDXGIOutput6`, requested swapchain color space, P010 input
+and first successful `Present` agree. Linux flat HDR uses GStreamer `waylandsink`; projection uses
+the optional Vulkan renderer with an exact 10-bit PQ/HLG WSI colorspace. Its current linear P010
+DMA-BUF path maps the buffer before the Vulkan upload, so it is bounded but not advertised as
+zero-copy. Supported JBR Wayland sessions use sibling video and bounded `wl_shm` Compose overlay
+subsurfaces with input and semantics retained on the parent Compose surface. Missing JBR/WLToolkit,
+GStreamer, Wayland color management, DMA-BUF, Vulkan, overlay, or output support replans to verified
+SDR; `FORCE_SDR` explicitly bypasses the HDR Wayland surface.
+
+Web attempts HDR projection only when WebGPU configuration readback and an HDR display are present. It imports a bounded set of current `VideoFrame` objects, asks the browser to color-manage tagged PQ/HLG into an extended Display-P3 working encoding, and projects them into an `rgba16float` canvas with extended tone mapping. HDR is confirmed only after the display still reports high dynamic range, the configuration is retained, and the first GPU submission completes; this confirms an HDR canvas element rather than claiming a raw PQ/HLG display transport. If an HDR canvas is rejected, `AUTO`/`PREFER_HDR` recreates the route as WebGPU controlled SDR: the extended sRGB texture is converted to linear light, tone-mapped with BT.2390, gamut-mapped through the common ICtCp LUT, dithered, and written to an FP16 standard sRGB canvas. WebGL is reserved for browser-managed SDR projection and is never reported as an HDR-to-SDR converter; without WebGPU the controlled HDR fallback fails closed. `REQUIRE_HDR` fails instead of falling back. Flat HDR normally stays browser-managed and keeps output status unknown, while `FORCE_SDR` switches its visible output to the same controlled WebGPU SDR canvas because a native `<video>` cannot be forced to SDR on an HDR display. Remote web videos must be served with CORS headers whenever a canvas renderer is active, because browsers block cross-origin video texture sampling otherwise. Some mobile browsers, especially iOS Safari, require a user permission gesture before device orientation events are delivered. A libVLC native view is never used as proof of HDR output.
 
 #### Custom Overlay UI
 
@@ -711,11 +827,11 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. ASS/SSA subtitles are rendered as plain dialogue text by Compose on native targets and with full styling on browser targets through JASSUB/libass. On desktop JVM, the libVLC MKV/WebM backends can expose and select embedded subtitle tracks; on macOS the canvas path can also dynamically load user-installed libass and blend full ASS/SSA rendering into the Compose/Skia frame. The external JVM HLS fallback can burn embedded subtitle tracks through user-installed VLC or `ffmpeg`.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. The core also parses ASS/SSA timing and dialogue text, but authored styles, positioning and effects require the optional `composemediaplayer-ass` artifact plus `AssSubtitleExtension()`. That extension uses bundled libass on Android, Apple, Windows and Linux targets, and JASSUB/libass on browser Wasm. Windows and Linux users do not install libass separately. Other native routes keep the plain-dialogue fallback unless their playback backend supplies styled subtitle rendering. On desktop JVM, the libVLC MKV/WebM backends can expose and select embedded subtitle tracks. For the optional HLS container fallback, the macOS KMediaBridge runtime can burn selected embedded text tracks into controlled BT.709 SDR; remux-only platform runtimes use the optional VLC fallback when it is available.
 
 #### 🎯 Supported Formats
 
-The player supports SRT, VTT, ASS and SSA subtitle formats with automatic format detection. Browser targets use JASSUB/libass for styled ASS/SSA rendering; native targets parse ASS/SSA timing and dialogue text in Compose unless a platform-specific backend, such as the desktop JVM libVLC canvas backend, provides full libass rendering.
+The player supports SRT, VTT, ASS and SSA subtitle formats with automatic format detection. With `composemediaplayer-ass` installed and activated, Android, browser Wasm, Apple targets, and Windows/Linux JVM use the libass-backed routes described below. The optional JVM artifact already contains the Windows/Linux runtime. Without it, the core keeps its lightweight ASS/SSA dialogue fallback. A platform-specific backend, such as a native libVLC surface, may independently provide styled rendering.
 
 #### 🎯 Adding Subtitles from URL or Local File
 
@@ -738,14 +854,66 @@ when (val result = playerState.selectSubtitleTrack(track)) {
 }
 ```
 
+#### Android ASS/SSA subtitles with libass
+
+The Android variant of the optional `composemediaplayer-ass` artifact includes libass 0.17.5 and its native runtime for `arm64-v8a` and `armeabi-v7a`; Intel Android ABIs are not published. Applications do not need another Maven repository. Add `AssSubtitleExtension()` to `VideoPlaybackOptions.extensions` to activate it. Media3 still owns playback and demuxing. The extension intercepts only the raw Matroska ASS/SSA packet format and renders it into a transparent screen-space overlay, while other Media3 subtitle formats keep their normal path.
+
+The libass route supports:
+
+- external `.ass` and `.ssa` tracks selected through `addSubtitleTrack(...)`;
+- embedded Matroska ASS/SSA tracks, including supported font attachments;
+- ASS styles, layers, positioning, karaoke, transforms and animation;
+- seeking, positive or negative subtitle offsets, resize and crop-to-fill geometry.
+
+ASS script styles control this overlay, so `subtitleTextStyle` and `subtitleBackgroundColor` apply to the Compose subtitle renderer rather than restyling libass output. A custom `AndroidMediaSourceProvider` that returns a fully constructed `MediaSource` must preserve KMediaPlayer's subtitle parser/extractor setup; otherwise that custom source can flatten ASS into ordinary Media3 cues before the libass renderer sees it. Side-loaded SSA supplied directly to Media3 and HLS SSA retain Media3's fallback path.
+
+The native libraries, Android notices and LGPL replacement material live in the optional artifact,
+not in `composemediaplayer`.
+
+#### Windows and Linux ASS/SSA subtitles with libass
+
+On a 64-bit JVM, the optional component extracts and loads its packaged libass runtime through
+Java's Foreign Function API. The JAR includes x86_64 and ARM64 payloads for both systems (libass
+0.17.4 on Windows and 0.17.5 on Linux), with SHA-256 verification before native loading. Windows
+uses DirectWrite font discovery; Linux uses the desktop's normal fontconfig configuration. External
+ASS/SSA files are composited into writable BGRA video frames. Embedded Matroska ASS/SSA tracks
+exposed by the libVLC canvas backend use the built-in extractor and pass container font attachments
+to libass.
+
+Users do not install libass or copy its native files. Register `AssSubtitleExtension()` and launch
+the application with native access enabled:
+
+```text
+--enable-native-access=ALL-UNNAMED
+```
+
+An advanced deployment can override the packaged runtime by setting either the JVM property or
+environment variable to a compatible library file (or a directory containing it):
+
+```text
+-Dcomposemediaplayer.ass.libraryPath=/opt/my-app/lib/libass.so.9
+KMEDIA_ASS_LIBRARY_PATH=C:\my-app\lib\libass-9.dll
+```
+
+The override must be set before the extension is first queried. If it cannot be loaded, the
+packaged runtime is used; a compatible system library is only the last recovery path. If loading,
+track extraction, or rendering fails, the player keeps its Compose or libVLC subtitle fallback.
+Native HDR/color and `LIBVLC_NATIVE` surfaces retain their platform subtitle path because they do
+not expose a writable CPU video frame.
+
 #### Browser ASS/SSA subtitles with JASSUB/libass
 
-ASS/SSA subtitle rendering is enabled by default on the `wasmJs` browser target. As a library user, you do not need to add `jassub`, libass, worker scripts, or WASM files manually. The library declares the `jassub` npm dependency and the browser bundle includes the default JASSUB worker, WASM and fallback font assets.
+Full ASS/SSA rendering on `wasmJs` is provided by the optional `composemediaplayer-ass` artifact and is active only when `AssSubtitleExtension()` is present in `VideoPlaybackOptions.extensions`. The optional artifact declares the pinned `jassub` npm dependency, so applications do not add JASSUB, libass, worker scripts or WASM files manually. The browser bundler emits JASSUB's default worker, WASM and fallback font assets; a core-only browser build contains none of them.
 
-For a basic browser app, just select an `.ass` or `.ssa` subtitle track:
+Create stable player options and then select an `.ass` or `.ssa` subtitle track:
 
 ```kotlin
-val playerState = rememberVideoPlayerState()
+val playbackOptions = remember {
+    VideoPlaybackOptions(
+        extensions = listOf(AssSubtitleExtension()),
+    )
+}
+val playerState = rememberVideoPlayerState(playbackOptions = playbackOptions)
 
 LaunchedEffect(Unit) {
     playerState.openUri("https://example.com/video.mp4")
@@ -802,7 +970,8 @@ Browser notes:
 - ASS/SSA rendering requires browser support for `OffscreenCanvas` and `canvas.transferControlToOffscreen()`.
 - Web fullscreen should keep the same video element alive; entering fullscreen should not restart playback.
 - SRT and VTT do not use JASSUB. They continue to use the Compose subtitle renderer.
-- Native Android, iOS and desktop targets do not use this JASSUB configuration.
+- Android, iOS and desktop JVM use the same extension entry point but do not use this JASSUB
+  configuration. Their native behavior is described in the ASS component documentation.
 
 #### Selecting Embedded Audio and Subtitle Tracks
 
@@ -1149,4 +1318,4 @@ fun App() {
 
 ## 📊 Roadmap
 
-- **Player with Separate Audio and Video Streams**: Add functionality to support different audio and video streams for advanced playback scenarios.
+- **Application-composed Separate Audio and Video Sources**: Add a public API for combining arbitrary independent source URLs. HLS alternate renditions used by the bounded Dolby Vision VOD bridge are already handled internally and are not this roadmap item.

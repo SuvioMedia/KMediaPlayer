@@ -1,8 +1,10 @@
-@file:OptIn(ExperimentalWasmJsInterop::class)
+@file:OptIn(ExperimentalWasmJsInterop::class, ExperimentalUnsignedTypes::class)
 
 package io.github.kdroidfilter.composemediaplayer
 
 import kotlinx.browser.document
+import org.khronos.webgl.Uint8Array
+import org.khronos.webgl.toUint8Array
 import org.w3c.dom.HTMLCanvasElement
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
@@ -46,6 +48,10 @@ internal fun HTMLCanvasElement.configureWebProjectionRenderer(
     projection: VideoProjectionSettings,
     projectionView: VideoProjectionViewSettings,
     textureCrop: VideoTextureCrop,
+    sourceColorInfo: VideoColorInfo,
+    outputDynamicRange: VideoDynamicRange,
+    onConfigured: (VideoDynamicRange, VideoSurfaceKind) -> Unit,
+    onHdrUnavailable: (String) -> Unit,
     onError: (String) -> Unit,
 ) {
     val normalized = projection.normalized()
@@ -54,28 +60,81 @@ internal fun HTMLCanvasElement.configureWebProjectionRenderer(
         normalized.toVideoProjectionRenderPlan(
             VideoProjectionRenderOptions(textureCrop = textureCrop),
         )
-    configureWebProjectionRenderer(
-        canvas = this,
-        video = video,
-        projectionType = normalized.projectionType.projectionShaderCode,
-        fovDegrees = plan.mesh.horizontalFovDegrees,
-        stereo = plan.stereo,
-        leftLeft = plan.leftEyeTexture.left,
-        leftTop = plan.leftEyeTexture.top,
-        leftRight = plan.leftEyeTexture.right,
-        leftBottom = plan.leftEyeTexture.bottom,
-        leftRotation = plan.leftEyeTexture.rotation.ordinal,
-        rightLeft = plan.rightEyeTexture.left,
-        rightTop = plan.rightEyeTexture.top,
-        rightRight = plan.rightEyeTexture.right,
-        rightBottom = plan.rightEyeTexture.bottom,
-        rightRotation = plan.rightEyeTexture.rotation.ordinal,
-        viewYawDegrees = normalizedView.yawDegrees,
-        viewPitchDegrees = normalizedView.pitchDegrees,
-        viewRollDegrees = normalizedView.rollDegrees,
-        viewZoom = normalizedView.zoom,
-        onError = onError,
-    )
+    val projectionType = normalized.projectionType.projectionShaderCode
+    val fovDegrees = plan.mesh.horizontalFovDegrees
+    val leftEye = plan.leftEyeTexture
+    val rightEye = plan.rightEyeTexture
+    if (outputDynamicRange.isWebGpuHdrOutput || sourceColorInfo.isHdr) {
+        if (!sourceColorInfo.hasWebGpuManagedHdrTransfer) {
+            return onError("Controlled WebGPU rendering requires a tagged PQ or HLG source transfer.")
+        }
+        val outputHdr = outputDynamicRange.isWebGpuHdrOutput
+        val canvasColorSpace =
+            if (outputHdr) {
+                requireNotNull(webGpuHdrCanvasColorSpaceFor(outputDynamicRange))
+            } else {
+                "srgb"
+            }
+        val unavailable: (String) -> Unit = if (outputHdr) onHdrUnavailable else onError
+        configureWebGpuProjectionRenderer(
+            canvas = this,
+            video = video,
+            canvasColorSpace = canvasColorSpace,
+            sourceColorSpace = webGpuExternalTextureColorSpaceFor(outputHdr),
+            outputHdr = outputHdr,
+            projectionType = projectionType,
+            fovDegrees = fovDegrees,
+            stereo = plan.stereo,
+            leftLeft = leftEye.left,
+            leftTop = leftEye.top,
+            leftRight = leftEye.right,
+            leftBottom = leftEye.bottom,
+            leftRotation = leftEye.rotation.ordinal,
+            rightLeft = rightEye.left,
+            rightTop = rightEye.top,
+            rightRight = rightEye.right,
+            rightBottom = rightEye.bottom,
+            rightRotation = rightEye.rotation.ordinal,
+            viewYawDegrees = normalizedView.yawDegrees,
+            viewPitchDegrees = normalizedView.pitchDegrees,
+            viewRollDegrees = normalizedView.rollDegrees,
+            viewZoom = normalizedView.zoom,
+            sourcePeakNits = sourceColorInfo.webSourcePeakNits,
+            gamutLutRgba16fBytes = webIctcpGamutRgba16fBytes,
+            gamutLutEdge = IctcpGamutLut3D.DEFAULT_EDGE,
+            onConfigured = {
+                onConfigured(
+                    if (outputHdr) outputDynamicRange else VideoDynamicRange.SDR,
+                    VideoSurfaceKind.WEB_GPU_CANVAS,
+                )
+            },
+            onUnavailable = unavailable,
+        )
+    } else {
+        configureWebGlProjectionRenderer(
+            canvas = this,
+            video = video,
+            projectionType = projectionType,
+            fovDegrees = fovDegrees,
+            stereo = plan.stereo,
+            leftLeft = leftEye.left,
+            leftTop = leftEye.top,
+            leftRight = leftEye.right,
+            leftBottom = leftEye.bottom,
+            leftRotation = leftEye.rotation.ordinal,
+            rightLeft = rightEye.left,
+            rightTop = rightEye.top,
+            rightRight = rightEye.right,
+            rightBottom = rightEye.bottom,
+            rightRotation = rightEye.rotation.ordinal,
+            viewYawDegrees = normalizedView.yawDegrees,
+            viewPitchDegrees = normalizedView.pitchDegrees,
+            viewRollDegrees = normalizedView.rollDegrees,
+            viewZoom = normalizedView.zoom,
+            onConfigured = { onConfigured(VideoDynamicRange.SDR, VideoSurfaceKind.WEB_GL_CANVAS) },
+            onError = onError,
+        )
+    }
 }
 
 internal fun HTMLCanvasElement.disposeWebProjectionRenderer() {
@@ -83,7 +142,7 @@ internal fun HTMLCanvasElement.disposeWebProjectionRenderer() {
 }
 
 @Suppress("LongMethod", "LongParameterList", "UNUSED_PARAMETER")
-private fun configureWebProjectionRenderer(
+private fun configureWebGlProjectionRenderer(
     canvas: HTMLCanvasElement,
     video: HTMLVideoElement,
     projectionType: Int,
@@ -103,6 +162,7 @@ private fun configureWebProjectionRenderer(
     viewPitchDegrees: Float,
     viewRollDegrees: Float,
     viewZoom: Float,
+    onConfigured: () -> Unit,
     onError: (String) -> Unit,
 ): Unit =
     js(
@@ -157,7 +217,8 @@ private fun configureWebProjectionRenderer(
                     "  }",
                     "  vec2 rotated = rotateUv(localUv);",
                     "  vec2 uv = mix(uEyeWindow.xy, uEyeWindow.zw, rotated);",
-                    "  return texture2D(uTexture, uv);",
+                    "  vec4 sampled = texture2D(uTexture, uv);",
+                    "  return sampled;",
                     "}",
                     "vec3 rayForScreenUv(vec2 screenUv) {",
                     "  vec2 p = vec2(screenUv.x * 2.0 - 1.0, 1.0 - screenUv.y * 2.0);",
@@ -276,6 +337,7 @@ private fun configureWebProjectionRenderer(
                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
 
                 return {
+                    kind: "webgl-sdr",
                     gl: gl,
                     program: program,
                     buffer: buffer,
@@ -287,6 +349,8 @@ private fun configureWebProjectionRenderer(
                     animationFrame: 0,
                     disposed: false,
                     uploadErrorReported: false,
+                    colorConfigurationReported: false,
+                    onConfigured: null,
                     onError: null
                 };
             }
@@ -351,6 +415,10 @@ private fun configureWebProjectionRenderer(
                             video.parentElement.style.setProperty("z-index", "-3", "important");
                         }
                         renderer.uploadErrorReported = false;
+                        if (!renderer.colorConfigurationReported && renderer.onConfigured) {
+                            renderer.colorConfigurationReported = true;
+                            renderer.onConfigured();
+                        }
                     } catch (error) {
                         if (!renderer.uploadErrorReported && renderer.onError) {
                             renderer.uploadErrorReported = true;
@@ -400,7 +468,9 @@ private fun configureWebProjectionRenderer(
                     video.parentElement.style.setProperty("z-index", "-3", "important");
                 }
                 renderer.video = video;
+                renderer.onConfigured = onConfigured;
                 renderer.onError = onError;
+                renderer.colorConfigurationReported = false;
                 renderer.settings = {
                     projectionType: projectionType,
                     fovDegrees: fovDegrees,
@@ -442,6 +512,8 @@ private fun disposeWebProjectionRenderer(canvas: HTMLCanvasElement): Unit =
     js(
         """
         {
+            canvas.__composeMediaPlayerProjectionGeneration =
+                (canvas.__composeMediaPlayerProjectionGeneration || 0) + 1;
             const renderer = canvas.__composeMediaPlayerProjectionRenderer;
             if (renderer) {
                 renderer.disposed = true;
@@ -449,14 +521,93 @@ private fun disposeWebProjectionRenderer(canvas: HTMLCanvasElement): Unit =
                     cancelAnimationFrame(renderer.animationFrame);
                     renderer.animationFrame = 0;
                 }
+                if (renderer.confirmationTimeout) {
+                    clearTimeout(renderer.confirmationTimeout);
+                    renderer.confirmationTimeout = 0;
+                }
                 const gl = renderer.gl;
                 if (gl) {
                     if (renderer.texture) gl.deleteTexture(renderer.texture);
                     if (renderer.buffer) gl.deleteBuffer(renderer.buffer);
                     if (renderer.program) gl.deleteProgram(renderer.program);
                 }
+                if (renderer.context && typeof renderer.context.unconfigure === "function") {
+                    try { renderer.context.unconfigure(); } catch (_) {}
+                }
+                if (renderer.uniformBuffer && typeof renderer.uniformBuffer.destroy === "function") {
+                    try { renderer.uniformBuffer.destroy(); } catch (_) {}
+                }
+                if (renderer.gamutLutTexture && typeof renderer.gamutLutTexture.destroy === "function") {
+                    try { renderer.gamutLutTexture.destroy(); } catch (_) {}
+                }
+                if (renderer.inFlightVideoFrames) {
+                    renderer.inFlightVideoFrames.forEach(function(frame) {
+                        try { frame.close(); } catch (_) {}
+                    });
+                    renderer.inFlightVideoFrames.clear();
+                }
+                if (renderer.device && typeof renderer.device.destroy === "function") {
+                    try { renderer.device.destroy(); } catch (_) {}
+                }
+                canvas.setAttribute("data-kmp-renderer-state", "disposed");
                 canvas.__composeMediaPlayerProjectionRenderer = null;
             }
         }
         """,
     )
+
+private val webIctcpGamutRgba16fBytes: Uint8Array by lazy {
+    val source = IctcpGamutLut3D.defaultRgba32f
+    UByteArray(source.size * Short.SIZE_BYTES) { byteIndex ->
+        val half = webFloatToHalfBits(source[byteIndex / Short.SIZE_BYTES].coerceIn(0.0f, 1.0f)).toInt()
+        if (byteIndex % Short.SIZE_BYTES == 0) {
+            (half and WEB_HALF_BYTE_MASK).toUByte()
+        } else {
+            ((half ushr Byte.SIZE_BITS) and WEB_HALF_BYTE_MASK).toUByte()
+        }
+    }.toUint8Array()
+}
+
+private const val WEB_HALF_BYTE_MASK = 0xff
+
+internal fun webFloatToHalfBits(value: Float): UShort {
+    val floatBits = value.toRawBits()
+    val sign = (floatBits ushr 16) and 0x8000
+    var roundedMagnitude = (floatBits and 0x7fffffff) + 0x1000
+    val half =
+        when {
+            roundedMagnitude >= 0x47800000 -> {
+                val magnitude = floatBits and 0x7fffffff
+                when {
+                    magnitude < 0x47800000 -> sign or 0x7bff
+                    roundedMagnitude < 0x7f800000 -> sign or 0x7c00
+                    else -> sign or 0x7c00 or ((floatBits and 0x007fffff) ushr 13)
+                }
+            }
+            roundedMagnitude >= 0x38800000 -> sign or ((roundedMagnitude - 0x38000000) ushr 13)
+            roundedMagnitude < 0x33000000 -> sign
+            else -> {
+                val exponent = (floatBits and 0x7fffffff) ushr 23
+                roundedMagnitude =
+                    ((floatBits and 0x7fffff) or 0x800000) +
+                    (0x800000 ushr (exponent - 102))
+                sign or (roundedMagnitude ushr (126 - exponent))
+            }
+        }
+    return half.toUShort()
+}
+
+private val VideoColorInfo.webSourcePeakNits: Float
+    get() =
+        (
+            masteringDisplay?.maxLuminanceNits
+                ?: contentLightLevel?.maxContentLightLevelNits?.toFloat()
+                ?: WEB_DEFAULT_HDR_PEAK_NITS
+        ).coerceIn(WEB_MIN_HDR_PEAK_NITS, WEB_MAX_HDR_PEAK_NITS)
+
+private const val WEB_DEFAULT_HDR_PEAK_NITS = 1_000f
+private const val WEB_MIN_HDR_PEAK_NITS = 100f
+private const val WEB_MAX_HDR_PEAK_NITS = 10_000f
+
+private val VideoDynamicRange.isWebGpuHdrOutput: Boolean
+    get() = this == VideoDynamicRange.HDR10 || this == VideoDynamicRange.HLG

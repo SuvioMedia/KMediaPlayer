@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import kotlin.test.Test
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 
 /**
  * Tests for the JVM implementation of VideoPlayerSurface
@@ -33,5 +34,15 @@ class VideoPlayerSurfaceTest {
 
         assertNotNull(strictSurface)
         assertNotNull(legacySurface)
+    }
+
+    @Test
+    fun eventingStateResolvesToItsNativeSurfaceOwner() {
+        val platformState = PreviewableVideoPlayerState()
+        val wrappedState = EventingVideoPlayerState(EventingVideoPlayerState(platformState))
+
+        assertSame(platformState, wrappedState.resolveJvmSurfaceState())
+
+        wrappedState.dispose()
     }
 }

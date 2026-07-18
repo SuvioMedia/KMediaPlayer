@@ -1,0 +1,6 @@
+package io.github.kdroidfilter.composemediaplayer.consumer.extensions
+
+import io.github.kdroidfilter.composemediaplayer.VideoSourcePipelineExtension
+import io.github.kdroidfilter.composemediaplayer.kmediabridge.KMediaBridgeAndroidExtension
+
+fun publishedAndroidBridgeExtension(): VideoSourcePipelineExtension = KMediaBridgeAndroidExtension()

@@ -8,7 +8,7 @@ import java.nio.ByteBuffer
 
 internal object WindowsNativeBridge {
     /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the DLL. */
-    private const val EXPECTED_NATIVE_VERSION = 4
+    private const val EXPECTED_NATIVE_VERSION = 12
 
     init {
         NativeLibraryLoader.load("NativeVideoPlayer", WindowsNativeBridge::class.java)
@@ -157,6 +157,39 @@ internal object WindowsNativeBridge {
         width: Int,
         height: Int,
     ): Int
+
+    @JvmStatic external fun nConfigureHdrOutput(
+        handle: Long,
+        integerConfiguration: IntArray,
+        floatingConfiguration: FloatArray,
+    ): Int
+
+    @JvmStatic external fun nAttachHdrOutput(
+        handle: Long,
+        component: Component,
+    ): Boolean
+
+    @JvmStatic external fun nDetachHdrOutput(
+        handle: Long,
+        component: Component,
+    )
+
+    @JvmStatic external fun nRenderHdrFrame(handle: Long): Int
+
+    @JvmStatic external fun nGetHdrOutputStatus(
+        handle: Long,
+        integerStatus: IntArray,
+        luminanceStatus: FloatArray,
+    ): Int
+
+    @JvmStatic external fun nGetDecodedVideoColorInfo(handle: Long): IntArray?
+
+    @JvmStatic external fun nGetVideoPlaybackDiagnostics(handle: Long): LongArray?
+
+    @JvmStatic external fun nProbeVideoColorInfo(
+        url: String,
+        requestHeaders: String,
+    ): IntArray?
 
     @JvmStatic external fun nCreateLibVlcInstance(
         libVlcPath: String,
@@ -342,4 +375,33 @@ internal object WindowsNativeBridge {
         width: Int,
         height: Int,
     ): Int = nSetOutputSize(handle, width, height)
+
+    fun configureHdrOutput(
+        handle: Long,
+        configuration: WindowsHdrNativeConfiguration,
+    ): Int = nConfigureHdrOutput(handle, configuration.integers, configuration.floats)
+
+    fun disableHdrOutput(handle: Long): Int = nConfigureHdrOutput(handle, intArrayOf(-1), floatArrayOf())
+
+    fun hdrOutputStatus(handle: Long): WindowsNativeHdrOutputStatus? {
+        val integers = IntArray(10)
+        val luminance = FloatArray(3)
+        val hr = nGetHdrOutputStatus(handle, integers, luminance)
+        if (hr < 0) return null
+        return WindowsNativeHdrOutputStatus(
+            displayQueried = integers[0] != 0,
+            advancedColorEnabled = integers[1] != 0,
+            swapChainConfigured = integers[2] != 0,
+            firstFramePresented = integers[3] != 0,
+            p010InputConfirmed = integers[4] != 0,
+            bitsPerColor = integers[5],
+            displayColorSpace = integers[6],
+            swapChainColorSpace = integers[7],
+            monitorGeneration = integers[8],
+            lastError = integers[9],
+            minLuminanceNits = luminance[0],
+            maxLuminanceNits = luminance[1],
+            maxFullFrameLuminanceNits = luminance[2],
+        )
+    }
 }

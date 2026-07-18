@@ -8,7 +8,9 @@ import kotlinx.coroutines.test.setMain
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class VideoPlayerStatePreviewTest {
@@ -33,5 +35,14 @@ class VideoPlayerStatePreviewTest {
             )
         assertIs<PreviewableVideoPlayerState>(playerState)
         playerState.dispose()
+    }
+
+    @Test
+    fun androidRuntimeAcceptsOnlyPublishedArmAbis() {
+        assertTrue(isSupportedAndroidRuntimeAbi(listOf("arm64-v8a")))
+        assertTrue(isSupportedAndroidRuntimeAbi(listOf("armeabi-v7a")))
+        assertTrue(isSupportedAndroidRuntimeAbi(listOf("x86_64", "arm64-v8a")))
+        assertFalse(isSupportedAndroidRuntimeAbi(listOf("x86_64", "x86")))
+        assertFalse(isSupportedAndroidRuntimeAbi(emptyList()))
     }
 }

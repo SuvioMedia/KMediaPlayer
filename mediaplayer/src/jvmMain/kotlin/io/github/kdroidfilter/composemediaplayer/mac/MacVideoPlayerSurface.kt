@@ -545,6 +545,7 @@ private class MacHdrMetalPanel(
         if (!awtCanvas.isDisplayable || awtCanvas.width <= 0 || awtCanvas.height <= 0) return
         val wasAttached = attached
         attached = playerState.attachHdrMetalComponent(awtCanvas, contentScaleMode) || wasAttached
+        if (attached) playerState.refreshAttachedHdrColorPipeline()
     }
 
     private fun updateTrackedWindow() {

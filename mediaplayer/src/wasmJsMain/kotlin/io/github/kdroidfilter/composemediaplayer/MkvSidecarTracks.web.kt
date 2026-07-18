@@ -54,7 +54,6 @@ internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
                     scope.launch {
                         if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
                         ensureMatroskaSubtitlesModuleLoaded()
-                        ensureAssRendererScriptLoaded()
                     }
                 }
             }

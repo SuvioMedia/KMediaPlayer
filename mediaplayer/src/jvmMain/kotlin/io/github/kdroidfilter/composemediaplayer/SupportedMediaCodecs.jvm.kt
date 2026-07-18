@@ -5,14 +5,16 @@ import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 internal actual suspend fun platformQuerySupportedAudioCodecs(): Set<MediaCodec> =
     when (CurrentPlatform.os) {
         CurrentPlatform.OS.WINDOWS -> windowsAudioCodecs
-        CurrentPlatform.OS.MAC -> appleAudioCodecs
+        CurrentPlatform.OS.MAC ->
+            if (CurrentPlatform.isSupportedMacOsArchitecture) appleAudioCodecs else emptySet()
         CurrentPlatform.OS.LINUX -> gstreamerAudioCodecs
     }
 
 internal actual suspend fun platformQuerySupportedVideoCodecs(): Set<MediaCodec> =
     when (CurrentPlatform.os) {
         CurrentPlatform.OS.WINDOWS -> windowsVideoCodecs
-        CurrentPlatform.OS.MAC -> appleVideoCodecs
+        CurrentPlatform.OS.MAC ->
+            if (CurrentPlatform.isSupportedMacOsArchitecture) appleVideoCodecs else emptySet()
         CurrentPlatform.OS.LINUX -> gstreamerVideoCodecs
     }
 

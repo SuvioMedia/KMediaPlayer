@@ -3,6 +3,8 @@ language = Objective-C
 
 ---
 #import <Foundation/Foundation.h>
+#import <AVFoundation/AVFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 
 @protocol NSKeyValueObserving
 @required
@@ -12,3 +14,70 @@ language = Objective-C
     change:(NSDictionary<NSKeyValueChangeKey, id> *)change
     context:(void *)context;
 @end;
+
+// Kotlin/Native does not currently expose AVPlayer's Objective-C class
+// property. Keep the platform capability query behind this tiny, typed bridge
+// instead of inferring Dolby Vision support from EDR headroom or codec presence.
+static inline uint64_t KMPAVPlayerAvailableHDRModes(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    AVPlayerHDRMode modes = [AVPlayer availableHDRModes];
+#pragma clang diagnostic pop
+    return (uint64_t)modes;
+}
+
+static inline NSString *KMPAVPlayerAvailableHDRModesDidChangeNotification(void) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    NSString *name = AVPlayerAvailableHDRModesDidChangeNotification;
+#pragma clang diagnostic pop
+    return name;
+}
+
+// Unlike availableHDRModes, this remains the supported coarse capability gate on current SDKs.
+// Mode-specific bits are still required below it so Dolby Vision is never inferred from EDR alone.
+static inline int32_t KMPAVPlayerEligibleForHDRPlayback(void) {
+    return [AVPlayer eligibleForHDRPlayback] ? 1 : 0;
+}
+
+static inline NSString *KMPAVPlayerEligibleForHDRPlaybackDidChangeNotification(void) {
+    return AVPlayerEligibleForHDRPlaybackDidChangeNotification;
+}
+
+// iOS 26 replaced wantsExtendedDynamicRangeContent with preferredDynamicRange. Keep the
+// availability branch in Objective-C so Kotlin callers cannot accidentally touch a symbol that is
+// unavailable on the library's iOS 16.2 minimum.
+static inline void KMPConfigureLayerDynamicRange(
+    CALayer *layer,
+    int32_t hdr,
+    double contentHeadroom
+) {
+    if (layer == nil) {
+        return;
+    }
+    if (@available(iOS 26.0, *)) {
+        layer.preferredDynamicRange = hdr ? CADynamicRangeHigh : CADynamicRangeStandard;
+        layer.contentsHeadroom =
+            contentHeadroom > 0.0 ? (contentHeadroom >= 1.0 ? contentHeadroom : 1.0) : 0.0;
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        layer.wantsExtendedDynamicRangeContent = hdr ? YES : NO;
+#pragma clang diagnostic pop
+    }
+}
+
+static inline int32_t KMPIsLayerDynamicRangeConfigured(CALayer *layer, int32_t hdr) {
+    if (layer == nil) {
+        return 0;
+    }
+    if (@available(iOS 26.0, *)) {
+        CADynamicRange expected = hdr ? CADynamicRangeHigh : CADynamicRangeStandard;
+        return [layer.preferredDynamicRange isEqualToString:expected] ? 1 : 0;
+    }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    BOOL configured = layer.wantsExtendedDynamicRangeContent;
+#pragma clang diagnostic pop
+    return configured == (hdr ? YES : NO) ? 1 : 0;
+}

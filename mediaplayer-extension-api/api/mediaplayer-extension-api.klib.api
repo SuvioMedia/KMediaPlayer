@@ -1,0 +1,217 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64, wasmJs]
+// Alias: ios => [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <io.github.shusek:mediaplayer-extension-api>
+final enum class io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState> { // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState|null[0]
+    enum entry AVAILABLE // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState.AVAILABLE|null[0]
+    enum entry DEGRADED // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState.DEGRADED|null[0]
+    enum entry UNAVAILABLE // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState.UNAVAILABLE|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState> // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState> // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState.values|values#static(){}[0]
+}
+
+abstract interface io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource { // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource|null[0]
+    abstract val metadataHandling // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.metadataHandling|{}metadataHandling[0]
+        abstract fun <get-metadataHandling>(): io.github.kdroidfilter.composemediaplayer/DynamicMetadataHandling // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.metadataHandling.<get-metadataHandling>|<get-metadataHandling>(){}[0]
+    abstract val outputColorInfo // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.outputColorInfo|{}outputColorInfo[0]
+        abstract fun <get-outputColorInfo>(): io.github.kdroidfilter.composemediaplayer/VideoColorInfo // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.outputColorInfo.<get-outputColorInfo>|<get-outputColorInfo>(){}[0]
+    abstract val uri // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.uri|{}uri[0]
+        abstract fun <get-uri>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.uri.<get-uri>|<get-uri>(){}[0]
+    open val detail // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.detail|{}detail[0]
+        open fun <get-detail>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.detail.<get-detail>|<get-detail>(){}[0]
+    open val requestHeaders // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.requestHeaders|{}requestHeaders[0]
+        open fun <get-requestHeaders>(): kotlin.collections/Map<kotlin/String, kotlin/String> // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.requestHeaders.<get-requestHeaders>|<get-requestHeaders>(){}[0]
+
+    abstract fun close() // io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource.close|close(){}[0]
+}
+
+abstract interface io.github.kdroidfilter.composemediaplayer/SubtitlePipelineExtension : io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension { // io.github.kdroidfilter.composemediaplayer/SubtitlePipelineExtension|null[0]
+    abstract val supportedSubtitleFormats // io.github.kdroidfilter.composemediaplayer/SubtitlePipelineExtension.supportedSubtitleFormats|{}supportedSubtitleFormats[0]
+        abstract fun <get-supportedSubtitleFormats>(): kotlin.collections/Set<io.github.kdroidfilter.composemediaplayer/SubtitleFormat> // io.github.kdroidfilter.composemediaplayer/SubtitlePipelineExtension.supportedSubtitleFormats.<get-supportedSubtitleFormats>|<get-supportedSubtitleFormats>(){}[0]
+
+    open fun supportsSubtitleFormat(io.github.kdroidfilter.composemediaplayer/SubtitleFormat): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/SubtitlePipelineExtension.supportsSubtitleFormat|supportsSubtitleFormat(io.github.kdroidfilter.composemediaplayer.SubtitleFormat){}[0]
+}
+
+abstract interface io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension { // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension|null[0]
+    abstract val id // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension.id|{}id[0]
+        abstract fun <get-id>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension.id.<get-id>|<get-id>(){}[0]
+    open val availability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension.availability|{}availability[0]
+        open fun <get-availability>(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension.availability.<get-availability>|<get-availability>(){}[0]
+    open val colorConversionCapabilities // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension.colorConversionCapabilities|{}colorConversionCapabilities[0]
+        open fun <get-colorConversionCapabilities>(): io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension.colorConversionCapabilities.<get-colorConversionCapabilities>|<get-colorConversionCapabilities>(){}[0]
+
+    open fun status(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension.status|status(){}[0]
+}
+
+abstract interface io.github.kdroidfilter.composemediaplayer/VideoSourcePipelineExtension : io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension { // io.github.kdroidfilter.composemediaplayer/VideoSourcePipelineExtension|null[0]
+    abstract suspend fun prepareSource(io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest): io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation // io.github.kdroidfilter.composemediaplayer/VideoSourcePipelineExtension.prepareSource|prepareSource(io.github.kdroidfilter.composemediaplayer.VideoPipelineSourceRequest){}[0]
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation { // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation|null[0]
+    final class Ready : io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation { // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource) // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready.<init>|<init>(io.github.kdroidfilter.composemediaplayer.PreparedVideoPipelineSource){}[0]
+
+        final val source // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready.source|{}source[0]
+            final fun <get-source>(): io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready.source.<get-source>|<get-source>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready.component1|component1(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource = ...): io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready.copy|copy(io.github.kdroidfilter.composemediaplayer.PreparedVideoPipelineSource){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Ready.toString|toString(){}[0]
+    }
+
+    final class Rejected : io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation { // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason, kotlin/String) // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.<init>|<init>(io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason;kotlin.String){}[0]
+
+        final val detail // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.detail|{}detail[0]
+            final fun <get-detail>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.detail.<get-detail>|<get-detail>(){}[0]
+        final val reason // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.reason|{}reason[0]
+            final fun <get-reason>(): io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.reason.<get-reason>|<get-reason>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.component1|component1(){}[0]
+        final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.component2|component2(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason = ..., kotlin/String = ...): io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.copy|copy(io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason;kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.Rejected.toString|toString(){}[0]
+    }
+
+    final object NotApplicable : io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation { // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.NotApplicable|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.NotApplicable.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.NotApplicable.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation.NotApplicable.toString|toString(){}[0]
+    }
+}
+
+final class io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability { // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState, kotlin/String? = ...) // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.<init>|<init>(io.github.kdroidfilter.composemediaplayer.VideoPipelineExtensionState;kotlin.String?){}[0]
+
+    final val canContribute // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.canContribute|{}canContribute[0]
+        final fun <get-canContribute>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.canContribute.<get-canContribute>|<get-canContribute>(){}[0]
+    final val detail // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.detail|{}detail[0]
+        final fun <get-detail>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.detail.<get-detail>|<get-detail>(){}[0]
+    final val state // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.state|{}state[0]
+        final fun <get-state>(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.state.<get-state>|<get-state>(){}[0]
+
+    final fun component1(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.component1|component1(){}[0]
+    final fun component2(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.component2|component2(){}[0]
+    final fun copy(io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionState = ..., kotlin/String? = ...): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.copy|copy(io.github.kdroidfilter.composemediaplayer.VideoPipelineExtensionState;kotlin.String?){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.toString|toString(){}[0]
+
+    final object Companion { // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.Companion|null[0]
+        final val Available // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.Companion.Available|{}Available[0]
+            final fun <get-Available>(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.Companion.Available.<get-Available>|<get-Available>(){}[0]
+
+        final fun degraded(kotlin/String): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.Companion.degraded|degraded(kotlin.String){}[0]
+        final fun unavailable(kotlin/String): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability.Companion.unavailable|unavailable(kotlin.String){}[0]
+    }
+}
+
+final class io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus { // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus|null[0]
+    constructor <init>(kotlin/String, io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability, io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities) // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.<init>|<init>(kotlin.String;io.github.kdroidfilter.composemediaplayer.VideoPipelineExtensionAvailability;io.github.kdroidfilter.composemediaplayer.ColorConversionCapabilities){}[0]
+
+    final val availability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.availability|{}availability[0]
+        final fun <get-availability>(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.availability.<get-availability>|<get-availability>(){}[0]
+    final val colorConversionCapabilities // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.colorConversionCapabilities|{}colorConversionCapabilities[0]
+        final fun <get-colorConversionCapabilities>(): io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.colorConversionCapabilities.<get-colorConversionCapabilities>|<get-colorConversionCapabilities>(){}[0]
+    final val id // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.id|{}id[0]
+        final fun <get-id>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.id.<get-id>|<get-id>(){}[0]
+
+    final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.component1|component1(){}[0]
+    final fun component2(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.component2|component2(){}[0]
+    final fun component3(): io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.component3|component3(){}[0]
+    final fun copy(kotlin/String = ..., io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability = ..., io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities = ...): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.copy|copy(kotlin.String;io.github.kdroidfilter.composemediaplayer.VideoPipelineExtensionAvailability;io.github.kdroidfilter.composemediaplayer.ColorConversionCapabilities){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionStatus.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest { // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest|null[0]
+    constructor <init>(kotlin/String, kotlin.collections/Map<kotlin/String, kotlin/String> = ..., kotlin/String? = ..., io.github.kdroidfilter.composemediaplayer/VideoColorInfo, io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy, io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy, kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Long = ..., io.github.kdroidfilter.composemediaplayer/VideoDynamicRange? = ..., kotlin/Boolean = ...) // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.<init>|<init>(kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String>;kotlin.String?;io.github.kdroidfilter.composemediaplayer.VideoColorInfo;io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy;io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy;kotlin.Boolean;kotlin.Boolean;kotlin.Long;io.github.kdroidfilter.composemediaplayer.VideoDynamicRange?;kotlin.Boolean){}[0]
+
+    final val automaticDolbyVisionConversionAllowed // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.automaticDolbyVisionConversionAllowed|{}automaticDolbyVisionConversionAllowed[0]
+        final fun <get-automaticDolbyVisionConversionAllowed>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.automaticDolbyVisionConversionAllowed.<get-automaticDolbyVisionConversionAllowed>|<get-automaticDolbyVisionConversionAllowed>(){}[0]
+    final val dolbyVisionPolicy // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.dolbyVisionPolicy|{}dolbyVisionPolicy[0]
+        final fun <get-dolbyVisionPolicy>(): io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.dolbyVisionPolicy.<get-dolbyVisionPolicy>|<get-dolbyVisionPolicy>(){}[0]
+    final val dynamicRangePolicy // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.dynamicRangePolicy|{}dynamicRangePolicy[0]
+        final fun <get-dynamicRangePolicy>(): io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.dynamicRangePolicy.<get-dynamicRangePolicy>|<get-dynamicRangePolicy>(){}[0]
+    final val isDrmProtected // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.isDrmProtected|{}isDrmProtected[0]
+        final fun <get-isDrmProtected>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.isDrmProtected.<get-isDrmProtected>|<get-isDrmProtected>(){}[0]
+    final val isLive // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.isLive|{}isLive[0]
+        final fun <get-isLive>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.isLive.<get-isLive>|<get-isLive>(){}[0]
+    final val mimeType // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.mimeType|{}mimeType[0]
+        final fun <get-mimeType>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.mimeType.<get-mimeType>|<get-mimeType>(){}[0]
+    final val requestHeaders // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.requestHeaders|{}requestHeaders[0]
+        final fun <get-requestHeaders>(): kotlin.collections/Map<kotlin/String, kotlin/String> // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.requestHeaders.<get-requestHeaders>|<get-requestHeaders>(){}[0]
+    final val requestedOutputDynamicRange // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.requestedOutputDynamicRange|{}requestedOutputDynamicRange[0]
+        final fun <get-requestedOutputDynamicRange>(): io.github.kdroidfilter.composemediaplayer/VideoDynamicRange? // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.requestedOutputDynamicRange.<get-requestedOutputDynamicRange>|<get-requestedOutputDynamicRange>(){}[0]
+    final val source // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.source|{}source[0]
+        final fun <get-source>(): io.github.kdroidfilter.composemediaplayer/VideoColorInfo // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.source.<get-source>|<get-source>(){}[0]
+    final val startPositionMs // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.startPositionMs|{}startPositionMs[0]
+        final fun <get-startPositionMs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.startPositionMs.<get-startPositionMs>|<get-startPositionMs>(){}[0]
+    final val uri // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.uri|{}uri[0]
+        final fun <get-uri>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.uri.<get-uri>|<get-uri>(){}[0]
+
+    final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component1|component1(){}[0]
+    final fun component10(): io.github.kdroidfilter.composemediaplayer/VideoDynamicRange? // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component10|component10(){}[0]
+    final fun component11(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component11|component11(){}[0]
+    final fun component2(): kotlin.collections/Map<kotlin/String, kotlin/String> // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component2|component2(){}[0]
+    final fun component3(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component3|component3(){}[0]
+    final fun component4(): io.github.kdroidfilter.composemediaplayer/VideoColorInfo // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component4|component4(){}[0]
+    final fun component5(): io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component5|component5(){}[0]
+    final fun component6(): io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component6|component6(){}[0]
+    final fun component7(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component7|component7(){}[0]
+    final fun component8(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component8|component8(){}[0]
+    final fun component9(): kotlin/Long // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.component9|component9(){}[0]
+    final fun copy(kotlin/String = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ..., kotlin/String? = ..., io.github.kdroidfilter.composemediaplayer/VideoColorInfo = ..., io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Long = ..., io.github.kdroidfilter.composemediaplayer/VideoDynamicRange? = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.copy|copy(kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String>;kotlin.String?;io.github.kdroidfilter.composemediaplayer.VideoColorInfo;io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy;io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy;kotlin.Boolean;kotlin.Boolean;kotlin.Long;io.github.kdroidfilter.composemediaplayer.VideoDynamicRange?;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest.toString|toString(){}[0]
+}
+
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionAvailability$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionAvailability$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionAvailability$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionStatus$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionStatus$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionStatus$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_NotApplicable$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_NotApplicable$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_NotApplicable$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Ready$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Ready$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Ready$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Rejected$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Rejected$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Rejected$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourceRequest$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourceRequest$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_VideoPipelineSourceRequest$stableprop[0]
+
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionAvailability$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionAvailability$stableprop_getter|io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionAvailability$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionStatus$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionStatus$stableprop_getter|io_github_kdroidfilter_composemediaplayer_VideoPipelineExtensionStatus$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_NotApplicable$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_NotApplicable$stableprop_getter|io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_NotApplicable$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Ready$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Ready$stableprop_getter|io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Ready$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Rejected$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Rejected$stableprop_getter|io_github_kdroidfilter_composemediaplayer_VideoPipelineSourcePreparation_Rejected$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourceRequest$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoPipelineSourceRequest$stableprop_getter|io_github_kdroidfilter_composemediaplayer_VideoPipelineSourceRequest$stableprop_getter(){}[0]
+
+// Targets: [ios]
+abstract interface io.github.kdroidfilter.composemediaplayer/IosPreparedVideoPipelineSource : io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource { // io.github.kdroidfilter.composemediaplayer/IosPreparedVideoPipelineSource|null[0]
+    abstract fun createPlayerItem(): platform.AVFoundation/AVPlayerItem // io.github.kdroidfilter.composemediaplayer/IosPreparedVideoPipelineSource.createPlayerItem|createPlayerItem(){}[0]
+}
+
+// Targets: [ios]
+abstract interface io.github.kdroidfilter.composemediaplayer/IosSubtitlePipelineExtension : io.github.kdroidfilter.composemediaplayer/SubtitlePipelineExtension { // io.github.kdroidfilter.composemediaplayer/IosSubtitlePipelineExtension|null[0]
+    abstract fun SubtitleOverlay(io.github.kdroidfilter.composemediaplayer/SubtitleTrack, kotlin/Long, kotlin/Boolean, androidx.compose.ui/Modifier, kotlin/Function1<kotlin/Boolean, kotlin/Unit>, androidx.compose.runtime/Composer?, kotlin/Int) // io.github.kdroidfilter.composemediaplayer/IosSubtitlePipelineExtension.SubtitleOverlay|SubtitleOverlay(io.github.kdroidfilter.composemediaplayer.SubtitleTrack;kotlin.Long;kotlin.Boolean;androidx.compose.ui.Modifier;kotlin.Function1<kotlin.Boolean,kotlin.Unit>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]
+}
+
+// Targets: [wasmJs]
+abstract interface io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource : io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource { // io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource|null[0]
+    abstract fun attach(org.w3c.dom/HTMLVideoElement, kotlin/Function1<kotlin/String, kotlin/Unit>) // io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource.attach|attach(org.w3c.dom.HTMLVideoElement;kotlin.Function1<kotlin.String,kotlin.Unit>){}[0]
+    abstract fun detach(org.w3c.dom/HTMLVideoElement) // io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource.detach|detach(org.w3c.dom.HTMLVideoElement){}[0]
+}
+
+// Targets: [wasmJs]
+abstract interface io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension : io.github.kdroidfilter.composemediaplayer/SubtitlePipelineExtension { // io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension|null[0]
+    abstract fun SubtitleOverlay(io.github.kdroidfilter.composemediaplayer/VideoPlayerState, org.w3c.dom/HTMLVideoElement?, androidx.compose.ui/Modifier, kotlin/Function1<kotlin/Boolean, kotlin/Unit>, androidx.compose.runtime/Composer?, kotlin/Int) // io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension.SubtitleOverlay|SubtitleOverlay(io.github.kdroidfilter.composemediaplayer.VideoPlayerState;org.w3c.dom.HTMLVideoElement?;androidx.compose.ui.Modifier;kotlin.Function1<kotlin.Boolean,kotlin.Unit>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]
+}

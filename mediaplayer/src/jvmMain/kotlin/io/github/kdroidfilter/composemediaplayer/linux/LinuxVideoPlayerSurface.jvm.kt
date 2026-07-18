@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
@@ -42,10 +43,54 @@ fun LinuxVideoPlayerSurface(
     ) {
         // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
         val shouldRenderVideo =
-            (playerState.hasMedia || playerState.libVlcNativeSurfaceRequested) &&
-                (!playerState.isFullscreen || isInFullscreenWindow || playerState.libVlcNativeSurfaceRequested)
+            (
+                playerState.hasMedia ||
+                    playerState.libVlcNativeSurfaceRequested ||
+                    playerState.waylandColorSurfaceRequested
+            ) &&
+                (
+                    !playerState.isFullscreen ||
+                        isInFullscreenWindow ||
+                        playerState.libVlcNativeSurfaceRequested ||
+                        playerState.waylandColorSurfaceRequested
+                )
         if (shouldRenderVideo) {
-            if (playerState.shouldUseLibVlcNativeSurface()) {
+            if (playerState.shouldUseWaylandColorSurface()) {
+                val waylandSurfaceModifier =
+                    contentScale.toCanvasModifier(
+                        playerState.aspectRatio,
+                        playerState.metadata.width,
+                        playerState.metadata.height,
+                    )
+                JvmNativeVideoHost(
+                    modifier = waylandSurfaceModifier,
+                    canvasName = "ComposeMediaPlayer JBR Wayland color surface",
+                    hostName = "ComposeMediaPlayer Linux Wayland host",
+                    attachNative = playerState::attachWaylandColorComponent,
+                    detachNative = playerState::detachWaylandColorComponent,
+                    nativeFullscreen = playerState.isFullscreen && !isInFullscreenWindow,
+                    showExternalOverlay =
+                        !isInFullscreenWindow && !playerState.waylandNativeOverlayAvailable,
+                    overlay = {
+                        LinuxVideoOverlayContent(playerState, overlay)
+                    },
+                )
+                if (playerState.waylandNativeOverlayAvailable) {
+                    // Keeps normal Compose hit testing and accessibility semantics on the
+                    // parent surface while pixels are shown by the native overlay subsurface.
+                    Box(
+                        modifier =
+                            waylandSurfaceModifier.graphicsLayer {
+                                alpha = 0f
+                            },
+                    ) {
+                        LinuxVideoOverlayContent(playerState, overlay)
+                    }
+                    LinuxWaylandComposeOverlayHost(playerState) {
+                        LinuxVideoOverlayContent(playerState, overlay)
+                    }
+                }
+            } else if (playerState.shouldUseLibVlcNativeSurface()) {
                 JvmNativeVideoHost(
                     modifier =
                         contentScale.toCanvasModifier(
@@ -88,7 +133,12 @@ fun LinuxVideoPlayerSurface(
         }
     }
 
-    if (playerState.isFullscreen && !isInFullscreenWindow && !playerState.libVlcNativeSurfaceRequested) {
+    if (
+        playerState.isFullscreen &&
+        !isInFullscreenWindow &&
+        !playerState.libVlcNativeSurfaceRequested &&
+        !playerState.waylandColorSurfaceRequested
+    ) {
         openFullscreenWindow(playerState, overlay = overlay, contentScale)
     }
 }
@@ -101,7 +151,8 @@ private fun LinuxVideoOverlayContent(
     // Add Compose-based subtitle layer
     if (playerState.subtitlesEnabled &&
         playerState.currentSubtitleTrack != null &&
-        playerState.currentSubtitleTrack?.isEmbedded != true
+        playerState.currentSubtitleTrack?.isEmbedded != true &&
+        !playerState.usesLibAssSubtitleOverlay
     ) {
         val currentTime =
             if (playerState.userDragging) {
