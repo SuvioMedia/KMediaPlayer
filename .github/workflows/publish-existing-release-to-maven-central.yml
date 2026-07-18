@@ -1,0 +1,181 @@
+name: Publish Existing Release to Maven Central
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable release tag, for example v2.0.0
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: maven-central-recovery-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - name: Checkout the immutable release tag
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Validate the immutable release
+        id: release_ref
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ "$RELEASE_TAG" != "v$version" || ! "$version" =~ $semver ]]; then
+            echo "Release tags must use immutable SemVer, for example v1.2.3." >&2
+            exit 1
+          fi
+
+          local_sha="$(git rev-parse HEAD^{commit})"
+          remote_sha="$(
+            git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}" |
+              awk 'END { print $1 }'
+          )"
+          if [[ -z "$remote_sha" || "$local_sha" != "$remote_sha" ]]; then
+            echo "The checked-out commit does not match the remote release tag." >&2
+            exit 1
+          fi
+
+          pages_base="https://shusek.github.io/KMediaPlayer/maven/io/github/shusek"
+          expected_coordinates=(
+            composemediaplayer-core
+            composemediaplayer
+            composemediaplayer-mpv
+          )
+          for artifact_id in "${expected_coordinates[@]}"; do
+            pom="$pages_base/$artifact_id/$version/$artifact_id-$version.pom"
+            curl --fail --silent --show-error --location --head "$pom" >/dev/null
+          done
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$local_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Locate the successful release run
+        id: release_run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.release_ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          run_id="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/publish-on-maven-central.yml/runs?event=push&status=success&per_page=100" \
+              --jq "first(.workflow_runs[] | select(.head_sha == \"$RELEASE_SHA\")) | .id"
+          )"
+          if [[ -z "$run_id" ]]; then
+            echo "No successful verified release run exists for $RELEASE_SHA." >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the verified native libraries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.release_run.outputs.run_id }}
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/
+          pattern: native-*-${{ steps.release_ref.outputs.sha }}
+          merge-multiple: true
+
+      - name: Verify the recovered native payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            darwin-aarch64/libNativeVideoPlayer.dylib
+            darwin-x86-64/libNativeVideoPlayer.dylib
+            linux-x86-64/libNativeVideoPlayer.so
+            linux-aarch64/libNativeVideoPlayer.so
+            win32-x86-64/NativeVideoPlayer.dll
+            win32-arm64/NativeVideoPlayer.dll
+          )
+          for relative_path in "${expected[@]}"; do
+            path="mediaplayer/src/jvmMain/resources/composemediaplayer/native/$relative_path"
+            test -s "$path" || { echo "Missing verified native payload: $path" >&2; exit 1; }
+          done
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          java-version: '25'
+          distribution: temurin
+          cache: gradle
+
+      - name: Verify Xcode 26.3 and iOS 26 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR" || {
+            echo "Xcode 26.3 is required by the current Compose UIKit artifacts." >&2
+            exit 1
+          }
+          sdk_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          case "$sdk_version" in
+            26.*) ;;
+            *) echo "An iOS 26 Simulator SDK is required." >&2; exit 1 ;;
+          esac
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager | sort | tail -n 1)"
+          fi
+          "$SDKMANAGER" "ndk;29.0.14206865"
+
+      - name: Require Maven Central credentials
+        shell: bash
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
+          MAVEN_SIGNING_PASSWORD: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$MAVEN_CENTRAL_USERNAME" ]] || missing+=(MAVEN_CENTRAL_USERNAME)
+          [[ -n "$MAVEN_CENTRAL_PASSWORD" ]] || missing+=(MAVEN_CENTRAL_PASSWORD)
+          [[ -n "$MAVEN_SIGNING_KEY" ]] || missing+=(MAVEN_SIGNING_KEY)
+          [[ -n "$MAVEN_SIGNING_PASSWORD" ]] || missing+=(MAVEN_SIGNING_PASSWORD)
+          if (( ${#missing[@]} > 0 )); then
+            echo "Missing required repository secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Publish the verified release to Maven Central
+        shell: bash
+        run: >-
+          ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
+          :mediaplayer:publishAndReleaseToMavenCentral
+          :mediaplayer-mpv:publishAndReleaseToMavenCentral
+          -PpublicationVersion="${{ steps.release_ref.outputs.version }}"
+          -PreleaseSigningEnabled=true
+          -PcomposeMediaPlayer.skipNativeBuild=true
+          --no-configuration-cache --no-daemon
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
