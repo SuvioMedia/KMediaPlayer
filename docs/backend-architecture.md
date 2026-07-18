@@ -4,22 +4,66 @@
 
 ```text
 application
-├── composemediaplayer ──────┐
-└── composemediaplayer-mpv ──┴──> composemediaplayer-core
+├── composemediaplayer ──────────────┬──> composemediaplayer-extension-api ──┐
+│                                    └────────────────────────────────────────┤
+├── composemediaplayer-ass ─────────────> composemediaplayer-extension-api ──┤
+├── composemediaplayer-dolbyvision ─────> composemediaplayer-extension-api ──┤
+├── composemediaplayer-kmediabridge ────> composemediaplayer-extension-api ──┤
+└── composemediaplayer-mpv ───────────────────────────────────────────────────┴──> composemediaplayer-core
 ```
 
-The implementation modules are siblings. They never depend on each other:
+Backend and extension implementations never depend on the default player:
 
 - `composemediaplayer-core` owns backend-neutral state, events, capabilities,
   backend factories, and the rendering SPI.
+- `composemediaplayer-extension-api` owns lightweight common and platform
+  contracts for source, subtitle, color-conversion, and scoped desktop bridge
+  extensions. It depends only on core.
 - `composemediaplayer` owns the default Media3, AVPlayer, browser, and desktop
-  JNI implementations plus the public `VideoPlayerSurface`.
+  JNI implementations plus the public `VideoPlayerSurface`. It consumes
+  extension contracts but contains no ASS, Dolby Vision, KMediaBridge, or
+  FFmpeg implementation dependency.
+- `composemediaplayer-ass`, `composemediaplayer-dolbyvision`, and
+  `composemediaplayer-kmediabridge` implement extension contracts directly.
+  They can be compiled and published without the default player.
 - `composemediaplayer-mpv` owns the optional Android/JVM adapter and depends
   directly on the matching KMediaMpv runtime.
 
 The `verifyBackendModuleBoundaries` Gradle task rejects a dependency from the
-default player to MPV, from MPV to the default player, or from core to either
-implementation.
+default player to MPV or KMediaBridge/FFmpeg, from an extension implementation
+to the default player, from MPV to the default player, or from core and the
+extension API to implementation modules.
+
+## Pipeline extensions
+
+Applications install stable extension instances in the player configuration:
+
+```kotlin
+val options = VideoPlaybackOptions(
+    extensions = listOf(
+        AssSubtitleExtension(),
+        DolbyVisionExtension(),
+        KMediaBridgeDesktopExtension(),
+    ),
+)
+```
+
+`VideoPlaybackOptions` rejects blank and duplicate extension identifiers. Each
+extension reports `AVAILABLE`, `DEGRADED`, or `UNAVAILABLE`; an unavailable
+extension remains visible in `extensionStatuses` for diagnostics but contributes
+no capabilities and is not called by a source or renderer selector.
+
+Extension objects are reusable, thread-safe configuration providers. Mutable
+per-player or per-source state belongs in scoped runtime objects. In particular,
+every desktop bridge open returns a `DesktopPlaybackBridgeSession` that the
+default player closes when the source is replaced or the player is disposed.
+This prevents one extension instance from coupling the lifetime of multiple
+players.
+
+The isolated extension consumer test resolves published ASS, Dolby Vision, and
+KMediaBridge coordinates plus the extension API while deliberately excluding
+`composemediaplayer`. It fails if the default player appears on the runtime
+classpath.
 
 ## Application selection
 
@@ -61,6 +105,11 @@ An optional backend module should:
 7. Add an isolated published-artifact consumer test, including verification of
    any transitive runtime dependency.
 
+An optional pipeline extension follows the same isolation rules but depends on
+`composemediaplayer-extension-api`, implements the narrowest platform hook it
+needs, exposes runtime state through typed availability, and keeps third-party
+runtime types out of its public ABI.
+
 ## MPV split
 
 `AbstractMpvVideoPlayerState` contains the shared state machine, value
@@ -74,8 +123,15 @@ and macOS ARM64. Android x86/x86_64 and macOS x86_64 are not release targets.
 
 ## Distribution and licensing boundary
 
-The core, default player, and adapter use this repository's license. The
+The core, extension API, default player, and adapters use this repository's license. The
 separately published KMediaMpv runtime is the boundary that carries the native
 license notices, corresponding source, and recipient relinking materials. The
 adapter consumes that runtime as a normal transitive dependency; it does not
 copy the native payload or relicense the application-facing contracts.
+
+KMediaBridge follows the same separation: the KMediaPlayer adapter owns only
+the extension-facing API and translation layer. The separately published
+KMediaBridge runtime owns the dynamically linked FFmpeg payload, notices,
+corresponding source, SBOM inputs, and relinking instructions. A caller-selected
+external compatible runtime is outside that audited payload and remains the
+caller's licensing responsibility.

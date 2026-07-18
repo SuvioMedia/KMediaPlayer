@@ -38,6 +38,10 @@ jobs:
             echo "Release tags must use immutable SemVer, for example v1.2.3." >&2
             exit 1
           fi
+          if [[ "${version%%+*}" == *-* ]]; then
+            echo "KMediaPlayer 2.x is published only as a stable release; preview tags are forbidden." >&2
+            exit 1
+          fi
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
             git fetch origin gh-pages:refs/remotes/origin/gh-pages
             existing_paths="$(git ls-tree -r --name-only origin/gh-pages -- maven/io/github/shusek)"
@@ -70,15 +74,36 @@ jobs:
           pattern: native-*-${{ github.sha }}
           merge-multiple: true
 
+      - name: Download verified JVM libdovi libraries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: mediaplayer-dolbyvision/src/jvmMain/resources/
+          pattern: libdovi-jvm-*-${{ github.sha }}
+          merge-multiple: true
+
+      - name: Download verified Apple ASS payloads
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: mediaplayer-ass/build/generated/
+          pattern: apple-ass-${{ github.sha }}
+
+      - name: Download verified Windows and Linux ASS payloads
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
+          pattern: desktop-ass-*-${{ github.sha }}
+          merge-multiple: true
+
       - name: Verify complete native payload
         shell: bash
         run: |
           set -euo pipefail
           expected=(
-            darwin-aarch64/libNativeVideoPlayer.dylib
-            darwin-x86-64/libNativeVideoPlayer.dylib
+            darwin-arm64/libNativeVideoPlayer.dylib
             linux-x86-64/libNativeVideoPlayer.so
             linux-aarch64/libNativeVideoPlayer.so
+            linux-x86-64/libKMediaPlayerVulkanProjection.so
+            linux-aarch64/libKMediaPlayerVulkanProjection.so
             win32-x86-64/NativeVideoPlayer.dll
             win32-arm64/NativeVideoPlayer.dll
           )
@@ -86,6 +111,23 @@ jobs:
             path="mediaplayer/src/jvmMain/resources/composemediaplayer/native/$relative_path"
             test -s "$path" || { echo "Missing native payload: $path" >&2; exit 1; }
           done
+
+          libdovi_expected=(
+            darwin-aarch64/libcomposemediaplayer_dovi.dylib
+            linux-x86-64/libcomposemediaplayer_dovi.so
+            linux-aarch64/libcomposemediaplayer_dovi.so
+            windows-x86-64/composemediaplayer_dovi.dll
+            windows-aarch64/composemediaplayer_dovi.dll
+          )
+          for relative_path in "${libdovi_expected[@]}"; do
+            path="mediaplayer-dolbyvision/src/jvmMain/resources/composemediaplayer/dolbyvision/native/$relative_path"
+            test -s "$path" || { echo "Missing libdovi payload: $path" >&2; exit 1; }
+          done
+
+          test ! -e mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64
+          test ! -e mediaplayer-dolbyvision/src/jvmMain/resources/composemediaplayer/dolbyvision/native/darwin-x86-64
+
+          bash .github/scripts/verify_apple_ass_payload.sh
 
       - name: Set up JDK 25
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
@@ -120,18 +162,28 @@ jobs:
           fi
           "$SDKMANAGER" "ndk;29.0.14206865"
 
+      - name: Install Rust targets for Android and Apple artifacts
+        run: >-
+          rustup target add armv7-linux-androideabi aarch64-linux-android
+          aarch64-apple-ios aarch64-apple-ios-sim wasm32-unknown-unknown
+
       - name: Build and stage the GitHub Pages release
         shell: bash
         run: >-
           ./gradlew :mediaplayer-core:publishAllPublicationsToGithubPagesRepository
+          :mediaplayer-extension-api:publishAllPublicationsToGithubPagesRepository
           :mediaplayer:publishAllPublicationsToGithubPagesRepository
           :mediaplayer-mpv:publishAllPublicationsToGithubPagesRepository
+          :mediaplayer-ass:publishAllPublicationsToGithubPagesRepository
+          :mediaplayer-dolbyvision:publishAllPublicationsToGithubPagesRepository
+          :mediaplayer-kmediabridge:publishAllPublicationsToGithubPagesRepository
           :mediaplayer-core:verifyJvm25Bytecode
           :mediaplayer:verifyJvm25Bytecode
           :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion="$RELEASE_VERSION"
           -PgithubPagesMavenRepository="$RUNNER_TEMP/gh-pages/maven"
           -PcomposeMediaPlayer.skipNativeBuild=true
+          -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
           --no-configuration-cache --no-daemon
 
       - name: Rebuild complete GitHub Pages Maven metadata
@@ -172,6 +224,67 @@ jobs:
           for artifact_id in "${expected_coordinates[@]}"; do
             pom="$repository/io/github/shusek/$artifact_id/$RELEASE_VERSION/$artifact_id-$RELEASE_VERSION.pom"
             test -s "$pom" || { echo "Missing staged coordinate: io.github.shusek:$artifact_id:$RELEASE_VERSION" >&2; exit 1; }
+          done
+
+          extension_api_artifacts=(
+            composemediaplayer-extension-api
+            composemediaplayer-extension-api-android
+            composemediaplayer-extension-api-jvm
+          )
+          for artifact in "${extension_api_artifacts[@]}"; do
+            pom="$repository/io/github/shusek/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom"
+            test -s "$pom" || {
+              echo "Missing staged extension API coordinate: $artifact:$RELEASE_VERSION" >&2
+              exit 1
+            }
+          done
+
+          ass_artifacts=(
+            composemediaplayer-ass
+            composemediaplayer-ass-android
+            composemediaplayer-ass-iosarm64
+            composemediaplayer-ass-iossimulatorarm64
+            composemediaplayer-ass-jvm
+          )
+          for artifact in "${ass_artifacts[@]}"; do
+            pom="$repository/io/github/shusek/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom"
+            test -s "$pom" || { echo "Missing staged ASS coordinate: $artifact:$RELEASE_VERSION" >&2; exit 1; }
+          done
+          ass_lgpl_materials="$repository/io/github/shusek/composemediaplayer-ass/$RELEASE_VERSION/composemediaplayer-ass-$RELEASE_VERSION-apple-lgpl-materials.zip"
+          test -s "$ass_lgpl_materials" || {
+            echo "Missing staged Apple ASS LGPL materials archive." >&2
+            exit 1
+          }
+          desktop_ass_lgpl_materials="$repository/io/github/shusek/composemediaplayer-ass/$RELEASE_VERSION/composemediaplayer-ass-$RELEASE_VERSION-desktop-lgpl-materials.zip"
+          test -s "$desktop_ass_lgpl_materials" || {
+            echo "Missing staged desktop ASS LGPL materials archive." >&2
+            exit 1
+          }
+
+          dolby_vision_artifacts=(
+            composemediaplayer-dolbyvision
+            composemediaplayer-dolbyvision-android
+            composemediaplayer-dolbyvision-jvm
+          )
+          for artifact in "${dolby_vision_artifacts[@]}"; do
+            pom="$repository/io/github/shusek/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom"
+            test -s "$pom" || {
+              echo "Missing staged Dolby Vision coordinate: $artifact:$RELEASE_VERSION" >&2
+              exit 1
+            }
+          done
+
+          kmedia_bridge_artifacts=(
+            composemediaplayer-kmediabridge
+            composemediaplayer-kmediabridge-android
+            composemediaplayer-kmediabridge-jvm
+          )
+          for artifact in "${kmedia_bridge_artifacts[@]}"; do
+            pom="$repository/io/github/shusek/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom"
+            test -s "$pom" || {
+              echo "Missing staged KMediaBridge coordinate: $artifact:$RELEASE_VERSION" >&2
+              exit 1
+            }
           done
 
           pages_dir="$RUNNER_TEMP/gh-pages"
@@ -257,11 +370,16 @@ jobs:
         shell: bash
         run: >-
           ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
+          :mediaplayer-extension-api:publishAndReleaseToMavenCentral
           :mediaplayer:publishAndReleaseToMavenCentral
           :mediaplayer-mpv:publishAndReleaseToMavenCentral
+          :mediaplayer-ass:publishAndReleaseToMavenCentral
+          :mediaplayer-dolbyvision:publishAndReleaseToMavenCentral
+          :mediaplayer-kmediabridge:publishAndReleaseToMavenCentral
           -PpublicationVersion="$RELEASE_VERSION"
           -PreleaseSigningEnabled=true
           -PcomposeMediaPlayer.skipNativeBuild=true
+          -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
           --no-configuration-cache --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}

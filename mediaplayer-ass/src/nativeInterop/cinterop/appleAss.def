@@ -1,0 +1,5 @@
+package = io.github.kdroidfilter.composemediaplayer.ass.native
+headers = KMediaAssRenderer.h
+headerFilter = KMediaAssRenderer.h
+staticLibraries = libcomposemediaplayer_ass.a libkmediafribidi.a
+linkerOpts = -framework CoreText -framework CoreFoundation -framework CoreGraphics -liconv -lc++ -lpthread

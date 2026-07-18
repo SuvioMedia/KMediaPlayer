@@ -1,3 +1,13 @@
+*.sh text eol=lf
+gradlew text eol=lf
+
 mediaplayer/api/** whitespace=-blank-at-eof
+mediaplayer-extension-api/api/** whitespace=-blank-at-eof
+mediaplayer-kmediabridge/api/** whitespace=-blank-at-eof
+mediaplayer-dolbyvision/api/** whitespace=-blank-at-eof
+mediaplayer-ass/api/** whitespace=-blank-at-eof
+# Preserve byte-for-byte upstream patches, license texts and corresponding source.
+mediaplayer-ass/src/androidMain/native/ass/** whitespace=-blank-at-eof,-blank-at-eol
+mediaplayer-ass/src/androidMain/resources/META-INF/kmediaplayer/android-ass/** whitespace=-blank-at-eof,-blank-at-eol
 mediaplayer-core/api/** whitespace=-blank-at-eof
 mediaplayer-mpv/api/** whitespace=-blank-at-eof

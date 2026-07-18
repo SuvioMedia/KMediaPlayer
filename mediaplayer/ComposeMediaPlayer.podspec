@@ -8,6 +8,7 @@ Pod::Spec.new do |spec|
     spec.summary                  = 'A multiplatform video player library for Compose applications'
     spec.vendored_frameworks      = 'build/cocoapods/framework/ComposeMediaPlayer.framework'
     spec.libraries                = 'c++'
+    spec.ios.deployment_target    = '16.2'
     if !Dir.exist?('build/cocoapods/framework/ComposeMediaPlayer.framework') || Dir.empty?('build/cocoapods/framework/ComposeMediaPlayer.framework')
         raise "
         Kotlin framework 'ComposeMediaPlayer' doesn't exist yet, so a proper Xcode project can't be generated.
@@ -41,5 +42,5 @@ Pod::Spec.new do |spec|
             SCRIPT
         }
     ]
-    spec.resources = ['build/compose/cocoapods/compose-resources']
+    spec.resources = ['build\compose\cocoapods\compose-resources']
 end

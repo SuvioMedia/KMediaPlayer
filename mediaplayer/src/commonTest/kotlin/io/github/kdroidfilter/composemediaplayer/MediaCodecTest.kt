@@ -70,4 +70,24 @@ class MediaCodecTest {
             assertEquals(MediaSupport.queryCapabilities(), support.capabilities)
             assertEquals(MediaSupport.queryCodecs(), support.codecs)
         }
+
+    @Test
+    fun snapshotExposesDisplayDynamicRangesForPreflightFiltering() =
+        runTest {
+            val support = MediaSupport.query()
+
+            assertEquals(MediaSupport.queryDisplayColorCapabilities(), support.displayColorCapabilities)
+            assertEquals(MediaSupport.querySupportedDynamicRanges(), support.supportedDynamicRanges)
+            assertEquals(MediaSupport.querySupportedHdrDynamicRanges(), support.supportedHdrDynamicRanges)
+            VideoDynamicRange.entries.forEach { dynamicRange ->
+                assertEquals(
+                    MediaSupport.queryDynamicRangeSupport(dynamicRange),
+                    support.dynamicRangeSupport(dynamicRange),
+                )
+                assertEquals(
+                    MediaSupport.queryIsDynamicRangeSupported(dynamicRange),
+                    support.isDynamicRangeSupported(dynamicRange),
+                )
+            }
+        }
 }

@@ -1,0 +1,6 @@
+package io.github.kdroidfilter.composemediaplayer.consumer.extensions
+
+import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeExtension
+import io.github.kdroidfilter.composemediaplayer.kmediabridge.KMediaBridgeDesktopExtension
+
+fun publishedDesktopBridgeExtension(): DesktopPlaybackBridgeExtension = KMediaBridgeDesktopExtension()

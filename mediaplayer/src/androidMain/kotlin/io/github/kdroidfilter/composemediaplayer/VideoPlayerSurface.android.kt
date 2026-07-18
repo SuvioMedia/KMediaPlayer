@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer
 import android.content.Context
 import android.os.Build
 import android.view.LayoutInflater
+import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
 import androidx.activity.ComponentActivity
@@ -16,7 +17,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MonotonicFrameClock
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -195,13 +199,29 @@ private fun VideoPlayerContent(
         contentAlignment = Alignment.Center,
     ) {
         if (playerState.hasMedia) {
-            val resolvedSurfaceType =
+            // Recompose when the planner learns that the initially attached native surface has no safe color route.
+            val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
+            val requestedSurfaceType =
                 surfaceType.resolveFor(
                     projection = playerState.projection,
                     textureCrop = playerState.projectionTextureCrop,
                 )
+            val resolvedSurfaceType =
+                if (
+                    colorPipelineStatus.source.isHdr &&
+                    playerState.shouldUseControlledColorFallback() &&
+                    requestedSurfaceType != SurfaceType.ProjectedGlSurfaceView &&
+                    requestedSurfaceType != SurfaceType.SphericalGlSurfaceView
+                ) {
+                    SurfaceType.ProjectedGlSurfaceView
+                } else {
+                    requestedSurfaceType
+                }
             key(resolvedSurfaceType) {
-                if (resolvedSurfaceType == SurfaceType.ProjectedGlSurfaceView) {
+                if (
+                    resolvedSurfaceType == SurfaceType.ProjectedGlSurfaceView ||
+                    resolvedSurfaceType == SurfaceType.SphericalGlSurfaceView
+                ) {
                     AndroidProjectionSurface(
                         playerState = playerState,
                         contentScale = contentScale,
@@ -215,10 +235,30 @@ private fun VideoPlayerContent(
                 }
             }
 
+            val styledSubtitleBackendActive =
+                playerState.currentSubtitleTrack
+                    ?.let { track -> playerState.androidSubtitleBackend?.supports(track) } == true
+            if (playerState.subtitlesEnabled && styledSubtitleBackendActive) {
+                playerState.androidSubtitleBackend?.Overlay(
+                    modifier =
+                        contentScale.toCanvasModifier(
+                            playerState.aspectRatio,
+                            playerState.metadata.width,
+                            playerState.metadata.height,
+                        ),
+                    cropToFill =
+                        contentScale == ContentScale.Crop &&
+                            resolvedSurfaceType != SurfaceType.ProjectedGlSurfaceView &&
+                            resolvedSurfaceType != SurfaceType.SphericalGlSurfaceView,
+                    videoAspectRatio = playerState.aspectRatio,
+                )
+            }
+
             // Add a Compose-based subtitle layer
             if (playerState.subtitlesEnabled &&
                 playerState.currentSubtitleTrack != null &&
-                playerState.currentSubtitleTrack?.isEmbedded != true
+                playerState.currentSubtitleTrack?.isEmbedded != true &&
+                !styledSubtitleBackendActive
             ) {
                 val currentTime =
                     if (playerState.userDragging) {
@@ -254,6 +294,9 @@ private fun AndroidProjectionSurface(
     contentScale: ContentScale,
 ) {
     AndroidProjectionDeviceMotionEffect(playerState)
+    val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
+    val sourceColorInfo = colorPipelineStatus.source
+    val isScreenWakeRequested = playerState.isPlaying || playerState.isLoading
 
     AndroidView(
         modifier =
@@ -263,41 +306,94 @@ private fun AndroidProjectionSurface(
                 playerState.metadata.height,
             ),
         factory = { context ->
-            AndroidProjectionGlSurfaceView(context).apply {
+            AndroidProjectionGlSurfaceView(
+                context = context,
+                effectController = playerState.androidProjectionEffectController,
+            ).apply {
+                keepScreenOn = isScreenWakeRequested
                 setBackgroundColor(android.graphics.Color.BLACK)
+                addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+                    playerState.updateVideoOutputSurface(SurfaceType.ProjectedGlSurfaceView, view.display)
+                }
                 callback =
                     object : AndroidProjectionGlSurfaceView.Callback {
-                        override fun onVideoSurfaceCreated(surface: android.view.Surface) {
-                            playerState.attachProjectionVideoSurface(surface)
+                        override fun onVideoEffectConfigured(
+                            outputDynamicRange: VideoDynamicRange,
+                            requireHdr: Boolean,
+                        ) {
+                            playerState.activateControlledColorRenderer(outputDynamicRange, requireHdr)
+                        }
+
+                        override fun onColorRendererConfigured(outputDynamicRange: VideoDynamicRange) {
+                            playerState.updateControlledColorRendererConfigured(outputDynamicRange)
+                        }
+
+                        override fun onHdrRendererUnavailable(
+                            outputDynamicRange: VideoDynamicRange,
+                            message: String,
+                        ) {
+                            playerState.updateControlledHdrRendererUnavailable(outputDynamicRange, message)
                         }
 
                         override fun onProjectionRendererError(message: String) {
+                            playerState.updateControlledColorRendererFailed(message)
                             androidVideoLogger.e { message }
                         }
                     }
+                playerState.attachProjectionVideoSurfaceView(this)
+                playerState.attachHdr10PlusMetadataConsumer(
+                    consumer = ::updateHdr10PlusMetadata,
+                    reset = ::clearHdr10PlusMetadata,
+                )
                 configure(
                     projection = playerState.projection,
                     projectionView = playerState.projectionView,
                     textureCrop = playerState.projectionTextureCrop,
+                    sourceColorInfo = sourceColorInfo,
+                    sourceFormat = playerState.projectionInputFormat(),
+                    plannedOutputDynamicRange = colorPipelineStatus.plannedOutputDynamicRange,
+                    plannedMetadataHandling = colorPipelineStatus.plannedMetadataHandling,
+                    dynamicRangePolicy = colorPipelineStatus.requestedDynamicRangePolicy,
+                    displayPeakLuminanceNits = colorPipelineStatus.display.maxLuminanceNits,
                 )
             }
         },
         update = { projectionView ->
+            projectionView.keepScreenOn = isScreenWakeRequested
+            playerState.updateVideoOutputSurface(SurfaceType.ProjectedGlSurfaceView, projectionView.display)
             playerState.attachPlayerView(null)
-            projectionView.videoSurface?.let(playerState::attachProjectionVideoSurface)
+            playerState.attachProjectionVideoSurfaceView(projectionView)
             projectionView.onResume()
+            playerState.attachHdr10PlusMetadataConsumer(
+                consumer = projectionView::updateHdr10PlusMetadata,
+                reset = projectionView::clearHdr10PlusMetadata,
+            )
             projectionView.configure(
                 projection = playerState.projection,
                 projectionView = playerState.projectionView,
                 textureCrop = playerState.projectionTextureCrop,
+                sourceColorInfo = sourceColorInfo,
+                sourceFormat = playerState.projectionInputFormat(),
+                plannedOutputDynamicRange = colorPipelineStatus.plannedOutputDynamicRange,
+                plannedMetadataHandling = colorPipelineStatus.plannedMetadataHandling,
+                dynamicRangePolicy = colorPipelineStatus.requestedDynamicRangePolicy,
+                displayPeakLuminanceNits = colorPipelineStatus.display.maxLuminanceNits,
             )
         },
         onReset = { projectionView ->
-            playerState.attachProjectionVideoSurface(null)
+            projectionView.keepScreenOn = false
+            playerState.updateControlledColorRendererConfigured(false)
+            playerState.updateVideoOutputSurface(null, null)
+            playerState.attachProjectionVideoSurfaceView(null)
+            playerState.attachHdr10PlusMetadataConsumer(null)
             projectionView.onPause()
         },
         onRelease = { projectionView ->
-            playerState.attachProjectionVideoSurface(null)
+            projectionView.keepScreenOn = false
+            playerState.updateControlledColorRendererConfigured(false)
+            playerState.updateVideoOutputSurface(null, null)
+            playerState.attachProjectionVideoSurfaceView(null)
+            playerState.attachHdr10PlusMetadataConsumer(null)
             projectionView.releaseRenderer()
         },
     )
@@ -310,6 +406,18 @@ private fun AndroidPlayerViewSurface(
     contentScale: ContentScale,
     resolvedSurfaceType: SurfaceType,
 ) {
+    val isScreenWakeRequested = playerState.isPlaying || playerState.isLoading
+    val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
+    val nativeSurfaceColorConfigurator =
+        remember(playerState) {
+            AndroidNativeSurfaceColorConfigurator(
+                onConfigured = playerState::updateNativeSurfaceDataSpaceConfigured,
+                onConfigurationFailed = playerState::updateNativeSurfaceDataSpaceConfigurationFailed,
+            )
+        }
+    DisposableEffect(nativeSurfaceColorConfigurator) {
+        onDispose(nativeSurfaceColorConfigurator::detach)
+    }
     AndroidView(
         modifier =
             contentScale.toCanvasModifier(
@@ -322,9 +430,19 @@ private fun AndroidPlayerViewSurface(
                 // Create PlayerView with the appropriate surface type
 
                 createPlayerViewWithSurfaceType(context, resolvedSurfaceType).apply {
-                    playerState.attachProjectionVideoSurface(null)
+                    keepScreenOn = isScreenWakeRequested
+                    addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+                        playerState.updateVideoOutputSurface(resolvedSurfaceType, view.display)
+                    }
+                    playerState.deactivateControlledColorRendererIfUnused()
+                    playerState.attachProjectionVideoSurfaceView(null)
                     // Attach this view to the player state
                     playerState.attachPlayerView(this)
+                    nativeSurfaceColorConfigurator.attach(videoSurfaceView as? SurfaceView)
+                    nativeSurfaceColorConfigurator.configure(
+                        dynamicRange = colorPipelineStatus.plannedOutputDynamicRange,
+                        hasRenderedFirstFrame = playerState.hasRenderedFirstVideoFrameForColorVerification(),
+                    )
 
                     if (playerState.exoPlayer != null) {
                         // Attach the player from the state
@@ -356,8 +474,16 @@ private fun AndroidPlayerViewSurface(
         },
         update = { playerView ->
             try {
+                playerView.keepScreenOn = isScreenWakeRequested
+                playerState.updateVideoOutputSurface(resolvedSurfaceType, playerView.display)
+                nativeSurfaceColorConfigurator.attach(playerView.videoSurfaceView as? SurfaceView)
+                nativeSurfaceColorConfigurator.configure(
+                    dynamicRange = colorPipelineStatus.plannedOutputDynamicRange,
+                    hasRenderedFirstFrame = playerState.hasRenderedFirstVideoFrameForColorVerification(),
+                )
                 if (playerState.exoPlayer != null) {
-                    playerState.attachProjectionVideoSurface(null)
+                    playerState.deactivateControlledColorRendererIfUnused()
+                    playerState.attachProjectionVideoSurfaceView(null)
                     // Re-attach after LazyList recycle: onReset nulls playerView.player
                     // and calls onPause(). Without this, the surface stays blank until
                     // the user navigates away and back.
@@ -379,6 +505,9 @@ private fun AndroidPlayerViewSurface(
         },
         onReset = { playerView ->
             try {
+                playerView.keepScreenOn = false
+                nativeSurfaceColorConfigurator.detach(playerView.videoSurfaceView as? SurfaceView)
+                playerState.updateVideoOutputSurface(null, null)
                 // Clean up resources when the view is recycled in a LazyList
                 playerView.player = null
                 playerView.onPause()
@@ -388,6 +517,9 @@ private fun AndroidPlayerViewSurface(
         },
         onRelease = { playerView ->
             try {
+                playerView.keepScreenOn = false
+                nativeSurfaceColorConfigurator.detach(playerView.videoSurfaceView as? SurfaceView)
+                playerState.updateVideoOutputSurface(null, null)
                 // Fully clean up the view on release
                 playerView.player = null
             } catch (e: Exception) {
@@ -397,8 +529,12 @@ private fun AndroidPlayerViewSurface(
     )
 }
 
-private fun VideoPlayerState.nativeSubtitleVisibility(): Int =
-    if (subtitlesEnabled && currentSubtitleTrack?.isEmbedded == true) {
+private fun DefaultVideoPlayerState.nativeSubtitleVisibility(): Int =
+    if (
+        subtitlesEnabled &&
+        currentSubtitleTrack?.isEmbedded == true &&
+        currentSubtitleTrack?.let { track -> androidSubtitleBackend?.supports(track) } != true
+    ) {
         View.VISIBLE
     } else {
         View.GONE
@@ -424,7 +560,7 @@ private fun createPlayerViewWithSurfaceType(
         // First try to inflate the custom layouts
         val layoutId =
             when (surfaceType) {
-                SurfaceType.Auto -> R.layout.player_view_texture
+                SurfaceType.Auto -> R.layout.player_view_surface
                 SurfaceType.SurfaceView -> R.layout.player_view_surface
                 SurfaceType.TextureView -> R.layout.player_view_texture
                 SurfaceType.SphericalGlSurfaceView -> R.layout.player_view_spherical
@@ -443,9 +579,7 @@ private fun createPlayerViewWithSurfaceType(
 
                 // Configure the surface type programmatically
                 when (surfaceType) {
-                    SurfaceType.Auto,
-                    SurfaceType.TextureView,
-                    -> {
+                    SurfaceType.TextureView -> {
                         // Use TextureView if available
                         videoSurfaceView?.let { view ->
                             if (view is TextureView) {
@@ -454,7 +588,9 @@ private fun createPlayerViewWithSurfaceType(
                         }
                     }
 
-                    SurfaceType.SurfaceView -> {
+                    SurfaceType.Auto,
+                    SurfaceType.SurfaceView,
+                    -> {
                         // SurfaceView is the default
                         androidVideoLogger.d { "Using SurfaceView" }
                     }
@@ -480,16 +616,16 @@ private fun createPlayerViewWithSurfaceType(
         }
     }
 
-private fun SurfaceType.resolveFor(
+internal fun SurfaceType.resolveFor(
     projection: VideoProjectionSettings,
     textureCrop: VideoTextureCrop,
 ): SurfaceType =
     when (this) {
         SurfaceType.Auto -> {
             when {
-                projection.usesAndroidCustomProjectionRenderer(textureCrop) -> SurfaceType.ProjectedGlSurfaceView
-                projection.usesMedia3SphericalProjection(textureCrop) -> SurfaceType.SphericalGlSurfaceView
-                else -> SurfaceType.TextureView
+                projection.requiresProjectionRenderer || !textureCrop.isDefaultTextureCrop ->
+                    SurfaceType.ProjectedGlSurfaceView
+                else -> SurfaceType.SurfaceView
             }
         }
         SurfaceType.TextureView,

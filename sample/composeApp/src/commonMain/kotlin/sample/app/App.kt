@@ -18,6 +18,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 import sample.app.feed.FeedScreen
 import sample.app.gallery.GalleryScreen
@@ -43,12 +45,24 @@ private enum class Screen(val label: String, val icon: ImageVector) {
 @Composable
 fun App(
     initialVideoUrl: String? = null,
+    initialSubtitleUrl: String? = null,
     demoSubtitleEnabled: Boolean = true,
+    initialMuted: Boolean = false,
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
+    initialProjection: VideoProjectionSettings = VideoProjectionSettings(),
 ) {
     AppTheme {
         var currentScreen by remember { mutableStateOf(Screen.Player) }
         val playerState = rememberRenderableVideoPlayerState(playbackOptions = playbackOptions)
+        LaunchedEffect(playerState, initialMuted) {
+            if (initialMuted) playerState.volume = 0f
+        }
+        LaunchedEffect(playerState, initialProjection) {
+            playerState.projection = initialProjection
+        }
+        LaunchedEffect(currentScreen, playerState) {
+            if (currentScreen != Screen.Player) playerState.stop()
+        }
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val useRail = maxWidth >= 600.dp
@@ -59,6 +73,7 @@ fun App(
                     onScreenChange = { currentScreen = it },
                     playerState = playerState,
                     initialVideoUrl = initialVideoUrl,
+                    initialSubtitleUrl = initialSubtitleUrl,
                     demoSubtitleEnabled = demoSubtitleEnabled,
                 )
             } else {
@@ -67,6 +82,7 @@ fun App(
                     onScreenChange = { currentScreen = it },
                     playerState = playerState,
                     initialVideoUrl = initialVideoUrl,
+                    initialSubtitleUrl = initialSubtitleUrl,
                     demoSubtitleEnabled = demoSubtitleEnabled,
                 )
             }
@@ -81,6 +97,7 @@ private fun BarLayout(
     onScreenChange: (Screen) -> Unit,
     playerState: RenderableVideoPlayerState,
     initialVideoUrl: String?,
+    initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
 ) {
     Scaffold(
@@ -102,6 +119,7 @@ private fun BarLayout(
             Modifier.fillMaxSize().padding(padding).zIndex(0f),
             playerState,
             initialVideoUrl,
+            initialSubtitleUrl,
             demoSubtitleEnabled,
         )
     }
@@ -114,6 +132,7 @@ private fun RailLayout(
     onScreenChange: (Screen) -> Unit,
     playerState: RenderableVideoPlayerState,
     initialVideoUrl: String?,
+    initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
@@ -134,6 +153,7 @@ private fun RailLayout(
             Modifier.weight(1f).fillMaxHeight().zIndex(0f),
             playerState,
             initialVideoUrl,
+            initialSubtitleUrl,
             demoSubtitleEnabled,
         )
     }
@@ -145,6 +165,7 @@ private fun ScreenContent(
     modifier: Modifier,
     playerState: RenderableVideoPlayerState,
     initialVideoUrl: String?,
+    initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
 ) {
     when (screen) {
@@ -153,6 +174,7 @@ private fun ScreenContent(
                 modifier,
                 playerState,
                 initialVideoUrl = initialVideoUrl,
+                initialSubtitleUrl = initialSubtitleUrl,
                 demoSubtitleEnabled = demoSubtitleEnabled,
             )
         Screen.Gallery -> GalleryScreen(modifier)

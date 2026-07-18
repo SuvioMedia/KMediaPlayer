@@ -8,94 +8,17 @@ data class MediaSourceSpec(
     val mimeType: String? = null,
 )
 
-enum class HdrSupport {
-    SUPPORTED,
-    UNSUPPORTED,
-    UNKNOWN,
-}
-
 @Stable
-data class HdrCapabilities(
-    val hdr: HdrSupport = HdrSupport.UNKNOWN,
-    val hdr10: HdrSupport = HdrSupport.UNKNOWN,
-    val hlg: HdrSupport = HdrSupport.UNKNOWN,
-    val dolbyVision: HdrSupport = HdrSupport.UNKNOWN,
-    val supportsNativeHdrPlayback: Boolean = false,
-    val supportsToneMappingToSdr: Boolean = false,
-    val supportsDolbyVisionProfile7To8Transcoding: Boolean = false,
-    val maxExtendedDynamicRange: Float = 1f,
-) {
-    init {
-        require(maxExtendedDynamicRange.isFinite()) { "maxExtendedDynamicRange must be finite." }
-        require(maxExtendedDynamicRange >= MINIMUM_EXTENDED_DYNAMIC_RANGE) {
-            "maxExtendedDynamicRange must be at least $MINIMUM_EXTENDED_DYNAMIC_RANGE."
-        }
-    }
-
-    val hasHdrDisplay: Boolean
-        get() = maxExtendedDynamicRange > 1f
-}
-
-@Stable
-class PlayerCapabilities(
+data class PlayerCapabilities(
     val supportsMkv: Boolean = false,
     val supportsPiP: Boolean = false,
-    val hdr: HdrCapabilities = HdrCapabilities(),
+    val decoderColorCapabilities: DecoderColorCapabilities = DecoderColorCapabilities(),
+    val displayColorCapabilities: DisplayColorCapabilities = DisplayColorCapabilities(),
+    val rendererColorCapabilities: RendererColorCapabilities = RendererColorCapabilities(),
+    val colorConversionCapabilities: ColorConversionCapabilities = ColorConversionCapabilities(),
     val supportedUriSchemes: Set<String> = DEFAULT_SUPPORTED_URI_SCHEMES,
+    val supportsHls: Boolean = false,
 ) {
-    private var explicitHlsSupport: Boolean = false
-
-    /**
-     * Whether this backend can play HLS sources.
-     *
-     * This remains outside the data-class constructor to preserve the constructor,
-     * component and copy descriptors published by the 1.x artifact. Backend modules
-     * can set it through the additive constructor below.
-     */
-    val supportsHls: Boolean
-        get() = explicitHlsSupport
-
-    constructor(
-        supportsMkv: Boolean = false,
-        supportsPiP: Boolean = false,
-        hdr: HdrCapabilities = HdrCapabilities(),
-        supportedUriSchemes: Set<String> = DEFAULT_SUPPORTED_URI_SCHEMES,
-        supportsHls: Boolean,
-    ) : this(
-        supportsMkv = supportsMkv,
-        supportsPiP = supportsPiP,
-        hdr = hdr,
-        supportedUriSchemes = supportedUriSchemes,
-    ) {
-        explicitHlsSupport = supportsHls
-    }
-
-    operator fun component1(): Boolean = supportsMkv
-
-    operator fun component2(): Boolean = supportsPiP
-
-    operator fun component3(): HdrCapabilities = hdr
-
-    operator fun component4(): Set<String> = supportedUriSchemes
-
-    /**
-     * Copies the 1.x structural fields while retaining this instance's backend-specific
-     * HLS support value.
-     */
-    fun copy(
-        supportsMkv: Boolean = this.supportsMkv,
-        supportsPiP: Boolean = this.supportsPiP,
-        hdr: HdrCapabilities = this.hdr,
-        supportedUriSchemes: Set<String> = this.supportedUriSchemes,
-    ): PlayerCapabilities =
-        PlayerCapabilities(
-            supportsMkv = supportsMkv,
-            supportsPiP = supportsPiP,
-            hdr = hdr,
-            supportedUriSchemes = supportedUriSchemes,
-            supportsHls = supportsHls,
-        )
-
     fun canPlaySource(
         uri: String,
         mimeType: String? = null,
@@ -121,37 +44,9 @@ class PlayerCapabilities(
 
     private fun supportsUriScheme(scheme: String): Boolean =
         supportedUriSchemes.any { it.trim().equals(scheme, ignoreCase = true) }
-
-    override fun equals(other: Any?): Boolean =
-        this === other ||
-            (
-                other is PlayerCapabilities &&
-                    supportsMkv == other.supportsMkv &&
-                    supportsPiP == other.supportsPiP &&
-                    hdr == other.hdr &&
-                    supportedUriSchemes == other.supportedUriSchemes
-            )
-
-    override fun hashCode(): Int {
-        var result = supportsMkv.hashCode()
-        result = HASH_MULTIPLIER * result + supportsPiP.hashCode()
-        result = HASH_MULTIPLIER * result + hdr.hashCode()
-        result = HASH_MULTIPLIER * result + supportedUriSchemes.hashCode()
-        return result
-    }
-
-    override fun toString(): String =
-        "PlayerCapabilities(" +
-            "supportsMkv=$supportsMkv, " +
-            "supportsPiP=$supportsPiP, " +
-            "hdr=$hdr, " +
-            "supportedUriSchemes=$supportedUriSchemes" +
-            ")"
 }
 
 private val DEFAULT_SUPPORTED_URI_SCHEMES = setOf("asset", "blob", "content", "data", "file", "http", "https")
-private const val HASH_MULTIPLIER = 31
-private const val MINIMUM_EXTENDED_DYNAMIC_RANGE = 1f
 private const val WINDOWS_DRIVE_PATH_MIN_LENGTH = 3
 
 private fun String.sourceScheme(): String =

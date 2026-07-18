@@ -3,6 +3,7 @@
 import io.github.kdroidfilter.nucleus.desktop.application.dsl.CompressionLevel
 import io.github.kdroidfilter.nucleus.desktop.application.dsl.TargetFormat
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.tasks.JavaExec
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
@@ -13,6 +14,36 @@ plugins {
     alias(libs.plugins.compose)
     alias(libs.plugins.android.multiplatform.library)
     alias(libs.plugins.nucleus)
+}
+
+// Keep the desktop sample's documented -Dsample.app.* launch controls available through Gradle's
+// forked run task. Reading only this allow-list avoids forwarding unrelated JVM properties.
+val desktopSampleSystemProperties =
+    listOf(
+        "sample.app.videoUrl",
+        "sample.app.demoSubtitle",
+        "sample.app.windowX",
+        "sample.app.windowY",
+        "sample.app.windowWidth",
+        "sample.app.windowHeight",
+        "sample.app.dynamicRangePolicy",
+        "sample.app.dolbyVisionPolicy",
+        "sample.app.desktopVideoBackend",
+        "sample.app.kMediaBridgeRuntimeDirectory",
+        "sample.app.projectionType",
+        "sample.app.colorSelfTestSeconds",
+        "sample.app.colorSelfTestResultFile",
+        "sample.app.colorSelfTestExpectedSource",
+        "sample.app.colorSelfTestExpectedOutput",
+        "sample.app.colorSelfTestRequireAudioSync",
+    )
+
+tasks.withType<JavaExec>().configureEach {
+    desktopSampleSystemProperties.forEach { propertyName ->
+        providers.systemProperty(propertyName).orNull?.let { propertyValue ->
+            systemProperty(propertyName, propertyValue)
+        }
+    }
 }
 
 kotlin {
@@ -77,9 +108,15 @@ kotlin {
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.nucleus.graalvm.runtime)
+            implementation(project(":mediaplayer-ass"))
+            implementation(project(":mediaplayer-kmediabridge"))
+        }
+        iosMain.dependencies {
+            implementation(project(":mediaplayer-ass"))
         }
         wasmJsMain.dependencies {
             implementation(libs.kotlinx.browser)
+            implementation(project(":mediaplayer-ass"))
         }
     }
 }

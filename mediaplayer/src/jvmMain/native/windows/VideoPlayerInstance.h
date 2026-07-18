@@ -10,8 +10,13 @@
 #include <endpointvolume.h>
 #include <wrl/client.h>
 #include <atomic>
+#include <limits>
+#include <memory>
+#include <vector>
 
 #include "HLSPlayer.h"
+
+class WindowsHdrPresenter;
 
 // Per-player state. All COM pointers use ComPtr, events/critical sections use
 // RAII wrappers. The destructor performs a full teardown; CloseMedia() resets
@@ -28,6 +33,35 @@ struct VideoPlayerInstance {
     UINT32 nativeWidth      = 0;
     UINT32 nativeHeight     = 0;
     std::atomic<bool> bEOF{false};
+
+    // ---- Controlled D3D11 HDR output ----
+    // In this mode the source reader emits P010 DXGI surfaces and the native
+    // presenter owns the swapchain. HDR pixels are never copied through the
+    // JVM/Compose BGRA canvas.
+    bool bHdrOutputRequested = false;
+    std::unique_ptr<WindowsHdrPresenter> hdrPresenter;
+    std::atomic<int32_t> decodedColorGeneration{0};
+    std::atomic<int32_t> decodedBitDepth{0};
+    std::atomic<int32_t> decodedPrimaries{0};
+    std::atomic<int32_t> decodedTransfer{0};
+    std::atomic<int32_t> decodedMatrix{0};
+    std::atomic<int32_t> decodedRange{0};
+    std::atomic<int32_t> decodedAuthoritativeUnknowns{0};
+    std::atomic<int64_t> totalVideoFrames{0};
+    std::atomic<int64_t> renderedVideoFrames{0};
+    std::atomic<int64_t> droppedVideoFrames{0};
+    std::atomic<int64_t> maximumAvSyncOffsetMicros{0};
+
+    // A second, compressed SourceReader keeps the HEVC access units needed
+    // for frame-accurate ST 2094-40 extraction. The decoded reader cannot be
+    // used for this because Media Foundation does not expose the original SEI
+    // payload on the P010 output sample.
+    Microsoft::WRL::ComPtr<IMFSourceReader> pHdrMetadataReader;
+    Microsoft::WRL::ComPtr<IMFSample> pHdrMetadataPendingSample;
+    LONGLONG llHdrMetadataPendingTimestamp = 0;
+    UINT32 hdrNalLengthSize = 4;
+    std::vector<BYTE> hdrMetadataLastPayload;
+    LONGLONG llHdrMetadataLastTimestamp = (std::numeric_limits<LONGLONG>::min)();
 
     // Frame caching: used when paused, and when the decoded frame arrived
     // earlier than its presentation time (replaces the sleep-in-render-path

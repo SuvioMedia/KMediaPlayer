@@ -1,6 +1,5 @@
 package io.github.kdroidfilter.composemediaplayer
 
-import io.github.kdroidfilter.composemediaplayer.mac.MacNativeBridge
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 
 internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOptions): PlayerCapabilities =
@@ -20,17 +19,24 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                     ),
             )
         CurrentPlatform.OS.MAC ->
-            PlayerCapabilities(
-                supportsHls = true,
-                supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
-                supportsMkv =
-                    supportsDesktopMkvPlayback(
-                        playbackOptions = playbackOptions,
-                        nativePlatformSupportsMkv = false,
-                        supportsLibVlcNativeBackend = true,
-                    ),
-                hdr = queryMacHdrCapabilities(),
-            )
+            if (CurrentPlatform.isSupportedMacOsArchitecture) {
+                PlayerCapabilities(
+                    supportsHls = true,
+                    supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
+                    supportsMkv =
+                        supportsDesktopMkvPlayback(
+                            playbackOptions = playbackOptions,
+                            nativePlatformSupportsMkv = false,
+                            supportsLibVlcNativeBackend = true,
+                        ),
+                    // A desktop player has no active display until its native layer is attached.
+                    // MacVideoPlayerState replaces this with capabilities of that layer's NSScreen.
+                    displayColorCapabilities = DisplayColorCapabilities(),
+                    rendererColorCapabilities = MAC_RENDERER_COLOR_CAPABILITIES,
+                )
+            } else {
+                PlayerCapabilities()
+            }
         CurrentPlatform.OS.LINUX ->
             PlayerCapabilities(
                 supportsHls = true,
@@ -42,7 +48,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                         supportsLibVlcNativeBackend = true,
                     ),
             )
-    }
+    }.withPipelineExtensions(playbackOptions)
 
 private val JVM_SUPPORTED_URI_SCHEMES = setOf("file", "http", "https")
 
@@ -58,62 +64,43 @@ private fun supportsDesktopMkvPlayback(
         DesktopVideoBackend.AUTO ->
             nativePlatformSupportsMkv ||
                 hasLibVlcBackend() ||
-                hasExternalHlsContainerFallback()
+                hasExternalHlsContainerFallback(playbackOptions)
     }
 
 private val detectedLibVlcBackend: Boolean by lazy {
     runCatching { ExternalVlcLocator.findLibVlc() != null }.getOrDefault(false)
 }
 
-private val detectedExternalHlsContainerFallback: Boolean by lazy {
-    if (ExternalHlsFallbackSupport.isDisabled()) {
-        false
-    } else {
-        runCatching {
-            ExternalVlcLocator.findVlc() != null || ExternalFfmpegLocator.findFfmpeg() != null
-        }.getOrDefault(false)
-    }
-}
-
 private fun hasLibVlcBackend(): Boolean = detectedLibVlcBackend
 
-private fun hasExternalHlsContainerFallback(): Boolean = detectedExternalHlsContainerFallback
+private fun hasExternalHlsContainerFallback(playbackOptions: VideoPlaybackOptions): Boolean =
+    !ExternalHlsFallbackSupport.isDisabled() &&
+        runCatching {
+            ExternalVlcLocator.findVlc() != null ||
+                ExternalHlsFallbackSupport.canKMediaBridgeCopyVideo(playbackOptions.extensions)
+        }.getOrDefault(false)
 
 internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean =
     platformPlayerCapabilities().canPlaySource(source)
 
-private fun queryMacHdrCapabilities(): HdrCapabilities =
-    runCatching {
-        MacNativeBridge.nGetHdrCapabilities()?.toHdrCapabilities()
-    }.getOrNull() ?: HdrCapabilities(
-        hdr = HdrSupport.UNKNOWN,
-        hdr10 = HdrSupport.UNKNOWN,
-        hlg = HdrSupport.UNKNOWN,
-        dolbyVision = HdrSupport.UNKNOWN,
+private val MAC_RENDERER_COLOR_CAPABILITIES =
+    RendererColorCapabilities(
+        nativeSurfaceDynamicRanges =
+            setOf(
+                VideoDynamicRange.HDR10,
+                VideoDynamicRange.HLG,
+                VideoDynamicRange.DOLBY_VISION,
+            ),
+        controlledHdrDynamicRanges =
+            setOf(
+                VideoDynamicRange.HDR10,
+                VideoDynamicRange.HDR10_PLUS,
+                VideoDynamicRange.HLG,
+            ),
+        supportsToneMappingToSdr = true,
+        supportsNativeToneMappingToSdr = true,
+        supportsHdrProjection = true,
+        supportsHdr10PlusApplication = true,
+        supportsDolbyVisionMetadata = true,
+        supportsDolbyVisionToneMappingToSdr = true,
     )
-
-private fun String.toHdrCapabilities(): HdrCapabilities {
-    val values =
-        split(';')
-            .mapNotNull { entry ->
-                val key = entry.substringBefore('=', missingDelimiterValue = "").trim()
-                val value = entry.substringAfter('=', missingDelimiterValue = "").trim()
-                if (key.isEmpty()) null else key to value
-            }.toMap()
-    return HdrCapabilities(
-        hdr = values["hdr"].toHdrSupport(),
-        hdr10 = values["hdr10"].toHdrSupport(),
-        hlg = values["hlg"].toHdrSupport(),
-        dolbyVision = values["dolbyVision"].toHdrSupport(),
-        supportsNativeHdrPlayback = values["native"] == "1",
-        supportsToneMappingToSdr = values["toneMap"] == "1",
-        maxExtendedDynamicRange = values["maxEdr"]?.toFloatOrNull() ?: 1f,
-    )
-}
-
-private fun String?.toHdrSupport(): HdrSupport =
-    when (this) {
-        "SUPPORTED" -> HdrSupport.SUPPORTED
-        "UNSUPPORTED" -> HdrSupport.UNSUPPORTED
-        else -> HdrSupport.UNKNOWN
-    }

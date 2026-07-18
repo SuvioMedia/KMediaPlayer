@@ -1,5 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
+import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
+import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
+import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
@@ -34,12 +37,43 @@ class WindowsVideoPlayerStateTest {
 
     private fun withWindowsPlayerState(block: (WindowsVideoPlayerState) -> Unit) {
         assumeWindows()
-        val playerState = WindowsVideoPlayerState()
+        val playerState = createWindowsPlayerStateOrSkip()
         try {
             block(playerState)
         } finally {
             playerState.dispose()
         }
+    }
+
+    private fun createWindowsPlayerStateOrSkip(): WindowsVideoPlayerState =
+        try {
+            WindowsVideoPlayerState()
+        } catch (error: Throwable) {
+            if (error.isNativeLibraryUnavailable()) {
+                Assume.assumeTrue("Native Windows player not available: ${error.message}", false)
+            }
+            throw error
+        }
+
+    private fun Throwable.isNativeLibraryUnavailable(): Boolean =
+        when (this) {
+            is UnsatisfiedLinkError -> true
+            is NoClassDefFoundError ->
+                message?.contains("NativeBridge") == true ||
+                    message?.contains(
+                        "Could not initialize class " +
+                            "io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState",
+                    ) == true ||
+                    cause?.isNativeLibraryUnavailable() == true
+            is ExceptionInInitializerError -> cause?.isNativeLibraryUnavailable() == true
+            else -> false
+        }
+
+    @Test
+    fun playbackDiagnosticsExposeAvSyncOnlyWhenAudioIsPresent() {
+        assertNull(maximumWindowsAvSyncOffsetMs(longArrayOf(1, 1, 0, 57_000, 0)))
+        assertNull(maximumWindowsAvSyncOffsetMs(longArrayOf(1, 1, 0, 57_000)))
+        assertEquals(26f, maximumWindowsAvSyncOffsetMs(longArrayOf(1, 1, 0, 26_000, 1)))
     }
 
     @Test
@@ -74,6 +108,43 @@ class WindowsVideoPlayerStateTest {
             "\\\\server\\share\\video.mp4",
             normalizeWindowsLocalFileUriForPlayback("file://server/share/video.mp4"),
         )
+    }
+
+    @Test
+    fun desktopBridgeForcesSdrForExplicitPolicyAndUnavailableHdrSurface() {
+        val hdrSource = VideoColorInfo(dynamicRange = VideoDynamicRange.HDR10)
+
+        val explicitSdr =
+            windowsDesktopBridgeColorRequest(
+                source = hdrSource,
+                dynamicRangePolicy = DynamicRangePolicy.FORCE_SDR,
+                hdrSurfaceRequested = false,
+            )
+        val automaticFallback =
+            windowsDesktopBridgeColorRequest(
+                source = hdrSource,
+                dynamicRangePolicy = DynamicRangePolicy.AUTO,
+                hdrSurfaceRequested = false,
+            )
+
+        assertTrue(explicitSdr.forceSdrOutput)
+        assertFalse(explicitSdr.allowHdrCmafPassthrough)
+        assertTrue(automaticFallback.forceSdrOutput)
+        assertFalse(automaticFallback.allowHdrCmafPassthrough)
+    }
+
+    @Test
+    fun desktopBridgeRequiresHdrPassthroughForStrictHdrSurface() {
+        val request =
+            windowsDesktopBridgeColorRequest(
+                source = VideoColorInfo(dynamicRange = VideoDynamicRange.HDR10),
+                dynamicRangePolicy = DynamicRangePolicy.REQUIRE_HDR,
+                hdrSurfaceRequested = true,
+            )
+
+        assertFalse(request.forceSdrOutput)
+        assertTrue(request.allowHdrCmafPassthrough)
+        assertTrue(request.requireHdrCmafPassthrough)
     }
 
     /**
@@ -186,7 +257,7 @@ class WindowsVideoPlayerStateTest {
     @Test
     fun disposeIsIdempotentAndRejectsCommands() {
         assumeWindows()
-        val playerState = WindowsVideoPlayerState()
+        val playerState = createWindowsPlayerStateOrSkip()
 
         playerState.dispose()
         playerState.dispose()

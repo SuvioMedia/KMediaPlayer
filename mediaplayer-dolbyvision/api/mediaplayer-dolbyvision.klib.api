@@ -1,0 +1,980 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64, wasmJs]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <io.github.shusek:mediaplayer-dolbyvision>
+final enum class io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer : kotlin/Enum<io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer> { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer|null[0]
+    enum entry FRAGMENTED_MP4 // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.FRAGMENTED_MP4|null[0]
+    enum entry HLS_LIVE // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.HLS_LIVE|null[0]
+    enum entry HLS_VOD // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.HLS_VOD|null[0]
+    enum entry MATROSKA // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.MATROSKA|null[0]
+    enum entry MP4 // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.MP4|null[0]
+    enum entry UNKNOWN // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.UNKNOWN|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer> // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer> // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer.values|values#static(){}[0]
+}
+
+final enum class io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection : kotlin/Enum<io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection> { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection|null[0]
+    enum entry CONTAINER_UNSUPPORTED // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.CONTAINER_UNSUPPORTED|null[0]
+    enum entry DRM_UNSUPPORTED // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.DRM_UNSUPPORTED|null[0]
+    enum entry LIVE_SOURCE_UNSUPPORTED // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.LIVE_SOURCE_UNSUPPORTED|null[0]
+    enum entry MODULE_RUNTIME_UNAVAILABLE // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.MODULE_RUNTIME_UNAVAILABLE|null[0]
+    enum entry NONE // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.NONE|null[0]
+    enum entry RPU_MISSING // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.RPU_MISSING|null[0]
+    enum entry SOURCE_PROFILE_UNSUPPORTED // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.SOURCE_PROFILE_UNSUPPORTED|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection> // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection> // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection.values|values#static(){}[0]
+}
+
+final enum class io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat : kotlin/Enum<io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat> { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat|null[0]
+    enum entry ANNEX_B // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat.ANNEX_B|null[0]
+    enum entry LENGTH_PREFIXED_4 // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat.LENGTH_PREFIXED_4|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat> // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat> // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat.values|values#static(){}[0]
+}
+
+final enum class io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason : kotlin/Enum<io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason> { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason|null[0]
+    enum entry CONVERSION_FAILED // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.CONVERSION_FAILED|null[0]
+    enum entry DRM_PROTECTED // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.DRM_PROTECTED|null[0]
+    enum entry INVALID_PLAYLIST // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.INVALID_PLAYLIST|null[0]
+    enum entry LIVE_SOURCE // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.LIVE_SOURCE|null[0]
+    enum entry RESOURCE_IO // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.RESOURCE_IO|null[0]
+    enum entry UNSUPPORTED_VARIANT // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.UNSUPPORTED_VARIANT|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason> // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason> // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason.values|values#static(){}[0]
+}
+
+abstract fun interface io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaDataSource { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaDataSource|null[0]
+    abstract suspend fun read(kotlin/String, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange?, kotlin/Int): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaDataSource.read|read(kotlin.String;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionByteRange?;kotlin.Int){}[0]
+}
+
+abstract interface io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentRemuxer { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentRemuxer|null[0]
+    abstract val isAvailable // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentRemuxer.isAvailable|{}isAvailable[0]
+        abstract fun <get-isAvailable>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentRemuxer.isAvailable.<get-isAvailable>|<get-isAvailable>(){}[0]
+
+    abstract suspend fun remux(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment, kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu>): io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentRemuxer.remux|remux(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionMediaFragment;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.dolbyvision.TimedDolbyVisionRpu>){}[0]
+}
+
+abstract interface io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRandomAccessDataSource { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRandomAccessDataSource|null[0]
+    abstract suspend fun read(kotlin/Long, kotlin/Int): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRandomAccessDataSource.read|read(kotlin.Long;kotlin.Int){}[0]
+    abstract suspend fun size(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRandomAccessDataSource.size|size(){}[0]
+}
+
+abstract interface io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter|null[0]
+    abstract val isAvailable // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter.isAvailable|{}isAvailable[0]
+        abstract fun <get-isAvailable>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter.isAvailable.<get-isAvailable>|<get-isAvailable>(){}[0]
+
+    abstract suspend fun convertProfile7To81(kotlin/ByteArray): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter.convertProfile7To81|convertProfile7To81(kotlin.ByteArray){}[0]
+    open suspend fun prepare(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter.prepare|prepare(){}[0]
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment) // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionMediaFragment){}[0]
+
+        final val fragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success.fragment|{}fragment[0]
+            final fun <get-fragment>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success.fragment.<get-fragment>|<get-fragment>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success.component1|component1(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success.copy|copy(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionMediaFragment){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration) // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.CmafDolbyVisionTrackConfiguration){}[0]
+
+        final val configuration // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success.configuration|{}configuration[0]
+            final fun <get-configuration>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success.configuration.<get-configuration>|<get-configuration>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success.component1|component1(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success.copy|copy(io.github.kdroidfilter.composemediaplayer.dolbyvision.CmafDolbyVisionTrackConfiguration){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.ConvertedDolbyVisionFragment){}[0]
+
+        final val value // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success.value|{}value[0]
+            final fun <get-value>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success.value.<get-value>|<get-value>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success.component1|component1(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success.copy|copy(io.github.kdroidfilter.composemediaplayer.dolbyvision.ConvertedDolbyVisionFragment){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult|null[0]
+    final class Invalid : io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Invalid.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success|null[0]
+        constructor <init>(kotlin/ByteArray) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success.<init>|<init>(kotlin.ByteArray){}[0]
+
+        final val rpuNalUnit // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success.rpuNalUnit|{}rpuNalUnit[0]
+            final fun <get-rpuNalUnit>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success.rpuNalUnit.<get-rpuNalUnit>|<get-rpuNalUnit>(){}[0]
+
+        final fun component1(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success.component1|component1(){}[0]
+        final fun copy(kotlin/ByteArray = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success.copy|copy(kotlin.ByteArray){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Success.toString|toString(){}[0]
+    }
+
+    final class Unavailable : io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult.Unavailable.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success|null[0]
+        constructor <init>(kotlin/ByteArray, io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment) // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.<init>|<init>(kotlin.ByteArray;io.github.kdroidfilter.composemediaplayer.dolbyvision.FlatMp4DolbyVisionFragment){}[0]
+
+        final val fragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.fragment|{}fragment[0]
+            final fun <get-fragment>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.fragment.<get-fragment>|<get-fragment>(){}[0]
+        final val payload // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.payload|{}payload[0]
+            final fun <get-payload>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.payload.<get-payload>|<get-payload>(){}[0]
+
+        final fun component1(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.component1|component1(){}[0]
+        final fun component2(): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.component2|component2(){}[0]
+        final fun copy(kotlin/ByteArray = ..., io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.copy|copy(kotlin.ByteArray;io.github.kdroidfilter.composemediaplayer.dolbyvision.FlatMp4DolbyVisionFragment){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession) // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.FlatMp4DolbyVisionSession){}[0]
+
+        final val session // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success.session|{}session[0]
+            final fun <get-session>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success.session.<get-session>|<get-session>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success.component1|component1(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success.copy|copy(io.github.kdroidfilter.composemediaplayer.dolbyvision.FlatMp4DolbyVisionSession){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success|null[0]
+        constructor <init>(kotlin/ByteArray, kotlin/Int, kotlin/Int) // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.<init>|<init>(kotlin.ByteArray;kotlin.Int;kotlin.Int){}[0]
+
+        final val discardedEnhancementLayerNals // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.discardedEnhancementLayerNals|{}discardedEnhancementLayerNals[0]
+            final fun <get-discardedEnhancementLayerNals>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.discardedEnhancementLayerNals.<get-discardedEnhancementLayerNals>|<get-discardedEnhancementLayerNals>(){}[0]
+        final val payload // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.payload|{}payload[0]
+            final fun <get-payload>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.payload.<get-payload>|<get-payload>(){}[0]
+        final val replacedRpus // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.replacedRpus|{}replacedRpus[0]
+            final fun <get-replacedRpus>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.replacedRpus.<get-replacedRpus>|<get-replacedRpus>(){}[0]
+
+        final fun component1(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.component1|component1(){}[0]
+        final fun component2(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.component2|component2(){}[0]
+        final fun component3(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.component3|component3(){}[0]
+        final fun copy(kotlin/ByteArray = ..., kotlin/Int = ..., kotlin/Int = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.copy|copy(kotlin.ByteArray;kotlin.Int;kotlin.Int){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure|null[0]
+        constructor <init>(kotlin/String, io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason = ...) // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.<init>|<init>(kotlin.String;io.github.kdroidfilter.composemediaplayer.dolbyvision.HlsVodDolbyVisionFailureReason){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.message.<get-message>|<get-message>(){}[0]
+        final val reason // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.reason|{}reason[0]
+            final fun <get-reason>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.reason.<get-reason>|<get-reason>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.component1|component1(){}[0]
+        final fun component2(): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.component2|component2(){}[0]
+        final fun copy(kotlin/String = ..., io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionFailureReason = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.copy|copy(kotlin.String;io.github.kdroidfilter.composemediaplayer.dolbyvision.HlsVodDolbyVisionFailureReason){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession) // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.HlsVodDolbyVisionSession){}[0]
+
+        final val session // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success.session|{}session[0]
+            final fun <get-session>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success.session.<get-session>|<get-session>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success.component1|component1(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success.copy|copy(io.github.kdroidfilter.composemediaplayer.dolbyvision.HlsVodDolbyVisionSession){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success|null[0]
+        constructor <init>(kotlin/ByteArray, io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment) // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.<init>|<init>(kotlin.ByteArray;io.github.kdroidfilter.composemediaplayer.dolbyvision.HlsVodDolbyVisionSegment){}[0]
+
+        final val payload // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.payload|{}payload[0]
+            final fun <get-payload>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.payload.<get-payload>|<get-payload>(){}[0]
+        final val segment // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.segment|{}segment[0]
+            final fun <get-segment>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.segment.<get-segment>|<get-segment>(){}[0]
+
+        final fun component1(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.component1|component1(){}[0]
+        final fun component2(): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.component2|component2(){}[0]
+        final fun copy(kotlin/ByteArray = ..., io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.copy|copy(kotlin.ByteArray;io.github.kdroidfilter.composemediaplayer.dolbyvision.HlsVodDolbyVisionSegment){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success|null[0]
+        constructor <init>(kotlin/ByteArray, io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment) // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.<init>|<init>(kotlin.ByteArray;io.github.kdroidfilter.composemediaplayer.dolbyvision.MatroskaDolbyVisionFragment){}[0]
+
+        final val fragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.fragment|{}fragment[0]
+            final fun <get-fragment>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.fragment.<get-fragment>|<get-fragment>(){}[0]
+        final val payload // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.payload|{}payload[0]
+            final fun <get-payload>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.payload.<get-payload>|<get-payload>(){}[0]
+
+        final fun component1(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.component1|component1(){}[0]
+        final fun component2(): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.component2|component2(){}[0]
+        final fun copy(kotlin/ByteArray = ..., io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.copy|copy(kotlin.ByteArray;io.github.kdroidfilter.composemediaplayer.dolbyvision.MatroskaDolbyVisionFragment){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult.Success.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult|null[0]
+    final class Failure : io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure.<init>|<init>(kotlin.String){}[0]
+
+        final val message // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure.message|{}message[0]
+            final fun <get-message>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure.message.<get-message>|<get-message>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Failure.toString|toString(){}[0]
+    }
+
+    final class Success : io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession) // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.MatroskaDolbyVisionSession){}[0]
+
+        final val session // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success.session|{}session[0]
+            final fun <get-session>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success.session.<get-session>|<get-session>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success.component1|component1(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success.copy|copy(io.github.kdroidfilter.composemediaplayer.dolbyvision.MatroskaDolbyVisionSession){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult.Success.toString|toString(){}[0]
+    }
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/ByteArrayDolbyVisionDataSource : io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRandomAccessDataSource { // io.github.kdroidfilter.composemediaplayer.dolbyvision/ByteArrayDolbyVisionDataSource|null[0]
+    constructor <init>(kotlin/ByteArray) // io.github.kdroidfilter.composemediaplayer.dolbyvision/ByteArrayDolbyVisionDataSource.<init>|<init>(kotlin.ByteArray){}[0]
+
+    final suspend fun read(kotlin/Long, kotlin/Int): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/ByteArrayDolbyVisionDataSource.read|read(kotlin.Long;kotlin.Int){}[0]
+    final suspend fun size(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/ByteArrayDolbyVisionDataSource.size|size(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentAdapter { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentAdapter|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration, kotlin/Int = ...) // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentAdapter.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.CmafDolbyVisionTrackConfiguration;kotlin.Int){}[0]
+
+    final fun demux(kotlin/ByteArray): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionDemuxResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentAdapter.demux|demux(kotlin.ByteArray){}[0]
+    final fun reset(kotlin/Long = ...) // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentAdapter.reset|reset(kotlin.Long){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentRemuxer : io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentRemuxer { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentRemuxer|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration, kotlin/Int = ...) // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentRemuxer.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.CmafDolbyVisionTrackConfiguration;kotlin.Int){}[0]
+
+    final val isAvailable // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentRemuxer.isAvailable|{}isAvailable[0]
+        final fun <get-isAvailable>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentRemuxer.isAvailable.<get-isAvailable>|<get-isAvailable>(){}[0]
+
+    final suspend fun remux(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment, kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu>): io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionFragmentRemuxer.remux|remux(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionMediaFragment;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.dolbyvision.TimedDolbyVisionRpu>){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration|null[0]
+    constructor <init>(kotlin/Int, kotlin/Long, kotlin/Int, kotlin/Int, kotlin/Int, kotlin/ByteArray) // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.<init>|<init>(kotlin.Int;kotlin.Long;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.ByteArray){}[0]
+
+    final val nalLengthFieldBytes // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.nalLengthFieldBytes|{}nalLengthFieldBytes[0]
+        final fun <get-nalLengthFieldBytes>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.nalLengthFieldBytes.<get-nalLengthFieldBytes>|<get-nalLengthFieldBytes>(){}[0]
+    final val rewrittenInitializationSegment // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.rewrittenInitializationSegment|{}rewrittenInitializationSegment[0]
+        final fun <get-rewrittenInitializationSegment>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.rewrittenInitializationSegment.<get-rewrittenInitializationSegment>|<get-rewrittenInitializationSegment>(){}[0]
+    final val sourceLevel // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.sourceLevel|{}sourceLevel[0]
+        final fun <get-sourceLevel>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.sourceLevel.<get-sourceLevel>|<get-sourceLevel>(){}[0]
+    final val sourceProfile // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.sourceProfile|{}sourceProfile[0]
+        final fun <get-sourceProfile>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.sourceProfile.<get-sourceProfile>|<get-sourceProfile>(){}[0]
+    final val timescale // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.timescale|{}timescale[0]
+        final fun <get-timescale>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.timescale.<get-timescale>|<get-timescale>(){}[0]
+    final val trackId // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.trackId|{}trackId[0]
+        final fun <get-trackId>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.trackId.<get-trackId>|<get-trackId>(){}[0]
+
+    final fun component1(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.component2|component2(){}[0]
+    final fun component3(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.component3|component3(){}[0]
+    final fun component4(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.component4|component4(){}[0]
+    final fun component5(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.component5|component5(){}[0]
+    final fun component6(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.component6|component6(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/Long = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/ByteArray = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.copy|copy(kotlin.Int;kotlin.Long;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.ByteArray){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionTrackConfiguration.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment { // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment, kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu>, kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionMediaFragment;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.dolbyvision.TimedDolbyVisionRpu>;kotlin.Boolean){}[0]
+
+    final val convertedRpus // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.convertedRpus|{}convertedRpus[0]
+        final fun <get-convertedRpus>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu> // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.convertedRpus.<get-convertedRpus>|<get-convertedRpus>(){}[0]
+    final val fragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.fragment|{}fragment[0]
+        final fun <get-fragment>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.fragment.<get-fragment>|<get-fragment>(){}[0]
+    final val timestampsAndAudioPreserved // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.timestampsAndAudioPreserved|{}timestampsAndAudioPreserved[0]
+        final fun <get-timestampsAndAudioPreserved>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.timestampsAndAudioPreserved.<get-timestampsAndAudioPreserved>|<get-timestampsAndAudioPreserved>(){}[0]
+
+    final fun component1(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.component1|component1(){}[0]
+    final fun component2(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu> // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.component2|component2(){}[0]
+    final fun component3(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.component3|component3(){}[0]
+    final fun copy(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu> = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.copy|copy(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionMediaFragment;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.dolbyvision.TimedDolbyVisionRpu>;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange|null[0]
+    constructor <init>(kotlin/Long, kotlin/Long) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.<init>|<init>(kotlin.Long;kotlin.Long){}[0]
+
+    final val length // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.length|{}length[0]
+        final fun <get-length>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.length.<get-length>|<get-length>(){}[0]
+    final val offset // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.offset|{}offset[0]
+        final fun <get-offset>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.offset.<get-offset>|<get-offset>(){}[0]
+
+    final fun component1(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.component2|component2(){}[0]
+    final fun copy(kotlin/Long = ..., kotlin/Long = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.copy|copy(kotlin.Long;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan|null[0]
+    constructor <init>(kotlin/Boolean, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection, kotlin/Int? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/String? = ...) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.<init>|<init>(kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionConversionRejection;kotlin.Int?;kotlin.Boolean;kotlin.Boolean;kotlin.String?){}[0]
+
+    final val canConvert // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.canConvert|{}canConvert[0]
+        final fun <get-canConvert>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.canConvert.<get-canConvert>|<get-canConvert>(){}[0]
+    final val detail // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.detail|{}detail[0]
+        final fun <get-detail>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.detail.<get-detail>|<get-detail>(){}[0]
+    final val discardsEnhancementLayer // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.discardsEnhancementLayer|{}discardsEnhancementLayer[0]
+        final fun <get-discardsEnhancementLayer>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.discardsEnhancementLayer.<get-discardsEnhancementLayer>|<get-discardsEnhancementLayer>(){}[0]
+    final val discardsFelMapping // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.discardsFelMapping|{}discardsFelMapping[0]
+        final fun <get-discardsFelMapping>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.discardsFelMapping.<get-discardsFelMapping>|<get-discardsFelMapping>(){}[0]
+    final val outputProfile // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.outputProfile|{}outputProfile[0]
+        final fun <get-outputProfile>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.outputProfile.<get-outputProfile>|<get-outputProfile>(){}[0]
+    final val rejection // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.rejection|{}rejection[0]
+        final fun <get-rejection>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.rejection.<get-rejection>|<get-rejection>(){}[0]
+
+    final fun component1(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.component1|component1(){}[0]
+    final fun component2(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.component2|component2(){}[0]
+    final fun component3(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.component3|component3(){}[0]
+    final fun component4(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.component4|component4(){}[0]
+    final fun component5(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.component5|component5(){}[0]
+    final fun component6(): kotlin/String? // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.component6|component6(){}[0]
+    final fun copy(kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRejection = ..., kotlin/Int? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/String? = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.copy|copy(kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionConversionRejection;kotlin.Int?;kotlin.Boolean;kotlin.Boolean;kotlin.String?){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer, kotlin/Int?, kotlin/Boolean, io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer, kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Long = ...) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionContainer;kotlin.Int?;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Boolean;kotlin.Int;kotlin.Long){}[0]
+
+    final val container // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.container|{}container[0]
+        final fun <get-container>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.container.<get-container>|<get-container>(){}[0]
+    final val enhancementLayer // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.enhancementLayer|{}enhancementLayer[0]
+        final fun <get-enhancementLayer>(): io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.enhancementLayer.<get-enhancementLayer>|<get-enhancementLayer>(){}[0]
+    final val hasRpu // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.hasRpu|{}hasRpu[0]
+        final fun <get-hasRpu>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.hasRpu.<get-hasRpu>|<get-hasRpu>(){}[0]
+    final val isDrmProtected // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.isDrmProtected|{}isDrmProtected[0]
+        final fun <get-isDrmProtected>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.isDrmProtected.<get-isDrmProtected>|<get-isDrmProtected>(){}[0]
+    final val isLive // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.isLive|{}isLive[0]
+        final fun <get-isLive>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.isLive.<get-isLive>|<get-isLive>(){}[0]
+    final val maximumBufferedBytes // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.maximumBufferedBytes|{}maximumBufferedBytes[0]
+        final fun <get-maximumBufferedBytes>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.maximumBufferedBytes.<get-maximumBufferedBytes>|<get-maximumBufferedBytes>(){}[0]
+    final val maximumBufferedFragments // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.maximumBufferedFragments|{}maximumBufferedFragments[0]
+        final fun <get-maximumBufferedFragments>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.maximumBufferedFragments.<get-maximumBufferedFragments>|<get-maximumBufferedFragments>(){}[0]
+    final val profile // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.profile|{}profile[0]
+        final fun <get-profile>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.profile.<get-profile>|<get-profile>(){}[0]
+
+    final fun component1(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.component1|component1(){}[0]
+    final fun component2(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.component2|component2(){}[0]
+    final fun component3(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.component3|component3(){}[0]
+    final fun component4(): io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.component4|component4(){}[0]
+    final fun component5(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.component5|component5(){}[0]
+    final fun component6(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.component6|component6(){}[0]
+    final fun component7(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.component7|component7(){}[0]
+    final fun copy(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionContainer = ..., kotlin/Int? = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer = ..., kotlin/Boolean = ..., kotlin/Int = ..., kotlin/Long = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.copy|copy(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionContainer;kotlin.Int?;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Boolean;kotlin.Int;kotlin.Long){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.toString|toString(){}[0]
+
+    final object Companion { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion|null[0]
+        final const val DEFAULT_MAXIMUM_BUFFERED_BYTES // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.DEFAULT_MAXIMUM_BUFFERED_BYTES|{}DEFAULT_MAXIMUM_BUFFERED_BYTES[0]
+            final fun <get-DEFAULT_MAXIMUM_BUFFERED_BYTES>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.DEFAULT_MAXIMUM_BUFFERED_BYTES.<get-DEFAULT_MAXIMUM_BUFFERED_BYTES>|<get-DEFAULT_MAXIMUM_BUFFERED_BYTES>(){}[0]
+        final const val DEFAULT_MAXIMUM_BUFFERED_FRAGMENTS // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.DEFAULT_MAXIMUM_BUFFERED_FRAGMENTS|{}DEFAULT_MAXIMUM_BUFFERED_FRAGMENTS[0]
+            final fun <get-DEFAULT_MAXIMUM_BUFFERED_FRAGMENTS>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.DEFAULT_MAXIMUM_BUFFERED_FRAGMENTS.<get-DEFAULT_MAXIMUM_BUFFERED_FRAGMENTS>|<get-DEFAULT_MAXIMUM_BUFFERED_FRAGMENTS>(){}[0]
+        final const val MAXIMUM_BUFFERED_BYTES // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.MAXIMUM_BUFFERED_BYTES|{}MAXIMUM_BUFFERED_BYTES[0]
+            final fun <get-MAXIMUM_BUFFERED_BYTES>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.MAXIMUM_BUFFERED_BYTES.<get-MAXIMUM_BUFFERED_BYTES>|<get-MAXIMUM_BUFFERED_BYTES>(){}[0]
+        final const val MAXIMUM_BUFFERED_FRAGMENTS // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.MAXIMUM_BUFFERED_FRAGMENTS|{}MAXIMUM_BUFFERED_FRAGMENTS[0]
+            final fun <get-MAXIMUM_BUFFERED_FRAGMENTS>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.MAXIMUM_BUFFERED_FRAGMENTS.<get-MAXIMUM_BUFFERED_FRAGMENTS>|<get-MAXIMUM_BUFFERED_FRAGMENTS>(){}[0]
+        final const val MINIMUM_BUFFERED_BYTES // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.MINIMUM_BUFFERED_BYTES|{}MINIMUM_BUFFERED_BYTES[0]
+            final fun <get-MINIMUM_BUFFERED_BYTES>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.MINIMUM_BUFFERED_BYTES.<get-MINIMUM_BUFFERED_BYTES>|<get-MINIMUM_BUFFERED_BYTES>(){}[0]
+        final const val MINIMUM_BUFFERED_FRAGMENTS // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.MINIMUM_BUFFERED_FRAGMENTS|{}MINIMUM_BUFFERED_FRAGMENTS[0]
+            final fun <get-MINIMUM_BUFFERED_FRAGMENTS>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest.Companion.MINIMUM_BUFFERED_FRAGMENTS.<get-MINIMUM_BUFFERED_FRAGMENTS>|<get-MINIMUM_BUFFERED_FRAGMENTS>(){}[0]
+    }
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension : io.github.kdroidfilter.composemediaplayer/VideoSourcePipelineExtension { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter = ...) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionRpuConverter){}[0]
+
+    final val availability // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.availability|{}availability[0]
+        final fun <get-availability>(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.availability.<get-availability>|<get-availability>(){}[0]
+    final val colorConversionCapabilities // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.colorConversionCapabilities|{}colorConversionCapabilities[0]
+        final fun <get-colorConversionCapabilities>(): io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.colorConversionCapabilities.<get-colorConversionCapabilities>|<get-colorConversionCapabilities>(){}[0]
+    final val converter // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.converter|{}converter[0]
+        final fun <get-converter>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.converter.<get-converter>|<get-converter>(){}[0]
+    final val id // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.id|{}id[0]
+        final fun <get-id>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.id.<get-id>|<get-id>(){}[0]
+
+    final suspend fun prepareSource(io.github.kdroidfilter.composemediaplayer/VideoPipelineSourceRequest): io.github.kdroidfilter.composemediaplayer/VideoPipelineSourcePreparation // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.prepareSource|prepareSource(io.github.kdroidfilter.composemediaplayer.VideoPipelineSourceRequest){}[0]
+
+    final object Companion { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.Companion|null[0]
+        final const val ID // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.Companion.ID|{}ID[0]
+            final fun <get-ID>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionExtension.Companion.ID.<get-ID>|<get-ID>(){}[0]
+    }
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment|null[0]
+    constructor <init>(kotlin/Long, kotlin/Long, kotlin/Long, kotlin/Long, kotlin/ByteArray, kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu>) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.<init>|<init>(kotlin.Long;kotlin.Long;kotlin.Long;kotlin.Long;kotlin.ByteArray;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.dolbyvision.TimedDolbyVisionRpu>){}[0]
+
+    final val endPresentationTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.endPresentationTimeUs|{}endPresentationTimeUs[0]
+        final fun <get-endPresentationTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.endPresentationTimeUs.<get-endPresentationTimeUs>|<get-endPresentationTimeUs>(){}[0]
+    final val payload // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.payload|{}payload[0]
+        final fun <get-payload>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.payload.<get-payload>|<get-payload>(){}[0]
+    final val precedingKeyframeTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.precedingKeyframeTimeUs|{}precedingKeyframeTimeUs[0]
+        final fun <get-precedingKeyframeTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.precedingKeyframeTimeUs.<get-precedingKeyframeTimeUs>|<get-precedingKeyframeTimeUs>(){}[0]
+    final val rpus // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.rpus|{}rpus[0]
+        final fun <get-rpus>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu> // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.rpus.<get-rpus>|<get-rpus>(){}[0]
+    final val sequence // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.sequence|{}sequence[0]
+        final fun <get-sequence>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.sequence.<get-sequence>|<get-sequence>(){}[0]
+    final val startPresentationTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.startPresentationTimeUs|{}startPresentationTimeUs[0]
+        final fun <get-startPresentationTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.startPresentationTimeUs.<get-startPresentationTimeUs>|<get-startPresentationTimeUs>(){}[0]
+
+    final fun component1(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.component3|component3(){}[0]
+    final fun component4(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.component4|component4(){}[0]
+    final fun component5(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.component5|component5(){}[0]
+    final fun component6(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu> // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.component6|component6(){}[0]
+    final fun copy(kotlin/Long = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin/ByteArray = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu> = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.copy|copy(kotlin.Long;kotlin.Long;kotlin.Long;kotlin.Long;kotlin.ByteArray;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.dolbyvision.TimedDolbyVisionRpu>){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentRemuxer) // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge.<init>|<init>(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionConversionRequest;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionRpuConverter;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionFragmentRemuxer){}[0]
+
+    final val plan // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge.plan|{}plan[0]
+        final fun <get-plan>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge.plan.<get-plan>|<get-plan>(){}[0]
+
+    final fun bufferedFragments(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/ConvertedDolbyVisionFragment> // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge.bufferedFragments|bufferedFragments(){}[0]
+    final fun reset() // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge.reset|reset(){}[0]
+    final fun restartTimeForSeek(kotlin/Long): kotlin/Long? // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge.restartTimeForSeek|restartTimeForSeek(kotlin.Long){}[0]
+    final suspend fun convert(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaFragment): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionFragmentConversionResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionStreamingBridge.convert|convert(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionMediaFragment){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment|null[0]
+    constructor <init>(kotlin/Int, kotlin/Long, kotlin/Long, kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.<init>|<init>(kotlin.Int;kotlin.Long;kotlin.Long;kotlin.Boolean){}[0]
+
+    final val endPresentationTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.endPresentationTimeUs|{}endPresentationTimeUs[0]
+        final fun <get-endPresentationTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.endPresentationTimeUs.<get-endPresentationTimeUs>|<get-endPresentationTimeUs>(){}[0]
+    final val index // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.index|{}index[0]
+        final fun <get-index>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.index.<get-index>|<get-index>(){}[0]
+    final val startPresentationTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.startPresentationTimeUs|{}startPresentationTimeUs[0]
+        final fun <get-startPresentationTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.startPresentationTimeUs.<get-startPresentationTimeUs>|<get-startPresentationTimeUs>(){}[0]
+    final val startsWithRandomAccessPoint // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.startsWithRandomAccessPoint|{}startsWithRandomAccessPoint[0]
+        final fun <get-startsWithRandomAccessPoint>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.startsWithRandomAccessPoint.<get-startsWithRandomAccessPoint>|<get-startsWithRandomAccessPoint>(){}[0]
+
+    final fun component1(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.component3|component3(){}[0]
+    final fun component4(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.component4|component4(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.copy|copy(kotlin.Int;kotlin.Long;kotlin.Long;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession|null[0]
+    final val fragments // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession.fragments|{}fragments[0]
+        final fun <get-fragments>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragment> // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession.fragments.<get-fragments>|<get-fragments>(){}[0]
+    final val initializationSegment // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession.initializationSegment|{}initializationSegment[0]
+        final fun <get-initializationSegment>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession.initializationSegment.<get-initializationSegment>|<get-initializationSegment>(){}[0]
+
+    final fun restartFragmentIndexForSeek(kotlin/Long): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession.restartFragmentIndexForSeek|restartFragmentIndexForSeek(kotlin.Long){}[0]
+    final suspend fun convertFragment(kotlin/Int): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionFragmentResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession.convertFragment|convertFragment(kotlin.Int){}[0]
+    final suspend fun resetForSeek(kotlin/Long): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionSession.resetForSeek|resetForSeek(kotlin.Long){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment|null[0]
+    constructor <init>(kotlin/Int, kotlin/String, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange?, kotlin/Long, kotlin/Long, kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.<init>|<init>(kotlin.Int;kotlin.String;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionByteRange?;kotlin.Long;kotlin.Long;kotlin.Boolean){}[0]
+
+    final val byteRange // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.byteRange|{}byteRange[0]
+        final fun <get-byteRange>(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange? // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.byteRange.<get-byteRange>|<get-byteRange>(){}[0]
+    final val discontinuity // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.discontinuity|{}discontinuity[0]
+        final fun <get-discontinuity>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.discontinuity.<get-discontinuity>|<get-discontinuity>(){}[0]
+    final val durationUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.durationUs|{}durationUs[0]
+        final fun <get-durationUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.durationUs.<get-durationUs>|<get-durationUs>(){}[0]
+    final val index // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.index|{}index[0]
+        final fun <get-index>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.index.<get-index>|<get-index>(){}[0]
+    final val sourceUri // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.sourceUri|{}sourceUri[0]
+        final fun <get-sourceUri>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.sourceUri.<get-sourceUri>|<get-sourceUri>(){}[0]
+    final val startPresentationTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.startPresentationTimeUs|{}startPresentationTimeUs[0]
+        final fun <get-startPresentationTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.startPresentationTimeUs.<get-startPresentationTimeUs>|<get-startPresentationTimeUs>(){}[0]
+
+    final fun component1(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.component1|component1(){}[0]
+    final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.component2|component2(){}[0]
+    final fun component3(): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange? // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.component3|component3(){}[0]
+    final fun component4(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.component4|component4(){}[0]
+    final fun component5(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.component5|component5(){}[0]
+    final fun component6(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.component6|component6(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/String = ..., io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionByteRange? = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.copy|copy(kotlin.Int;kotlin.String;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionByteRange?;kotlin.Long;kotlin.Long;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession|null[0]
+    final val hasExternalAudioRenditions // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.hasExternalAudioRenditions|{}hasExternalAudioRenditions[0]
+        final fun <get-hasExternalAudioRenditions>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.hasExternalAudioRenditions.<get-hasExternalAudioRenditions>|<get-hasExternalAudioRenditions>(){}[0]
+    final val initializationSegment // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.initializationSegment|{}initializationSegment[0]
+        final fun <get-initializationSegment>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.initializationSegment.<get-initializationSegment>|<get-initializationSegment>(){}[0]
+    final val segments // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.segments|{}segments[0]
+        final fun <get-segments>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegment> // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.segments.<get-segments>|<get-segments>(){}[0]
+    final val usesMasterPlaylist // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.usesMasterPlaylist|{}usesMasterPlaylist[0]
+        final fun <get-usesMasterPlaylist>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.usesMasterPlaylist.<get-usesMasterPlaylist>|<get-usesMasterPlaylist>(){}[0]
+
+    final fun renderEntryPlaylist(kotlin/String): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.renderEntryPlaylist|renderEntryPlaylist(kotlin.String){}[0]
+    final fun renderMediaPlaylist(kotlin/String): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.renderMediaPlaylist|renderMediaPlaylist(kotlin.String){}[0]
+    final fun restartSegmentIndexForSeek(kotlin/Long): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.restartSegmentIndexForSeek|restartSegmentIndexForSeek(kotlin.Long){}[0]
+    final suspend fun convertSegment(kotlin/Int): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSegmentResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.convertSegment|convertSegment(kotlin.Int){}[0]
+    final suspend fun resetForSeek(kotlin/Long): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionSession.resetForSeek|resetForSeek(kotlin.Long){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviRpuConverter : io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter { // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviRpuConverter|null[0]
+    constructor <init>() // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviRpuConverter.<init>|<init>(){}[0]
+
+    final val isAvailable // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviRpuConverter.isAvailable|{}isAvailable[0]
+        final fun <get-isAvailable>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviRpuConverter.isAvailable.<get-isAvailable>|<get-isAvailable>(){}[0]
+
+    final fun close() // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviRpuConverter.close|close(){}[0]
+    final suspend fun convertProfile7To81(kotlin/ByteArray): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConversionResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviRpuConverter.convertProfile7To81|convertProfile7To81(kotlin.ByteArray){}[0]
+    final suspend fun prepare(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviRpuConverter.prepare|prepare(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment|null[0]
+    constructor <init>(kotlin/Int, kotlin/Long, kotlin/Long, kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.<init>|<init>(kotlin.Int;kotlin.Long;kotlin.Long;kotlin.Boolean){}[0]
+
+    final val endPresentationTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.endPresentationTimeUs|{}endPresentationTimeUs[0]
+        final fun <get-endPresentationTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.endPresentationTimeUs.<get-endPresentationTimeUs>|<get-endPresentationTimeUs>(){}[0]
+    final val index // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.index|{}index[0]
+        final fun <get-index>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.index.<get-index>|<get-index>(){}[0]
+    final val startPresentationTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.startPresentationTimeUs|{}startPresentationTimeUs[0]
+        final fun <get-startPresentationTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.startPresentationTimeUs.<get-startPresentationTimeUs>|<get-startPresentationTimeUs>(){}[0]
+    final val startsWithRandomAccessPoint // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.startsWithRandomAccessPoint|{}startsWithRandomAccessPoint[0]
+        final fun <get-startsWithRandomAccessPoint>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.startsWithRandomAccessPoint.<get-startsWithRandomAccessPoint>|<get-startsWithRandomAccessPoint>(){}[0]
+
+    final fun component1(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.component1|component1(){}[0]
+    final fun component2(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.component3|component3(){}[0]
+    final fun component4(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.component4|component4(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/Long = ..., kotlin/Long = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.copy|copy(kotlin.Int;kotlin.Long;kotlin.Long;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession|null[0]
+    final val fragments // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession.fragments|{}fragments[0]
+        final fun <get-fragments>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragment> // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession.fragments.<get-fragments>|<get-fragments>(){}[0]
+    final val initializationSegment // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession.initializationSegment|{}initializationSegment[0]
+        final fun <get-initializationSegment>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession.initializationSegment.<get-initializationSegment>|<get-initializationSegment>(){}[0]
+
+    final fun restartFragmentIndexForSeek(kotlin/Long): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession.restartFragmentIndexForSeek|restartFragmentIndexForSeek(kotlin.Long){}[0]
+    final suspend fun convertFragment(kotlin/Int): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionFragmentResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession.convertFragment|convertFragment(kotlin.Int){}[0]
+    final suspend fun resetForSeek(kotlin/Long): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionSession.resetForSeek|resetForSeek(kotlin.Long){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu { // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu|null[0]
+    constructor <init>(kotlin/Long, kotlin/ByteArray) // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.<init>|<init>(kotlin.Long;kotlin.ByteArray){}[0]
+
+    final val nalUnit // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.nalUnit|{}nalUnit[0]
+        final fun <get-nalUnit>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.nalUnit.<get-nalUnit>|<get-nalUnit>(){}[0]
+    final val presentationTimeUs // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.presentationTimeUs|{}presentationTimeUs[0]
+        final fun <get-presentationTimeUs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.presentationTimeUs.<get-presentationTimeUs>|<get-presentationTimeUs>(){}[0]
+
+    final fun component1(): kotlin/Long // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.component1|component1(){}[0]
+    final fun component2(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.component2|component2(){}[0]
+    final fun copy(kotlin/Long = ..., kotlin/ByteArray = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.copy|copy(kotlin.Long;kotlin.ByteArray){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/TimedDolbyVisionRpu.toString|toString(){}[0]
+}
+
+final object io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationSegment { // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationSegment|null[0]
+    final fun prepareProfile81(kotlin/ByteArray, kotlin/Int = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/CmafDolbyVisionInitializationSegment.prepareProfile81|prepareProfile81(kotlin.ByteArray;kotlin.Int){}[0]
+}
+
+final object io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlanner { // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlanner|null[0]
+    final fun plan(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionRequest, kotlin/Boolean): io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlan // io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionConversionPlanner.plan|plan(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionConversionRequest;kotlin.Boolean){}[0]
+}
+
+final object io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionAdapter { // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionAdapter|null[0]
+    final suspend fun open(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRandomAccessDataSource, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter, io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer, kotlin/Long = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Long = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionOpenResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/FlatMp4DolbyVisionAdapter.open|open(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionRandomAccessDataSource;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionRpuConverter;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Long;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Long){}[0]
+}
+
+final object io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcDolbyVisionRpuRewriter { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcDolbyVisionRpuRewriter|null[0]
+    final fun rewrite(kotlin/ByteArray, io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcNalUnitFormat, kotlin.collections/List<kotlin/ByteArray>, kotlin/Boolean = ..., kotlin/Int = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcRpuRewriteResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/HevcDolbyVisionRpuRewriter.rewrite|rewrite(kotlin.ByteArray;io.github.kdroidfilter.composemediaplayer.dolbyvision.HevcNalUnitFormat;kotlin.collections.List<kotlin.ByteArray>;kotlin.Boolean;kotlin.Int){}[0]
+}
+
+final object io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionAdapter { // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionAdapter|null[0]
+    final suspend fun open(kotlin/String, kotlin/String, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionMediaDataSource, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter, io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer, kotlin/Int = ..., kotlin/Long = ..., kotlin/Int = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionOpenResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/HlsVodDolbyVisionAdapter.open|open(kotlin.String;kotlin.String;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionMediaDataSource;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionRpuConverter;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Int;kotlin.Long;kotlin.Int){}[0]
+}
+
+final object io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionAdapter { // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionAdapter|null[0]
+    final suspend fun open(io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRandomAccessDataSource, io.github.kdroidfilter.composemediaplayer.dolbyvision/DolbyVisionRpuConverter, io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer, kotlin/Long = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Long = ...): io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionOpenResult // io.github.kdroidfilter.composemediaplayer.dolbyvision/MatroskaDolbyVisionAdapter.open|open(io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionRandomAccessDataSource;io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionRpuConverter;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Long;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Long){}[0]
+}
+
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_ByteArrayDolbyVisionDataSource$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_ByteArrayDolbyVisionDataSource$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_ByteArrayDolbyVisionDataSource$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentAdapter$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentAdapter$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentAdapter$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentRemuxer$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentRemuxer$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentRemuxer$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationSegment$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationSegment$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationSegment$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionTrackConfiguration$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionTrackConfiguration$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionTrackConfiguration$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_ConvertedDolbyVisionFragment$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_ConvertedDolbyVisionFragment$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_ConvertedDolbyVisionFragment$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionByteRange$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionByteRange$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionByteRange$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlan$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlan$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlan$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlanner$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlanner$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlanner$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionRequest$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionRequest$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionRequest$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionExtension$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionExtension$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionExtension$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionMediaFragment$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionMediaFragment$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionMediaFragment$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Invalid$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Invalid$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Invalid$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Unavailable$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Unavailable$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Unavailable$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionStreamingBridge$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionStreamingBridge$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionStreamingBridge$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionAdapter$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionAdapter$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionAdapter$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragment$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragment$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragment$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionSession$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionSession$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionSession$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcDolbyVisionRpuRewriter$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcDolbyVisionRpuRewriter$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcDolbyVisionRpuRewriter$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionAdapter$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionAdapter$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionAdapter$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegment$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegment$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegment$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSession$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSession$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSession$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviRpuConverter$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviRpuConverter$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviRpuConverter$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionAdapter$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionAdapter$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionAdapter$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragment$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragment$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragment$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionSession$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionSession$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionSession$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TimedDolbyVisionRpu$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TimedDolbyVisionRpu$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_TimedDolbyVisionRpu$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_DolbyVision$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_DolbyVision$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_DolbyVision$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_Failure$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_NotVideo$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_NotVideo$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_NotVideo$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_VideoWithoutDolbyVision$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_VideoWithoutDolbyVision$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_VideoWithoutDolbyVision$stableprop[0]
+
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_ByteArrayDolbyVisionDataSource$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_ByteArrayDolbyVisionDataSource$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_ByteArrayDolbyVisionDataSource$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionDemuxResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentAdapter$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentAdapter$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentAdapter$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentRemuxer$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentRemuxer$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionFragmentRemuxer$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationSegment$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationSegment$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionInitializationSegment$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionTrackConfiguration$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionTrackConfiguration$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafDolbyVisionTrackConfiguration$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_CmafStructureResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_ConvertedDolbyVisionFragment$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_ConvertedDolbyVisionFragment$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_ConvertedDolbyVisionFragment$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionByteRange$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionByteRange$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionByteRange$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlan$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlan$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlan$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlanner$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlanner$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionPlanner$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionRequest$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionRequest$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionConversionRequest$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionExtension$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionExtension$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionExtension$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionFragmentConversionResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionMediaFragment$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionMediaFragment$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionMediaFragment$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Invalid$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Invalid$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Invalid$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Unavailable$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Unavailable$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionRpuConversionResult_Unavailable$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionStreamingBridge$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionStreamingBridge$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_DolbyVisionStreamingBridge$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionAdapter$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionAdapter$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionAdapter$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragment$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragment$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragment$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionFragmentResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionOpenResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionSession$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionSession$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4DolbyVisionSession$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_FlatMp4ParseResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcDolbyVisionRpuRewriter$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcDolbyVisionRpuRewriter$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcDolbyVisionRpuRewriter$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HevcRpuRewriteResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPassthroughParseResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsPlaylistParseResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsRenditionResolution_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionAdapter$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionAdapter$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionAdapter$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionOpenResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegment$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegment$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegment$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSegmentResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSession$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSession$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodDolbyVisionSession$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_HlsVodPlaylistResolution_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_IsoBmffParseResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviRpuConverter$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviRpuConverter$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviRpuConverter$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionAdapter$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionAdapter$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionAdapter$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragment$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragment$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragment$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionFragmentResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionOpenResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionSession$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionSession$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaDolbyVisionSession$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_MatroskaParseResult_Success$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TimedDolbyVisionRpu$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TimedDolbyVisionRpu$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_TimedDolbyVisionRpu$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_DolbyVision$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_DolbyVision$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_DolbyVision$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_Failure$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_NotVideo$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_NotVideo$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_NotVideo$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_VideoWithoutDolbyVision$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_VideoWithoutDolbyVision$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_TrackParseResult_VideoWithoutDolbyVision$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final object io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviWasmConfiguration { // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviWasmConfiguration|null[0]
+    final var moduleUrl // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviWasmConfiguration.moduleUrl|{}moduleUrl[0]
+        final fun <get-moduleUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviWasmConfiguration.moduleUrl.<get-moduleUrl>|<get-moduleUrl>(){}[0]
+        final fun <set-moduleUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer.dolbyvision/LibDoviWasmConfiguration.moduleUrl.<set-moduleUrl>|<set-moduleUrl>(kotlin.String){}[0]
+}
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviWasmConfiguration$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviWasmConfiguration$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviWasmConfiguration$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Failure$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Failure$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Failure$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_None$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_None$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_None$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Ready$stableprop // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Ready$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Ready$stableprop[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviWasmConfiguration$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviWasmConfiguration$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_LibDoviWasmConfiguration$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Failure$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Failure$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Failure$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_None$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_None$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_None$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Ready$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.dolbyvision/io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Ready$stableprop_getter|io_github_kdroidfilter_composemediaplayer_dolbyvision_WebHlsAudioPreparation_Ready$stableprop_getter(){}[0]

@@ -46,10 +46,37 @@ fun WindowsVideoPlayerSurface(
     ) {
         // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
         val shouldRenderVideo =
-            (playerState.hasMedia || playerState.libVlcNativeSurfaceRequested) &&
-                (!playerState.isFullscreen || isInFullscreenWindow || playerState.libVlcNativeSurfaceRequested)
+            (
+                playerState.hasMedia ||
+                    playerState.libVlcNativeSurfaceRequested ||
+                    playerState.windowsHdrSurfaceRequested
+            ) &&
+                (
+                    !playerState.isFullscreen ||
+                        isInFullscreenWindow ||
+                        playerState.libVlcNativeSurfaceRequested ||
+                        playerState.windowsHdrSurfaceRequested
+                )
         if (shouldRenderVideo) {
-            if (playerState.shouldUseLibVlcNativeSurface()) {
+            if (playerState.shouldUseWindowsHdrSurface()) {
+                JvmNativeVideoHost(
+                    modifier =
+                        contentScale.toCanvasModifier(
+                            playerState.aspectRatio,
+                            playerState.metadata.width,
+                            playerState.metadata.height,
+                        ),
+                    canvasName = "ComposeMediaPlayer Windows D3D11 HDR canvas",
+                    hostName = "ComposeMediaPlayer Windows D3D11 HDR host",
+                    attachNative = playerState::attachWindowsHdrNativeComponent,
+                    detachNative = playerState::detachWindowsHdrNativeComponent,
+                    nativeFullscreen = playerState.isFullscreen && !isInFullscreenWindow,
+                    showExternalOverlay = !isInFullscreenWindow,
+                    overlay = {
+                        WindowsVideoOverlayContent(playerState, overlay)
+                    },
+                )
+            } else if (playerState.shouldUseLibVlcNativeSurface()) {
                 JvmNativeVideoHost(
                     modifier =
                         contentScale.toCanvasModifier(
@@ -92,7 +119,11 @@ fun WindowsVideoPlayerSurface(
         }
     }
 
-    if (playerState.isFullscreen && !isInFullscreenWindow && !playerState.libVlcNativeSurfaceRequested) {
+    if (playerState.isFullscreen &&
+        !isInFullscreenWindow &&
+        !playerState.libVlcNativeSurfaceRequested &&
+        !playerState.windowsHdrSurfaceRequested
+    ) {
         openFullscreenWindow(playerState, contentScale = contentScale, overlay = overlay)
     }
 }
@@ -105,7 +136,8 @@ private fun WindowsVideoOverlayContent(
     // Add Compose-based subtitle layer
     if (playerState.subtitlesEnabled &&
         playerState.currentSubtitleTrack != null &&
-        playerState.currentSubtitleTrack?.isEmbedded != true
+        playerState.currentSubtitleTrack?.isEmbedded != true &&
+        !playerState.usesLibAssSubtitleOverlay
     ) {
         val currentTime =
             if (playerState.userDragging) {

@@ -6,12 +6,12 @@ import kotlinx.coroutines.withContext
 
 internal actual suspend fun platformQuerySupportedAudioCodecs(): Set<MediaCodec> =
     withContext(Dispatchers.Default) {
-        androidAudioCodecs
+        if (currentAndroidRuntimeIsSupported()) androidAudioCodecs else emptySet()
     }
 
 internal actual suspend fun platformQuerySupportedVideoCodecs(): Set<MediaCodec> =
     withContext(Dispatchers.Default) {
-        androidVideoCodecs
+        if (currentAndroidRuntimeIsSupported()) androidVideoCodecs else emptySet()
     }
 
 private val androidAudioCodecs: Set<MediaCodec> by lazy {

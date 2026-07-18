@@ -15,9 +15,9 @@
 
 #ifdef __OBJC__
 #import <AppKit/AppKit.h>
+#import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
-
-static NSView* g_hdr_native_view = nil;
+#import <VideoToolbox/VideoToolbox.h>
 #endif
 
 // ---------------------------------------------------------------------------
@@ -41,13 +41,16 @@ extern void*   getHdrMetalLayer(void* ctx);
 extern void    setHdrMetalLayerSize(void* ctx, int32_t width, int32_t height, double scale);
 extern void    setHdrMetalPreferred(void* ctx, int32_t preferred);
 extern void    setHdrToneMappingEnabled(void* ctx, int32_t enabled);
+extern int32_t setHdrMetalProjectionConfiguration(void* ctx, const char* configuration);
+extern const char* getHdrRendererFailure(void* ctx);
 extern void    setHdrMetalContentScaleMode(void* ctx, int32_t mode);
 extern void    detachHdrMetalLayer(void* ctx);
 extern int32_t isHdrMetalAvailable(void* ctx);
-extern const char* getHdrCapabilities(void);
+extern int32_t isHdrOutputReady(void* ctx);
 extern float  getVideoFrameRate(void* ctx);
 extern float  getScreenRefreshRate(void* ctx);
 extern float  getCaptureFrameRate(void* ctx);
+extern const char* getPlaybackDiagnostics(void* ctx);
 extern double getVideoDuration(void* ctx);
 extern double getCurrentTime(void* ctx);
 extern void   seekTo(void* ctx, double time);
@@ -57,6 +60,7 @@ extern float  getPlaybackSpeed(void* ctx);
 extern const char* getVideoTitle(void* ctx);
 extern int64_t     getVideoBitrate(void* ctx);
 extern const char* getVideoMimeType(void* ctx);
+extern const char* getVideoColorInfo(void* ctx);
 extern int32_t getAudioChannels(void* ctx);
 extern int32_t getAudioSampleRate(void* ctx);
 extern int32_t consumeDidPlayToEnd(void* ctx);
@@ -101,6 +105,9 @@ typedef enum {
 typedef struct {
     PlayerKind kind;
     void* ctx;
+    // AVPlayerLayer host owned by this player. Keeping it on the handle avoids
+    // one player's attach/detach operation stealing another player's layer.
+    void* native_view;
 } NativePlayerHandle;
 
 static NativePlayerHandle* toHandle(jlong h) {
@@ -283,9 +290,14 @@ static double component_backing_scale(JNIEnv* env, jobject component) {
     return scale;
 }
 
-static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer* layer) {
+static jboolean set_awt_component_layer(
+    JNIEnv* env,
+    jobject component,
+    CALayer* layer,
+    NSView** native_view_slot
+) {
 #ifdef __OBJC__
-    if (!component) return JNI_FALSE;
+    if (!component || !native_view_slot) return JNI_FALSE;
     jobject awt_window = component_window_ancestor(env, component);
     jstring awt_window_title = awt_window ? call_object_string(env, awt_window, "getTitle") : NULL;
     const char* awt_window_title_utf = awt_window_title
@@ -333,10 +345,10 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
             if ([surface_layers respondsToSelector:@selector(setLayer:)]) {
                 ((id<JAWT_SurfaceLayers>)surface_layers).layer = nil;
                 if (!layer) {
-                    [g_hdr_native_view removeFromSuperview];
-                    [g_hdr_native_view setLayer:nil];
-                    [g_hdr_native_view release];
-                    g_hdr_native_view = nil;
+                    [*native_view_slot removeFromSuperview];
+                    [*native_view_slot setLayer:nil];
+                    [*native_view_slot release];
+                    *native_view_slot = nil;
                     ok = JNI_TRUE;
                 } else {
                     jint width = call_component_int(env, component, "getWidth");
@@ -362,9 +374,9 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
                     }
                     NSView* content_view = [window contentView];
                     if (content_view) {
-                        if (!g_hdr_native_view) {
-                            g_hdr_native_view = [[NSView alloc] initWithFrame:NSZeroRect];
-                            [g_hdr_native_view setWantsLayer:YES];
+                        if (!*native_view_slot) {
+                            *native_view_slot = [[NSView alloc] initWithFrame:NSZeroRect];
+                            [*native_view_slot setWantsLayer:YES];
                         }
                         CGFloat view_y = [content_view isFlipped]
                             ? component_y
@@ -372,12 +384,12 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
                         if (view_y < 0.0 && view_y > -64.0) {
                             view_y = 0.0;
                         }
-                        [g_hdr_native_view setFrame:NSMakeRect(component_x, view_y, width, height)];
-                        [g_hdr_native_view setLayer:layer];
-                        [g_hdr_native_view setWantsLayer:YES];
-                        if ([g_hdr_native_view superview] != content_view) {
-                            [g_hdr_native_view removeFromSuperview];
-                            [content_view addSubview:g_hdr_native_view positioned:NSWindowAbove relativeTo:nil];
+                        [*native_view_slot setFrame:NSMakeRect(component_x, view_y, width, height)];
+                        [*native_view_slot setLayer:layer];
+                        [*native_view_slot setWantsLayer:YES];
+                        if ([*native_view_slot superview] != content_view) {
+                            [*native_view_slot removeFromSuperview];
+                            [content_view addSubview:*native_view_slot positioned:NSWindowAbove relativeTo:nil];
                         }
                         ok = JNI_TRUE;
                     }
@@ -402,6 +414,7 @@ static jboolean set_awt_component_layer(JNIEnv* env, jobject component, CALayer*
     (void)env;
     (void)component;
     (void)layer;
+    (void)native_view_slot;
     return JNI_FALSE;
 #endif
 }
@@ -1091,228 +1104,6 @@ static inline LibVlcPlayer* vlcCtx(NativePlayerHandle* handle) {
 }
 
 // ---------------------------------------------------------------------------
-// Optional libass renderer
-// ---------------------------------------------------------------------------
-
-typedef struct ass_library ASS_Library;
-typedef struct ass_renderer ASS_Renderer;
-typedef struct ass_track ASS_Track;
-typedef struct ass_image {
-    int w;
-    int h;
-    int stride;
-    unsigned char* bitmap;
-    uint32_t color;
-    int dst_x;
-    int dst_y;
-    struct ass_image* next;
-} ASS_Image;
-
-typedef struct {
-    void* dylib;
-    ASS_Library* (*library_init)(void);
-    void (*library_done)(ASS_Library*);
-    ASS_Renderer* (*renderer_init)(ASS_Library*);
-    void (*renderer_done)(ASS_Renderer*);
-    void (*set_frame_size)(ASS_Renderer*, int, int);
-    void (*set_fonts)(ASS_Renderer*, const char*, const char*, int, const char*, int);
-    void (*add_font)(ASS_Library*, const char*, const char*, int);
-    ASS_Track* (*new_track)(ASS_Library*);
-    void (*free_track)(ASS_Track*);
-    void (*process_data)(ASS_Track*, char*, int);
-    ASS_Image* (*render_frame)(ASS_Renderer*, ASS_Track*, long long, int*);
-} LibAssApi;
-
-typedef struct {
-    LibAssApi api;
-    ASS_Library* library;
-    ASS_Renderer* renderer;
-    ASS_Track* track;
-    int frame_width;
-    int frame_height;
-} LibAssContext;
-
-static int load_libass_api(const char* libass_path, LibAssApi* api) {
-    if (!libass_path || !api) return 0;
-    memset(api, 0, sizeof(*api));
-
-    void* dylib = dlopen(libass_path, RTLD_NOW | RTLD_LOCAL);
-    if (!dylib) {
-        native_logf("Failed to dlopen libass: %s\n", dlerror());
-        return 0;
-    }
-
-    api->dylib = dylib;
-    api->library_init = (ASS_Library* (*)(void))dlsym(dylib, "ass_library_init");
-    api->library_done = (void (*)(ASS_Library*))dlsym(dylib, "ass_library_done");
-    api->renderer_init = (ASS_Renderer* (*)(ASS_Library*))dlsym(dylib, "ass_renderer_init");
-    api->renderer_done = (void (*)(ASS_Renderer*))dlsym(dylib, "ass_renderer_done");
-    api->set_frame_size = (void (*)(ASS_Renderer*, int, int))dlsym(dylib, "ass_set_frame_size");
-    api->set_fonts = (void (*)(ASS_Renderer*, const char*, const char*, int, const char*, int))dlsym(dylib, "ass_set_fonts");
-    api->add_font = (void (*)(ASS_Library*, const char*, const char*, int))dlsym(dylib, "ass_add_font");
-    api->new_track = (ASS_Track* (*)(ASS_Library*))dlsym(dylib, "ass_new_track");
-    api->free_track = (void (*)(ASS_Track*))dlsym(dylib, "ass_free_track");
-    api->process_data = (void (*)(ASS_Track*, char*, int))dlsym(dylib, "ass_process_data");
-    api->render_frame = (ASS_Image* (*)(ASS_Renderer*, ASS_Track*, long long, int*))dlsym(dylib, "ass_render_frame");
-
-    if (!api->library_init || !api->library_done || !api->renderer_init || !api->renderer_done ||
-        !api->set_frame_size || !api->set_fonts || !api->new_track || !api->free_track ||
-        !api->process_data || !api->render_frame) {
-        native_logf("libass is missing required API symbols\n");
-        dlclose(dylib);
-        memset(api, 0, sizeof(*api));
-        return 0;
-    }
-
-    return 1;
-}
-
-static LibAssContext* create_libass_renderer(const char* libass_path) {
-    LibAssContext* ctx = (LibAssContext*)calloc(1, sizeof(LibAssContext));
-    if (!ctx) return NULL;
-
-    if (!load_libass_api(libass_path, &ctx->api)) {
-        free(ctx);
-        return NULL;
-    }
-
-    ctx->library = ctx->api.library_init();
-    if (!ctx->library) {
-        dlclose(ctx->api.dylib);
-        free(ctx);
-        return NULL;
-    }
-
-    ctx->renderer = ctx->api.renderer_init(ctx->library);
-    if (!ctx->renderer) {
-        ctx->api.library_done(ctx->library);
-        dlclose(ctx->api.dylib);
-        free(ctx);
-        return NULL;
-    }
-
-    ctx->api.set_fonts(ctx->renderer, NULL, "Arial", 1, NULL, 1);
-    return ctx;
-}
-
-static void dispose_libass_renderer(LibAssContext* ctx) {
-    if (!ctx) return;
-    if (ctx->track) {
-        ctx->api.free_track(ctx->track);
-        ctx->track = NULL;
-    }
-    if (ctx->renderer) {
-        ctx->api.renderer_done(ctx->renderer);
-        ctx->renderer = NULL;
-    }
-    if (ctx->library) {
-        ctx->api.library_done(ctx->library);
-        ctx->library = NULL;
-    }
-    if (ctx->api.dylib) {
-        dlclose(ctx->api.dylib);
-        ctx->api.dylib = NULL;
-    }
-    free(ctx);
-}
-
-static int configure_libass_track(LibAssContext* ctx, const char* ass_data) {
-    if (!ctx || !ctx->library || !ass_data) return 0;
-
-    if (ctx->track) {
-        ctx->api.free_track(ctx->track);
-        ctx->track = NULL;
-    }
-
-    ctx->track = ctx->api.new_track(ctx->library);
-    if (!ctx->track) return 0;
-
-    size_t data_length = strlen(ass_data);
-    char* mutable_data = (char*)malloc(data_length + 1);
-    if (!mutable_data) return 0;
-    memcpy(mutable_data, ass_data, data_length + 1);
-    ctx->api.process_data(ctx->track, mutable_data, (int)data_length);
-    free(mutable_data);
-    return 1;
-}
-
-static int add_libass_font(LibAssContext* ctx, const char* name, const char* data, int data_size) {
-    if (!ctx || !ctx->library || !ctx->api.add_font || !name || !data || data_size <= 0) return 0;
-
-    char* mutable_data = (char*)malloc((size_t)data_size);
-    if (!mutable_data) {
-        return 0;
-    }
-
-    memcpy(mutable_data, data, (size_t)data_size);
-    ctx->api.add_font(ctx->library, name, mutable_data, data_size);
-    free(mutable_data);
-    return 1;
-}
-
-static inline uint8_t blend_channel(uint8_t src, uint8_t dst, int alpha) {
-    return (uint8_t)((src * alpha + dst * (255 - alpha) + 127) / 255);
-}
-
-static int blend_libass_frame(
-    LibAssContext* ctx,
-    uint8_t* pixels,
-    int row_bytes,
-    int width,
-    int height,
-    long long time_ms
-) {
-    if (!ctx || !ctx->renderer || !ctx->track || !pixels || row_bytes <= 0 || width <= 0 || height <= 0) {
-        return 0;
-    }
-
-    if (ctx->frame_width != width || ctx->frame_height != height) {
-        ctx->api.set_frame_size(ctx->renderer, width, height);
-        ctx->frame_width = width;
-        ctx->frame_height = height;
-    }
-
-    int detect_change = 0;
-    ASS_Image* image = ctx->api.render_frame(ctx->renderer, ctx->track, time_ms, &detect_change);
-    for (ASS_Image* item = image; item; item = item->next) {
-        if (!item->bitmap || item->w <= 0 || item->h <= 0) continue;
-
-        uint8_t r = (uint8_t)((item->color >> 24) & 0xff);
-        uint8_t g = (uint8_t)((item->color >> 16) & 0xff);
-        uint8_t b = (uint8_t)((item->color >> 8) & 0xff);
-        int color_alpha = 255 - (int)(item->color & 0xff);
-        if (color_alpha <= 0) continue;
-
-        int start_x = item->dst_x < 0 ? -item->dst_x : 0;
-        int start_y = item->dst_y < 0 ? -item->dst_y : 0;
-        int end_x = item->w;
-        int end_y = item->h;
-        if (item->dst_x + end_x > width) end_x = width - item->dst_x;
-        if (item->dst_y + end_y > height) end_y = height - item->dst_y;
-
-        for (int y = start_y; y < end_y; y++) {
-            uint8_t* src_row = item->bitmap + (size_t)y * (size_t)item->stride;
-            uint8_t* dst_row = pixels + (size_t)(item->dst_y + y) * (size_t)row_bytes + (size_t)(item->dst_x + start_x) * 4u;
-            for (int x = start_x; x < end_x; x++) {
-                int alpha = ((int)src_row[x] * color_alpha + 127) / 255;
-                if (alpha <= 0) {
-                    dst_row += 4;
-                    continue;
-                }
-
-                dst_row[0] = blend_channel(b, dst_row[0], alpha);
-                dst_row[1] = blend_channel(g, dst_row[1], alpha);
-                dst_row[2] = blend_channel(r, dst_row[2], alpha);
-                dst_row[3] = 255;
-                dst_row += 4;
-            }
-        }
-    }
-
-    return 1;
-}
-
-// ---------------------------------------------------------------------------
 // JNI implementations
 // ---------------------------------------------------------------------------
 
@@ -1358,67 +1149,6 @@ static jlong JNICALL jni_CreateLibVlcPlayer(
     handle->kind = PLAYER_KIND_LIBVLC;
     handle->ctx = player;
     return (jlong)(uintptr_t)handle;
-}
-
-static jlong JNICALL jni_CreateLibAssRenderer(JNIEnv* env, jclass cls, jstring libPath) {
-    if (!libPath) return 0L;
-    const char* cLibPath = (*env)->GetStringUTFChars(env, libPath, NULL);
-    if (!cLibPath) return 0L;
-    LibAssContext* ctx = create_libass_renderer(cLibPath);
-    (*env)->ReleaseStringUTFChars(env, libPath, cLibPath);
-    return (jlong)(uintptr_t)ctx;
-}
-
-static jboolean JNICALL jni_SetLibAssTrack(JNIEnv* env, jclass cls, jlong handle, jstring assData) {
-    if (!handle || !assData) return JNI_FALSE;
-    const char* cAssData = (*env)->GetStringUTFChars(env, assData, NULL);
-    if (!cAssData) return JNI_FALSE;
-    LibAssContext* ctx = (LibAssContext*)(uintptr_t)(uint64_t)handle;
-    int result = configure_libass_track(ctx, cAssData);
-    (*env)->ReleaseStringUTFChars(env, assData, cAssData);
-    return (jboolean)(result != 0);
-}
-
-static jboolean JNICALL jni_AddLibAssFont(JNIEnv* env, jclass cls, jlong handle, jstring name, jbyteArray data) {
-    if (!handle || !name || !data) return JNI_FALSE;
-    LibAssContext* ctx = (LibAssContext*)(uintptr_t)(uint64_t)handle;
-    const char* cName = (*env)->GetStringUTFChars(env, name, NULL);
-    if (!cName) return JNI_FALSE;
-
-    jsize dataSize = (*env)->GetArrayLength(env, data);
-    jbyte* bytes = (*env)->GetByteArrayElements(env, data, NULL);
-    if (!bytes) {
-        (*env)->ReleaseStringUTFChars(env, name, cName);
-        return JNI_FALSE;
-    }
-
-    int result = add_libass_font(ctx, cName, (const char*)bytes, (int)dataSize);
-    (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-    (*env)->ReleaseStringUTFChars(env, name, cName);
-    return (jboolean)(result != 0);
-}
-
-static jboolean JNICALL jni_BlendLibAssFrame(
-    JNIEnv* env,
-    jclass cls,
-    jlong handle,
-    jlong pixelsAddress,
-    jint rowBytes,
-    jint width,
-    jint height,
-    jlong timeMs
-) {
-    (void)env;
-    (void)cls;
-    LibAssContext* ctx = (LibAssContext*)(uintptr_t)(uint64_t)handle;
-    uint8_t* pixels = (uint8_t*)(uintptr_t)(uint64_t)pixelsAddress;
-    return (jboolean)(blend_libass_frame(ctx, pixels, rowBytes, width, height, (long long)timeMs) != 0);
-}
-
-static void JNICALL jni_DisposeLibAssRenderer(JNIEnv* env, jclass cls, jlong handle) {
-    (void)env;
-    (void)cls;
-    dispose_libass_renderer((LibAssContext*)(uintptr_t)(uint64_t)handle);
 }
 
 static void JNICALL jni_OpenUri(JNIEnv* env, jclass cls, jlong handle, jstring uri) {
@@ -1627,12 +1357,72 @@ static void JNICALL jni_SetHdrToneMappingEnabled(JNIEnv* env, jclass cls, jlong 
     if (ctx) setHdrToneMappingEnabled(ctx, enabled ? 1 : 0);
 }
 
-static jstring JNICALL jni_GetHdrCapabilities(JNIEnv* env, jclass cls) {
-    const char* s = getHdrCapabilities();
-    if (!s) return NULL;
-    jstring result = (*env)->NewStringUTF(env, s);
-    free((void*)s);
+static jboolean JNICALL jni_SetHdrMetalProjectionConfiguration(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jstring configuration
+) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native) || !configuration) return JNI_FALSE;
+    void* ctx = avCtx(native);
+    if (!ctx) return JNI_FALSE;
+    const char* value = (*env)->GetStringUTFChars(env, configuration, NULL);
+    if (!value) return JNI_FALSE;
+    int32_t configured = setHdrMetalProjectionConfiguration(ctx, value);
+    (*env)->ReleaseStringUTFChars(env, configuration, value);
+    return configured ? JNI_TRUE : JNI_FALSE;
+}
+
+static jstring JNICALL jni_GetHdrRendererFailure(JNIEnv* env, jclass cls, jlong handle) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return NULL;
+    void* ctx = avCtx(native);
+    if (!ctx) return NULL;
+    const char* detail = getHdrRendererFailure(ctx);
+    if (!detail) return NULL;
+    jstring result = (*env)->NewStringUTF(env, detail);
+    free((void*)detail);
     return result;
+}
+
+static jstring JNICALL jni_GetDisplayColorCapabilities(JNIEnv* env, jclass cls, jlong handle) {
+#ifdef __OBJC__
+    NativePlayerHandle* native = toHandle(handle);
+    if (!native || native->kind != PLAYER_KIND_AV) return NULL;
+    NSView* view = (NSView*)native->native_view;
+    NSScreen* screen = [[view window] screen];
+    if (!screen) return NULL;
+
+    double potential_edr = [screen maximumPotentialExtendedDynamicRangeColorComponentValue];
+    double current_edr = [screen maximumExtendedDynamicRangeColorComponentValue];
+    BOOL eligible = [AVPlayer eligibleForHDRPlayback];
+    int native_hdr = eligible && potential_edr > 1.0 ? 1 : 0;
+    int dolby_vision_decode =
+        VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC) ? 1 : 0;
+    NSNumber* screen_number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
+    char value[384];
+    snprintf(
+        value,
+        sizeof(value),
+        "known=1;native=%d;eligible=%d;potentialEdr=%.6f;currentEdr=%.6f;screenId=%u;hdr10=%s;hlg=%s;dolbyVision=%s;dolbyVisionHardwareDecode=%d",
+        native_hdr,
+        eligible ? 1 : 0,
+        potential_edr,
+        current_edr,
+        screen_number ? [screen_number unsignedIntValue] : 0u,
+        native_hdr ? "SUPPORTED" : "UNSUPPORTED",
+        native_hdr ? "SUPPORTED" : "UNSUPPORTED",
+        native_hdr && dolby_vision_decode ? "SUPPORTED" : "UNSUPPORTED",
+        dolby_vision_decode
+    );
+    return (*env)->NewStringUTF(env, value);
+#else
+    (void)env;
+    (void)cls;
+    (void)handle;
+    return NULL;
+#endif
 }
 
 static jboolean JNICALL jni_AttachHdrMetalView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
@@ -1651,7 +1441,9 @@ static jboolean JNICALL jni_AttachHdrMetalView(JNIEnv* env, jclass cls, jlong ha
     double scale = component_backing_scale(env, component);
     setHdrMetalLayerSize(ctx, (int32_t)width, (int32_t)height, scale);
 
-    jboolean attached = set_awt_component_layer(env, component, layer);
+    NSView* native_view = (NSView*)native->native_view;
+    jboolean attached = set_awt_component_layer(env, component, layer, &native_view);
+    native->native_view = native_view;
     if (!attached) {
         native_logf("HDR Metal: JAWT layer attach failed\n");
     }
@@ -1661,7 +1453,9 @@ static jboolean JNICALL jni_AttachHdrMetalView(JNIEnv* env, jclass cls, jlong ha
 static void JNICALL jni_DetachHdrMetalView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
     NativePlayerHandle* native = toHandle(handle);
     if (!vlcCtx(native) && component) {
-        set_awt_component_layer(env, component, nil);
+        NSView* native_view = (NSView*)native->native_view;
+        set_awt_component_layer(env, component, nil, &native_view);
+        native->native_view = native_view;
     }
     void* ctx = avCtx(native);
     if (ctx) detachHdrMetalLayer(ctx);
@@ -1717,6 +1511,13 @@ static jboolean JNICALL jni_IsHdrMetalAvailable(JNIEnv* env, jclass cls, jlong h
     return ctx ? (jboolean)(isHdrMetalAvailable(ctx) != 0) : JNI_FALSE;
 }
 
+static jboolean JNICALL jni_IsHdrOutputReady(JNIEnv* env, jclass cls, jlong handle) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return JNI_FALSE;
+    void* ctx = avCtx(native);
+    return ctx ? (jboolean)(isHdrOutputReady(ctx) != 0) : JNI_FALSE;
+}
+
 static jfloat JNICALL jni_GetVideoFrameRate(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     if (vlcCtx(native)) return 0.0f;
@@ -1736,6 +1537,18 @@ static jfloat JNICALL jni_GetCaptureFrameRate(JNIEnv* env, jclass cls, jlong han
     if (vlcCtx(native)) return 30.0f;
     void* ctx = avCtx(native);
     return ctx ? getCaptureFrameRate(ctx) : 0.0f;
+}
+
+static jstring JNICALL jni_GetPlaybackDiagnostics(JNIEnv* env, jclass cls, jlong handle) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return NULL;
+    void* ctx = avCtx(native);
+    if (!ctx) return NULL;
+    const char* value = getPlaybackDiagnostics(ctx);
+    if (!value) return NULL;
+    jstring result = (*env)->NewStringUTF(env, value);
+    free((void*)value);
+    return result;
 }
 
 static jdouble JNICALL jni_GetVideoDuration(JNIEnv* env, jclass cls, jlong handle) {
@@ -1775,6 +1588,11 @@ static void JNICALL jni_SeekTo(JNIEnv* env, jclass cls, jlong handle, jdouble ti
 static void JNICALL jni_DisposePlayer(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     if (!native) return;
+    if (native->kind == PLAYER_KIND_AV && native->native_view) {
+        NSView* native_view = (NSView*)native->native_view;
+        detach_awt_component_native_view(&native_view);
+        native->native_view = NULL;
+    }
     if (native->kind == PLAYER_KIND_LIBVLC) {
         dispose_libvlc_player((LibVlcPlayer*)native->ctx);
     } else if (native->kind == PLAYER_KIND_AV && native->ctx) {
@@ -1827,6 +1645,18 @@ static jstring JNICALL jni_GetVideoMimeType(JNIEnv* env, jclass cls, jlong handl
     void* ctx = avCtx(native);
     if (!ctx) return NULL;
     const char* s = getVideoMimeType(ctx);
+    if (!s) return NULL;
+    jstring result = (*env)->NewStringUTF(env, s);
+    free((void*)s);
+    return result;
+}
+
+static jstring JNICALL jni_GetVideoColorInfo(JNIEnv* env, jclass cls, jlong handle) {
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return NULL;
+    void* ctx = avCtx(native);
+    if (!ctx) return NULL;
+    const char* s = getVideoColorInfo(ctx);
     if (!s) return NULL;
     jstring result = (*env)->NewStringUTF(env, s);
     free((void*)s);
@@ -1902,11 +1732,6 @@ static jboolean JNICALL jni_DisableLibVlcSubtitles(JNIEnv* env, jclass cls, jlon
 static const JNINativeMethod g_methods[] = {
     { "nCreatePlayer",           "()J",                         (void*)jni_CreatePlayer },
     { "nCreateLibVlcPlayer",     "(Ljava/lang/String;Ljava/lang/String;Z)J", (void*)jni_CreateLibVlcPlayer },
-    { "nCreateLibAssRenderer",   "(Ljava/lang/String;)J",       (void*)jni_CreateLibAssRenderer },
-    { "nSetLibAssTrack",         "(JLjava/lang/String;)Z",      (void*)jni_SetLibAssTrack },
-    { "nAddLibAssFont",          "(JLjava/lang/String;[B)Z",    (void*)jni_AddLibAssFont },
-    { "nBlendLibAssFrame",       "(JJIIIJ)Z",                   (void*)jni_BlendLibAssFrame },
-    { "nDisposeLibAssRenderer",  "(J)V",                        (void*)jni_DisposeLibAssRenderer },
     { "nOpenUri",                "(JLjava/lang/String;)V",      (void*)jni_OpenUri },
     { "nOpenUriWithHeaders",     "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaders },
     { "nOpenUriWithHeaderLines", "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaderLines },
@@ -1923,16 +1748,20 @@ static const JNINativeMethod g_methods[] = {
     { "nSetOutputSize",          "(JII)I",                      (void*)jni_SetOutputSize },
     { "nSetHdrMetalPreferred",   "(JZ)V",                       (void*)jni_SetHdrMetalPreferred },
     { "nSetHdrToneMappingEnabled", "(JZ)V",                     (void*)jni_SetHdrToneMappingEnabled },
-    { "nGetHdrCapabilities",     "()Ljava/lang/String;",        (void*)jni_GetHdrCapabilities },
+    { "nSetHdrMetalProjectionConfiguration", "(JLjava/lang/String;)Z", (void*)jni_SetHdrMetalProjectionConfiguration },
+    { "nGetHdrRendererFailure", "(J)Ljava/lang/String;",       (void*)jni_GetHdrRendererFailure },
+    { "nGetDisplayColorCapabilities", "(J)Ljava/lang/String;",   (void*)jni_GetDisplayColorCapabilities },
     { "nAttachHdrMetalView",     "(JLjava/awt/Component;)Z",    (void*)jni_AttachHdrMetalView },
     { "nDetachHdrMetalView",     "(JLjava/awt/Component;)V",    (void*)jni_DetachHdrMetalView },
     { "nAttachLibVlcNativeView", "(JLjava/awt/Component;)Z",    (void*)jni_AttachLibVlcNativeView },
     { "nDetachLibVlcNativeView", "(JLjava/awt/Component;)V",    (void*)jni_DetachLibVlcNativeView },
     { "nSetHdrMetalContentScaleMode", "(JI)V",                  (void*)jni_SetHdrMetalContentScaleMode },
     { "nIsHdrMetalAvailable",    "(J)Z",                        (void*)jni_IsHdrMetalAvailable },
+    { "nIsHdrOutputReady",       "(J)Z",                        (void*)jni_IsHdrOutputReady },
     { "nGetVideoFrameRate",      "(J)F",                        (void*)jni_GetVideoFrameRate },
     { "nGetScreenRefreshRate",   "(J)F",                        (void*)jni_GetScreenRefreshRate },
     { "nGetCaptureFrameRate",    "(J)F",                        (void*)jni_GetCaptureFrameRate },
+    { "nGetPlaybackDiagnostics", "(J)Ljava/lang/String;",       (void*)jni_GetPlaybackDiagnostics },
     { "nGetVideoDuration",       "(J)D",                        (void*)jni_GetVideoDuration },
     { "nGetCurrentTime",         "(J)D",                        (void*)jni_GetCurrentTime },
     { "nSeekTo",                 "(JD)V",                       (void*)jni_SeekTo },
@@ -1942,6 +1771,7 @@ static const JNINativeMethod g_methods[] = {
     { "nGetVideoTitle",          "(J)Ljava/lang/String;",       (void*)jni_GetVideoTitle },
     { "nGetVideoBitrate",        "(J)J",                        (void*)jni_GetVideoBitrate },
     { "nGetVideoMimeType",       "(J)Ljava/lang/String;",       (void*)jni_GetVideoMimeType },
+    { "nGetVideoColorInfo",      "(J)Ljava/lang/String;",       (void*)jni_GetVideoColorInfo },
     { "nGetAudioChannels",       "(J)I",                        (void*)jni_GetAudioChannels },
     { "nGetAudioSampleRate",     "(J)I",                        (void*)jni_GetAudioSampleRate },
     { "nConsumeDidPlayToEnd",    "(J)Z",                        (void*)jni_ConsumeDidPlayToEnd },

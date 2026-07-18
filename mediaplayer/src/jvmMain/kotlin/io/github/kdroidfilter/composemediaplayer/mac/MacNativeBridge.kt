@@ -22,30 +22,6 @@ internal object MacNativeBridge {
         nativeVideoOutput: Boolean,
     ): Long
 
-    @JvmStatic external fun nCreateLibAssRenderer(libAssPath: String): Long
-
-    @JvmStatic external fun nSetLibAssTrack(
-        handle: Long,
-        assData: String,
-    ): Boolean
-
-    @JvmStatic external fun nAddLibAssFont(
-        handle: Long,
-        name: String,
-        data: ByteArray,
-    ): Boolean
-
-    @JvmStatic external fun nBlendLibAssFrame(
-        handle: Long,
-        pixelsAddress: Long,
-        rowBytes: Int,
-        width: Int,
-        height: Int,
-        timeMs: Long,
-    ): Boolean
-
-    @JvmStatic external fun nDisposeLibAssRenderer(handle: Long)
-
     @JvmStatic external fun nOpenUri(
         handle: Long,
         uri: String,
@@ -126,7 +102,15 @@ internal object MacNativeBridge {
         enabled: Boolean,
     )
 
-    @JvmStatic external fun nGetHdrCapabilities(): String?
+    @JvmStatic external fun nSetHdrMetalProjectionConfiguration(
+        handle: Long,
+        configuration: String,
+    ): Boolean
+
+    @JvmStatic external fun nGetHdrRendererFailure(handle: Long): String?
+
+    /** Capabilities of the screen currently hosting this player's native layer. */
+    @JvmStatic external fun nGetDisplayColorCapabilities(handle: Long): String?
 
     @JvmStatic external fun nAttachHdrMetalView(
         handle: Long,
@@ -155,12 +139,17 @@ internal object MacNativeBridge {
 
     @JvmStatic external fun nIsHdrMetalAvailable(handle: Long): Boolean
 
+    /** True only after AVPlayerLayer/CoreAnimation or the controlled Metal renderer has a frame to display. */
+    @JvmStatic external fun nIsHdrOutputReady(handle: Long): Boolean
+
     // Timing / rate info
     @JvmStatic external fun nGetVideoFrameRate(handle: Long): Float
 
     @JvmStatic external fun nGetScreenRefreshRate(handle: Long): Float
 
     @JvmStatic external fun nGetCaptureFrameRate(handle: Long): Float
+
+    @JvmStatic external fun nGetPlaybackDiagnostics(handle: Long): String?
 
     @JvmStatic external fun nGetVideoDuration(handle: Long): Double
 
@@ -172,6 +161,8 @@ internal object MacNativeBridge {
     @JvmStatic external fun nGetVideoBitrate(handle: Long): Long
 
     @JvmStatic external fun nGetVideoMimeType(handle: Long): String?
+
+    @JvmStatic external fun nGetVideoColorInfo(handle: Long): String?
 
     @JvmStatic external fun nGetAudioChannels(handle: Long): Int
 

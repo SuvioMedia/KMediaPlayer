@@ -26,6 +26,10 @@ internal class EventingVideoPlayerState(
 ) : VideoPlayerState by delegate {
     constructor(delegate: VideoPlayerState) : this(delegate, Dispatchers.Default)
 
+    /** Underlying platform state used by platform surface hosts. */
+    internal val wrappedState: VideoPlayerState
+        get() = delegate
+
     private val eventDispatcher = PlaybackEventDispatcher()
     private val eventScope = CoroutineScope(eventCoroutineContext + SupervisorJob())
     private val eventStateLock = PlatformLock()

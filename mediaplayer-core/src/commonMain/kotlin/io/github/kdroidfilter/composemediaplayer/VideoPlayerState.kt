@@ -8,7 +8,10 @@ import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlin.jvm.JvmName
 import kotlin.time.Clock
 import kotlin.time.Duration
@@ -61,6 +64,14 @@ interface VideoPlayerState {
             )
     val capabilities: PlayerCapabilities
         get() = PlayerCapabilities(supportsPiP = isPipSupported)
+
+    /**
+     * Live description of the selected color path. Decoder recognition alone never changes this status to HDR;
+     * [VideoColorPipelineStatus.outputDynamicRange] is HDR only after a display route has been configured and
+     * [VideoColorPipelineStatus.verification] explains how that route was confirmed.
+     */
+    val colorPipelineStatus: StateFlow<VideoColorPipelineStatus>
+        get() = EmptyColorPipelineStatus.status
 
     /**
      * Controls the playback volume. Valid values are within the range of 0.0 (muted) to 1.0 (maximum volume).
@@ -476,6 +487,11 @@ interface VideoPlayerState {
 
 private object EmptyPlaybackEvents {
     val events: SharedFlow<PlaybackEvent> = MutableSharedFlow()
+}
+
+private object EmptyColorPipelineStatus {
+    val status: StateFlow<VideoColorPipelineStatus> =
+        MutableStateFlow(VideoColorPipelineStatus()).asStateFlow()
 }
 
 /**

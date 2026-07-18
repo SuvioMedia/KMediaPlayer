@@ -33,11 +33,63 @@ jobs:
             echo "OK: $f ($(wc -c < "$f") bytes)"
           done
 
+      - name: Build JVM libdovi payloads for Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+          manifest="mediaplayer-dolbyvision/native/libdovi/Cargo.toml"
+          cargo build --release --locked --manifest-path "$manifest" --target x86_64-pc-windows-msvc
+          cargo build --release --locked --manifest-path "$manifest" --target aarch64-pc-windows-msvc
+          root="mediaplayer-dolbyvision/native/libdovi"
+          output="build/libdoviJvmResources/composemediaplayer/dolbyvision/native"
+          mkdir -p "$output/windows-x86-64" "$output/windows-aarch64"
+          cp "$root/target/x86_64-pc-windows-msvc/release/composemediaplayer_libdovi.dll" \
+            "$output/windows-x86-64/composemediaplayer_dovi.dll"
+          cp "$root/target/aarch64-pc-windows-msvc/release/composemediaplayer_libdovi.dll" \
+            "$output/windows-aarch64/composemediaplayer_dovi.dll"
+
+      - name: Build bundled Windows libass payloads
+        shell: pwsh
+        run: >-
+          ./mediaplayer-ass/native/desktop/build-windows.ps1
+          -OutputRoot ./mediaplayer-ass/build/generated/desktopAssJvmResources
+
+      - name: Verify bundled Windows libass manifests
+        shell: pwsh
+        run: |
+          @("windows-x86-64", "windows-aarch64") | ForEach-Object {
+            $root = "mediaplayer-ass/build/generated/desktopAssJvmResources/composemediaplayer/ass/native/$_"
+            if (-not (Test-Path "$root/runtime.properties")) {
+              throw "Missing bundled libass manifest for $_"
+            }
+            $main = (Get-Content "$root/runtime.properties" | Where-Object { $_ -like "mainLibrary=*" }).Split("=", 2)[1]
+            if (-not (Test-Path "$root/$main")) {
+              throw "Missing bundled libass main DLL for $_"
+            }
+          }
+
       - name: Upload Windows natives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: native-windows-${{ github.sha }}
           path: build/nativeLibs/
+          retention-days: 1
+
+      - name: Upload Windows JVM libdovi payloads
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: libdovi-jvm-windows-${{ github.sha }}
+          path: build/libdoviJvmResources/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload Windows JVM libass payloads
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: desktop-ass-windows-${{ github.sha }}
+          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
+          if-no-files-found: error
           retention-days: 1
 
   macos:
@@ -51,6 +103,20 @@ jobs:
         with:
           java-version: '25'
           distribution: 'temurin'
+          cache: gradle
+
+      - name: Install Apple ASS build tools
+        run: brew install meson ninja pkg-config
+
+      - name: Build bundled Apple ASS payloads
+        run: >-
+          ./gradlew :mediaplayer-ass:buildMacosArm64AppleAss
+          :mediaplayer-ass:buildIosArm64AppleAss
+          :mediaplayer-ass:buildIosSimulatorArm64AppleAss
+          --no-daemon
+
+      - name: Verify bundled Apple ASS payloads
+        run: bash .github/scripts/verify_apple_ass_payload.sh
 
       - name: Build macOS native dylibs
         run: bash mediaplayer/src/jvmMain/native/macos/build.sh
@@ -59,18 +125,47 @@ jobs:
 
       - name: Verify macOS natives
         run: |
-          for f in \
-            build/nativeLibs/darwin-aarch64/libNativeVideoPlayer.dylib \
-            build/nativeLibs/darwin-x86-64/libNativeVideoPlayer.dylib; do
-            if [ ! -f "$f" ]; then echo "MISSING: $f" >&2; exit 1; fi
-            echo "OK: $f ($(wc -c < "$f") bytes)"
-          done
+          f=build/nativeLibs/darwin-arm64/libNativeVideoPlayer.dylib
+          if [ ! -f "$f" ]; then echo "MISSING: $f" >&2; exit 1; fi
+          echo "OK: $f ($(wc -c < "$f") bytes)"
+          test ! -e build/nativeLibs/darwin-x86-64
+
+      - name: Build JVM libdovi payloads for macOS
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-darwin
+          manifest="mediaplayer-dolbyvision/native/libdovi/Cargo.toml"
+          cargo build --release --locked --manifest-path "$manifest" --target aarch64-apple-darwin
+          root="mediaplayer-dolbyvision/native/libdovi"
+          output="build/libdoviJvmResources/composemediaplayer/dolbyvision/native"
+          mkdir -p "$output/darwin-aarch64"
+          cp "$root/target/aarch64-apple-darwin/release/libcomposemediaplayer_libdovi.dylib" \
+            "$output/darwin-aarch64/libcomposemediaplayer_dovi.dylib"
+          test ! -e "$output/darwin-x86-64"
 
       - name: Upload macOS natives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: native-macos-${{ github.sha }}
           path: build/nativeLibs/
+          retention-days: 1
+
+      - name: Upload macOS JVM libdovi payloads
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: libdovi-jvm-macos-${{ github.sha }}
+          path: build/libdoviJvmResources/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload Apple ASS payloads
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: apple-ass-${{ github.sha }}
+          path: |
+            mediaplayer-ass/build/generated/appleAssJvmResources/
+            mediaplayer-ass/build/generated/appleAssIos/
+          if-no-files-found: error
           retention-days: 1
 
   linux:
@@ -80,8 +175,10 @@ jobs:
         include:
           - os: ubuntu-24.04
             arch: x86-64
+            rust-target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             arch: aarch64
+            rust-target: aarch64-unknown-linux-gnu
     steps:
       - name: Checkout Repo
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -96,10 +193,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            autoconf \
+            automake \
+            build-essential \
+            curl \
+            libfontconfig1-dev \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            libtool \
+            libwayland-dev \
+            libvulkan-dev \
+            meson \
+            nasm \
+            ninja-build \
+            patchelf \
+            pkg-config \
+            xz-utils \
+            glslc \
             gstreamer1.0-plugins-base \
-            gstreamer1.0-plugins-good
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-tools \
+            libgtk-3-0 \
+            weston \
+            xvfb
 
       - name: Build Linux native library
         working-directory: mediaplayer/src/jvmMain/native/linux
@@ -110,11 +226,103 @@ jobs:
       - name: Verify Linux natives
         run: |
           test -f build/nativeLibs/linux-${{ matrix.arch }}/libNativeVideoPlayer.so
+          test -f build/nativeLibs/linux-${{ matrix.arch }}/libKMediaPlayerVulkanProjection.so
           ls -la build/nativeLibs/linux-${{ matrix.arch }}/
+
+      - name: Verify actual GStreamer decoder reporting
+        run: |
+          gst-launch-1.0 -q \
+            videotestsrc num-buffers=10 \
+            ! video/x-raw,width=64,height=64,framerate=5/1 \
+            ! vp8enc deadline=1 \
+            ! webmmux \
+            ! filesink location="$RUNNER_TEMP/decoder-smoke.webm"
+          cc \
+            -Wall -Wextra -Werror \
+            -Wl,--allow-shlib-undefined \
+            -Imediaplayer/src/jvmMain/native/linux \
+            mediaplayer/src/jvmMain/native/linux/tests/NativeDecoderNameSmokeTest.c \
+            -L"build/nativeLibs/linux-${{ matrix.arch }}" \
+            -Wl,-rpath,"build/nativeLibs/linux-${{ matrix.arch }}" \
+            -lNativeVideoPlayer \
+            -o "$RUNNER_TEMP/native-decoder-name-smoke"
+          LD_LIBRARY_PATH="$JAVA_HOME/lib:$JAVA_HOME/lib/server:${LD_LIBRARY_PATH:-}" \
+            "$RUNNER_TEMP/native-decoder-name-smoke" "$RUNNER_TEMP/decoder-smoke.webm"
+
+      - name: Verify optional Vulkan renderer loading
+        run: |
+          cc \
+            -Wall -Wextra -Werror \
+            -Wl,--allow-shlib-undefined \
+            -Imediaplayer/src/jvmMain/native/linux \
+            mediaplayer/src/jvmMain/native/linux/tests/OptionalVulkanProjectionLoaderSmokeTest.c \
+            -L"build/nativeLibs/linux-${{ matrix.arch }}" \
+            -Wl,-rpath,"build/nativeLibs/linux-${{ matrix.arch }}" \
+            -lNativeVideoPlayer \
+            -ldl \
+            -o "$RUNNER_TEMP/optional-vulkan-loader-smoke"
+          LD_LIBRARY_PATH="$JAVA_HOME/lib:$JAVA_HOME/lib/server:${LD_LIBRARY_PATH:-}" \
+            "$RUNNER_TEMP/optional-vulkan-loader-smoke" \
+            "$GITHUB_WORKSPACE/build/nativeLibs/linux-${{ matrix.arch }}/libKMediaPlayerVulkanProjection.so"
+
+      - name: Verify JBR WLToolkit surface and direct Wayland query
+        run: bash mediaplayer/src/jvmMain/native/linux/tests/run_jbr_wayland_surface_smoke.sh
+
+      - name: Build JVM libdovi payload for Linux
+        run: |
+          set -euo pipefail
+          rustup target add '${{ matrix.rust-target }}'
+          manifest="mediaplayer-dolbyvision/native/libdovi/Cargo.toml"
+          cargo build --release --locked --manifest-path "$manifest" --target '${{ matrix.rust-target }}'
+          root="mediaplayer-dolbyvision/native/libdovi"
+          output="build/libdoviJvmResources/composemediaplayer/dolbyvision/native/linux-${{ matrix.arch }}"
+          mkdir -p "$output"
+          cp "$root/target/${{ matrix.rust-target }}/release/libcomposemediaplayer_libdovi.so" \
+            "$output/libcomposemediaplayer_dovi.so"
+
+      - name: Build bundled Linux libass payload
+        run: >-
+          bash mediaplayer-ass/native/desktop/build-linux.sh
+          linux-${{ matrix.arch }}
+          mediaplayer-ass/build/generated/desktopAssJvmResources
+
+      - name: Verify bundled Linux libass payload
+        run: |
+          set -euo pipefail
+          root="mediaplayer-ass/build/generated/desktopAssJvmResources/composemediaplayer/ass/native/linux-${{ matrix.arch }}"
+          test -f "$root/runtime.properties"
+          test -f "$root/libass.so.9"
+          test -f "$root/libkmediafribidi.so.0"
+          LD_LIBRARY_PATH="$root" python3 - "$root/libass.so.9" <<'PY'
+          import ctypes
+          import sys
+          libass = ctypes.CDLL(sys.argv[1])
+          libass.ass_library_version.restype = ctypes.c_int
+          version = libass.ass_library_version()
+          if version < 0x01705000:
+              raise SystemExit(f"unexpected bundled libass version: 0x{version:08x}")
+          print(f"bundled libass version: 0x{version:08x}")
+          PY
 
       - name: Upload Linux library
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: native-linux-${{ matrix.arch }}-${{ github.sha }}
           path: build/nativeLibs/
+          retention-days: 1
+
+      - name: Upload Linux JVM libdovi payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: libdovi-jvm-linux-${{ matrix.arch }}-${{ github.sha }}
+          path: build/libdoviJvmResources/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload Linux JVM libass payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: desktop-ass-linux-${{ matrix.arch }}-${{ github.sha }}
+          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
+          if-no-files-found: error
           retention-days: 1

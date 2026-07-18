@@ -153,8 +153,18 @@ internal class MpvRuntimeResolutionFailure(
     cause: Throwable? = null,
 ) : IllegalStateException(guidance, cause)
 
-internal fun resolveMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRuntime =
-    when (val source = config.librarySource) {
+internal fun resolveMpvRuntime(
+    config: MpvRuntimeConfig,
+    osName: String = System.getProperty("os.name"),
+    architecture: String = System.getProperty("os.arch"),
+): ResolvedMpvRuntime {
+    if (!isMpvDesktopPlatformSupported(osName, architecture)) {
+        throw MpvRuntimeResolutionFailure(
+            reason = MpvUnavailableReason.UNSUPPORTED_PLATFORM,
+            guidance = "The MPV backend on macOS requires Apple Silicon (arm64).",
+        )
+    }
+    return when (val source = config.librarySource) {
         MpvLibrarySource.Bundled -> resolveBundledMpvRuntime(config)
         else ->
             ResolvedMpvRuntime(
@@ -163,6 +173,7 @@ internal fun resolveMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRuntime =
                 licenseStatus = MpvRuntimeLicenseStatus.UNVERIFIED_USER_PROVIDED,
             )
     }
+}
 
 private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRuntime {
     if (!isBundledMpvDesktopSupported()) {
@@ -238,6 +249,15 @@ internal fun isBundledMpvDesktopSupported(
             normalizedOsName.contains("linux") &&
                 normalizedArchitecture in setOf("amd64", "x86_64", "aarch64", "arm64")
         )
+}
+
+internal fun isMpvDesktopPlatformSupported(
+    osName: String,
+    architecture: String,
+): Boolean {
+    val normalizedOsName = osName.lowercase()
+    if (!normalizedOsName.contains("mac") && !normalizedOsName.contains("darwin")) return true
+    return architecture.lowercase() in setOf("aarch64", "arm64")
 }
 
 internal fun MpvRuntimeException.Reason.toMpvUnavailableReason(): MpvUnavailableReason =

@@ -32,18 +32,27 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
 ) {
-    when (playerState) {
+    when (val surfaceState = playerState.resolveJvmSurfaceState()) {
         is PreviewableVideoPlayerState ->
             VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
         is VideoPlayerSurfaceProvider ->
-            playerState.RenderVideoPlayerSurface(modifier, contentScale, overlay)
-        is DefaultVideoPlayerState ->
-            when (val delegate = playerState.delegate) {
-                is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-                is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-                is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-                else -> error("Unsupported JVM player delegate: ${delegate::class}")
+            surfaceState.RenderVideoPlayerSurface(modifier, contentScale, overlay)
+        is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(surfaceState, modifier, contentScale, overlay)
+        is MacVideoPlayerState -> MacVideoPlayerSurface(surfaceState, modifier, contentScale, overlay)
+        is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(surfaceState, modifier, contentScale, overlay)
+        else -> error("Unsupported JVM player state: ${surfaceState.javaClass.name}")
+    }
+}
+
+/** Resolves API and event wrappers to the platform state that owns the native video surface. */
+internal fun VideoPlayerState.resolveJvmSurfaceState(): VideoPlayerState {
+    var current = this
+    while (true) {
+        current =
+            when (current) {
+                is DefaultVideoPlayerState -> current.delegate
+                is EventingVideoPlayerState -> current.wrappedState
+                else -> return current
             }
-        else -> error("Unsupported video player state: ${playerState::class}")
     }
 }

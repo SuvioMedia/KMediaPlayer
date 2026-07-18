@@ -36,7 +36,13 @@ class VideoPlayerStateTest {
     private fun Throwable.isNativeLibraryUnavailable(): Boolean =
         when (this) {
             is UnsatisfiedLinkError -> true
-            is NoClassDefFoundError -> message?.contains("NativeBridge") == true
+            is NoClassDefFoundError ->
+                message?.contains("NativeBridge") == true ||
+                    message?.contains(
+                        "Could not initialize class " +
+                            "io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState",
+                    ) == true ||
+                    cause?.isNativeLibraryUnavailable() == true
             is ExceptionInInitializerError -> cause?.isNativeLibraryUnavailable() == true
             else -> false
         }

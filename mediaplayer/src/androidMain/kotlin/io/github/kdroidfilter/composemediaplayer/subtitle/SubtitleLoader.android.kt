@@ -52,15 +52,16 @@ actual suspend fun loadSubtitleContent(src: String): String =
                         } else {
                             Uri.fromFile(java.io.File(src))
                         }
+                    val directFile = java.io.File(uri.path ?: src)
 
                     try {
                         context.contentResolver.openInputStream(uri)?.use { inputStream ->
                             inputStream.bufferedReader().use { it.readText() }
-                        } ?: ""
+                        } ?: directFile.readText()
                     } catch (e: Exception) {
                         // Fallback to direct file access if content resolver fails
                         try {
-                            java.io.File(src).readText()
+                            directFile.readText()
                         } catch (e2: Exception) {
                             androidVideoLogger.e { "Failed to load subtitle file: ${e2.message}" }
                             ""

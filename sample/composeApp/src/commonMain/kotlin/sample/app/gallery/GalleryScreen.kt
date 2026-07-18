@@ -31,6 +31,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +52,7 @@ import sample.app.player.SAMPLE_VIDEOS
 fun GalleryScreen(modifier: Modifier = Modifier) {
     val featuredState = rememberRenderableVideoPlayerState()
     val featured = SAMPLE_VIDEOS.first()
+    var activePreviewUrl by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         featuredState.openUri(featured.second)
@@ -85,7 +90,14 @@ fun GalleryScreen(modifier: Modifier = Modifier) {
 
             // Video cards
             items(SAMPLE_VIDEOS.drop(1)) { (title, url) ->
-                VideoCard(title = title, url = url)
+                VideoCard(
+                    title = title,
+                    url = url,
+                    active = activePreviewUrl == url,
+                    onActiveChange = { active ->
+                        activePreviewUrl = if (active) url else null
+                    },
+                )
             }
         }
     }
@@ -171,28 +183,29 @@ private fun HeroCard(title: String, playerState: RenderableVideoPlayerState) {
 }
 
 @Composable
-private fun VideoCard(title: String, url: String) {
-    val playerState = rememberRenderableVideoPlayerState()
-
-    LaunchedEffect(url) {
-        playerState.openUri(url)
-        playerState.loop = true
-    }
-
+private fun VideoCard(
+    title: String,
+    url: String,
+    active: Boolean,
+    onActiveChange: (Boolean) -> Unit,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable {
-                if (playerState.isPlaying) playerState.pause() else playerState.play()
-            },
+            .clickable { onActiveChange(!active) },
         shape = RoundedCornerShape(12.dp),
     ) {
         Box(modifier = Modifier.height(160.dp)) {
-            VideoPlayerSurface(
-                playerState = playerState,
-                modifier = Modifier.fillMaxSize(),
-            )
+            if (active) {
+                ActiveVideoCardSurface(url)
+            } else {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
+            }
 
             // Gradient + title
             Box(
@@ -219,7 +232,7 @@ private fun VideoCard(title: String, url: String) {
                     .padding(10.dp),
             )
 
-            if (!playerState.isPlaying && playerState.hasMedia) {
+            if (!active) {
                 Icon(
                     Icons.Default.PlayArrow,
                     contentDescription = "Play",
@@ -227,14 +240,30 @@ private fun VideoCard(title: String, url: String) {
                     modifier = Modifier.align(Alignment.Center).size(36.dp),
                 )
             }
+        }
+    }
+}
 
-            if (playerState.isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center).size(24.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp,
-                )
-            }
+@Composable
+private fun ActiveVideoCardSurface(url: String) {
+    val playerState = rememberRenderableVideoPlayerState()
+
+    LaunchedEffect(url) {
+        playerState.loop = true
+        playerState.openUri(url)
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        VideoPlayerSurface(
+            playerState = playerState,
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (playerState.isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center).size(24.dp),
+                color = Color.White,
+                strokeWidth = 2.dp,
+            )
         }
     }
 }

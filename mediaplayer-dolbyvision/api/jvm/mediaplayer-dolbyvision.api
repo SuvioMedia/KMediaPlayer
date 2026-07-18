@@ -1,0 +1,859 @@
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/ByteArrayDolbyVisionDataSource : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRandomAccessDataSource {
+	public static final field $stable I
+	public fun <init> ([B)V
+	public fun read (JILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun size (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult$Success;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFragment ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionFragmentAdapter {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;I)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun demux ([B)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionDemuxResult;
+	public final fun reset (J)V
+	public static synthetic fun reset$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionFragmentAdapter;JILjava/lang/Object;)V
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionFragmentRemuxer : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentRemuxer {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;I)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun isAvailable ()Z
+	public fun remux (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult$Success;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getConfiguration ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationSegment {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationSegment;
+	public final fun prepareProfile81 ([BI)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult;
+	public static synthetic fun prepareProfile81$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationSegment;[BIILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionInitializationResult;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration {
+	public static final field $stable I
+	public fun <init> (IJIII[B)V
+	public final fun component1 ()I
+	public final fun component2 ()J
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()I
+	public final fun component6 ()[B
+	public final fun copy (IJIII[B)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;IJIII[BILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/CmafDolbyVisionTrackConfiguration;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNalLengthFieldBytes ()I
+	public final fun getRewrittenInitializationSegment ()[B
+	public final fun getSourceLevel ()I
+	public final fun getSourceProfile ()I
+	public final fun getTimescale ()J
+	public final fun getTrackId ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;Ljava/util/List;Z)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Z
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;Ljava/util/List;Z)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;Ljava/util/List;ZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getConvertedRpus ()Ljava/util/List;
+	public final fun getFragment ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;
+	public final fun getTimestampsAndAudioPreserved ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange {
+	public static final field $stable I
+	public fun <init> (JJ)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun copy (JJ)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;JJILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLength ()J
+	public final fun getOffset ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer : java/lang/Enum {
+	public static final field FRAGMENTED_MP4 Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public static final field HLS_LIVE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public static final field HLS_VOD Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public static final field MATROSKA Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public static final field MP4 Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionPlan {
+	public static final field $stable I
+	public fun <init> (ZLio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;Ljava/lang/Integer;ZZLjava/lang/String;)V
+	public synthetic fun <init> (ZLio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;Ljava/lang/Integer;ZZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public final fun component3 ()Ljava/lang/Integer;
+	public final fun component4 ()Z
+	public final fun component5 ()Z
+	public final fun component6 ()Ljava/lang/String;
+	public final fun copy (ZLio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;Ljava/lang/Integer;ZZLjava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionPlan;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionPlan;ZLio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;Ljava/lang/Integer;ZZLjava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionPlan;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCanConvert ()Z
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getDiscardsEnhancementLayer ()Z
+	public final fun getDiscardsFelMapping ()Z
+	public final fun getOutputProfile ()Ljava/lang/Integer;
+	public final fun getRejection ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionPlanner {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionPlanner;
+	public final fun plan (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRequest;Z)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionPlan;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection : java/lang/Enum {
+	public static final field CONTAINER_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public static final field DRM_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public static final field LIVE_SOURCE_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public static final field MODULE_RUNTIME_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public static final field NONE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public static final field RPU_MISSING Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public static final field SOURCE_PROFILE_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRejection;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRequest {
+	public static final field $stable I
+	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRequest$Companion;
+	public static final field DEFAULT_MAXIMUM_BUFFERED_BYTES J
+	public static final field DEFAULT_MAXIMUM_BUFFERED_FRAGMENTS I
+	public static final field MAXIMUM_BUFFERED_BYTES J
+	public static final field MAXIMUM_BUFFERED_FRAGMENTS I
+	public static final field MINIMUM_BUFFERED_BYTES J
+	public static final field MINIMUM_BUFFERED_FRAGMENTS I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;Ljava/lang/Integer;ZLio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;ZIJ)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;Ljava/lang/Integer;ZLio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;ZIJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Z
+	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public final fun component5 ()Z
+	public final fun component6 ()I
+	public final fun component7 ()J
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;Ljava/lang/Integer;ZLio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;ZIJ)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRequest;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRequest;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;Ljava/lang/Integer;ZLio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;ZIJILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRequest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContainer ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public final fun getEnhancementLayer ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public final fun getHasRpu ()Z
+	public final fun getMaximumBufferedBytes ()J
+	public final fun getMaximumBufferedFragments ()I
+	public final fun getProfile ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public final fun isDrmProtected ()Z
+	public final fun isLive ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRequest$Companion {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionExtension : io/github/kdroidfilter/composemediaplayer/VideoSourcePipelineExtension {
+	public static final field $stable I
+	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionExtension$Companion;
+	public static final field ID Ljava/lang/String;
+	public fun <init> ()V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun getAvailability ()Lio/github/kdroidfilter/composemediaplayer/VideoPipelineExtensionAvailability;
+	public fun getColorConversionCapabilities ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public final fun getConverter ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;
+	public fun getId ()Ljava/lang/String;
+	public fun prepareSource (Lio/github/kdroidfilter/composemediaplayer/VideoPipelineSourceRequest;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun status ()Lio/github/kdroidfilter/composemediaplayer/VideoPipelineExtensionStatus;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionExtension$Companion {
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult$Success;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentConversionResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/ConvertedDolbyVisionFragment;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentRemuxer {
+	public abstract fun isAvailable ()Z
+	public abstract fun remux (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaDataSource {
+	public abstract fun read (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment {
+	public static final field $stable I
+	public fun <init> (JJJJ[BLjava/util/List;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun component5 ()[B
+	public final fun component6 ()Ljava/util/List;
+	public final fun copy (JJJJ[BLjava/util/List;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;JJJJ[BLjava/util/List;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEndPresentationTimeUs ()J
+	public final fun getPayload ()[B
+	public final fun getPrecedingKeyframeTimeUs ()J
+	public final fun getRpus ()Ljava/util/List;
+	public final fun getSequence ()J
+	public final fun getStartPresentationTimeUs ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRandomAccessDataSource {
+	public abstract fun read (JILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun size (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Invalid : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Invalid;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Invalid;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Invalid;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult {
+	public static final field $stable I
+	public fun <init> ([B)V
+	public final fun component1 ()[B
+	public final fun copy ([B)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Success;[BILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRpuNalUnit ()[B
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Unavailable : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Unavailable;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Unavailable;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConversionResult$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter {
+	public abstract fun convertProfile7To81 ([BLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun isAvailable ()Z
+	public fun prepare (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter$DefaultImpls {
+	public static fun prepare (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionStreamingBridge {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionRequest;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionFragmentRemuxer;)V
+	public final fun bufferedFragments ()Ljava/util/List;
+	public final fun convert (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaFragment;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun getPlan ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionConversionPlan;
+	public final fun reset ()V
+	public final fun restartTimeForSeek (J)Ljava/lang/Long;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionAdapter {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionAdapter;
+	public final fun open (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRandomAccessDataSource;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;JIIIIJLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun open$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionAdapter;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRandomAccessDataSource;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;JIIIIJLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment {
+	public static final field $stable I
+	public fun <init> (IJJZ)V
+	public final fun component1 ()I
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()Z
+	public final fun copy (IJJZ)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment;IJJZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEndPresentationTimeUs ()J
+	public final fun getIndex ()I
+	public final fun getStartPresentationTimeUs ()J
+	public final fun getStartsWithRandomAccessPoint ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult {
+	public static final field $stable I
+	public fun <init> ([BLio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment;)V
+	public final fun component1 ()[B
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment;
+	public final fun copy ([BLio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult$Success;[BLio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragmentResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFragment ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionFragment;
+	public final fun getPayload ()[B
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionSession;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionSession;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionSession;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult$Success;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionSession;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionOpenResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSession ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionSession;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/FlatMp4DolbyVisionSession {
+	public static final field $stable I
+	public final fun convertFragment (ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun getFragments ()Ljava/util/List;
+	public final fun getInitializationSegment ()[B
+	public final fun resetForSeek (JLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun restartFragmentIndexForSeek (J)I
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HevcDolbyVisionRpuRewriter {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcDolbyVisionRpuRewriter;
+	public final fun rewrite ([BLio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcNalUnitFormat;Ljava/util/List;ZI)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult;
+	public static synthetic fun rewrite$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcDolbyVisionRpuRewriter;[BLio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcNalUnitFormat;Ljava/util/List;ZIILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HevcNalUnitFormat : java/lang/Enum {
+	public static final field ANNEX_B Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcNalUnitFormat;
+	public static final field LENGTH_PREFIXED_4 Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcNalUnitFormat;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcNalUnitFormat;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcNalUnitFormat;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult {
+	public static final field $stable I
+	public fun <init> ([BII)V
+	public final fun component1 ()[B
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun copy ([BII)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult$Success;[BIIILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HevcRpuRewriteResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDiscardedEnhancementLayerNals ()I
+	public final fun getPayload ()[B
+	public final fun getReplacedRpus ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionAdapter {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionAdapter;
+	public final fun open (Ljava/lang/String;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaDataSource;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;IJILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun open$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionAdapter;Ljava/lang/String;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionMediaDataSource;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;IJILkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason : java/lang/Enum {
+	public static final field CONVERSION_FAILED Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public static final field DRM_PROTECTED Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public static final field INVALID_PLAYLIST Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public static final field LIVE_SOURCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public static final field RESOURCE_IO Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public static final field UNSUPPORTED_VARIANT Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public final fun copy (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult$Failure;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public final fun getReason ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionFailureReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSession;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSession;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSession;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult$Success;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSession;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionOpenResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSession ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSession;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment {
+	public static final field $stable I
+	public fun <init> (ILjava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;JJZ)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;
+	public final fun component4 ()J
+	public final fun component5 ()J
+	public final fun component6 ()Z
+	public final fun copy (ILjava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;JJZ)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment;ILjava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;JJZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getByteRange ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionByteRange;
+	public final fun getDiscontinuity ()Z
+	public final fun getDurationUs ()J
+	public final fun getIndex ()I
+	public final fun getSourceUri ()Ljava/lang/String;
+	public final fun getStartPresentationTimeUs ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult {
+	public static final field $stable I
+	public fun <init> ([BLio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment;)V
+	public final fun component1 ()[B
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment;
+	public final fun copy ([BLio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult$Success;[BLio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegmentResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPayload ()[B
+	public final fun getSegment ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSegment;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/HlsVodDolbyVisionSession {
+	public static final field $stable I
+	public final fun convertSegment (ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun getHasExternalAudioRenditions ()Z
+	public final fun getInitializationSegment ()[B
+	public final fun getSegments ()Ljava/util/List;
+	public final fun getUsesMasterPlaylist ()Z
+	public final fun renderEntryPlaylist (Ljava/lang/String;)Ljava/lang/String;
+	public final fun renderMediaPlaylist (Ljava/lang/String;)Ljava/lang/String;
+	public final fun resetForSeek (JLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun restartSegmentIndexForSeek (J)I
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionAdapter {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionAdapter;
+	public final fun isAvailable (Ljava/lang/String;)Z
+	public static synthetic fun isAvailable$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionAdapter;Ljava/lang/String;ILjava/lang/Object;)Z
+	public final fun open (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionRequest;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$EndOfStream : io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$EndOfStream;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult {
+	public static final field $stable I
+	public fun <init> ([BJJJ)V
+	public final fun component1 ()[B
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun copy ([BJJJ)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$Success;[BJJJILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionFragmentResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEndPresentationTimeUs ()J
+	public final fun getPayload ()[B
+	public final fun getSequence ()J
+	public final fun getStartPresentationTimeUs ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionSession;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionSession;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionSession;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult$Success;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionSession;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionOpenResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSession ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionSession;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionRequest {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;Ljava/lang/String;Ljava/util/Map;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;JIIIJ)V
+	public synthetic fun <init> (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;Ljava/lang/String;Ljava/util/Map;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;JIIIJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()J
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/util/Map;
+	public final fun component5 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public final fun component6 ()J
+	public final fun component7 ()I
+	public final fun component8 ()I
+	public final fun component9 ()I
+	public final fun copy (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;Ljava/lang/String;Ljava/util/Map;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;JIIIJ)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionRequest;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionRequest;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;Ljava/lang/String;Ljava/util/Map;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;JIIIJILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionRequest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContainer ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionContainer;
+	public final fun getEnhancementLayer ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public final fun getFfmpegExecutable ()Ljava/lang/String;
+	public final fun getInput ()Ljava/lang/String;
+	public final fun getMaximumBufferedBytes ()J
+	public final fun getMaximumBufferedFragments ()I
+	public final fun getMaximumFragmentBytes ()I
+	public final fun getMaximumInitializationBytes ()I
+	public final fun getRequestHeaders ()Ljava/util/Map;
+	public final fun getTargetFragmentDurationUs ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmFfmpegDolbyVisionSession : java/io/Closeable {
+	public static final field $stable I
+	public fun close ()V
+	public final fun getInitializationSegment ()[B
+	public final fun nextFragment (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun seekTo (JLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmLibDoviRpuConverter : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter, java/io/Closeable {
+	public static final field $stable I
+	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/dolbyvision/JvmLibDoviRpuConverter$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/nio/file/Path;)V
+	public synthetic fun <init> (Ljava/nio/file/Path;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun close ()V
+	public fun convertProfile7To81 ([BLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun isAvailable ()Z
+	public fun prepare (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/JvmLibDoviRpuConverter$Companion {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/LibDoviRpuConverter : io/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter {
+	public static final field $stable I
+	public fun <init> ()V
+	public final fun close ()V
+	public fun convertProfile7To81 ([BLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun isAvailable ()Z
+	public fun prepare (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionAdapter {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionAdapter;
+	public final fun open (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRandomAccessDataSource;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;JIIIIIJLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun open$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionAdapter;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRandomAccessDataSource;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/DolbyVisionRpuConverter;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;JIIIIIJLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment {
+	public static final field $stable I
+	public fun <init> (IJJZ)V
+	public final fun component1 ()I
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()Z
+	public final fun copy (IJJZ)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment;IJJZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEndPresentationTimeUs ()J
+	public final fun getIndex ()I
+	public final fun getStartPresentationTimeUs ()J
+	public final fun getStartsWithRandomAccessPoint ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult {
+	public static final field $stable I
+	public fun <init> ([BLio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment;)V
+	public final fun component1 ()[B
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment;
+	public final fun copy ([BLio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult$Success;[BLio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragmentResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFragment ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionFragment;
+	public final fun getPayload ()[B
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult$Failure : io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult$Failure;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult$Failure;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult$Failure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult$Success : io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionSession;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionSession;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionSession;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult$Success;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult$Success;Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionSession;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionOpenResult$Success;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSession ()Lio/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionSession;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/MatroskaDolbyVisionSession {
+	public static final field $stable I
+	public final fun convertFragment (ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun getFragments ()Ljava/util/List;
+	public final fun getInitializationSegment ()[B
+	public final fun resetForSeek (JLkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun restartFragmentIndexForSeek (J)I
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/dolbyvision/TimedDolbyVisionRpu {
+	public static final field $stable I
+	public fun <init> (J[B)V
+	public final fun component1 ()J
+	public final fun component2 ()[B
+	public final fun copy (J[B)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/TimedDolbyVisionRpu;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/dolbyvision/TimedDolbyVisionRpu;J[BILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/dolbyvision/TimedDolbyVisionRpu;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNalUnit ()[B
+	public final fun getPresentationTimeUs ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+

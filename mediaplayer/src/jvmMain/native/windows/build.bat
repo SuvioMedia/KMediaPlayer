@@ -31,6 +31,14 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
+echo === x64 HDR shader validation ===
+ctest --test-dir build-x64 -C Release --output-on-failure
+if %ERRORLEVEL% neq 0 (
+    echo Error during x64 HDR shader validation
+    exit /b %ERRORLEVEL%
+)
+
+echo.
 echo === ARM64 Configuration ===
 cmake -B build-arm64 -A ARM64 .
 if %ERRORLEVEL% neq 0 (

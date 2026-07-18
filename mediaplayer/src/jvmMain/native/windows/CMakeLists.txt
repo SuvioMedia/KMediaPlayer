@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.15)
-project(NativeVideoPlayer LANGUAGES CXX)
+project(NativeVideoPlayer LANGUAGES C CXX)
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(JNI REQUIRED)
+set(HDR10_PLUS_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../common")
 
 if(DEFINED ENV{NATIVE_LIBS_OUTPUT_DIR})
     set(BASE_OUTPUT_DIR "$ENV{NATIVE_LIBS_OUTPUT_DIR}")
@@ -39,12 +42,18 @@ add_library(NativeVideoPlayer SHARED
         AudioManager.h
         HLSPlayer.cpp
         HLSPlayer.h
+        WindowsHdrPresenter.cpp
+        WindowsHdrPresenter.h
+        Hdr10PlusHevcParser.cpp
+        Hdr10PlusHevcParser.h
         LibVlcCanvas.cpp
         LibVlcCanvas.h
         jni_bridge.cpp
+        "${HDR10_PLUS_COMMON_DIR}/Hdr10PlusToneCurve.c"
+        "${HDR10_PLUS_COMMON_DIR}/IctcpGamutLut.c"
 )
 
-target_include_directories(NativeVideoPlayer PRIVATE ${JNI_INCLUDE_DIRS})
+target_include_directories(NativeVideoPlayer PRIVATE ${JNI_INCLUDE_DIRS} "${HDR10_PLUS_COMMON_DIR}")
 
 if(JAVA_AWT_INCLUDE_PATH)
     target_include_directories(NativeVideoPlayer PRIVATE "${JAVA_AWT_INCLUDE_PATH}")
@@ -96,6 +105,7 @@ target_link_libraries(NativeVideoPlayer PRIVATE
         mfsensorgroup
         dxva2
         d3d11
+        d3dcompiler
         dxgi
         evr
 )
@@ -109,6 +119,37 @@ set_target_properties(NativeVideoPlayer PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${OUTPUT_DIR}"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OUTPUT_DIR}"
 )
+
+enable_testing()
+add_executable(HdrShaderValidation HdrShaderValidation.cpp)
+target_compile_definitions(HdrShaderValidation PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(HdrShaderValidation PRIVATE NativeVideoPlayer)
+add_custom_command(TARGET HdrShaderValidation POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:NativeVideoPlayer>
+                $<TARGET_FILE_DIR:HdrShaderValidation>)
+add_test(NAME WindowsHdrShaderValidation COMMAND HdrShaderValidation)
+
+add_executable(Hdr10PlusToneCurveTest
+        "${HDR10_PLUS_COMMON_DIR}/Hdr10PlusToneCurve.c"
+        "${HDR10_PLUS_COMMON_DIR}/Hdr10PlusToneCurveTest.c"
+)
+target_include_directories(Hdr10PlusToneCurveTest PRIVATE "${HDR10_PLUS_COMMON_DIR}")
+add_test(NAME Hdr10PlusToneCurveTest COMMAND Hdr10PlusToneCurveTest)
+
+add_executable(Hdr10PlusHevcParserTest
+        Hdr10PlusHevcParser.cpp
+        Hdr10PlusHevcParserTest.cpp
+)
+target_include_directories(Hdr10PlusHevcParserTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+add_test(NAME Hdr10PlusHevcParserTest COMMAND Hdr10PlusHevcParserTest)
+
+add_executable(IctcpGamutLutTest
+        "${HDR10_PLUS_COMMON_DIR}/IctcpGamutLut.c"
+        "${HDR10_PLUS_COMMON_DIR}/IctcpGamutLutTest.c"
+)
+target_include_directories(IctcpGamutLutTest PRIVATE "${HDR10_PLUS_COMMON_DIR}")
+add_test(NAME IctcpGamutLutTest COMMAND IctcpGamutLutTest)
 
 message(STATUS "Target architecture: ${TARGET_ARCH}")
 message(STATUS "Output directory: ${OUTPUT_DIR}")

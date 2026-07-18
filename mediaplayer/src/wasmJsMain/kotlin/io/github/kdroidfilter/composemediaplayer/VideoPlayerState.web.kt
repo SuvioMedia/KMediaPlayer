@@ -18,6 +18,7 @@ import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
 import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import io.github.vinceglb.filekit.PlatformFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,6 +26,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.io.IOException
 import kotlin.time.Duration
@@ -42,6 +44,8 @@ internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOpt
         supportsMkv = canPlayWebMimeType(MATROSKA_MIME_TYPE),
         supportsHls = isWebHlsPlaybackSupported(),
         supportsPiP = isWebPictureInPictureSupported(),
+        displayColorCapabilities = queryWebDisplayColorCapabilities(),
+        rendererColorCapabilities = queryWebRendererColorCapabilities(),
         supportedUriSchemes = WEB_SUPPORTED_URI_SCHEMES,
     )
 
@@ -62,6 +66,19 @@ internal actual fun platformQueryCanPlaySource(source: MediaSourceSpec): Boolean
 open class DefaultVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
+    internal val webSubtitlePipelineExtensions: List<WebSubtitlePipelineExtension> =
+        playbackOptions.extensions
+            .filterIsInstance<WebSubtitlePipelineExtension>()
+            .filter { extension -> extension.availability.canContribute }
+    private val colorPipelineController = VideoColorPipelineController(playbackOptions, platformPlayerCapabilities())
+    override val colorPipelineStatus: StateFlow<VideoColorPipelineStatus> = colorPipelineController.status
+    private var webControlledColorSurfaceActive = false
+    private var webProjectionSurfaceActive = false
+    private var webColorRendererConfigured = false
+    private var webColorRendererOutputDynamicRange = VideoDynamicRange.UNKNOWN
+    private var webProjectionSurfaceKind = VideoSurfaceKind.UNKNOWN
+    private var webGpuHdrUnavailable = false
+    private var webGpuHdrFailureDetail: String? = null
     private var disposed = false
     internal val isDisposed: Boolean get() = disposed
     private var projectionAutoDetectionEnabled = playbackOptions.usesAutoProjectionDetection()
@@ -72,6 +89,7 @@ open class DefaultVideoPlayerState(
             checkNotDisposed()
             projectionAutoDetectionEnabled = false
             applyProjectionSettings(value)
+            refreshWebColorPipelineOutput()
         }
     private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
     override var projectionView: VideoProjectionViewSettings
@@ -93,6 +111,7 @@ open class DefaultVideoPlayerState(
         set(value) {
             checkNotDisposed()
             _projectionTextureCrop = value.normalized()
+            refreshWebColorPipelineOutput()
         }
 
     // Coroutine scope for managing async operations
@@ -114,6 +133,8 @@ open class DefaultVideoPlayerState(
     val sourceUri: String? get() = _sourceUri
     private var _requestHeaders by mutableStateOf<Map<String, String>>(emptyMap())
     val requestHeaders: Map<String, String> get() = _requestHeaders
+    private var preparedPipelineSource: PreparedVideoPipelineSource? = null
+    private var preparedPipelineOriginalColorInfo: VideoColorInfo? = null
 
     // Playback state properties
     private var _isPlaying by mutableStateOf(false)
@@ -166,7 +187,7 @@ open class DefaultVideoPlayerState(
     override val hlsQualityMode: HlsQualityMode get() = _hlsQualityMode
     internal var applyHlsQualityCallback: ((String?) -> Unit)? = null
     override val capabilities: PlayerCapabilities
-        get() = platformPlayerCapabilities()
+        get() = platformPlayerCapabilities().withPipelineExtensions(playbackOptions)
     private var _aspectRatio by mutableStateOf(DEFAULT_ASPECT_RATIO)
     override val aspectRatio: Float get() = _aspectRatio
 
@@ -285,6 +306,7 @@ open class DefaultVideoPlayerState(
         set(value) {
             checkNotDisposed()
             _isFullscreen = value
+            refreshWebColorPipelineOutput()
         }
     override var isPipActive: Boolean
         get() = false
@@ -344,6 +366,12 @@ open class DefaultVideoPlayerState(
      */
     internal var applyPlaybackSpeedCallback: ((Float) -> Unit)? = null
 
+    /**
+     * Applies transport changes synchronously when a browser user gesture is still active.
+     * This matters for browsers that reject a deferred `HTMLVideoElement.play()` call.
+     */
+    internal var applyPlaybackCallback: ((Boolean) -> Unit)? = null
+
     internal var resetPlaybackCallback: (() -> Unit)? = null
 
     /**
@@ -354,6 +382,257 @@ open class DefaultVideoPlayerState(
         checkNotDisposed()
         positionRecalculationCallback?.invoke()
     }
+
+    internal fun bindWebColorSurface(
+        usesControlledColorRenderer: Boolean,
+        isProjection: Boolean,
+    ) {
+        webControlledColorSurfaceActive = usesControlledColorRenderer
+        webProjectionSurfaceActive = isProjection
+        resetWebColorRendererRuntime(resetHdrFailure = true)
+        refreshWebColorPipelineOutput()
+    }
+
+    internal fun unbindWebColorSurface() {
+        webControlledColorSurfaceActive = false
+        webProjectionSurfaceActive = false
+        resetWebColorRendererRuntime(resetHdrFailure = true)
+        colorPipelineController.updateOutput(
+            surfaceKind = VideoSurfaceKind.UNKNOWN,
+            nativeSurfaceAvailable = false,
+            isProjection = false,
+            verification = ColorPipelineVerification.NONE,
+        )
+    }
+
+    internal fun attachPreparedPipelineSource(video: org.w3c.dom.HTMLVideoElement) {
+        val source = preparedPipelineSource as? WebPreparedVideoPipelineSource ?: return
+        val expectedSessionId = mediaSessionId
+        source.attach(video) { detail ->
+            if (!isCurrentMediaSession(expectedSessionId) || disposed) return@attach
+            _isPlaying = false
+            _isLoading = false
+            setError(
+                VideoPlayerError.ColorPipelineError(
+                    ColorPipelineFallbackReason.DOLBY_VISION_CONVERTER_UNAVAILABLE,
+                    detail,
+                ),
+            )
+        }
+    }
+
+    internal fun detachPreparedPipelineSource(video: org.w3c.dom.HTMLVideoElement) {
+        (preparedPipelineSource as? WebPreparedVideoPipelineSource)?.detach(video)
+    }
+
+    private fun closePreparedPipelineSource() {
+        val prepared = preparedPipelineSource
+        preparedPipelineSource = null
+        preparedPipelineOriginalColorInfo = null
+        prepared?.close()
+    }
+
+    internal fun refreshWebVideoColorInfo(video: org.w3c.dom.HTMLVideoElement) {
+        val decodedSource = video.toWebVideoColorInfo()
+        val source = preparedPipelineOriginalColorInfo ?: decodedSource
+        if (colorPipelineStatus.value.source == source) {
+            refreshWebColorPipelineOutput()
+            return
+        }
+        val decoderSource = preparedPipelineSource?.outputColorInfo ?: decodedSource
+        val decoderRanges =
+            buildSet {
+                if (decoderSource.dynamicRange != VideoDynamicRange.UNKNOWN) add(decoderSource.dynamicRange)
+                if (decoderSource.dynamicRange == VideoDynamicRange.HDR10_PLUS) add(VideoDynamicRange.HDR10)
+                if (decoderSource.dolbyVision?.hasHdr10CompatibleBaseLayer == true) add(VideoDynamicRange.HDR10)
+            }
+        colorPipelineController.updateSource(
+            source = source,
+            decoderName =
+                if (preparedPipelineSource != null) {
+                    "libdovi Profile 7 to 8.1 MediaSource bridge -> browser decoder"
+                } else {
+                    "Browser decoder / WebCodecs VideoFrame"
+                },
+            decoderCapabilities =
+                if (decoderRanges.isEmpty()) {
+                    DecoderColorCapabilities()
+                } else {
+                    DecoderColorCapabilities(
+                        isKnown = true,
+                        supportedDynamicRanges = decoderRanges,
+                        maxBitDepth = decoderSource.bitDepth,
+                    )
+                },
+            isLive = sourceUri?.substringBefore('?')?.endsWith(".m3u8", ignoreCase = true) == true,
+        )
+        resetWebColorRendererRuntime(resetHdrFailure = true)
+        refreshWebColorPipelineOutput()
+    }
+
+    internal fun onWebColorRendererConfigured(
+        outputDynamicRange: VideoDynamicRange,
+        surfaceKind: VideoSurfaceKind,
+    ) {
+        if (!webControlledColorSurfaceActive) return
+        if (
+            webColorRendererConfigured &&
+            webColorRendererOutputDynamicRange == outputDynamicRange &&
+            webProjectionSurfaceKind == surfaceKind
+        ) {
+            return
+        }
+        webColorRendererConfigured = true
+        webColorRendererOutputDynamicRange = outputDynamicRange
+        webProjectionSurfaceKind = surfaceKind
+        if (confirmsWebGpuHdrOutput(outputDynamicRange, surfaceKind)) {
+            webGpuHdrUnavailable = false
+            webGpuHdrFailureDetail = null
+        }
+        refreshWebColorPipelineOutput()
+    }
+
+    internal fun onWebDisplayColorCapabilitiesChanged() {
+        if (disposed) return
+        resetWebColorRendererRuntime(resetHdrFailure = true)
+        refreshWebColorPipelineOutput()
+    }
+
+    internal fun onWebHdrRendererUnavailable(message: String) {
+        if (!webControlledColorSurfaceActive) return
+        webGpuHdrUnavailable = true
+        webGpuHdrFailureDetail = message
+        webColorRendererConfigured = false
+        webColorRendererOutputDynamicRange = VideoDynamicRange.UNKNOWN
+        webProjectionSurfaceKind = VideoSurfaceKind.UNKNOWN
+        refreshWebColorPipelineOutput()
+    }
+
+    internal fun onWebColorRendererFailed(message: String) {
+        webColorRendererConfigured = false
+        webColorRendererOutputDynamicRange = VideoDynamicRange.UNKNOWN
+        refreshWebColorPipelineOutput()
+        setError(
+            VideoPlayerError.ColorPipelineError(
+                reason = ColorPipelineFallbackReason.RENDERER_CONFIGURATION_FAILED,
+                message = message,
+            ),
+        )
+    }
+
+    @Suppress("CyclomaticComplexMethod")
+    private fun refreshWebColorPipelineOutput() {
+        val display = queryWebDisplayColorCapabilities()
+        val runtimeSupport = queryWebHdrCanvasRuntimeSupport()
+        val renderer =
+            if (webControlledColorSurfaceActive) {
+                queryWebProjectionRendererColorCapabilities(
+                    display = display,
+                    runtimeSupport = runtimeSupport,
+                    hdrDisabledAfterRuntimeFailure = webGpuHdrUnavailable,
+                )
+            } else {
+                queryWebRendererColorCapabilities(display)
+            }
+        val source = colorPipelineStatus.value.source
+        val compatibleHdrOutput = source.webCompatibleHdrCanvasOutput
+        val runtimeFallbackApplies =
+            webProjectionSurfaceActive &&
+                source.isHdr &&
+                compatibleHdrOutput != null &&
+                display.supports(compatibleHdrOutput) &&
+                renderer.controlledHdrDynamicRanges.isEmpty()
+        val intendedSurface =
+            when {
+                !webControlledColorSurfaceActive -> VideoSurfaceKind.WEB_VIDEO
+                webColorRendererConfigured -> webProjectionSurfaceKind
+                source.isHdr -> VideoSurfaceKind.WEB_GPU_CANVAS
+                else -> VideoSurfaceKind.WEB_GL_CANVAS
+            }
+        val plan =
+            colorPipelineController.updateOutput(
+                displayCapabilities = display,
+                rendererCapabilities = renderer,
+                surfaceKind = intendedSurface,
+                nativeSurfaceAvailable = !webControlledColorSurfaceActive,
+                isProjection = webProjectionSurfaceActive,
+                verification = ColorPipelineVerification.INFERRED,
+                platformRuntimeFallbackReason =
+                    ColorPipelineFallbackReason.HDR_PROJECTION_UNAVAILABLE.takeIf { runtimeFallbackApplies },
+                platformRuntimeDetail =
+                    webProjectionHdrFallbackDetail(runtimeSupport).takeIf { runtimeFallbackApplies },
+            )
+        if (
+            webControlledColorSurfaceActive &&
+            webColorRendererConfigured &&
+            plan?.outputDynamicRange == webColorRendererOutputDynamicRange &&
+            intendedSurface == webProjectionSurfaceKind
+        ) {
+            colorPipelineController.updateOutput(
+                displayCapabilities = display,
+                rendererCapabilities = renderer,
+                surfaceKind = intendedSurface,
+                nativeSurfaceAvailable = false,
+                isProjection = webProjectionSurfaceActive,
+                verification = ColorPipelineVerification.RENDERER_CONFIGURED,
+                platformRuntimeFallbackReason =
+                    ColorPipelineFallbackReason.HDR_PROJECTION_UNAVAILABLE.takeIf { runtimeFallbackApplies },
+                platformRuntimeDetail =
+                    webProjectionHdrFallbackDetail(runtimeSupport).takeIf { runtimeFallbackApplies },
+            )
+        }
+        val pipelineError = colorPipelineController.pipelineErrorOrNull()
+        val sourceColorPending =
+            colorPipelineStatus.value.source.dynamicRange == VideoDynamicRange.UNKNOWN && _isLoading
+        val waitingForWebGpuConfirmation =
+            webControlledColorSurfaceActive &&
+                !webGpuHdrUnavailable &&
+                !webColorRendererConfigured &&
+                colorPipelineStatus.value.plannedOutputDynamicRange.isHdrOutput
+        val unconfirmedRequiredHdr =
+            playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR &&
+                colorPipelineStatus.value.source.isHdr &&
+                colorPipelineStatus.value.outputDynamicRange == VideoDynamicRange.UNKNOWN &&
+                !waitingForWebGpuConfirmation
+        if ((!sourceColorPending && pipelineError != null) || unconfirmedRequiredHdr) {
+            val fatalError =
+                pipelineError
+                    ?: VideoPlayerError.ColorPipelineError(
+                        reason = ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
+                        message = "The browser cannot confirm an HDR output surface for REQUIRE_HDR.",
+                    )
+            if (_error != fatalError) setError(fatalError)
+            _isPlaying = false
+        } else if (!sourceColorPending && _error is VideoPlayerError.ColorPipelineError) {
+            _error = null
+        }
+    }
+
+    private fun resetWebColorRendererRuntime(resetHdrFailure: Boolean) {
+        webColorRendererConfigured = false
+        webColorRendererOutputDynamicRange = VideoDynamicRange.UNKNOWN
+        webProjectionSurfaceKind = VideoSurfaceKind.UNKNOWN
+        if (resetHdrFailure) {
+            webGpuHdrUnavailable = false
+            webGpuHdrFailureDetail = null
+        }
+    }
+
+    private fun webProjectionHdrFallbackDetail(runtimeSupport: WebHdrCanvasRuntimeSupport): String =
+        webGpuHdrFailureDetail
+            ?: when {
+                !runtimeSupport.displayReportsHighDynamicRange ->
+                    "The active browser display does not report `(dynamic-range: high)`; " +
+                        "projection uses controlled SDR WebGPU."
+                !runtimeSupport.hasWebGpu ->
+                    "WebGPU is unavailable in this browsing context; no controlled HDR-to-SDR canvas route exists."
+                !runtimeSupport.hasCanvasConfigurationReadback ->
+                    "The browser cannot read back an extended-range WebGPU canvas configuration; " +
+                        "projection uses controlled SDR WebGPU."
+                else ->
+                    "The browser could not retain a confirmed FP16 extended-tone-mapping canvas; " +
+                        "projection uses controlled SDR WebGPU."
+            }
 
     internal fun isCurrentMediaSession(sessionId: Long): Boolean = !disposed && sessionId == mediaSessionId
 
@@ -737,6 +1016,104 @@ open class DefaultVideoPlayerState(
         _hlsQualityMode = HlsQualityMode.AUTO
     }
 
+    private fun requiresExplicitWebDolbyVisionBridge(): Boolean =
+        playbackOptions.dolbyVisionPolicy == DolbyVisionPolicy.CONVERT_PROFILE_7_TO_8_1
+
+    private suspend fun prepareExplicitWebDolbyVisionSource(
+        uri: String,
+        requestHeaders: Map<String, String>,
+        sessionId: Long,
+    ) {
+        val assumedSource =
+            VideoColorInfo(
+                dynamicRange = VideoDynamicRange.DOLBY_VISION,
+                bitDepth = 10,
+                primaries = VideoColorPrimaries.BT2020,
+                transfer = VideoColorTransfer.PQ,
+                matrix = VideoColorMatrix.BT2020_NCL,
+                range = VideoColorRange.LIMITED,
+                dolbyVision =
+                    DolbyVisionInfo(
+                        profile = DOLBY_VISION_PROFILE_7,
+                        hasRpu = true,
+                        enhancementLayer = DolbyVisionEnhancementLayer.UNKNOWN,
+                        hasHdr10CompatibleBaseLayer = true,
+                    ),
+            )
+        val preparation =
+            playbackOptions.prepareSourceWithExtensions(
+                VideoPipelineSourceRequest(
+                    uri = uri,
+                    requestHeaders = requestHeaders,
+                    source = assumedSource,
+                    dynamicRangePolicy = playbackOptions.dynamicRangePolicy,
+                    dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+                ),
+            )
+        if (!isCurrentMediaSession(sessionId)) {
+            (preparation as? VideoPipelineSourcePreparation.Ready)?.source?.close()
+            return
+        }
+        when (preparation) {
+            is VideoPipelineSourcePreparation.Ready -> {
+                val webSource = preparation.source as? WebPreparedVideoPipelineSource
+                if (webSource == null) {
+                    preparation.source.close()
+                    rejectExplicitWebDolbyVisionSource(
+                        "The installed converter did not provide a browser MediaSource transport.",
+                    )
+                    return
+                }
+                preparedPipelineSource = webSource
+                preparedPipelineOriginalColorInfo = assumedSource
+                _requestHeaders = webSource.requestHeaders
+                colorPipelineController.updateCapabilities(capabilities)
+                colorPipelineController.updateSource(
+                    source = assumedSource,
+                    decoderInput = webSource.outputColorInfo,
+                    appliedDolbyVisionProfileMapping =
+                        assumedSource.profile7To81MappingOrNull(webSource.outputColorInfo),
+                    decoderName = "libdovi Profile 7 to 8.1 MediaSource bridge -> browser decoder",
+                    decoderCapabilities =
+                        DecoderColorCapabilities(
+                            isKnown = true,
+                            supportedDynamicRanges = setOf(webSource.outputColorInfo.dynamicRange),
+                            maxBitDepth = webSource.outputColorInfo.bitDepth,
+                            supportedDolbyVisionProfiles =
+                                webSource.outputColorInfo.dolbyVision
+                                    ?.profile
+                                    ?.let { setOf(it) }
+                                    .orEmpty(),
+                            isDolbyVisionProfileSupportKnown = true,
+                        ),
+                )
+                _sourceUri = webSource.uri
+                refreshWebColorPipelineOutput()
+            }
+            is VideoPipelineSourcePreparation.Rejected -> {
+                _isPlaying = false
+                _isLoading = false
+                setError(VideoPlayerError.ColorPipelineError(preparation.reason, preparation.detail))
+            }
+            VideoPipelineSourcePreparation.NotApplicable ->
+                rejectExplicitWebDolbyVisionSource(
+                    "No installed browser source extension can perform the requested Profile 7 conversion.",
+                )
+        }
+    }
+
+    private fun rejectExplicitWebDolbyVisionSource(detail: String) {
+        _sourceUri = null
+        _isPlaying = false
+        _isLoading = false
+        setError(
+            VideoPlayerError.ColorPipelineError(
+                ColorPipelineFallbackReason.DOLBY_VISION_CONVERTER_UNAVAILABLE,
+                detail,
+            ),
+        )
+    }
+
     /**
      * Opens a media source from the given URI.
      *
@@ -750,18 +1127,20 @@ open class DefaultVideoPlayerState(
     ) {
         checkNotDisposed()
         playerScope.coroutineContext.cancelChildren()
+        closePreparedPipelineSource()
         val previousSessionId = mediaSessionId
         val hadPreviousSource = _hasMedia || _sourceUri != null
         val sessionId = nextMediaSessionId()
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
+        val requiresDolbyVisionBridge = requiresExplicitWebDolbyVisionBridge()
 
-        _sourceUri = uri
+        _sourceUri = uri.takeUnless { requiresDolbyVisionBridge }
         _requestHeaders = sanitizedHeaders
         resetProjectionForSource(uri)
         _hasMedia = true
         _isLoading = true // Set initial loading state
         _error = null
-        _isPlaying = false
+        _isPlaying = initializePlayerState == InitialPlayerState.PLAY
         seekingState = false
         seekEventActive = false
         stallEventActive = false
@@ -771,6 +1150,8 @@ open class DefaultVideoPlayerState(
         _bufferedRanges.clear()
         _diagnostics = PlaybackDiagnostics()
         _aspectRatio = DEFAULT_ASPECT_RATIO
+        colorPipelineController.resetSource()
+        resetWebColorRendererRuntime(resetHdrFailure = true)
         clearHlsQualityState()
         resetSourceTracks()
         clearMetadata()
@@ -799,10 +1180,15 @@ open class DefaultVideoPlayerState(
         // Don't set isLoading to false here - let the video events handle it
         playerScope.launch {
             try {
-                // Set isPlaying based on the initializePlayerState parameter
-                if (isCurrentMediaSession(sessionId)) {
-                    _isPlaying = initializePlayerState == InitialPlayerState.PLAY
+                if (requiresDolbyVisionBridge) {
+                    prepareExplicitWebDolbyVisionSource(
+                        uri = uri,
+                        requestHeaders = sanitizedHeaders,
+                        sessionId = sessionId,
+                    )
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 if (isCurrentMediaSession(sessionId)) {
                     _isLoading = false
@@ -876,6 +1262,7 @@ open class DefaultVideoPlayerState(
         checkNotDisposed()
         if (_hasMedia && !_isPlaying) {
             _isPlaying = true
+            applyPlaybackCallback?.invoke(true)
         }
     }
 
@@ -900,6 +1287,7 @@ open class DefaultVideoPlayerState(
         checkNotDisposed()
         if (_isPlaying) {
             _isPlaying = false
+            applyPlaybackCallback?.invoke(false)
         }
     }
 
@@ -929,6 +1317,7 @@ open class DefaultVideoPlayerState(
         val releasedSessionId = mediaSessionId
         val hadSource = _hasMedia || _sourceUri != null
         playerScope.coroutineContext.cancelChildren()
+        closePreparedPipelineSource()
         _isPlaying = false
         _sourceUri = null
         _hasMedia = false
@@ -951,6 +1340,8 @@ open class DefaultVideoPlayerState(
         clearMetadata()
         resetPlaybackCallback?.invoke()
         _requestHeaders = emptyMap()
+        colorPipelineController.resetSource()
+        resetWebColorRendererRuntime(resetHdrFailure = true)
         if (hadSource) {
             emitSourceReleasedForSession(releasedSessionId)
             nextMediaSessionId()
@@ -1053,7 +1444,10 @@ open class DefaultVideoPlayerState(
     override fun toggleFullscreen() {
         checkNotDisposed()
         FullscreenManager.toggleFullscreen(isFullscreen) { newFullscreenState ->
-            if (!disposed) _isFullscreen = newFullscreenState
+            if (!disposed) {
+                _isFullscreen = newFullscreenState
+                refreshWebColorPipelineOutput()
+            }
         }
     }
 
@@ -1173,12 +1567,14 @@ open class DefaultVideoPlayerState(
         positionRecalculationCallback = null
         applyVolumeCallback = null
         applyPlaybackSpeedCallback = null
+        applyPlaybackCallback = null
         applyAudioTrackCallback = null
         applySubtitleTrackCallback = null
         resetPlaybackCallback = null
         playbackEndedCallback = null
         restartCallback = null
         clearHlsQualityState()
+        closePreparedPipelineSource()
         _sourceUri = null
         _hasMedia = false
         _isPlaying = false
@@ -1206,6 +1602,10 @@ open class DefaultVideoPlayerState(
         _requestHeaders = emptyMap()
         clearAllTracks()
         clearMetadata()
+        colorPipelineController.resetSource()
+        resetWebColorRendererRuntime(resetHdrFailure = true)
+        webControlledColorSurfaceActive = false
+        webProjectionSurfaceActive = false
         nextMediaSessionId()
         playerScope.cancel()
     }
@@ -1234,7 +1634,19 @@ private fun String.toBufferedRangeOrNull(): BufferedRange? {
 
 private const val MATROSKA_MIME_TYPE = "video/x-matroska"
 private const val DEFAULT_ASPECT_RATIO = 16f / 9f
+private const val DOLBY_VISION_PROFILE_7 = 7
 private val WEB_SUPPORTED_URI_SCHEMES = setOf("blob", "data", "http", "https")
+
+private val VideoColorInfo.webCompatibleHdrCanvasOutput: VideoDynamicRange?
+    get() =
+        when (dynamicRange) {
+            VideoDynamicRange.HDR10, VideoDynamicRange.HDR10_PLUS -> VideoDynamicRange.HDR10
+            VideoDynamicRange.HLG -> VideoDynamicRange.HLG
+            else -> null
+        }
+
+private val VideoDynamicRange.isHdrOutput: Boolean
+    get() = this == VideoDynamicRange.HDR10 || this == VideoDynamicRange.HLG
 
 private fun canPlayWebSource(
     uri: String,

@@ -19,8 +19,13 @@ class NativeLibraryLoaderTest {
         assertEquals("win32-arm64", nativePlatformFor("Windows 11", "aarch64"))
         assertEquals("linux-x86-64", nativePlatformFor("Linux", "x86_64"))
         assertEquals("linux-aarch64", nativePlatformFor("Linux", "arm64"))
-        assertEquals("darwin-x86-64", nativePlatformFor("Mac OS X", "x64"))
         assertEquals("darwin-arm64", nativePlatformFor("Darwin", "arm64"))
+
+        val intelMacError =
+            assertFailsWith<UnsupportedOperationException> {
+                nativePlatformFor("Mac OS X", "x64")
+            }
+        assertTrue(intelMacError.message.orEmpty().contains("macOS requires arm64"))
 
         val error = assertFailsWith<UnsupportedOperationException> { nativePlatformFor("Linux", "riscv64") }
         assertTrue(error.message.orEmpty().contains("Unsupported native architecture"))

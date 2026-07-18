@@ -7,14 +7,23 @@ import androidx.compose.ui.graphics.asComposeImageBitmap
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
+import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
+import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
+import io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.DesktopPlayerLifecycle
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
+import io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities
+import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
+import io.github.kdroidfilter.composemediaplayer.DynamicMetadataHandling
+import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackSupport
 import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
 import io.github.kdroidfilter.composemediaplayer.HlsFallbackSource
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.JvmDecodedVideoColorSignalCodec
 import io.github.kdroidfilter.composemediaplayer.JvmExternalFallbackContainerSupport
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcAudioStream
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcInstallation
@@ -24,9 +33,14 @@ import io.github.kdroidfilter.composemediaplayer.JvmLibVlcTrackInfo
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
+import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineController
+import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineStatus
+import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
@@ -35,16 +49,28 @@ import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.externalHlsTrackStreamIndex
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
+import io.github.kdroidfilter.composemediaplayer.isExternalHlsAudioTrackId
+import io.github.kdroidfilter.composemediaplayer.isExternalHlsSubtitleTrackId
+import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
 import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.normalizeUnixLocalFileUriForPlayback
 import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
+import io.github.kdroidfilter.composemediaplayer.requiresProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
+import io.github.kdroidfilter.composemediaplayer.subtitle.DesktopAssBlendResult
+import io.github.kdroidfilter.composemediaplayer.subtitle.DesktopAssSubtitleSession
+import io.github.kdroidfilter.composemediaplayer.subtitle.extractEmbeddedDesktopAssSubtitle
+import io.github.kdroidfilter.composemediaplayer.subtitle.isAssLikeDesktopTrack
+import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
 import io.github.kdroidfilter.composemediaplayer.subtitleTrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.toConfirmedDecoderCapabilities
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
@@ -52,6 +78,7 @@ import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
@@ -67,6 +94,12 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 internal val linuxLogger = TaggedLogger("LinuxVideoPlayerState")
+
+private val WAYLAND_NATIVE_DYNAMIC_RANGES = setOf(VideoDynamicRange.HDR10, VideoDynamicRange.HLG)
+private const val WAYLAND_NEGOTIATION_TIMEOUT_MS = 8_000L
+internal const val WAYLAND_OVERLAY_UPLOAD_FAILED = 0
+internal const val WAYLAND_OVERLAY_UPLOAD_COMMITTED = 1
+internal const val WAYLAND_OVERLAY_UPLOAD_DROPPED = 2
 
 private enum class LinuxLibVlcRenderMode {
     MEMORY,
@@ -94,18 +127,30 @@ private data class LinuxLibVlcRuntimeTrackDescription(
 class LinuxVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState {
+    private val colorPipelineController =
+        VideoColorPipelineController(playbackOptions, jvmPlayerCapabilities(playbackOptions))
+    override val colorPipelineStatus: StateFlow<VideoColorPipelineStatus> = colorPipelineController.status
     private var _projection by mutableStateOf(playbackOptions.projection.normalized())
     override var projection: VideoProjectionSettings
         get() = _projection
         set(value) {
             _projection = value.normalized()
             updateProjectionRenderingInfo()
+            refreshLinuxColorPipeline()
+            if (waylandColorSurfaceRequested && shouldRequestWaylandColorSurface()) {
+                reconfigureAttachedWaylandColorSurface()
+            } else if (waylandColorSurfaceRequested) {
+                scheduleWaylandColorFallback(
+                    "The current Linux runtime cannot establish the requested HDR projection route.",
+                )
+            }
         }
     private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
     override var projectionView: VideoProjectionViewSettings
         get() = _projectionView
         set(value) {
             _projectionView = value.normalized()
+            updateWaylandProjectionConfiguration()
         }
     private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
     override var projectionViewControlMode: VideoProjectionViewControlMode
@@ -119,6 +164,8 @@ class LinuxVideoPlayerState(
         set(value) {
             _projectionTextureCrop = value.normalized()
             updateProjectionRenderingInfo()
+            refreshLinuxColorPipeline()
+            updateWaylandProjectionConfiguration()
         }
 
     // Native player pointer (AtomicLong for lock-free reads from the frame hot path)
@@ -161,6 +208,24 @@ class LinuxVideoPlayerState(
     private var externalHlsSelectedAudioStreamIndex: Int? = null
     private var externalHlsSelectedSubtitleStreamIndex: Int? = null
     private var externalHlsPlaybackOffsetSeconds: Double = 0.0
+    private var externalFallbackToneMappedHdrToSdr = false
+    private var activeSourceColorInfo = VideoColorInfo()
+    private var nativeDecodedColorGeneration = 0
+    private var activeDecoderName: String? = null
+    private var nativeDecoderNameResolved = false
+    private var colorOutputVerified = false
+    private var hdr10PlusApplicationUnavailable = false
+    private val linuxHdrRuntimeStatus by lazy(LinuxHdrRuntimeProbe::query)
+    private var activeDisplayColorCapabilities = DisplayColorCapabilities()
+    internal var waylandColorSurfaceRequested: Boolean by mutableStateOf(false)
+        private set
+    private var waylandColorSurfaceAttached = false
+    internal var waylandNativeOverlayAvailable: Boolean by mutableStateOf(false)
+        private set
+    private var waylandProjectionRendererAttached = false
+    private var waylandFallbackInProgress = false
+    private var waylandAttachedComponent: Component? = null
+    private var waylandAttachStartedAtMillis = 0L
     private var libVlcBackendActive: Boolean = false
     private var libVlcSourceUri: String? = null
     private var libVlcTrackInfo: JvmLibVlcTrackInfo? = null
@@ -193,6 +258,10 @@ class LinuxVideoPlayerState(
     override var error: VideoPlayerError? by mutableStateOf(null)
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
+    private val desktopAssSubtitleSession = DesktopAssSubtitleSession(playbackOptions.extensions)
+    private val desktopAssSelectionToken = AtomicLong(0L)
+    internal var usesLibAssSubtitleOverlay: Boolean by mutableStateOf(false)
+        private set
     private val _availableSubtitleTracks = mutableStateListOf<SubtitleTrack>()
     override val availableSubtitleTracks: List<SubtitleTrack>
         get() = _availableSubtitleTracks
@@ -230,7 +299,16 @@ class LinuxVideoPlayerState(
 
     override val capabilities: PlayerCapabilities
         get() = jvmPlayerCapabilities(playbackOptions)
-    override var isFullscreen: Boolean by mutableStateOf(false)
+    private var _isFullscreen by mutableStateOf(false)
+    override var isFullscreen: Boolean
+        get() = _isFullscreen
+        set(value) {
+            lifecycle.ensureUsable()
+            if (_isFullscreen == value) return
+            _isFullscreen = value
+            colorOutputVerified = false
+            refreshLinuxColorPipeline()
+        }
     private var lastUri: String? = null
     private var lastRequestHeaders: Map<String, String> = emptyMap()
 
@@ -364,6 +442,7 @@ class LinuxVideoPlayerState(
         }
     }
 
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     override fun openUri(
         uri: String,
         initializePlayerState: InitialPlayerState,
@@ -374,8 +453,10 @@ class LinuxVideoPlayerState(
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
         lifecycle.launchSourceOperation(
             onScheduled = {
+                clearDesktopAssSubtitleRenderer()
                 lastUri = uri
                 lastRequestHeaders = sanitizedHeaders
+                resetLinuxColorPipeline()
             },
         ) { generation ->
             if (!checkExistsIfLocalFile(uri)) {
@@ -400,13 +481,69 @@ class LinuxVideoPlayerState(
                 clearExternalHlsFallbackTrackState()
                 clearLibVlcTrackState()
 
-                val libVlcBackend = resolveLibVlcBackendForUri(uri, sanitizedHeaders)
+                val sourceProbe =
+                    withContext(Dispatchers.IO) {
+                        JvmLibVlcMediaProbe.probe(uri, sanitizedHeaders)
+                    }
+                activeSourceColorInfo = sourceProbe.videoColorInfo
+                activeDecoderName = "GStreamer (decoder element not reported)"
+                nativeDecoderNameResolved = false
+                colorOutputVerified = false
+                activeDisplayColorCapabilities = defaultWaylandDisplayCapabilities()
+                val requestWaylandSurface = shouldRequestWaylandColorSurface()
+                withContext(Dispatchers.Main) {
+                    waylandColorSurfaceRequested = requestWaylandSurface
+                }
+                val prospectiveDecoderCapabilities =
+                    if (requestWaylandSurface) {
+                        activeSourceColorInfo.toConfirmedDecoderCapabilities().copy(isKnown = false)
+                    } else {
+                        DecoderColorCapabilities()
+                    }
+                colorPipelineController.updateSource(
+                    source = activeSourceColorInfo,
+                    decoderName = activeDecoderName,
+                    decoderCapabilities = prospectiveDecoderCapabilities,
+                    isLive = uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true),
+                )
+                refreshLinuxColorPipeline()
+
+                val strictHdrRequest =
+                    playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR ||
+                        (
+                            activeSourceColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
+                                playbackOptions.dolbyVisionPolicy == DolbyVisionPolicy.REQUIRE_NATIVE
+                        )
+                val needsManagedSdrFallback =
+                    !strictHdrRequest &&
+                        !activeSourceColorInfo.isSafeForUnmanagedSdrFallback() &&
+                        (
+                            !activeSourceColorInfo.isHdr ||
+                                colorPipelineController.pipelineErrorOrNull() != null
+                        )
+                if (strictHdrRequest && colorPipelineController.pipelineErrorOrNull() != null) {
+                    publishLinuxColorPipelineError()
+                    return@launchSourceOperation
+                }
+
+                val libVlcBackend =
+                    if (needsManagedSdrFallback) null else resolveLibVlcBackendForUri(uri, sanitizedHeaders)
                 ensurePlayerInitialized(libVlcBackend)
                 lifecycle.ensureCurrentSource(generation)
 
                 var playbackUri = uri
                 var playbackHeaders = sanitizedHeaders
-                if (libVlcBackend != null) {
+                if (needsManagedSdrFallback) {
+                    playbackUri =
+                        try {
+                            prepareExternalHlsPlayback(uri, sanitizedHeaders)
+                        } catch (pipelineFailure: UnsupportedOperationException) {
+                            refreshLinuxColorPipeline()
+                            publishLinuxColorPipelineError(pipelineFailure.message)
+                            return@launchSourceOperation
+                        }
+                    playbackHeaders = emptyMap()
+                } else if (libVlcBackend != null) {
                     playbackUri = prepareLibVlcPlayback(uri, sanitizedHeaders, libVlcBackend.renderMode)
                 }
 
@@ -443,7 +580,7 @@ class LinuxVideoPlayerState(
                         if (!lifecycle.isCurrentSource(generation)) return@withContext
                         hasMedia = true
                         updateProjectionRenderingInfo()
-                        isLoading = false
+                        isLoading = waylandColorSurfaceRequested
                         isPlaying = startPlayback
                     }
                     lifecycle.ensureCurrentSource(generation)
@@ -516,6 +653,10 @@ class LinuxVideoPlayerState(
         nativeBackendUsesLibVlc = false
         nativeBackendLibVlcRenderMode = null
         libVlcNativeSurfaceAttached = false
+        waylandColorSurfaceAttached = false
+        waylandNativeOverlayAvailable = false
+        waylandProjectionRendererAttached = false
+        waylandAttachedComponent = null
         closeExternalHlsFallback()
         clearLibVlcTrackState()
     }
@@ -686,7 +827,7 @@ class LinuxVideoPlayerState(
                 } ?: throw missingLibVlcBackendException()
             }
             "libvlc-wayland", "wayland" -> unsupportedLibVlcWaylandBackend()
-            "ffmpeg", "vlc" -> null
+            "ffmpeg", "kmediabridge", "bridge", "vlc" -> null
             else -> null
         }
     }
@@ -774,7 +915,7 @@ class LinuxVideoPlayerState(
             LinuxLibVlcRenderMode.MEMORY ->
                 "VLC is loaded dynamically from the user's installation; frames are copied into Compose SDR."
             LinuxLibVlcRenderMode.NATIVE_VIEW ->
-                "Best-effort native HDR-preserving path; actual HDR output depends on VLC, Linux compositor, GPU, and display settings. Compose controls use a separate overlay window."
+                "Native X11/XWayland child-window rendering for container compatibility; this path is not accepted as confirmed HDR. Compose controls use a separate overlay window."
         }
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
@@ -908,6 +1049,178 @@ class LinuxVideoPlayerState(
             nativeBackendUsesLibVlc &&
             nativeBackendLibVlcRenderMode == LinuxLibVlcRenderMode.NATIVE_VIEW
 
+    internal fun shouldUseWaylandColorSurface(): Boolean =
+        !lifecycle.isDisposed &&
+            waylandColorSurfaceRequested &&
+            !nativeBackendUsesLibVlc
+
+    internal fun attachWaylandColorComponent(component: Component): Boolean {
+        synchronized(nativeInstanceLock) {
+            if (!shouldUseWaylandColorSurface()) return false
+            val ptr = playerPtr
+            if (ptr == 0L) return false
+
+            return runCatching {
+                val projectionConfiguration = currentLinuxHdrProjectionConfiguration()
+                val usesProjectionRenderer = projection.requiresProjectionRenderer
+                val attached =
+                    if (usesProjectionRenderer && projectionConfiguration != null) {
+                        LinuxNativeBridge.nAttachWaylandHdrProjectionView(
+                            ptr,
+                            component,
+                            projectionConfiguration.integers,
+                            projectionConfiguration.floats,
+                        )
+                    } else if (!usesProjectionRenderer) {
+                        LinuxNativeBridge.nAttachWaylandHdrView(ptr, component)
+                    } else {
+                        false
+                    }
+                if (!attached) return@runCatching false
+                val wasAttached = waylandColorSurfaceAttached
+                waylandColorSurfaceAttached = true
+                waylandProjectionRendererAttached = usesProjectionRenderer
+                waylandAttachedComponent = component
+                waylandNativeOverlayAvailable =
+                    LinuxNativeBridge.nGetWaylandHdrOverlaySize(ptr)?.let { size ->
+                        size.size >= 2 && size[0] > 0 && size[1] > 0
+                    } == true
+                if (!wasAttached) waylandAttachStartedAtMillis = System.currentTimeMillis()
+
+                val outputId = LinuxNativeBridge.nGetWaylandOutputId(ptr).takeIf { it >= 0 }
+                val displayName = component.graphicsConfiguration?.device?.iDstring
+                val activeSnapshot =
+                    LinuxNativeWaylandColorCapabilitiesDecoder.decode(
+                        LinuxNativeBridge.nQueryJbrWaylandColorCapabilities(outputId ?: -1),
+                    ) ?: linuxHdrRuntimeStatus.waylandColorSnapshot
+                activeDisplayColorCapabilities =
+                    activeSnapshot.displayCapabilitiesFor(
+                        globalId = outputId,
+                        displayName = displayName,
+                    )
+                updateWaylandProjectionConfiguration()
+                colorOutputVerified = false
+                refreshLinuxColorPipeline()
+
+                if (isPlaying) LinuxNativeBridge.nPlay(ptr)
+                if (isStrictHdrRequest() && colorPipelineController.pipelineErrorOrNull() != null) {
+                    scheduleWaylandColorFallback("The active Wayland output cannot satisfy REQUIRE_HDR.")
+                }
+                true
+            }.getOrElse { failure ->
+                linuxLogger.e { "Failed to attach the JBR Wayland color surface: ${failure.message}" }
+                false
+            }
+        }
+    }
+
+    private fun currentLinuxHdrProjectionConfiguration(): LinuxHdrProjectionConfiguration? =
+        buildLinuxHdrProjectionNativeConfiguration(
+            source = activeSourceColorInfo,
+            display = activeDisplayColorCapabilities,
+            dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+            projection = projection,
+            projectionView = projectionView,
+            textureCrop = projectionTextureCrop,
+            metadataHandling =
+                colorPipelineStatus.value.plannedMetadataHandling.takeIf {
+                    linuxHdrRuntimeStatus.supportsHdr10PlusMetadata &&
+                        !hdr10PlusApplicationUnavailable
+                } ?: DynamicMetadataHandling.NONE,
+        )
+
+    private fun updateWaylandProjectionConfiguration() {
+        if (!waylandColorSurfaceAttached || !waylandProjectionRendererAttached) return
+        val configuration = currentLinuxHdrProjectionConfiguration() ?: return
+        synchronized(nativeInstanceLock) {
+            val ptr = playerPtr
+            if (ptr != 0L) {
+                LinuxNativeBridge.nUpdateWaylandHdrProjectionConfiguration(
+                    ptr,
+                    configuration.integers,
+                    configuration.floats,
+                )
+            }
+        }
+    }
+
+    private fun reconfigureAttachedWaylandColorSurface() {
+        if (!waylandColorSurfaceAttached) return
+        val component = waylandAttachedComponent ?: return
+        if (!attachWaylandColorComponent(component)) {
+            scheduleWaylandColorFallback("Failed to reconfigure the active Wayland HDR surface.")
+        }
+    }
+
+    internal fun detachWaylandColorComponent(component: Component) {
+        synchronized(nativeInstanceLock) {
+            val ptr = playerPtr
+            if (ptr != 0L) {
+                runCatching { LinuxNativeBridge.nDetachWaylandHdrView(ptr, component) }
+                    .onFailure { failure ->
+                        linuxLogger.e { "Failed to detach the JBR Wayland color surface: ${failure.message}" }
+                    }
+            }
+            waylandColorSurfaceAttached = false
+            waylandNativeOverlayAvailable = false
+            waylandProjectionRendererAttached = false
+            waylandAttachedComponent = null
+            colorOutputVerified = false
+            refreshLinuxColorPipeline()
+        }
+    }
+
+    internal fun waylandOverlaySize(): IntSize? =
+        synchronized(nativeInstanceLock) {
+            if (!waylandColorSurfaceAttached || !waylandNativeOverlayAvailable) {
+                return@synchronized null
+            }
+            val ptr = playerPtr
+            if (ptr == 0L) return@synchronized null
+            runCatching { LinuxNativeBridge.nGetWaylandHdrOverlaySize(ptr) }
+                .getOrNull()
+                ?.takeIf { it.size >= 2 && it[0] > 0 && it[1] > 0 }
+                ?.let { IntSize(it[0], it[1]) }
+        }
+
+    internal fun updateWaylandOverlay(
+        pixelAddress: Long,
+        rowBytes: Int,
+        width: Int,
+        height: Int,
+    ): Int =
+        synchronized(nativeInstanceLock) {
+            if (!waylandColorSurfaceAttached || !waylandNativeOverlayAvailable) {
+                return@synchronized WAYLAND_OVERLAY_UPLOAD_FAILED
+            }
+            val ptr = playerPtr
+            if (ptr == 0L) return@synchronized WAYLAND_OVERLAY_UPLOAD_FAILED
+            runCatching {
+                LinuxNativeBridge.nUpdateWaylandHdrOverlay(
+                    ptr,
+                    pixelAddress,
+                    rowBytes,
+                    width,
+                    height,
+                )
+            }.getOrDefault(WAYLAND_OVERLAY_UPLOAD_FAILED)
+        }
+
+    internal fun clearWaylandOverlay() {
+        synchronized(nativeInstanceLock) {
+            val ptr = playerPtr
+            if (ptr != 0L && waylandColorSurfaceAttached) {
+                runCatching { LinuxNativeBridge.nClearWaylandHdrOverlay(ptr) }
+            }
+        }
+    }
+
+    internal fun disableWaylandNativeOverlay(detail: String) {
+        linuxLogger.e { detail }
+        clearWaylandOverlay()
+        waylandNativeOverlayAvailable = false
+    }
+
     internal fun attachLibVlcNativeComponent(component: Component): Boolean {
         synchronized(nativeInstanceLock) {
             if (!shouldUseLibVlcNativeSurface()) return false
@@ -986,6 +1299,7 @@ class LinuxVideoPlayerState(
                 selectedAudioStreamIndex = externalHlsSelectedAudioStreamIndex,
                 selectedSubtitleStreamIndex = externalHlsSelectedSubtitleStreamIndex,
                 startTimeSeconds = externalHlsPlaybackOffsetSeconds,
+                extensions = playbackOptions.extensions,
             )
         externalHlsFallback = started.fallback
         externalHlsFallbackDurationSeconds = started.source.durationSeconds
@@ -993,6 +1307,23 @@ class LinuxVideoPlayerState(
         externalHlsSelectedAudioStreamIndex = started.source.selectedAudioStreamIndex
         externalHlsSelectedSubtitleStreamIndex = started.source.selectedSubtitleStreamIndex
         externalHlsPlaybackOffsetSeconds = started.source.playbackOffsetSeconds
+        externalFallbackToneMappedHdrToSdr = started.source.toneMappedHdrToSdr
+        if (started.source.inputColorInfo.dynamicRange != VideoDynamicRange.UNKNOWN) {
+            activeSourceColorInfo = started.source.inputColorInfo
+        }
+        activeDecoderName =
+            when {
+                started.source.videoCopiedWithoutReencoding -> "KMediaBridge sample copy -> GStreamer"
+                externalFallbackToneMappedHdrToSdr -> "Color-managed SDR bridge -> GStreamer"
+                else -> activeDecoderName
+            }
+        colorPipelineController.updateSource(
+            source = activeSourceColorInfo,
+            decoderName = activeDecoderName,
+            decoderCapabilities = activeSourceColorInfo.toConfirmedDecoderCapabilities(),
+            isLive = false,
+        )
+        refreshLinuxColorPipeline()
         updateExternalHlsFallbackTracks(started.source)
         return started.source.playlistUrl
     }
@@ -1005,6 +1336,7 @@ class LinuxVideoPlayerState(
         externalHlsSelectedAudioStreamIndex = null
         externalHlsSelectedSubtitleStreamIndex = null
         externalHlsPlaybackOffsetSeconds = 0.0
+        externalFallbackToneMappedHdrToSdr = false
         fallback?.close()
     }
 
@@ -1013,13 +1345,13 @@ class LinuxVideoPlayerState(
         externalHlsSelectedSubtitleStreamIndex = null
         externalHlsPlaybackOffsetSeconds = 0.0
         withContext(Dispatchers.Main) {
-            _availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
-            if (currentAudioTrack?.id?.let(ExternalHlsFallbackSupport::isExternalHlsAudioTrackId) == true) {
+            _availableAudioTracks.removeAll { isExternalHlsAudioTrackId(it.id) }
+            if (currentAudioTrack?.id?.let(::isExternalHlsAudioTrackId) == true) {
                 currentAudioTrack = null
             }
 
-            _availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
-            if (currentSubtitleTrack?.id?.let(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId) == true) {
+            _availableSubtitleTracks.removeAll { isExternalHlsSubtitleTrackId(it.id) }
+            if (currentSubtitleTrack?.id?.let(::isExternalHlsSubtitleTrackId) == true) {
                 currentSubtitleTrack = null
                 subtitlesEnabled = false
             }
@@ -1029,35 +1361,35 @@ class LinuxVideoPlayerState(
     private suspend fun updateExternalHlsFallbackTracks(hlsSource: HlsFallbackSource) {
         val previousSubtitleId = currentSubtitleTrack?.id
         withContext(Dispatchers.Main) {
-            _availableAudioTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsAudioTrackId(it.id) }
+            _availableAudioTracks.removeAll { isExternalHlsAudioTrackId(it.id) }
             _availableAudioTracks.addAll(hlsSource.audioTracks)
             currentAudioTrack =
                 hlsSource.selectedAudioStreamIndex
                     ?.let { streamIndex ->
                         hlsSource.audioTracks.firstOrNull {
-                            ExternalHlsFallbackSupport.externalHlsTrackStreamIndex(it.id) == streamIndex
+                            externalHlsTrackStreamIndex(it.id) == streamIndex
                         }
                     }
                     ?: hlsSource.audioTracks.firstOrNull { it.isDefault }
                     ?: hlsSource.audioTracks.firstOrNull()
 
-            _availableSubtitleTracks.removeAll { ExternalHlsFallbackSupport.isExternalHlsSubtitleTrackId(it.id) }
+            _availableSubtitleTracks.removeAll { isExternalHlsSubtitleTrackId(it.id) }
             _availableSubtitleTracks.addAll(hlsSource.subtitleTracks)
             val selectedSubtitleTrack =
                 hlsSource.selectedSubtitleStreamIndex
                     ?.let { streamIndex ->
                         hlsSource.subtitleTracks.firstOrNull {
-                            ExternalHlsFallbackSupport.externalHlsTrackStreamIndex(it.id) == streamIndex
+                            externalHlsTrackStreamIndex(it.id) == streamIndex
                         }
                     }
                     ?: previousSubtitleId
-                        ?.takeIf(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId)
+                        ?.takeIf(::isExternalHlsSubtitleTrackId)
                         ?.let { previousId -> hlsSource.subtitleTracks.firstOrNull { it.id == previousId } }
 
             if (selectedSubtitleTrack != null) {
                 currentSubtitleTrack = selectedSubtitleTrack
                 subtitlesEnabled = true
-            } else if (previousSubtitleId?.let(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId) == true) {
+            } else if (previousSubtitleId?.let(::isExternalHlsSubtitleTrackId) == true) {
                 currentSubtitleTrack = null
                 subtitlesEnabled = false
             }
@@ -1121,6 +1453,7 @@ class LinuxVideoPlayerState(
             val mimeType = if (nativeBackendUsesLibVlc) null else LinuxNativeBridge.nGetVideoMimeType(ptr)
             val audioChannels = if (nativeBackendUsesLibVlc) 0 else LinuxNativeBridge.nGetAudioChannels(ptr)
             val audioSampleRate = if (nativeBackendUsesLibVlc) 0 else LinuxNativeBridge.nGetAudioSampleRate(ptr)
+            refreshNativeDecoderName(ptr)
 
             withContext(Dispatchers.Main) {
                 metadata.duration = duration
@@ -1149,7 +1482,13 @@ class LinuxVideoPlayerState(
             playerScope.launch {
                 while (isActive) {
                     ensureActive()
-                    if (shouldUseLibVlcNativeSurface()) {
+                    val ptr = playerPtr
+                    if (ptr != 0L && !nativeBackendUsesLibVlc) {
+                        refreshNativeDecodedColorInfo(ptr)
+                    }
+                    if (shouldUseWaylandColorSurface()) {
+                        updateWaylandColorOutputState()
+                    } else if (shouldUseLibVlcNativeSurface()) {
                         lastFrameUpdateTime = System.currentTimeMillis()
                         if (isLoading) {
                             withContext(Dispatchers.Main) { isLoading = false }
@@ -1183,7 +1522,7 @@ class LinuxVideoPlayerState(
     }
 
     private suspend fun checkBufferingState() {
-        if (shouldUseLibVlcNativeSurface()) return
+        if (shouldUseLibVlcNativeSurface() || shouldUseWaylandColorSurface()) return
         if (isPlaying && !isLoading) {
             val timeSinceLastFrame = System.currentTimeMillis() - lastFrameUpdateTime
             if (timeSinceLastFrame > bufferingTimeoutThreshold) {
@@ -1192,13 +1531,181 @@ class LinuxVideoPlayerState(
         }
     }
 
+    private suspend fun updateWaylandColorOutputState() {
+        if (!waylandColorSurfaceAttached) return
+        val ptr = playerPtr
+        if (ptr == 0L) return
+        refreshNativeDecoderName(ptr)
+        val state = LinuxNativeBridge.nGetWaylandHdrOutputState(ptr)
+        if (
+            activeSourceColorInfo.dynamicRange == VideoDynamicRange.HDR10_PLUS &&
+            state and WAYLAND_OUTPUT_HDR10_PLUS_UNAVAILABLE != 0 &&
+            !hdr10PlusApplicationUnavailable
+        ) {
+            hdr10PlusApplicationUnavailable = true
+            colorOutputVerified = false
+            refreshLinuxColorPipeline()
+            updateWaylandProjectionConfiguration()
+            return
+        }
+        val negotiation =
+            LinuxWaylandOutputNegotiation.evaluate(
+                state,
+                activeSourceColorInfo.dynamicRange,
+                requireDmaBuf = projection.requiresProjectionRenderer,
+                requireHdr10PlusApplication =
+                    colorPipelineStatus.value.plannedMetadataHandling ==
+                        DynamicMetadataHandling.APPLIED_BY_RENDERER,
+            )
+        if (negotiation.state == LinuxWaylandNegotiationState.FAILED) {
+            scheduleWaylandColorFallback(negotiation.detail ?: "Wayland color negotiation failed.")
+            return
+        }
+        if (negotiation.state == LinuxWaylandNegotiationState.PENDING) {
+            if (System.currentTimeMillis() - waylandAttachStartedAtMillis > WAYLAND_NEGOTIATION_TIMEOUT_MS) {
+                scheduleWaylandColorFallback("Timed out while negotiating a 10-bit PQ/HLG Wayland surface.")
+            }
+            return
+        }
+
+        if (!colorOutputVerified) {
+            colorPipelineController.updateSource(
+                source = activeSourceColorInfo,
+                decoderName = activeDecoderName,
+                decoderCapabilities = activeSourceColorInfo.toConfirmedDecoderCapabilities(),
+                isLive = lastUri?.substringBefore('?')?.endsWith(".m3u8", ignoreCase = true) == true,
+            )
+            colorOutputVerified = true
+            refreshLinuxColorPipeline()
+            if (isStrictHdrRequest() && colorPipelineController.pipelineErrorOrNull() != null) {
+                scheduleWaylandColorFallback("The active output changed and no longer satisfies REQUIRE_HDR.")
+                return
+            }
+        }
+
+        lastFrameUpdateTime = System.currentTimeMillis()
+        if (isLoading && !seekInProgress) {
+            withContext(Dispatchers.Main) { isLoading = false }
+        }
+    }
+
+    private suspend fun refreshNativeDecodedColorInfo(ptr: Long) {
+        val decoded =
+            JvmDecodedVideoColorSignalCodec.decode(
+                runCatching { LinuxNativeBridge.nGetDecodedVideoColorInfo(ptr) }.getOrNull(),
+            ) ?: return
+        if (decoded.generation == nativeDecodedColorGeneration) return
+        nativeDecodedColorGeneration = decoded.generation
+
+        val previous = activeSourceColorInfo
+        val updated = decoded.mergeInto(previous)
+        if (updated == previous) return
+
+        activeSourceColorInfo = updated
+        colorOutputVerified = false
+        if (updated.dynamicRange != previous.dynamicRange) {
+            hdr10PlusApplicationUnavailable = false
+        }
+        colorPipelineController.updateSource(
+            source = updated,
+            decoderName = activeDecoderName,
+            decoderCapabilities = updated.toConfirmedDecoderCapabilities(),
+            isLive = lastUri?.substringBefore('?')?.endsWith(".m3u8", ignoreCase = true) == true,
+        )
+
+        val canUseWaylandColorSurface = shouldRequestWaylandColorSurface()
+        when {
+            canUseWaylandColorSurface && !waylandColorSurfaceRequested ->
+                withContext(Dispatchers.Main) {
+                    waylandColorSurfaceRequested = true
+                    isLoading = true
+                }
+            projection.requiresProjectionRenderer &&
+                waylandColorSurfaceRequested &&
+                !canUseWaylandColorSurface -> {
+                refreshLinuxColorPipeline()
+                scheduleWaylandColorFallback(
+                    "The adaptive stream selected a signal that the active Vulkan HDR projection cannot present.",
+                )
+                return
+            }
+            updated.isHdr &&
+                !canUseWaylandColorSurface &&
+                !externalFallbackToneMappedHdrToSdr -> {
+                refreshLinuxColorPipeline()
+                scheduleWaylandColorFallback(
+                    "The adaptive stream selected HDR but the verified Wayland HDR route is unavailable.",
+                )
+                return
+            }
+        }
+
+        updateWaylandProjectionConfiguration()
+        refreshLinuxColorPipeline()
+    }
+
+    private fun scheduleWaylandColorFallback(detail: String) {
+        if (waylandFallbackInProgress || lifecycle.isDisposed) return
+        waylandFallbackInProgress = true
+        lifecycle.launchSourceBoundControlOperation { generation ->
+            try {
+                val ptr = playerPtr
+                val component = waylandAttachedComponent
+                if (ptr != 0L && component != null) {
+                    synchronized(nativeInstanceLock) {
+                        LinuxNativeBridge.nDetachWaylandHdrView(ptr, component)
+                    }
+                }
+                waylandColorSurfaceAttached = false
+                waylandNativeOverlayAvailable = false
+                waylandProjectionRendererAttached = false
+                waylandAttachedComponent = null
+                colorOutputVerified = false
+                withContext(Dispatchers.Main) {
+                    waylandColorSurfaceRequested = false
+                    isLoading = true
+                }
+                refreshLinuxColorPipeline()
+
+                if (isStrictHdrRequest()) {
+                    if (ptr != 0L) LinuxNativeBridge.nPause(ptr)
+                    publishLinuxColorPipelineError(detail)
+                    return@launchSourceBoundControlOperation
+                }
+
+                val sourceUri = lastUri
+                if (sourceUri == null) {
+                    publishLinuxColorPipelineError(detail)
+                    return@launchSourceBoundControlOperation
+                }
+                restartExternalHlsPlayback(
+                    sourceUri = sourceUri,
+                    selectedAudioStreamIndex = externalHlsSelectedAudioStreamIndex,
+                    selectedSubtitleStreamIndex = externalHlsSelectedSubtitleStreamIndex,
+                    onSelectionApplied = {},
+                    failureMessage = "Failed to establish a color-correct SDR fallback. $detail",
+                    generation = generation,
+                )
+            } finally {
+                waylandFallbackInProgress = false
+            }
+        }
+    }
+
+    private fun isStrictHdrRequest(): Boolean =
+        playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR ||
+            (
+                activeSourceColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
+                    playbackOptions.dolbyVisionPolicy == DolbyVisionPolicy.REQUIRE_NATIVE
+            )
+
     private fun stopBufferingCheck() {
         bufferingCheckJob?.cancel()
         bufferingCheckJob = null
     }
 
     private suspend fun updateFrameAsync() {
-        if (shouldUseLibVlcNativeSurface()) return
+        if (shouldUseLibVlcNativeSurface() || shouldUseWaylandColorSurface()) return
         withContext(frameDispatcher) {
             try {
                 val ptr = playerPtr
@@ -1209,6 +1716,7 @@ class LinuxVideoPlayerState(
                 if (frameAddress == 0L) return@withContext
 
                 var framePublished = false
+                var subtitleRendererFailed = false
                 try {
                     val width = outInfo[0]
                     val height = outInfo[1]
@@ -1252,6 +1760,20 @@ class LinuxVideoPlayerState(
                             LinuxNativeBridge.nWrapPointer(pixelsAddr, destSizeBytes)
                                 ?: return@withContext
                         copyBgraFrame(srcBuf, destBuf, width, height, destRowBytes)
+                        if (usesLibAssSubtitleOverlay) {
+                            subtitleRendererFailed =
+                                desktopAssSubtitleSession.blend(
+                                    pixels = destBuf,
+                                    rowBytes = destRowBytes,
+                                    width = width,
+                                    height = height,
+                                    timeMs =
+                                        (
+                                            getPositionSafely() +
+                                                subtitleOffset
+                                        ).inWholeMilliseconds.coerceAtLeast(0L),
+                                ) == DesktopAssBlendResult.Failed
+                        }
 
                         _currentFrameState.value = targetBitmap.asComposeImageBitmap()
                         framePublished = true
@@ -1260,7 +1782,17 @@ class LinuxVideoPlayerState(
                     nativeUnlockFrame(ptr)
                 }
 
+                if (subtitleRendererFailed) {
+                    withContext(Dispatchers.Main) {
+                        handleDesktopAssRendererFailure()
+                    }
+                }
                 if (framePublished) {
+                    refreshNativeDecoderName(ptr)
+                    if (!colorOutputVerified) {
+                        colorOutputVerified = true
+                        refreshLinuxColorPipeline()
+                    }
                     lastFrameUpdateTime = System.currentTimeMillis()
                     if (isLoading && !seekInProgress) {
                         withContext(Dispatchers.Main) { isLoading = false }
@@ -1353,6 +1885,12 @@ class LinuxVideoPlayerState(
         val ptr = playerPtr
         if (ptr == 0L) return
         try {
+            if (shouldUseWaylandColorSurface() && !waylandColorSurfaceAttached) {
+                withContext(Dispatchers.Main) { isPlaying = true }
+                startFrameUpdates()
+                startBufferingCheck()
+                return
+            }
             if (shouldUseLibVlcNativeSurface() && !libVlcNativeSurfaceAttached) {
                 withContext(Dispatchers.Main) { isPlaying = true }
                 startFrameUpdates()
@@ -1384,7 +1922,7 @@ class LinuxVideoPlayerState(
                 isPlaying = false
                 isLoading = false
             }
-            if (!shouldUseLibVlcNativeSurface()) {
+            if (!shouldUseLibVlcNativeSurface() && !shouldUseWaylandColorSurface()) {
                 updateFrameAsync()
             }
             stopFrameUpdates()
@@ -1411,6 +1949,7 @@ class LinuxVideoPlayerState(
             }
             clearExternalHlsFallbackTrackState()
             clearLibVlcTrackState()
+            clearDesktopAssSubtitleRenderer()
         }
     }
 
@@ -1418,6 +1957,7 @@ class LinuxVideoPlayerState(
         lifecycle.ensureUsable()
         lifecycle.launchSourceOperation(
             onScheduled = {
+                clearDesktopAssSubtitleRenderer()
                 lastUri = null
                 lastRequestHeaders = emptyMap()
             },
@@ -1425,6 +1965,7 @@ class LinuxVideoPlayerState(
             cleanupCurrentPlayback()
             clearExternalHlsFallbackTrackState()
             clearLibVlcTrackState()
+            clearDesktopAssSubtitleRenderer()
             resetState()
         }
     }
@@ -1618,6 +2159,11 @@ class LinuxVideoPlayerState(
                 nativeBackendLibVlcRenderMode = null
                 libVlcBackendActive = false
                 libVlcNativeSurfaceAttached = false
+                waylandColorSurfaceAttached = false
+                waylandNativeOverlayAvailable = false
+                waylandProjectionRendererAttached = false
+                waylandAttachedComponent = null
+                clearDesktopAssSubtitleRenderer()
                 resetState()
                 onPlaybackEnded = null
                 onRestart = null
@@ -1662,8 +2208,8 @@ class LinuxVideoPlayerState(
         val selectedStreamIndex =
             track
                 ?.id
-                ?.takeIf(ExternalHlsFallbackSupport::isExternalHlsAudioTrackId)
-                ?.let(ExternalHlsFallbackSupport::externalHlsTrackStreamIndex)
+                ?.takeIf(::isExternalHlsAudioTrackId)
+                ?.let(::externalHlsTrackStreamIndex)
 
         if (track != null && selectedStreamIndex != null) {
             lifecycle.launchSourceBoundControlOperation { generation ->
@@ -1682,14 +2228,18 @@ class LinuxVideoPlayerState(
 
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {
         lifecycle.ensureUsable()
+        if (track != null && track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
+            return TrackSelectionResult.NotFound(track.id)
+        }
+        val assSelectionToken = desktopAssSelectionToken.incrementAndGet()
+        if (track == null) {
+            clearDesktopAssSubtitleRenderer(assSelectionToken)
+        }
         if (track == null && libVlcBackendActive) {
             lifecycle.launchSourceBoundControlOperation { generation ->
                 disableLibVlcSubtitles(generation)
             }
             return TrackSelectionResult.Disabled
-        }
-        if (track != null && track.isEmbedded && availableSubtitleTracks.none { it.id == track.id }) {
-            return TrackSelectionResult.NotFound(track.id)
         }
 
         val selectedLibVlcStreamIndex =
@@ -1699,8 +2249,14 @@ class LinuxVideoPlayerState(
                 ?.let(::libVlcTrackStreamIndex)
 
         if (track != null && selectedLibVlcStreamIndex != null) {
+            clearDesktopAssSubtitleRenderer(assSelectionToken)
             lifecycle.launchSourceBoundControlOperation { generation ->
-                selectLibVlcSubtitleTrack(track, selectedLibVlcStreamIndex, generation)
+                selectLibVlcSubtitleTrack(
+                    track = track,
+                    streamIndex = selectedLibVlcStreamIndex,
+                    assSelectionToken = assSelectionToken,
+                    generation = generation,
+                )
             }
             return TrackSelectionResult.Selected(track.id)
         }
@@ -1708,16 +2264,73 @@ class LinuxVideoPlayerState(
         val selectedStreamIndex =
             track
                 ?.id
-                ?.takeIf(ExternalHlsFallbackSupport::isExternalHlsSubtitleTrackId)
-                ?.let(ExternalHlsFallbackSupport::externalHlsTrackStreamIndex)
+                ?.takeIf(::isExternalHlsSubtitleTrackId)
+                ?.let(::externalHlsTrackStreamIndex)
 
         if (track != null && selectedStreamIndex != null) {
+            clearDesktopAssSubtitleRenderer(assSelectionToken)
             lifecycle.launchSourceBoundControlOperation { generation ->
                 switchExternalHlsSubtitleTrack(track, selectedStreamIndex, generation)
             }
             return TrackSelectionResult.Selected(track.id)
         }
 
+        if (track != null && canUseDesktopAssSubtitleOverlay(track)) {
+            clearDesktopAssSubtitleRenderer(assSelectionToken)
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                try {
+                    val content = withContext(Dispatchers.IO) { loadSubtitleContent(track.src) }
+                    if (desktopAssSelectionToken.get() != assSelectionToken) {
+                        return@launchSourceBoundControlOperation
+                    }
+                    val backend =
+                        withContext(Dispatchers.Default) {
+                            desktopAssSubtitleSession.configure(
+                                track = track,
+                                content = content,
+                                ownerToken = assSelectionToken,
+                            )
+                        }
+                    lifecycle.ensureCurrentSource(generation)
+                    if (desktopAssSelectionToken.get() != assSelectionToken) {
+                        desktopAssSubtitleSession.clear(assSelectionToken)
+                        return@launchSourceBoundControlOperation
+                    }
+                    commitCurrentSourceOnMain(generation) {
+                        if (desktopAssSelectionToken.get() != assSelectionToken) return@commitCurrentSourceOnMain
+                        currentSubtitleTrack = track
+                        subtitlesEnabled = true
+                        usesLibAssSubtitleOverlay = true
+                        renderingInfo.subtitleRenderer = "$backend dynamic overlay"
+                        renderingInfo.subtitleSource = track.src
+                        error = null
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) {
+                        desktopAssSubtitleSession.clear(assSelectionToken)
+                        throw e
+                    }
+                    linuxLogger.w { "ASS subtitle renderer unavailable; using Compose fallback: ${e.message}" }
+                    if (desktopAssSelectionToken.get() == assSelectionToken) {
+                        desktopAssSubtitleSession.clear(assSelectionToken)
+                        commitCurrentSourceOnMain(generation) {
+                            if (desktopAssSelectionToken.get() != assSelectionToken) {
+                                return@commitCurrentSourceOnMain
+                            }
+                            currentSubtitleTrack = track
+                            subtitlesEnabled = true
+                            usesLibAssSubtitleOverlay = false
+                            renderingInfo.subtitleRenderer =
+                                "Compose dialogue fallback (libass unavailable)"
+                            renderingInfo.subtitleSource = track.src
+                        }
+                    }
+                }
+            }
+            return TrackSelectionResult.Selected(track.id)
+        }
+
+        clearDesktopAssSubtitleRenderer(assSelectionToken)
         lifecycle.launchSourceBoundControlOperation { generation ->
             commitCurrentSourceOnMain(generation) {
                 currentSubtitleTrack = track
@@ -1725,6 +2338,46 @@ class LinuxVideoPlayerState(
             }
         }
         return track.subtitleTrackSelectionResult()
+    }
+
+    private fun canUseDesktopAssSubtitleOverlay(track: SubtitleTrack): Boolean =
+        isAssLikeDesktopTrack(track) &&
+            !shouldUseWaylandColorSurface() &&
+            !shouldUseLibVlcNativeSurface()
+
+    private fun handleDesktopAssRendererFailure() {
+        usesLibAssSubtitleOverlay = false
+        val track = currentSubtitleTrack
+        val streamIndex =
+            track
+                ?.id
+                ?.takeIf(::isLibVlcSubtitleTrackId)
+                ?.let(::libVlcTrackStreamIndex)
+        if (track == null || streamIndex == null || !libVlcBackendActive) {
+            renderingInfo.subtitleRenderer =
+                "Compose dialogue fallback (libass renderer failed)"
+            return
+        }
+
+        val assSelectionToken = desktopAssSelectionToken.get()
+        renderingInfo.subtitleRenderer =
+            "libVLC subtitle fallback (libass renderer failed)"
+        lifecycle.launchSourceBoundControlOperation { generation ->
+            selectNativeLibVlcSubtitleTrack(
+                track = track,
+                streamIndex = streamIndex,
+                assSelectionToken = assSelectionToken,
+                generation = generation,
+            )
+        }
+    }
+
+    private fun clearDesktopAssSubtitleRenderer(selectionToken: Long = desktopAssSelectionToken.incrementAndGet()) {
+        if (desktopAssSelectionToken.get() != selectionToken) return
+        desktopAssSubtitleSession.clear()
+        usesLibAssSubtitleOverlay = false
+        renderingInfo.subtitleRenderer = null
+        renderingInfo.subtitleSource = null
     }
 
     override fun addSubtitleTrack(track: SubtitleTrack) {
@@ -1754,6 +2407,7 @@ class LinuxVideoPlayerState(
 
     override fun disableSubtitles(): TrackSelectionResult {
         lifecycle.ensureUsable()
+        clearDesktopAssSubtitleRenderer()
         val selectedTrack = currentSubtitleTrack
         if (libVlcBackendActive && selectedTrack?.id?.let(::isLibVlcSubtitleTrackId) == true) {
             lifecycle.launchSourceBoundControlOperation { generation ->
@@ -1799,8 +2453,24 @@ class LinuxVideoPlayerState(
     private suspend fun selectLibVlcSubtitleTrack(
         track: SubtitleTrack,
         streamIndex: Int,
+        assSelectionToken: Long,
         generation: Long,
     ) {
+        if (trySelectEmbeddedLibAssSubtitleTrack(track, streamIndex, assSelectionToken, generation)) {
+            return
+        }
+        selectNativeLibVlcSubtitleTrack(track, streamIndex, assSelectionToken, generation)
+    }
+
+    private suspend fun selectNativeLibVlcSubtitleTrack(
+        track: SubtitleTrack,
+        streamIndex: Int,
+        assSelectionToken: Long,
+        generation: Long,
+    ) {
+        lifecycle.ensureCurrentSource(generation)
+        if (desktopAssSelectionToken.get() != assSelectionToken) return
+
         val ordinal =
             libVlcTrackInfo
                 ?.subtitleStreams
@@ -1810,13 +2480,91 @@ class LinuxVideoPlayerState(
         val applied = ordinal != null && ptr != 0L && LinuxNativeBridge.nSelectLibVlcSubtitleTrack(ptr, ordinal)
         lifecycle.ensureCurrentSource(generation)
         commitCurrentSourceOnMain(generation) {
+            if (desktopAssSelectionToken.get() != assSelectionToken) return@commitCurrentSourceOnMain
             if (applied) {
                 libVlcSelectedSubtitleStreamIndex = streamIndex
                 currentSubtitleTrack = track
                 subtitlesEnabled = true
+                usesLibAssSubtitleOverlay = false
+                renderingInfo.subtitleRenderer = "libVLC subtitle renderer"
+                renderingInfo.subtitleSource = track.src
             } else {
                 error = VideoPlayerError.CodecError("Failed to select libVLC subtitle track: ${track.id}")
             }
+        }
+    }
+
+    private suspend fun trySelectEmbeddedLibAssSubtitleTrack(
+        track: SubtitleTrack,
+        streamIndex: Int,
+        assSelectionToken: Long,
+        generation: Long,
+    ): Boolean {
+        if (!canUseDesktopAssSubtitleOverlay(track)) return false
+        val sourceUri = lastUri ?: libVlcSourceUri ?: return false
+
+        try {
+            val payload =
+                withContext(Dispatchers.IO) {
+                    extractEmbeddedDesktopAssSubtitle(
+                        uri = sourceUri,
+                        streamIndex = streamIndex,
+                        requestHeaders = lastRequestHeaders,
+                    )
+                }
+            lifecycle.ensureCurrentSource(generation)
+            if (desktopAssSelectionToken.get() != assSelectionToken) return true
+
+            val backend =
+                withContext(Dispatchers.Default) {
+                    desktopAssSubtitleSession.configure(
+                        track = track,
+                        content = payload.content,
+                        fonts = payload.fonts,
+                        streamIndex = streamIndex,
+                        ownerToken = assSelectionToken,
+                    )
+                }
+            lifecycle.ensureCurrentSource(generation)
+            if (desktopAssSelectionToken.get() != assSelectionToken) {
+                desktopAssSubtitleSession.clear(assSelectionToken)
+                return true
+            }
+
+            val ptr = playerPtr
+            check(ptr != 0L && LinuxNativeBridge.nDisableLibVlcSubtitles(ptr)) {
+                "libVLC could not release the embedded subtitle overlay."
+            }
+            lifecycle.ensureCurrentSource(generation)
+            if (desktopAssSelectionToken.get() != assSelectionToken) {
+                desktopAssSubtitleSession.clear(assSelectionToken)
+                return true
+            }
+
+            commitCurrentSourceOnMain(generation) {
+                if (desktopAssSelectionToken.get() != assSelectionToken) {
+                    return@commitCurrentSourceOnMain
+                }
+                libVlcSelectedSubtitleStreamIndex = streamIndex
+                currentSubtitleTrack = track
+                subtitlesEnabled = true
+                usesLibAssSubtitleOverlay = true
+                renderingInfo.subtitleRenderer = "$backend dynamic overlay"
+                renderingInfo.subtitleSource = track.src
+                error = null
+            }
+            return true
+        } catch (e: CancellationException) {
+            desktopAssSubtitleSession.clear(assSelectionToken)
+            throw e
+        } catch (e: Exception) {
+            if (desktopAssSelectionToken.get() != assSelectionToken) return true
+            desktopAssSubtitleSession.clear(assSelectionToken)
+            linuxLogger.w {
+                "Embedded ASS extraction/rendering unavailable; using libVLC subtitles: ${e.message}"
+            }
+            lifecycle.ensureCurrentSource(generation)
+            return false
         }
     }
 
@@ -1882,7 +2630,7 @@ class LinuxVideoPlayerState(
             }
             return
         }
-        if (track != null && !ExternalHlsFallbackSupport.hasSubtitleRenderer()) {
+        if (track != null && !ExternalHlsFallbackSupport.hasSubtitleRenderer(playbackOptions.extensions)) {
             commitCurrentSourceOnMain(generation) {
                 isLoading = false
                 currentSubtitleTrack = null
@@ -2034,7 +2782,7 @@ class LinuxVideoPlayerState(
         if (sw <= 0 || sh <= 0) return
         val ptr = playerPtr
         if (ptr == 0L) return
-        if (nativeBackendUsesLibVlc) return
+        if (nativeBackendUsesLibVlc || shouldUseWaylandColorSurface()) return
 
         // Compute output dimensions that fit within the surface while preserving
         // the video's native aspect ratio. Passing the raw surface size would let
@@ -2178,6 +2926,192 @@ class LinuxVideoPlayerState(
             error = null
         }
         _currentFrameState.value = null
+        resetLinuxColorPipeline()
+    }
+
+    private fun refreshLinuxColorPipeline() {
+        val runtimeStatus = linuxHdrRuntimeStatus.takeIf { activeSourceColorInfo.isHdr }
+        val runtimeRouteReady =
+            runtimeStatus?.let { status ->
+                if (projection.requiresProjectionRenderer) {
+                    status.isVulkanProjectionReady
+                } else {
+                    status.isColorManagedSurfaceReady
+                }
+            } ?: true
+        val usesWaylandSurface =
+            waylandColorSurfaceRequested &&
+                !nativeBackendUsesLibVlc
+        val supportsHdr10PlusApplication =
+            usesWaylandSurface &&
+                projection.requiresProjectionRenderer &&
+                linuxHdrRuntimeStatus.supportsHdr10PlusMetadata &&
+                !hdr10PlusApplicationUnavailable
+        colorPipelineController.updateOutput(
+            displayCapabilities = activeDisplayColorCapabilities,
+            rendererCapabilities =
+                if (usesWaylandSurface) {
+                    if (projection.requiresProjectionRenderer) {
+                        RendererColorCapabilities(
+                            controlledHdrDynamicRanges =
+                                WAYLAND_NATIVE_DYNAMIC_RANGES +
+                                    setOfNotNull(
+                                        VideoDynamicRange.HDR10_PLUS.takeIf {
+                                            supportsHdr10PlusApplication
+                                        },
+                                    ),
+                            supportsHdrProjection = true,
+                            supportsHdr10PlusApplication = supportsHdr10PlusApplication,
+                        )
+                    } else {
+                        RendererColorCapabilities(
+                            nativeSurfaceDynamicRanges = WAYLAND_NATIVE_DYNAMIC_RANGES,
+                            supportsNativeToneMappingToSdr = true,
+                        )
+                    }
+                } else {
+                    RendererColorCapabilities(
+                        supportsToneMappingToSdr = false,
+                    )
+                },
+            surfaceKind =
+                if (usesWaylandSurface) {
+                    if (projection.requiresProjectionRenderer) {
+                        VideoSurfaceKind.CONTROLLED_GPU_SURFACE
+                    } else {
+                        VideoSurfaceKind.NATIVE_CHILD_WINDOW
+                    }
+                } else {
+                    VideoSurfaceKind.COMPOSE_CANVAS
+                },
+            nativeSurfaceAvailable = usesWaylandSurface && !projection.requiresProjectionRenderer,
+            isProjection = projection.requiresProjectionRenderer,
+            verification =
+                if (colorOutputVerified) {
+                    ColorPipelineVerification.RENDERER_CONFIGURED
+                } else {
+                    ColorPipelineVerification.NONE
+                },
+            platformRuntimeFallbackReason =
+                runtimeStatus
+                    ?.takeUnless { runtimeRouteReady }
+                    ?.let { ColorPipelineFallbackReason.PLATFORM_RUNTIME_UNAVAILABLE },
+            platformRuntimeDetail =
+                runtimeStatus?.takeUnless { runtimeRouteReady }?.let { status ->
+                    if (projection.requiresProjectionRenderer) status.projectionDetail else status.surfaceDetail
+                },
+        )
+    }
+
+    private fun shouldRequestWaylandColorSurface(): Boolean {
+        if (
+            !activeSourceColorInfo.isEligibleForLinuxWaylandColorSurface(
+                dynamicRangePolicy = playbackOptions.dynamicRangePolicy,
+                dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+            )
+        ) {
+            return false
+        }
+        val runtimeReady =
+            if (projection.requiresProjectionRenderer) {
+                linuxHdrRuntimeStatus.isVulkanProjectionReady
+            } else {
+                linuxHdrRuntimeStatus.isColorManagedSurfaceReady
+            }
+        if (!runtimeReady) return false
+        if (projection.requiresProjectionRenderer && currentLinuxHdrProjectionConfiguration() == null) return false
+        return true
+    }
+
+    private fun defaultWaylandDisplayCapabilities(): DisplayColorCapabilities {
+        val snapshot = linuxHdrRuntimeStatus.waylandColorSnapshot
+        val named =
+            snapshot.displayCapabilitiesFor(
+                globalId = linuxHdrRuntimeStatus.defaultOutputId,
+                displayName = linuxHdrRuntimeStatus.defaultDisplayName,
+            )
+        if (named.isKnown) return named
+        val onlyOutput = snapshot.outputs.values.singleOrNull() ?: return named
+        return snapshot.displayCapabilitiesFor(globalId = onlyOutput.globalId)
+    }
+
+    private fun resetLinuxColorPipeline() {
+        activeSourceColorInfo = VideoColorInfo()
+        nativeDecodedColorGeneration = 0
+        activeDecoderName = null
+        nativeDecoderNameResolved = false
+        colorOutputVerified = false
+        hdr10PlusApplicationUnavailable = false
+        externalFallbackToneMappedHdrToSdr = false
+        activeDisplayColorCapabilities = DisplayColorCapabilities()
+        waylandColorSurfaceRequested = false
+        waylandColorSurfaceAttached = false
+        waylandNativeOverlayAvailable = false
+        waylandProjectionRendererAttached = false
+        waylandFallbackInProgress = false
+        waylandAttachedComponent = null
+        waylandAttachStartedAtMillis = 0L
+        colorPipelineController.resetSource()
+    }
+
+    private fun refreshNativeDecoderName(ptr: Long) {
+        if (nativeDecoderNameResolved || nativeBackendUsesLibVlc || ptr == 0L) return
+        val reported =
+            runCatching { LinuxNativeBridge.nGetVideoDecoderName(ptr) }
+                .getOrNull()
+                ?.takeIf(String::isNotBlank)
+                ?: return
+        nativeDecoderNameResolved = true
+        activeDecoderName =
+            if (externalFallbackToneMappedHdrToSdr) {
+                "Color-managed SDR bridge -> $reported"
+            } else {
+                reported
+            }
+        colorPipelineController.updateSource(
+            source = activeSourceColorInfo,
+            decoderName = activeDecoderName,
+            decoderCapabilities =
+                when {
+                    externalFallbackToneMappedHdrToSdr ->
+                        activeSourceColorInfo.toConfirmedDecoderCapabilities()
+                    waylandColorSurfaceRequested && colorOutputVerified ->
+                        activeSourceColorInfo.toConfirmedDecoderCapabilities()
+                    waylandColorSurfaceRequested ->
+                        activeSourceColorInfo.toConfirmedDecoderCapabilities().copy(isKnown = false)
+                    else -> DecoderColorCapabilities()
+                },
+            isLive = lastUri?.substringBefore('?')?.endsWith(".m3u8", ignoreCase = true) == true,
+        )
+        refreshLinuxColorPipeline()
+    }
+
+    private suspend fun publishLinuxColorPipelineError(extraDetail: String? = null) {
+        val pipelineError =
+            colorPipelineController.pipelineErrorOrNull()
+                ?: VideoPlayerError.ColorPipelineError(
+                    reason =
+                        if (activeSourceColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN) {
+                            ColorPipelineFallbackReason.SOURCE_COLOR_UNKNOWN
+                        } else {
+                            ColorPipelineFallbackReason.PLATFORM_RUNTIME_UNAVAILABLE
+                        },
+                    message =
+                        if (activeSourceColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN) {
+                            "The source color transfer cannot be verified safely."
+                        } else {
+                            "No verified Linux color pipeline is available."
+                        },
+                )
+        withContext(Dispatchers.Main) {
+            isLoading = false
+            error =
+                if (extraDetail.isNullOrBlank()) {
+                    pipelineError
+                } else {
+                    pipelineError.copy(message = "${pipelineError.message} $extraDetail")
+                }
+        }
     }
 
     private fun setPlayerError(error: VideoPlayerError) {
@@ -2250,5 +3184,24 @@ class LinuxVideoPlayerState(
                 if (e is CancellationException) throw e
             }
         }
+    }
+}
+
+internal fun VideoColorInfo.isEligibleForLinuxWaylandColorSurface(
+    dynamicRangePolicy: DynamicRangePolicy,
+    dolbyVisionPolicy: DolbyVisionPolicy,
+): Boolean {
+    if (!isHdr || dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR) return false
+    return when (dynamicRange) {
+        VideoDynamicRange.HDR10,
+        VideoDynamicRange.HDR10_PLUS,
+        VideoDynamicRange.HLG,
+        -> true
+        VideoDynamicRange.DOLBY_VISION ->
+            dolbyVisionPolicy != DolbyVisionPolicy.REQUIRE_NATIVE &&
+                dolbyVision?.hasHdr10CompatibleBaseLayer == true
+        VideoDynamicRange.SDR,
+        VideoDynamicRange.UNKNOWN,
+        -> false
     }
 }

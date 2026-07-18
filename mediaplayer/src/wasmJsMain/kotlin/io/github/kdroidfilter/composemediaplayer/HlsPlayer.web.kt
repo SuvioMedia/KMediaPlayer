@@ -100,6 +100,7 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
                 if (!playerState.isCurrentMediaSession(mediaSessionId)) return@launch
                 playerState.syncWebMediaTracks(this@configureHlsSource)
                 playerState.syncHlsQualities(this@configureHlsSource)
+                playerState.refreshWebVideoColorInfo(this@configureHlsSource)
                 this@configureHlsSource.applySelectedAudioTrack(playerState.currentAudioTrack)
                 this@configureHlsSource.applySelectedSubtitleTrack(
                     if (playerState.subtitlesEnabled) playerState.currentSubtitleTrack else null,
@@ -208,6 +209,12 @@ private fun setupHlsSource(
                         try { onTracksChangedError(String(message)); } catch (_) {}
                     }
                 };
+                const syncAfterDecodedFrame = function() {
+                    sync();
+                    if (typeof video.requestVideoFrameCallback === "function") {
+                        video.requestVideoFrameCallback(function() { sync(); });
+                    }
+                };
 
                 const parseAttributes = function(value) {
                     const attrs = {};
@@ -259,8 +266,9 @@ private fun setupHlsSource(
                     hls.loadSource(sourceUri);
                 });
                 hls.on(Hls.Events.MANIFEST_PARSED, sync);
-                hls.on(Hls.Events.LEVEL_SWITCHED, sync);
+                hls.on(Hls.Events.LEVEL_SWITCHED, syncAfterDecodedFrame);
                 hls.on(Hls.Events.LEVEL_UPDATED, sync);
+                hls.on(Hls.Events.FRAG_CHANGED, syncAfterDecodedFrame);
                 hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, sync);
                 hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, sync);
                 hls.on(Hls.Events.ERROR, function(_, data) {

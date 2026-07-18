@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.common
 
+import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -106,6 +107,7 @@ class VideoPlayerErrorTest {
      * Test when used in a when expression
      */
     @Test
+    @Suppress("CyclomaticComplexMethod")
     fun testWhenExpression() {
         val errors =
             listOf(
@@ -117,6 +119,10 @@ class VideoPlayerErrorTest {
                 VideoPlayerError.NoSourceError("No source"),
                 VideoPlayerError.TimeoutError("Timeout"),
                 VideoPlayerError.HlsError("HLS error", type = "networkError", details = "manifestLoadError"),
+                VideoPlayerError.ColorPipelineError(
+                    ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
+                    "HDR route unavailable",
+                ),
                 VideoPlayerError.UnknownError("Unknown error"),
             )
 
@@ -131,6 +137,7 @@ class VideoPlayerErrorTest {
                     is VideoPlayerError.NoSourceError -> "Source: ${error.message}"
                     is VideoPlayerError.TimeoutError -> "Timeout: ${error.message}"
                     is VideoPlayerError.HlsError -> "HLS: ${error.message}"
+                    is VideoPlayerError.ColorPipelineError -> "Color: ${error.message}"
                     is VideoPlayerError.UnknownError -> "Unknown: ${error.message}"
                 }
 
@@ -143,6 +150,7 @@ class VideoPlayerErrorTest {
                 is VideoPlayerError.NoSourceError -> assertEquals("Source: No source", message)
                 is VideoPlayerError.TimeoutError -> assertEquals("Timeout: Timeout", message)
                 is VideoPlayerError.HlsError -> assertEquals("HLS: HLS error", message)
+                is VideoPlayerError.ColorPipelineError -> assertEquals("Color: HDR route unavailable", message)
                 is VideoPlayerError.UnknownError -> assertEquals("Unknown: Unknown error", message)
             }
         }

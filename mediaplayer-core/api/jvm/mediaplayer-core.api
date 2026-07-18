@@ -94,6 +94,86 @@ public final class io/github/kdroidfilter/composemediaplayer/CacheConfig {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (ZZZZ)V
+	public synthetic fun <init> (ZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun copy (ZZZZ)Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;ZZZZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getSupportsDolbyVisionProfile7To8 ()Z
+	public final fun getSupportsHdr10PlusApplication ()Z
+	public final fun getSupportsHdrToSdrSourceBridge ()Z
+	public final fun getSupportsStreamingVOD ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason : java/lang/Enum {
+	public static final field DECODER_DOES_NOT_SUPPORT_SOURCE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DISPLAY_CAPABILITIES_UNKNOWN Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DISPLAY_DOES_NOT_SUPPORT_SOURCE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DOLBY_VISION_BASE_LAYER_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DOLBY_VISION_BASE_LAYER_USED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DOLBY_VISION_CONVERTER_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DOLBY_VISION_PROFILE_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DOLBY_VISION_RPU_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DRM_CONVERSION_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field DYNAMIC_METADATA_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field EXPLICIT_SDR_REQUEST Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field HDR_PROJECTION_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field HDR_SURFACE_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field LIVE_SOURCE_CONVERSION_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field NONE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field PLATFORM_RUNTIME_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field RENDERER_CONFIGURATION_FAILED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field SOURCE_COLOR_UNKNOWN Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field SOURCE_IS_SDR Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static final field TONE_MAPPER_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer : java/lang/Enum {
+	public static final field CONTROLLED_HDR Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public static final field CONTROLLED_SDR Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public static final field DOLBY_VISION_CONVERTER Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public static final field SOURCE_BRIDGE_SDR Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public static final field SYSTEM_NATIVE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/ColorPipelineRoute : java/lang/Enum {
+	public static final field CONTROLLED_HDR_RENDERER Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public static final field CONTROLLED_SDR_RENDERER Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public static final field DOLBY_VISION_CONVERSION Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public static final field SOURCE_BRIDGE_SDR Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public static final field SYSTEM_NATIVE_SURFACE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public static final field UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/ColorPipelineVerification : java/lang/Enum {
+	public static final field INFERRED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;
+	public static final field NONE Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;
+	public static final field RENDERER_CONFIGURED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;
+	public static final field SYSTEM_REPORTED Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/ComposableSingletons$VideoPlayerBackendKt {
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/ComposableSingletons$VideoPlayerBackendKt;
 	public fun <init> ()V
@@ -101,45 +181,176 @@ public final class io/github/kdroidfilter/composemediaplayer/ComposableSingleton
 	public final fun getLambda$-833320218$io_github_shusek_mediaplayer_core ()Lkotlin/jvm/functions/Function2;
 }
 
-public abstract interface annotation class io/github/kdroidfilter/composemediaplayer/ExperimentalComposeMediaPlayerBackendApi : java/lang/annotation/Annotation {
-}
-
-public final class io/github/kdroidfilter/composemediaplayer/HdrCapabilities {
+public final class io/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata {
 	public static final field $stable I
 	public fun <init> ()V
-	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;ZZZF)V
-	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;ZZZFILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public final fun component5 ()Z
-	public final fun component6 ()Z
-	public final fun component7 ()Z
-	public final fun component8 ()F
-	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;ZZZF)Lio/github/kdroidfilter/composemediaplayer/HdrCapabilities;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/HdrCapabilities;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;Lio/github/kdroidfilter/composemediaplayer/HdrSupport;ZZZFILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/HdrCapabilities;
+	public fun <init> (Ljava/lang/Integer;Ljava/lang/Integer;)V
+	public synthetic fun <init> (Ljava/lang/Integer;Ljava/lang/Integer;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/Integer;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun copy (Ljava/lang/Integer;Ljava/lang/Integer;)Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;Ljava/lang/Integer;Ljava/lang/Integer;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getDolbyVision ()Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public final fun getHasHdrDisplay ()Z
-	public final fun getHdr ()Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public final fun getHdr10 ()Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public final fun getHlg ()Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public final fun getMaxExtendedDynamicRange ()F
-	public final fun getSupportsDolbyVisionProfile7To8Transcoding ()Z
-	public final fun getSupportsNativeHdrPlayback ()Z
-	public final fun getSupportsToneMappingToSdr ()Z
+	public final fun getMaxContentLightLevelNits ()Ljava/lang/Integer;
+	public final fun getMaxFrameAverageLightLevelNits ()Ljava/lang/Integer;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
 
-public final class io/github/kdroidfilter/composemediaplayer/HdrSupport : java/lang/Enum {
-	public static final field SUPPORTED Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public static final field UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
+public final class io/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (ZLjava/util/Set;Ljava/lang/Integer;Ljava/util/Set;Z)V
+	public synthetic fun <init> (ZLjava/util/Set;Ljava/lang/Integer;Ljava/util/Set;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Ljava/util/Set;
+	public final fun component3 ()Ljava/lang/Integer;
+	public final fun component4 ()Ljava/util/Set;
+	public final fun component5 ()Z
+	public final fun copy (ZLjava/util/Set;Ljava/lang/Integer;Ljava/util/Set;Z)Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;ZLjava/util/Set;Ljava/lang/Integer;Ljava/util/Set;ZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxBitDepth ()Ljava/lang/Integer;
+	public final fun getSupportedDolbyVisionProfiles ()Ljava/util/Set;
+	public final fun getSupportedDynamicRanges ()Ljava/util/Set;
+	public fun hashCode ()I
+	public final fun isDolbyVisionProfileSupportKnown ()Z
+	public final fun isKnown ()Z
+	public final fun supports (Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;)Z
+	public final fun supports (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;)Z
+	public final fun supportsDolbyVisionProfile (Ljava/lang/Integer;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (ZLjava/util/Set;Ljava/lang/Float;Ljava/lang/Float;Ljava/lang/Float;)V
+	public synthetic fun <init> (ZLjava/util/Set;Ljava/lang/Float;Ljava/lang/Float;Ljava/lang/Float;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Ljava/util/Set;
+	public final fun component3 ()Ljava/lang/Float;
+	public final fun component4 ()Ljava/lang/Float;
+	public final fun component5 ()Ljava/lang/Float;
+	public final fun copy (ZLjava/util/Set;Ljava/lang/Float;Ljava/lang/Float;Ljava/lang/Float;)Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;ZLjava/util/Set;Ljava/lang/Float;Ljava/lang/Float;Ljava/lang/Float;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxLuminanceNits ()Ljava/lang/Float;
+	public final fun getMinLuminanceNits ()Ljava/lang/Float;
+	public final fun getReferenceWhiteNits ()Ljava/lang/Float;
+	public final fun getSupportedDynamicRanges ()Ljava/util/Set;
+	public final fun getSupportsHdr ()Z
+	public fun hashCode ()I
+	public final fun isKnown ()Z
+	public final fun supportFor (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;)Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRangeSupport;
+	public final fun supports (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer : java/lang/Enum {
+	public static final field FEL Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public static final field MEL Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public static final field NONE Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
-	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
-	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/HdrSupport;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/DolbyVisionInfo {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Boolean;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;Z)V
+	public synthetic fun <init> (Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Boolean;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/Integer;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Ljava/lang/Boolean;
+	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public final fun component5 ()Z
+	public final fun copy (Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Boolean;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;Z)Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Boolean;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;ZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEnhancementLayer ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionEnhancementLayer;
+	public final fun getHasHdr10CompatibleBaseLayer ()Z
+	public final fun getHasRpu ()Ljava/lang/Boolean;
+	public final fun getLevel ()Ljava/lang/Integer;
+	public final fun getProfile ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy : java/lang/Enum {
+	public static final field AUTO Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public static final field CONVERT_PROFILE_7_TO_8_1 Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public static final field PREFER_HDR10_BASE_LAYER Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public static final field REQUIRE_NATIVE Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/Integer;Ljava/lang/Integer;ZLjava/lang/Boolean;Ljava/lang/Boolean;)V
+	public synthetic fun <init> (Ljava/lang/Integer;Ljava/lang/Integer;ZLjava/lang/Boolean;Ljava/lang/Boolean;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/Integer;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Z
+	public final fun component4 ()Ljava/lang/Boolean;
+	public final fun component5 ()Ljava/lang/Boolean;
+	public final fun copy (Ljava/lang/Integer;Ljava/lang/Integer;ZLjava/lang/Boolean;Ljava/lang/Boolean;)Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Ljava/lang/Integer;Ljava/lang/Integer;ZLjava/lang/Boolean;Ljava/lang/Boolean;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEnhancementLayerDiscarded ()Ljava/lang/Boolean;
+	public final fun getFelMappingDiscarded ()Ljava/lang/Boolean;
+	public final fun getOutputHasHdr10CompatibleBaseLayer ()Z
+	public final fun getOutputProfile ()Ljava/lang/Integer;
+	public final fun getSourceProfile ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling : java/lang/Enum {
+	public static final field APPLIED_BY_RENDERER Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public static final field APPLIED_BY_SOURCE_BRIDGE Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public static final field CONVERTED Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public static final field DROPPED Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public static final field NONE Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public static final field PASSTHROUGH Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/DynamicRangePolicy : java/lang/Enum {
+	public static final field AUTO Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public static final field FORCE_SDR Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public static final field PREFER_HDR Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public static final field REQUIRE_HDR Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+}
+
+public abstract interface annotation class io/github/kdroidfilter/composemediaplayer/ExperimentalComposeMediaPlayerBackendApi : java/lang/annotation/Annotation {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (ILjava/lang/Integer;Z)V
+	public synthetic fun <init> (ILjava/lang/Integer;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Z
+	public final fun copy (ILjava/lang/Integer;Z)Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;ILjava/lang/Integer;ZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApplicationIdentifier ()I
+	public final fun getApplicationVersion ()Ljava/lang/Integer;
+	public final fun getHasPerFrameMetadata ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/HlsQualityMode : java/lang/Enum {
@@ -226,6 +437,36 @@ public final class io/github/kdroidfilter/composemediaplayer/InitialPlayerState 
 	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata {
+	public static final field $stable I
+	public fun <init> (FFFFFFFFFF)V
+	public final fun component1 ()F
+	public final fun component10 ()F
+	public final fun component2 ()F
+	public final fun component3 ()F
+	public final fun component4 ()F
+	public final fun component5 ()F
+	public final fun component6 ()F
+	public final fun component7 ()F
+	public final fun component8 ()F
+	public final fun component9 ()F
+	public final fun copy (FFFFFFFFFF)Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;FFFFFFFFFFILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBlueX ()F
+	public final fun getBlueY ()F
+	public final fun getGreenX ()F
+	public final fun getGreenY ()F
+	public final fun getMaxLuminanceNits ()F
+	public final fun getMinLuminanceNits ()F
+	public final fun getRedX ()F
+	public final fun getRedY ()F
+	public final fun getWhiteX ()F
+	public final fun getWhiteY ()F
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/MediaSourceSpec {
 	public static final field $stable I
 	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
@@ -245,21 +486,23 @@ public final class io/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics
 	public static final field $stable I
 	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics$Companion;
 	public fun <init> ()V
-	public fun <init> (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;Ljava/util/List;Ljava/lang/String;)V
-	public synthetic fun <init> (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;Ljava/util/List;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Float;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;Ljava/util/List;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Float;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;Ljava/util/List;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/Long;
-	public final fun component10 ()Ljava/util/List;
-	public final fun component11 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/lang/Integer;
+	public final fun component11 ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
+	public final fun component12 ()Ljava/util/List;
+	public final fun component13 ()Ljava/lang/String;
 	public final fun component2 ()Ljava/lang/Long;
 	public final fun component3 ()Ljava/lang/Long;
-	public final fun component4 ()Ljava/lang/Integer;
-	public final fun component5 ()Ljava/lang/Integer;
+	public final fun component4 ()Ljava/lang/Long;
+	public final fun component5 ()Ljava/lang/Float;
 	public final fun component6 ()Ljava/lang/Integer;
 	public final fun component7 ()Ljava/lang/Integer;
 	public final fun component8 ()Ljava/lang/Integer;
-	public final fun component9 ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
-	public final fun copy (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;Ljava/util/List;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;
+	public final fun component9 ()Ljava/lang/Integer;
+	public final fun copy (Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Float;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;Ljava/util/List;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Float;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getBitrate ()Ljava/lang/Integer;
 	public final fun getBufferedRanges ()Ljava/util/List;
@@ -267,9 +510,12 @@ public final class io/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics
 	public final fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
 	public final fun getDroppedFramePercent ()Ljava/lang/Float;
 	public final fun getDroppedVideoFrames ()Ljava/lang/Long;
+	public final fun getEffectiveVideoFrames ()Ljava/lang/Long;
+	public final fun getMaximumAvSyncOffsetMs ()Ljava/lang/Float;
 	public final fun getNetworkState ()Ljava/lang/Integer;
 	public final fun getNotes ()Ljava/lang/String;
 	public final fun getReadyState ()Ljava/lang/Integer;
+	public final fun getRenderedVideoFrames ()Ljava/lang/Long;
 	public final fun getTotalVideoFrames ()Ljava/lang/Long;
 	public final fun getVideoHeight ()Ljava/lang/Integer;
 	public final fun getVideoWidth ()Ljava/lang/Integer;
@@ -506,21 +752,26 @@ public final class io/github/kdroidfilter/composemediaplayer/PlaybackSnapshot {
 public final class io/github/kdroidfilter/composemediaplayer/PlayerCapabilities {
 	public static final field $stable I
 	public fun <init> ()V
-	public fun <init> (ZZLio/github/kdroidfilter/composemediaplayer/HdrCapabilities;Ljava/util/Set;)V
-	public synthetic fun <init> (ZZLio/github/kdroidfilter/composemediaplayer/HdrCapabilities;Ljava/util/Set;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public fun <init> (ZZLio/github/kdroidfilter/composemediaplayer/HdrCapabilities;Ljava/util/Set;Z)V
-	public synthetic fun <init> (ZZLio/github/kdroidfilter/composemediaplayer/HdrCapabilities;Ljava/util/Set;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (ZZLio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Ljava/util/Set;Z)V
+	public synthetic fun <init> (ZZLio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Ljava/util/Set;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun canPlaySource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;)Z
 	public final fun canPlaySource (Ljava/lang/String;Ljava/lang/String;)Z
 	public static synthetic fun canPlaySource$default (Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Z
 	public final fun component1 ()Z
 	public final fun component2 ()Z
-	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/HdrCapabilities;
-	public final fun component4 ()Ljava/util/Set;
-	public final fun copy (ZZLio/github/kdroidfilter/composemediaplayer/HdrCapabilities;Ljava/util/Set;)Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;ZZLio/github/kdroidfilter/composemediaplayer/HdrCapabilities;Ljava/util/Set;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;
+	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;
+	public final fun component5 ()Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;
+	public final fun component6 ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public final fun component7 ()Ljava/util/Set;
+	public final fun component8 ()Z
+	public final fun copy (ZZLio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Ljava/util/Set;Z)Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;ZZLio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Ljava/util/Set;ZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getHdr ()Lio/github/kdroidfilter/composemediaplayer/HdrCapabilities;
+	public final fun getColorConversionCapabilities ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public final fun getDecoderColorCapabilities ()Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;
+	public final fun getDisplayColorCapabilities ()Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;
+	public final fun getRendererColorCapabilities ()Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;
 	public final fun getSupportedUriSchemes ()Ljava/util/Set;
 	public final fun getSupportsHls ()Z
 	public final fun getSupportsMkv ()Z
@@ -585,6 +836,7 @@ public final class io/github/kdroidfilter/composemediaplayer/PreviewableVideoPla
 	public fun getBufferedPercent ()F
 	public fun getBufferedRanges ()Ljava/util/List;
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
 	public fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
 	public fun getCurrentSubtitleTrack ()Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;
@@ -678,6 +930,41 @@ public final class io/github/kdroidfilter/composemediaplayer/PreviewableVideoPla
 	public fun stop ()V
 	public fun toString ()Ljava/lang/String;
 	public fun toggleFullscreen ()V
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/RendererColorCapabilities {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/util/Map;ZZZZZZZ)V
+	public synthetic fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/util/Map;ZZZZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/Set;
+	public final fun component10 ()Z
+	public final fun component2 ()Ljava/util/Set;
+	public final fun component3 ()Ljava/util/Map;
+	public final fun component4 ()Z
+	public final fun component5 ()Z
+	public final fun component6 ()Z
+	public final fun component7 ()Z
+	public final fun component8 ()Z
+	public final fun component9 ()Z
+	public final fun controlledOutputFor (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;)Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun copy (Ljava/util/Set;Ljava/util/Set;Ljava/util/Map;ZZZZZZZ)Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Ljava/util/Set;Ljava/util/Set;Ljava/util/Map;ZZZZZZZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getControlledHdrDynamicRanges ()Ljava/util/Set;
+	public final fun getControlledOutputConversions ()Ljava/util/Map;
+	public final fun getNativeSurfaceDynamicRanges ()Ljava/util/Set;
+	public final fun getSupportsDolbyVisionMetadata ()Z
+	public final fun getSupportsDolbyVisionToneMappingToSdr ()Z
+	public final fun getSupportsHdr10PlusApplication ()Z
+	public final fun getSupportsHdr10PlusPassthrough ()Z
+	public final fun getSupportsHdrProjection ()Z
+	public final fun getSupportsNativeToneMappingToSdr ()Z
+	public final fun getSupportsToneMappingToSdr ()Z
+	public fun hashCode ()I
+	public final fun supportsControlled (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Z)Z
+	public final fun supportsNative (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;)Z
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/SubtitleFormat : java/lang/Enum {
@@ -805,6 +1092,245 @@ public final class io/github/kdroidfilter/composemediaplayer/TrackSelectionResul
 	public static final fun subtitleTrackSelectionResult (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorInfo {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun component10 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public final fun component5 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public final fun component6 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;
+	public final fun component7 ()Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;
+	public final fun component8 ()Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;
+	public final fun component9 ()Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;)Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBitDepth ()Ljava/lang/Integer;
+	public final fun getContentLightLevel ()Lio/github/kdroidfilter/composemediaplayer/ContentLightLevelMetadata;
+	public final fun getDolbyVision ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public final fun getDynamicRange ()Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun getHdr10Plus ()Lio/github/kdroidfilter/composemediaplayer/Hdr10PlusInfo;
+	public final fun getMasteringDisplay ()Lio/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata;
+	public final fun getMatrix ()Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public final fun getPrimaries ()Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public final fun getRange ()Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;
+	public final fun getTransfer ()Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public fun hashCode ()I
+	public final fun isHdr ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorMatrix : java/lang/Enum {
+	public static final field BT2020_CL Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public static final field BT2020_NCL Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public static final field BT601 Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public static final field BT709 Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public static final field ICTCP Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public static final field RGB Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoColorMatrix;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorPipelineKt {
+	public static final fun toStatus (Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlan;Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineRequest;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineStatus;
+	public static synthetic fun toStatus$default (Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlan;Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineRequest;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineStatus;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlan {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;ZLio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;ZLio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public final fun component4 ()Z
+	public final fun component5 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public final fun component6 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public final fun component7 ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;ZLio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlan;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlan;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;ZLio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlan;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getDolbyVisionProfileMapping ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public final fun getFallbackReason ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public final fun getMetadataHandling ()Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public final fun getOutputDolbyVision ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public final fun getOutputDynamicRange ()Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun getRequestHonored ()Z
+	public final fun getRoute ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRoute;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlanner {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlanner;
+	public final fun plan (Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineRequest;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelinePlan;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorPipelineRequest {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;ZZLio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;ZZZLio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;ZZLio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;ZZZLio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
+	public final fun component10 ()Z
+	public final fun component11 ()Z
+	public final fun component12 ()Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public final fun component13 ()Z
+	public final fun component14 ()Z
+	public final fun component15 ()Z
+	public final fun component16 ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public final fun component17 ()Ljava/lang/String;
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
+	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;
+	public final fun component5 ()Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;
+	public final fun component6 ()Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;
+	public final fun component7 ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public final fun component8 ()Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public final fun component9 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;ZZLio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;ZZZLio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineRequest;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineRequest;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;ZZLio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;ZZZLio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineRequest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAllowAutomaticDolbyVisionConversion ()Z
+	public final fun getAppliedDolbyVisionProfileMapping ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public final fun getConversion ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public final fun getDecoder ()Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;
+	public final fun getDecoderInput ()Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
+	public final fun getDisplay ()Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;
+	public final fun getDolbyVisionPolicy ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public final fun getDynamicRangePolicy ()Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public final fun getNativeSurfaceAvailable ()Z
+	public final fun getPlatformRuntimeDetail ()Ljava/lang/String;
+	public final fun getPlatformRuntimeFallbackReason ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public final fun getRenderer ()Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;
+	public final fun getSource ()Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
+	public final fun getSurfaceKind ()Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public fun hashCode ()I
+	public final fun isDrmProtected ()Z
+	public final fun isLive ()Z
+	public final fun isProjection ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorPipelineStatus {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;ZLio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;ZLio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public final fun component10 ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public final fun component11 ()Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun component12 ()Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun component13 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public final fun component14 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public final fun component15 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public final fun component16 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public final fun component17 ()Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public final fun component18 ()Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public final fun component19 ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;
+	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public final fun component20 ()Z
+	public final fun component21 ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public final fun component22 ()Ljava/lang/String;
+	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
+	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;
+	public final fun component7 ()Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public final fun component8 ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public final fun component9 ()Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;ZLio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineStatus;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineStatus;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;ZLio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPipelineStatus;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getConversionCapabilities ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public final fun getDecoderCapabilities ()Lio/github/kdroidfilter/composemediaplayer/DecoderColorCapabilities;
+	public final fun getDecoderName ()Ljava/lang/String;
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getDisplay ()Lio/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities;
+	public final fun getDolbyVisionProfileMapping ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public final fun getFallbackReason ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public final fun getMetadataHandling ()Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public final fun getOutputDolbyVision ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public final fun getOutputDynamicRange ()Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun getPlannedDolbyVisionProfileMapping ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionProfileMapping;
+	public final fun getPlannedMetadataHandling ()Lio/github/kdroidfilter/composemediaplayer/DynamicMetadataHandling;
+	public final fun getPlannedOutputDolbyVision ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionInfo;
+	public final fun getPlannedOutputDynamicRange ()Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public final fun getRenderer ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineRenderer;
+	public final fun getRendererCapabilities ()Lio/github/kdroidfilter/composemediaplayer/RendererColorCapabilities;
+	public final fun getRequestHonored ()Z
+	public final fun getRequestedDolbyVisionPolicy ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public final fun getRequestedDynamicRangePolicy ()Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public final fun getSource ()Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
+	public final fun getSurface ()Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public final fun getVerification ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineVerification;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorPrimaries : java/lang/Enum {
+	public static final field BT2020 Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public static final field BT601_525 Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public static final field BT601_625 Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public static final field BT709 Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public static final field DISPLAY_P3 Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoColorPrimaries;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorRange : java/lang/Enum {
+	public static final field FULL Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;
+	public static final field LIMITED Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoColorRange;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoColorTransfer : java/lang/Enum {
+	public static final field HLG Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public static final field LINEAR Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public static final field PQ Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public static final field SDR Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public static final field SRGB Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoColorTransfer;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoDynamicRange : java/lang/Enum {
+	public static final field DOLBY_VISION Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public static final field HDR10 Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public static final field HDR10_PLUS Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public static final field HLG Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public static final field SDR Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRange;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoDynamicRangeSupport : java/lang/Enum {
+	public static final field SUPPORTED Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRangeSupport;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRangeSupport;
+	public static final field UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRangeSupport;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRangeSupport;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoDynamicRangeSupport;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/VideoEyeOrder : java/lang/Enum {
 	public static final field LeftRight Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;
 	public static final field RightLeft Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;
@@ -881,6 +1407,20 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoPlayerError$Co
 	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError$CodecError;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError$CodecError;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getMessage ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoPlayerError$ColorPipelineError : io/github/kdroidfilter/composemediaplayer/VideoPlayerError {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError$ColorPipelineError;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError$ColorPipelineError;Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError$ColorPipelineError;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public final fun getReason ()Lio/github/kdroidfilter/composemediaplayer/ColorPipelineFallbackReason;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -1009,6 +1549,7 @@ public abstract interface class io/github/kdroidfilter/composemediaplayer/VideoP
 	public fun getBufferedPercent ()F
 	public fun getBufferedRanges ()Ljava/util/List;
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
 	public abstract fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
 	public abstract fun getCurrentSubtitleTrack ()Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;
@@ -1121,6 +1662,7 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoPlayerState$De
 	public static fun getBufferedPercent (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)F
 	public static fun getBufferedRanges (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Ljava/util/List;
 	public static fun getCapabilities (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public static fun getColorPipelineStatus (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lkotlinx/coroutines/flow/StateFlow;
 	public static fun getCurrentHlsQuality (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
 	public static fun getCurrentTimeMs (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)J
 	public static fun getDiagnostics (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;
@@ -1385,6 +1927,22 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoStereoLayout :
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;
 	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/VideoSurfaceKind : java/lang/Enum {
+	public static final field COMPOSE_CANVAS Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field CONTROLLED_GPU_SURFACE Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field NATIVE_CHILD_WINDOW Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field NATIVE_LAYER Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field SURFACE_VIEW Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field TEXTURE_VIEW Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field UNKNOWN Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field WEB_GL_CANVAS Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field WEB_GPU_CANVAS Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static final field WEB_VIDEO Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoSurfaceKind;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/VideoTextureCrop {

@@ -33,6 +33,26 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
+        val kmediaBridgeRuntimeRepository =
+            providers
+                .gradleProperty("kmediaBridgeRuntimeRepository")
+                .orNull
+                ?.takeIf { it.isNotBlank() }
+                ?: "https://shusek.github.io/KMediaBridge/maven"
+        val kmediaBridgeRuntimeRepositoryUri = uri(kmediaBridgeRuntimeRepository)
+        check(
+            kmediaBridgeRuntimeRepositoryUri.scheme in setOf("https", "file") &&
+                kmediaBridgeRuntimeRepositoryUri.userInfo == null,
+        ) {
+            "kmediaBridgeRuntimeRepository must be an HTTPS or local file URL without embedded credentials."
+        }
+        maven {
+            name = "kmediaBridgePublicRuntimeAndLegacy"
+            url = kmediaBridgeRuntimeRepositoryUri
+            content {
+                includeGroup("io.github.shusek")
+            }
+        }
         exclusiveContent {
             forRepository {
                 ivy {
@@ -95,9 +115,21 @@ dependencyResolutionManagement {
                 includeModule("io.github.shusek", "composemediaplayer-core")
                 includeModule("io.github.shusek", "composemediaplayer-core-android")
                 includeModule("io.github.shusek", "composemediaplayer-core-jvm")
+                includeModule("io.github.shusek", "composemediaplayer-extension-api")
+                includeModule("io.github.shusek", "composemediaplayer-extension-api-android")
+                includeModule("io.github.shusek", "composemediaplayer-extension-api-jvm")
                 includeModule("io.github.shusek", "composemediaplayer")
-                includeModule("io.github.shusek", "composemediaplayer-android")
                 includeModule("io.github.shusek", "composemediaplayer-jvm")
+                includeModule("io.github.shusek", "composemediaplayer-android")
+                includeModule("io.github.shusek", "composemediaplayer-dolbyvision")
+                includeModule("io.github.shusek", "composemediaplayer-dolbyvision-jvm")
+                includeModule("io.github.shusek", "composemediaplayer-dolbyvision-android")
+                includeModule("io.github.shusek", "composemediaplayer-ass")
+                includeModule("io.github.shusek", "composemediaplayer-ass-jvm")
+                includeModule("io.github.shusek", "composemediaplayer-ass-android")
+                includeModule("io.github.shusek", "composemediaplayer-kmediabridge")
+                includeModule("io.github.shusek", "composemediaplayer-kmediabridge-android")
+                includeModule("io.github.shusek", "composemediaplayer-kmediabridge-jvm")
                 includeModule("io.github.shusek", "composemediaplayer-mpv")
                 includeModule("io.github.shusek", "composemediaplayer-mpv-android")
                 includeModule("io.github.shusek", "composemediaplayer-mpv-jvm")
@@ -106,9 +138,14 @@ dependencyResolutionManagement {
     }
 }
 include(":mediaplayer-core")
+include(":mediaplayer-extension-api")
 include(":mediaplayer")
+include(":mediaplayer-ass")
+include(":mediaplayer-dolbyvision")
+include(":mediaplayer-kmediabridge")
 include(":mediaplayer-mpv")
 include(":consumer-smoke")
+include(":consumer-smoke-extensions")
 include(":consumer-smoke-mpv")
 include(":sample:composeApp")
 include(":androidApp")

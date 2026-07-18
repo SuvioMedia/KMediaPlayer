@@ -10,9 +10,10 @@
 #include <mfreadwrite.h>
 #include <audioclient.h>
 #include <mmdeviceapi.h>
+#include <cstdint>
 
 // Native API version — bump when the exported API changes.
-#define NATIVE_VIDEO_PLAYER_VERSION 4
+#define NATIVE_VIDEO_PLAYER_VERSION 12
 
 // Playback speed bounds — kept in sync with
 // io.github.kdroidfilter.composemediaplayer.VideoPlayerState.{MIN,MAX}_PLAYBACK_SPEED.
@@ -39,6 +40,22 @@ typedef struct VideoMetadata {
     BOOL hasAudioChannels;
     BOOL hasAudioSampleRate;
 } VideoMetadata;
+
+typedef struct HdrOutputStatus {
+    BOOL displayQueried;
+    BOOL advancedColorEnabled;
+    BOOL swapChainConfigured;
+    BOOL firstFramePresented;
+    BOOL p010InputConfirmed;
+    UINT32 bitsPerColor;
+    UINT32 displayColorSpace;
+    UINT32 swapChainColorSpace;
+    UINT32 monitorGeneration;
+    HRESULT lastError;
+    float minLuminanceNits;
+    float maxLuminanceNits;
+    float maxFullFrameLuminanceNits;
+} HdrOutputStatus;
 
 #ifdef _WIN32
   #ifdef NATIVEVIDEOPLAYER_EXPORTS
@@ -83,6 +100,30 @@ NATIVEVIDEOPLAYER_API HRESULT SetPlaybackSpeed(VideoPlayerInstance* pInstance, f
 NATIVEVIDEOPLAYER_API HRESULT GetPlaybackSpeed(const VideoPlayerInstance* pInstance, float* pSpeed);
 NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInstance, VideoMetadata* pMetadata);
 NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT32 targetWidth, UINT32 targetHeight);
+NATIVEVIDEOPLAYER_API HRESULT ConfigureHdrOutput(
+    VideoPlayerInstance* pInstance,
+    const int32_t* integerConfiguration,
+    size_t integerCount,
+    const float* floatingConfiguration,
+    size_t floatingCount);
+NATIVEVIDEOPLAYER_API HRESULT AttachHdrOutput(VideoPlayerInstance* pInstance, HWND hwnd);
+NATIVEVIDEOPLAYER_API void    DetachHdrOutput(VideoPlayerInstance* pInstance);
+NATIVEVIDEOPLAYER_API HRESULT RenderHdrFrame(VideoPlayerInstance* pInstance);
+NATIVEVIDEOPLAYER_API HRESULT GetHdrOutputStatus(VideoPlayerInstance* pInstance, HdrOutputStatus* status);
+// Active decoded color snapshot: generation, bit depth, primaries, transfer,
+// matrix, range and authoritative-unknown marker. Values follow
+// JvmDecodedVideoColorSignalCodec.
+NATIVEVIDEOPLAYER_API void    GetDecodedVideoColorInfo(
+    const VideoPlayerInstance* pInstance,
+    int32_t outInfo[7]);
+NATIVEVIDEOPLAYER_API HRESULT ProbeVideoColorInfoWithHeaders(
+    const wchar_t* url,
+    const wchar_t* requestHeaders,
+    int32_t outInfo[7]);
+NATIVEVIDEOPLAYER_API void    GetVideoPlaybackDiagnostics(
+    const VideoPlayerInstance* pInstance,
+    int64_t outDiagnostics[5]);
+NATIVEVIDEOPLAYER_API HRESULT ValidateHdrPresenterShaders();
 
 #ifdef __cplusplus
 }

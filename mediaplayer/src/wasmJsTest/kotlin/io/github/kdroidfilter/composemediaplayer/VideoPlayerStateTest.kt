@@ -347,6 +347,23 @@ class VideoPlayerStateTest {
     }
 
     @Test
+    fun testPlaybackCallbackRunsSynchronouslyWithTransportCommand() {
+        val playerState = createVideoPlayerState() as DefaultVideoPlayerState
+        val appliedStates = mutableListOf<Boolean>()
+        playerState.applyPlaybackCallback = appliedStates::add
+        playerState.openUri(
+            uri = "https://example.test/video.mp4",
+            initializePlayerState = InitialPlayerState.PAUSE,
+        )
+
+        playerState.play()
+        playerState.pause()
+
+        assertEquals(listOf(true, false), appliedStates)
+        playerState.dispose()
+    }
+
+    @Test
     fun testOpenUriReleasesPreviousMediaSession() =
         runTest {
             val playerState = createVideoPlayerState() as DefaultVideoPlayerState

@@ -31,6 +31,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation("$publicationGroup:composemediaplayer:${publicationVersion.get()}")
+            implementation("$publicationGroup:composemediaplayer-ass:${publicationVersion.get()}")
+        }
+        androidMain.dependencies {
+            implementation("$publicationGroup:composemediaplayer-kmediabridge:${publicationVersion.get()}")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

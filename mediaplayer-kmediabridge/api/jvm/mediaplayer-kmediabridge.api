@@ -1,0 +1,51 @@
+public final class io/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopExtension : io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeExtension {
+	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopExtension$Companion;
+	public static final field ID Ljava/lang/String;
+	public fun <init> ()V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun getAvailability ()Lio/github/kdroidfilter/composemediaplayer/VideoPipelineExtensionAvailability;
+	public fun getColorConversionCapabilities ()Lio/github/kdroidfilter/composemediaplayer/ColorConversionCapabilities;
+	public fun getDesktopCapabilities ()Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeCapabilities;
+	public fun getId ()Ljava/lang/String;
+	public final fun getRuntimeSelection ()Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;
+	public fun open (Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeRequest;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun status ()Lio/github/kdroidfilter/composemediaplayer/VideoPipelineExtensionStatus;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopExtension$Companion {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy : java/lang/Enum {
+	public static final field BUNDLED_ONLY Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;
+	public static final field EXTERNAL_ONLY Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;
+	public static final field PREFER_BUNDLED Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;
+	public static final field PREFER_EXTERNAL Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection {
+	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection$Companion;
+	public fun <init> ()V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;Ljava/nio/file/Path;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;Ljava/nio/file/Path;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public static final fun bundled ()Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;
+	public final fun component2 ()Ljava/nio/file/Path;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;Ljava/nio/file/Path;)Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;Ljava/nio/file/Path;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;
+	public fun equals (Ljava/lang/Object;)Z
+	public static final fun fromExternalDirectory (Ljava/nio/file/Path;)Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;
+	public final fun getExternalRuntimeDirectory ()Ljava/nio/file/Path;
+	public final fun getPolicy ()Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimePolicy;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection$Companion {
+	public final fun bundled ()Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;
+	public final fun fromExternalDirectory (Ljava/nio/file/Path;)Lio/github/kdroidfilter/composemediaplayer/kmediabridge/KMediaBridgeDesktopRuntimeSelection;
+}
+

@@ -1,6 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.subtitle
 
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -9,15 +9,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+
+private val composeSubtitleLogger = TaggedLogger("ComposeSubtitleLayer")
 
 /**
  * A composable function that displays subtitles over a video player.
@@ -62,7 +66,11 @@ fun ComposeSubtitleLayer(
 
         val shouldRefreshLiveSidecar = subtitleTrack.id.startsWith(EXTERNAL_FFMPEG_SUBTITLE_TRACK_ID_PREFIX)
         do {
-            subtitles = loadAndParseSubtitles(subtitleTrack)
+            val loadedSubtitles = loadAndParseSubtitles(subtitleTrack)
+            composeSubtitleLogger.d {
+                "Loaded ${loadedSubtitles.cues.size} ${subtitleTrack.resolvedFormat()} subtitle cues."
+            }
+            subtitles = loadedSubtitles
             if (shouldRefreshLiveSidecar) {
                 delay(2_000.milliseconds)
             }
@@ -70,17 +78,24 @@ fun ComposeSubtitleLayer(
     }
 
     // Display the subtitles if available
-    Box(
+    BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomCenter,
     ) {
+        val responsiveTextStyle =
+            if (maxHeight > 0.dp && maxHeight < 240.dp && textStyle.fontSize.isSp) {
+                textStyle.copy(fontSize = minOf(textStyle.fontSize.value, maxHeight.value * 0.09f).sp)
+            } else {
+                textStyle
+            }
+
         subtitles?.let { cueList ->
             if (subtitlesEnabled) {
                 AutoUpdatingSubtitleDisplay(
                     subtitles = cueList,
                     currentTime = currentTime,
                     isPlaying = isPlaying,
-                    textStyle = textStyle,
+                    textStyle = responsiveTextStyle,
                     backgroundColor = backgroundColor,
                 )
             }
@@ -93,6 +108,7 @@ private suspend fun loadAndParseSubtitles(subtitleTrack: SubtitleTrack): Subtitl
         withContext(Dispatchers.Default) {
             // Load and parse the subtitle file
             val content = loadSubtitleContent(subtitleTrack.src)
+            composeSubtitleLogger.d { "Read ${content.length} subtitle characters before parsing." }
 
             // Determine the subtitle format based on file extension and content
             val resolvedFormat =

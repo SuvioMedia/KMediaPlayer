@@ -15,4 +15,13 @@ internal object CurrentPlatform {
             else -> OS.LINUX
         }
     }
+
+    val architecture: String by lazy {
+        System.getProperty("os.arch", "").lowercase()
+    }
+
+    val isSupportedMacOsArchitecture: Boolean
+        get() = os != OS.MAC || architecture.isSupportedMacOsArchitecture()
 }
+
+internal fun String.isSupportedMacOsArchitecture(): Boolean = lowercase() in setOf("aarch64", "arm64")

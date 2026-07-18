@@ -5,7 +5,8 @@ package io.github.kdroidfilter.composemediaplayer.subtitle
  *
  * The parser preserves timing and readable dialogue text. ASS styling, vector
  * drawing, karaoke timing and font attachments are intentionally not rendered
- * here; browser targets still use libass/JASSUB for full styled ASS rendering.
+ * here. Browser apps can opt into full styled rendering through the
+ * `composemediaplayer-ass` artifact backed by JASSUB/libass.
  */
 object AssParser {
     private val defaultEventFormat =
@@ -107,7 +108,7 @@ object AssParser {
             .replace("\\N", "\n")
             .replace("\\n", "\n")
             .replace("\\h", " ")
-            .replace(Regex("\\{[^}]*}"), "")
+            .replace(Regex("\\{[^}]*\\}"), "")
             .replace(Regex("</?[^>]+>"), "")
             .lines()
             .joinToString("\n") { it.trim() }

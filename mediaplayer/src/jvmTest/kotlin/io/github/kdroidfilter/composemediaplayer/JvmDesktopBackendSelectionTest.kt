@@ -6,21 +6,15 @@ import kotlin.test.assertNull
 
 class JvmDesktopBackendSelectionTest {
     @Test
-    fun `auto native hdr forces libvlc native view`() {
-        val playbackOptions =
-            VideoPlaybackOptions(
-                videoOutputMode = VideoOutputMode.NATIVE_HDR,
-                desktopVideoBackend = DesktopVideoBackend.AUTO,
+    fun `dynamic range policy never promotes libvlc to confirmed HDR backend`() {
+        DynamicRangePolicy.entries.forEach { policy ->
+            assertNull(
+                VideoPlaybackOptions(
+                    dynamicRangePolicy = policy,
+                    desktopVideoBackend = DesktopVideoBackend.AUTO,
+                ).forcedJvmDesktopBackend(),
             )
-
-        assertEquals(JVM_DESKTOP_BACKEND_LIBVLC_NATIVE_VIEW, playbackOptions.forcedJvmDesktopBackend())
-    }
-
-    @Test
-    fun `auto non native hdr keeps backend unforced`() {
-        assertNull(VideoPlaybackOptions().forcedJvmDesktopBackend())
-        assertNull(VideoPlaybackOptions(videoOutputMode = VideoOutputMode.COMPOSE_SDR).forcedJvmDesktopBackend())
-        assertNull(VideoPlaybackOptions(videoOutputMode = VideoOutputMode.TONE_MAPPED_SDR).forcedJvmDesktopBackend())
+        }
     }
 
     @Test
@@ -28,21 +22,21 @@ class JvmDesktopBackendSelectionTest {
         assertEquals(
             JVM_DESKTOP_BACKEND_PLATFORM,
             VideoPlaybackOptions(
-                videoOutputMode = VideoOutputMode.NATIVE_HDR,
+                dynamicRangePolicy = DynamicRangePolicy.REQUIRE_HDR,
                 desktopVideoBackend = DesktopVideoBackend.PLATFORM,
             ).forcedJvmDesktopBackend(),
         )
         assertEquals(
             JVM_DESKTOP_BACKEND_LIBVLC,
             VideoPlaybackOptions(
-                videoOutputMode = VideoOutputMode.NATIVE_HDR,
+                dynamicRangePolicy = DynamicRangePolicy.REQUIRE_HDR,
                 desktopVideoBackend = DesktopVideoBackend.LIBVLC,
             ).forcedJvmDesktopBackend(),
         )
         assertEquals(
             JVM_DESKTOP_BACKEND_LIBVLC_NATIVE_VIEW,
             VideoPlaybackOptions(
-                videoOutputMode = VideoOutputMode.COMPOSE_SDR,
+                dynamicRangePolicy = DynamicRangePolicy.FORCE_SDR,
                 desktopVideoBackend = DesktopVideoBackend.LIBVLC_NATIVE,
             ).forcedJvmDesktopBackend(),
         )

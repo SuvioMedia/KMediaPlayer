@@ -1,0 +1,3 @@
+-keep class io.github.kdroidfilter.composemediaplayer.dolbyvision.LibDoviRpuConverter {
+    native <methods>;
+}
