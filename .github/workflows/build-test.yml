@@ -359,6 +359,12 @@ jobs:
           -PcomposeMediaPlayer.skipNativeBuild=true
           --no-configuration-cache --no-daemon --continue
 
+      - name: Verify Maven Central POM metadata
+        run: >-
+          python3 .github/scripts/verify_maven_poms.py
+          build/consumer-repository
+          0.0.0-consumer.${{ github.sha }}
+
       - name: Compile and run the isolated consumer
         run: >-
           ./gradlew consumerSmokeTest

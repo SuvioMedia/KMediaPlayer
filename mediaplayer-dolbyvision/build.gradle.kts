@@ -497,6 +497,12 @@ mavenPublishing {
         description.set("Optional bounded Dolby Vision Profile 7 to 8.1 conversion bridge for Compose Media Player.")
         inceptionYear.set("2026")
         url.set("https://github.com/Shusek/KMediaPlayer")
+        developers {
+            developer {
+                id.set("Shusek")
+                name.set("Shusek")
+            }
+        }
         licenses {
             license {
                 name.set("MIT (libdovi); repository license applies to the Kotlin bridge")

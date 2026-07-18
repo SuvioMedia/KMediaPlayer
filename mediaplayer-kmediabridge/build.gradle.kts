@@ -120,6 +120,12 @@ mavenPublishing {
         description.set("Optional Android and JVM source bridges for controlled playback through KMediaBridge.")
         inceptionYear.set("2026")
         url.set("https://github.com/Shusek/KMediaPlayer")
+        developers {
+            developer {
+                id.set("Shusek")
+                name.set("Shusek")
+            }
+        }
         licenses {
             license {
                 name.set("Repository license; the optional FFmpeg runtime is LGPL-2.1-or-later")

@@ -29,3 +29,5 @@ Pods/
 NUL
 .claude/
 .cache/
+__pycache__/
+*.py[cod]

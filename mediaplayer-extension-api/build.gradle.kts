@@ -138,6 +138,12 @@ mavenPublishing {
         inceptionYear.set("2026")
         url.set("https://github.com/Shusek/KMediaPlayer")
 
+        developers {
+            developer {
+                id.set("Shusek")
+                name.set("Shusek")
+            }
+        }
         licenses {
             license {
                 name.set("Internal Use Notice and Limited License")

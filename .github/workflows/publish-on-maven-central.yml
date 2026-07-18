@@ -215,6 +215,7 @@ jobs:
             found=$((found + 1))
           done < <(find "$repository/io/github/shusek" -path "*/$RELEASE_VERSION/*.pom" -type f)
           test "$found" -gt 0 || { echo "No staged POMs for $RELEASE_VERSION" >&2; exit 1; }
+          python3 .github/scripts/verify_maven_poms.py "$repository" "$RELEASE_VERSION"
 
           expected_coordinates=(
             composemediaplayer-core
