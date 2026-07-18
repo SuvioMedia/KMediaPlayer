@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.mpv
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableReason
 import io.github.kdroidfilter.composemediaplayer.inspectMpvBackend
+import io.github.shusek.kmediampv.runtime.desktop.MpvRuntimeException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
@@ -31,6 +32,19 @@ class MpvRuntimeTest {
         } else {
             val unavailable = assertIs<MpvBackendAvailability.Unavailable>(availability)
             assertEquals(MpvBackendUnavailableReason.UNSUPPORTED_PLATFORM, unavailable.reason)
+        }
+    }
+
+    @Test
+    fun mapsBundledRuntimeReasonsWithoutParsingMessages() {
+        MpvRuntimeException.Reason.entries.forEach { reason ->
+            val expected =
+                if (reason == MpvRuntimeException.Reason.UNSUPPORTED_PLATFORM) {
+                    MpvUnavailableReason.UNSUPPORTED_PLATFORM
+                } else {
+                    MpvUnavailableReason.BUNDLED_RUNTIME_REJECTED
+                }
+            assertEquals(expected, reason.toMpvUnavailableReason())
         }
     }
 

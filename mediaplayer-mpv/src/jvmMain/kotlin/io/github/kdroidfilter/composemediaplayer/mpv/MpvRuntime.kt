@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.mpv
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.MpvLoadFailure
 import io.github.shusek.kmediampv.runtime.desktop.MpvDesktopRuntime
+import io.github.shusek.kmediampv.runtime.desktop.MpvRuntimeException
 import java.nio.file.Path
 
 /** Selects the shared libmpv library loaded by the optional backend. */
@@ -192,18 +193,30 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
             guidance = "KMediaMpv requires a Java 25 runtime.",
             cause = failure,
         )
+    } catch (failure: MpvRuntimeException) {
+        val reason = failure.reason().toMpvUnavailableReason()
+        throw MpvRuntimeResolutionFailure(
+            reason = reason,
+            guidance =
+                if (reason == MpvUnavailableReason.UNSUPPORTED_PLATFORM) {
+                    "The bundled KMediaMpv runtime does not support this desktop. " +
+                        "Supported targets are Linux x86_64/ARM64 and macOS ARM64."
+                } else {
+                    "The bundled KMediaMpv runtime was rejected (${failure.reason().name})."
+                },
+            cause = failure,
+        )
     } catch (failure: RuntimeException) {
         throw MpvRuntimeResolutionFailure(
-            reason =
-                if (failure.message?.contains("unsupported", ignoreCase = true) == true) {
-                    MpvUnavailableReason.UNSUPPORTED_PLATFORM
-                } else {
-                    MpvUnavailableReason.BUNDLED_RUNTIME_REJECTED
-                },
-            guidance =
-                "The bundled KMediaMpv runtime could not be verified for this desktop. " +
-                    "Supported targets are Linux x86_64/ARM64 and macOS ARM64.",
+            reason = MpvUnavailableReason.BUNDLED_RUNTIME_REJECTED,
+            guidance = "The bundled KMediaMpv runtime could not be verified.",
             cause = failure,
         )
     }
 }
+
+internal fun MpvRuntimeException.Reason.toMpvUnavailableReason(): MpvUnavailableReason =
+    when (this) {
+        MpvRuntimeException.Reason.UNSUPPORTED_PLATFORM -> MpvUnavailableReason.UNSUPPORTED_PLATFORM
+        else -> MpvUnavailableReason.BUNDLED_RUNTIME_REJECTED
+    }
