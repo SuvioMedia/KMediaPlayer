@@ -231,6 +231,8 @@ jobs:
 
       - name: Verify actual GStreamer decoder reporting
         run: |
+          read -r -a glib_cflags <<< "$(pkg-config --cflags glib-2.0)"
+          read -r -a glib_libs <<< "$(pkg-config --libs glib-2.0)"
           gst-launch-1.0 -q \
             videotestsrc num-buffers=10 \
             ! video/x-raw,width=64,height=64,framerate=5/1 \
@@ -240,11 +242,13 @@ jobs:
           cc \
             -Wall -Wextra -Werror \
             -Wl,--allow-shlib-undefined \
+            "${glib_cflags[@]}" \
             -Imediaplayer/src/jvmMain/native/linux \
             mediaplayer/src/jvmMain/native/linux/tests/NativeDecoderNameSmokeTest.c \
             -L"build/nativeLibs/linux-${{ matrix.arch }}" \
             -Wl,-rpath,"build/nativeLibs/linux-${{ matrix.arch }}" \
             -lNativeVideoPlayer \
+            "${glib_libs[@]}" \
             -o "$RUNNER_TEMP/native-decoder-name-smoke"
           LD_LIBRARY_PATH="$JAVA_HOME/lib:$JAVA_HOME/lib/server:${LD_LIBRARY_PATH:-}" \
             "$RUNNER_TEMP/native-decoder-name-smoke" "$RUNNER_TEMP/decoder-smoke.webm"

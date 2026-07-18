@@ -12,7 +12,8 @@ artifact. Applications do not need to install libass separately.
 | FriBidi | 1.0.16 | 1.0.16 | LGPL-2.1-or-later |
 
 The Windows payload is built by the pinned official vcpkg commit
-`baddcee32f29086c2c1c1f002df5078e371f7934`. Its generated legal directory
+`d015e31e90838a4c9dfa3eed45979bc70d9357fc` (the commit referenced by the
+official `2026.05.25` tag). Its generated legal directory
 contains the copyright file for every shipped vcpkg runtime package. The
 Linux payload builds permissively licensed dependencies into libass and keeps
 FriBidi as the independent, replaceable `libkmediafribidi.so.0`.

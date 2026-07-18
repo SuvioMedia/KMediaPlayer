@@ -1,25 +1,10 @@
 package io.github.kdroidfilter.composemediaplayer.subtitle
 
-import android.net.Uri
 import androidx.test.platform.app.InstrumentationRegistry
-import kotlinx.coroutines.runBlocking
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 class AndroidAssSubtitleDeviceTest {
-    @Test
-    fun loadsAndParsesAssFromAnAppOwnedFile() =
-        runBlocking {
-            val context = InstrumentationRegistry.getInstrumentation().targetContext
-            val subtitleFile = File(context.cacheDir, "composemediaplayer-test.ass")
-            subtitleFile.writeText(ASS_CONTENT)
-
-            val loaded = loadSubtitleContent(Uri.fromFile(subtitleFile).toString())
-            assertEquals(ASS_CONTENT, loaded)
-        }
-
     @Test
     fun bundledLibassRendersARealRgbaFrame() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

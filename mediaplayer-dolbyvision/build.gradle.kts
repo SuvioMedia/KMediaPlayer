@@ -16,6 +16,7 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose)
     alias(libs.plugins.vannitktech.maven.publish)
+    alias(libs.plugins.dokka)
     alias(libs.plugins.detekt)
 }
 

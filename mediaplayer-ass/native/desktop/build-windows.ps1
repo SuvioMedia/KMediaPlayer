@@ -7,7 +7,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$VcpkgCommit = "baddcee32f29086c2c1c1f002df5078e371f7934"
+$VcpkgCommit = "d015e31e90838a4c9dfa3eed45979bc70d9357fc"
 $LibAssVersion = "0.17.4"
 $ModuleDirectory = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $BuildRoot = if ($env:KMEDIA_ASS_DESKTOP_BUILD_ROOT) {

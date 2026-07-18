@@ -171,17 +171,16 @@ private final class HdrMetalShaderReferenceTest {
             SIMD4<Float>(0.70, 0.20, 0.05, 2),
         ]
         let output = try runVectorKernel("kmp_primaries_reference", input: cases)
-        let expected = [
-            SIMD3<Float>(
-                0.627403896 * 0.70 + 0.329283038 * 0.20 + 0.043313066 * 0.05,
-                0.069097289 * 0.70 + 0.919540395 * 0.20 + 0.011362316 * 0.05,
-                0.016391439 * 0.70 + 0.088013308 * 0.20 + 0.895595253 * 0.05
-            ),
-            SIMD3<Float>(
-                0.753833034 * 0.70 + 0.198597369 * 0.20 + 0.047569597 * 0.05,
-                0.045743849 * 0.70 + 0.941777220 * 0.20 + 0.012478931 * 0.05,
-                -0.001210340 * 0.70 + 0.017601717 * 0.20 + 0.983608623 * 0.05
-            ),
+        let source = SIMD3<Float>(0.70, 0.20, 0.05)
+        let rec709Red = 0.627403896 * source.x + 0.329283038 * source.y + 0.043313066 * source.z
+        let rec709Green = 0.069097289 * source.x + 0.919540395 * source.y + 0.011362316 * source.z
+        let rec709Blue = 0.016391439 * source.x + 0.088013308 * source.y + 0.895595253 * source.z
+        let displayP3Red = 0.753833034 * source.x + 0.198597369 * source.y + 0.047569597 * source.z
+        let displayP3Green = 0.045743849 * source.x + 0.941777220 * source.y + 0.012478931 * source.z
+        let displayP3Blue = -0.001210340 * source.x + 0.017601717 * source.y + 0.983608623 * source.z
+        let expected: [SIMD3<Float>] = [
+            SIMD3<Float>(rec709Red, rec709Green, rec709Blue),
+            SIMD3<Float>(displayP3Red, displayP3Green, displayP3Blue),
         ]
         for index in cases.indices {
             for channel in 0..<3 {
