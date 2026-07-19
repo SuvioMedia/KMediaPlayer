@@ -334,6 +334,19 @@ jobs:
           distribution: temurin
           cache: gradle
 
+      - name: Install Wasm browser dependencies deterministically
+        shell: pwsh
+        run: |
+          ./gradlew.bat kotlinWasmNpmInstall --no-daemon --no-parallel
+          @(
+            "build/wasm/node_modules/@js-joda/core",
+            "build/wasm/node_modules/hls.js"
+          ) | ForEach-Object {
+            if (-not (Test-Path $_)) {
+              throw "Required Wasm browser dependency was not installed: $_"
+            }
+          }
+
       - name: Smoke-test the real Movi CDN module in Microsoft Edge
         shell: pwsh
         run: |
@@ -343,7 +356,7 @@ jobs:
           }
           $env:CHROME_BIN = $edgePath
           ./gradlew.bat :mediaplayer:wasmJsBrowserTest `
-            --tests '*MoviRealPackageBrowserTest*' --no-daemon
+            --tests '*MoviRealPackageBrowserTest*' --no-daemon --no-parallel
 
       - name: Upload Edge smoke-test results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
