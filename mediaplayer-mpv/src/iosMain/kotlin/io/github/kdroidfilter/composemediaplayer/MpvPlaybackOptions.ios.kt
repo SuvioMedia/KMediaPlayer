@@ -22,7 +22,7 @@ internal actual fun mpvBackendInfo(): VideoPlayerBackendInfo =
         capabilities =
             PlayerCapabilities(
                 supportsMkv = true,
-                supportedUriSchemes = setOf("file", "http", "https", "rtmp", "rtsp"),
+                supportedUriSchemes = setOf("file"),
             ),
     )
 

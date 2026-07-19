@@ -183,8 +183,8 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
             reason = MpvUnavailableReason.UNSUPPORTED_PLATFORM,
             guidance =
                 "The bundled KMediaMpv runtime does not support this desktop. " +
-                    "Use MpvRuntimeSource.System or ExplicitPath with an application-supplied " +
-                    "libmpv on Windows x86_64. Bundled targets are Linux x86_64/ARM64 and macOS ARM64.",
+                    "Bundled targets are Linux x86_64/ARM64, macOS ARM64, and Windows x86_64. " +
+                    "Use MpvRuntimeSource.System or ExplicitPath only for a custom libmpv.",
         )
     }
 
@@ -194,9 +194,9 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
             if (fontsDirectory == null) {
                 null
             } else {
-                MpvDesktopRuntime.resolveRuntime(fontsDirectory)
+                MpvDesktopRuntime.resolveRuntimeForLoading(fontsDirectory)
             }
-        val path = resolution?.libMpvPath() ?: MpvDesktopRuntime.resolveLibMpv()
+        val path = resolution?.libMpvPath() ?: MpvDesktopRuntime.resolveLibMpvForLoading()
         return ResolvedMpvRuntime(
             librarySource = MpvLibrarySource.ExplicitPath(path),
             requiredOptions = resolution?.requiredOptions().orEmpty(),
@@ -223,8 +223,8 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
             guidance =
                 if (reason == MpvUnavailableReason.UNSUPPORTED_PLATFORM) {
                     "The bundled KMediaMpv runtime does not support this desktop. " +
-                        "Use MpvRuntimeSource.System or ExplicitPath with an application-supplied " +
-                        "libmpv on Windows x86_64. Bundled targets are Linux x86_64/ARM64 and macOS ARM64."
+                        "Bundled targets are Linux x86_64/ARM64, macOS ARM64, and Windows x86_64. " +
+                        "Use MpvRuntimeSource.System or ExplicitPath only for a custom libmpv."
                 } else {
                     "The bundled KMediaMpv runtime was rejected (${failure.reason().name})."
                 },
@@ -252,6 +252,10 @@ internal fun isBundledMpvDesktopSupported(
         (
             normalizedOsName.contains("linux") &&
                 normalizedArchitecture in setOf("amd64", "x86_64", "x86-64", "x64", "aarch64", "arm64")
+        ) ||
+        (
+            normalizedOsName.contains("win") &&
+                normalizedArchitecture in setOf("amd64", "x86_64", "x86-64", "x64")
         )
 }
 

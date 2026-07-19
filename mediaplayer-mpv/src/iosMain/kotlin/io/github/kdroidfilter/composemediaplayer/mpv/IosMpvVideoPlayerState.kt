@@ -14,6 +14,7 @@ import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerB
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
@@ -90,13 +91,23 @@ internal class IosMpvVideoPlayerState(
             videoRenderer = "libmpv software render API",
             audioRenderer = "mpv iOS audio output",
             subtitleRenderer = "mpv/libass",
-            notes = "Application-embedded, code-signed iOS libmpv runtime.",
+            notes =
+                if (options.runtimeSource == MpvRuntimeSource.Bundled) {
+                    "Verified KMediaMpv CocoaPod runtime embedded and code-signed by the application build."
+                } else {
+                    "Application-selected, code-signed iOS libmpv runtime."
+                },
         )
 
     override val capabilities =
         PlayerCapabilities(
             supportsMkv = true,
-            supportedUriSchemes = setOf("file", "http", "https", "rtmp", "rtsp"),
+            supportedUriSchemes =
+                if (options.runtimeSource == MpvRuntimeSource.Bundled) {
+                    setOf("file")
+                } else {
+                    setOf("file", "http", "https", "rtmp", "rtsp")
+                },
         )
 
     override val preciseCurrentTime: Duration
@@ -157,6 +168,9 @@ internal class IosMpvVideoPlayerState(
         require(uri.isNotBlank()) { "The media URI must not be blank." }
         require(requestHeaders.isEmpty()) {
             "The mpv artifact does not accept request headers. Use a credential-safe transport outside this backend."
+        }
+        require(options.runtimeSource != MpvRuntimeSource.Bundled || uri.isLocalIosMpvSource()) {
+            "The verified KMediaMpv runtime has networking disabled and accepts local paths or file: URIs only."
         }
         beginSourcePreparation(uri, initializePlayerState)
         try {
@@ -222,7 +236,14 @@ internal class IosMpvVideoPlayerState(
             TrackSelectionResult.Failed("libmpv rejected the subtitle-track selection.")
         }
 
-    override fun validateExternalSubtitle(track: SubtitleTrack) = Unit
+    override fun validateExternalSubtitle(track: SubtitleTrack) {
+        require(
+            options.runtimeSource != MpvRuntimeSource.Bundled ||
+                track.src.isLocalIosMpvSource(),
+        ) {
+            "The verified KMediaMpv runtime accepts local subtitle paths or file: URIs only."
+        }
+    }
 
     override fun removeBackendExternalSubtitle(track: SubtitleTrack) {
         findMpvTrackId(type = "sub", externalFilename = track.src)?.let { id ->
@@ -609,6 +630,18 @@ internal class IosMpvVideoPlayerState(
         private const val BYTES_PER_PIXEL = 4
         private const val BITS_PER_COMPONENT = 8
     }
+}
+
+internal fun String.isLocalIosMpvSource(): Boolean {
+    val separator = indexOf(':')
+    if (separator <= 0) return true
+    val candidate = substring(0, separator)
+    if (!candidate.first().isLetter() ||
+        candidate.any { !it.isLetterOrDigit() && it !in "+-." }
+    ) {
+        return true
+    }
+    return candidate.equals("file", ignoreCase = true)
 }
 
 private fun currentTimeMillis(): Long = (NSDate().timeIntervalSince1970 * 1_000.0).toLong()

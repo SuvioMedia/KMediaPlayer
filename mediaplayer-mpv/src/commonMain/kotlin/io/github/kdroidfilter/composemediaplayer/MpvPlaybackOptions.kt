@@ -15,10 +15,10 @@ import androidx.compose.runtime.remember
  * @param preserveAssStyles preserves script positioning and styling when `true`.
  * @param useEmbeddedFonts allows fonts embedded in the media container.
  * @param maxDesktopRenderPixels upper bound for a software-rendered desktop or iOS frame.
- * @param runtimeSource native libmpv source. [MpvRuntimeSource.Bundled] keeps the
- * verified KMediaMpv runtime on currently published Android and desktop targets.
- * Windows and iOS applications can opt into an app-supplied runtime with
- * [MpvRuntimeSource.System] or [MpvRuntimeSource.ExplicitPath].
+ * @param runtimeSource native libmpv source. [MpvRuntimeSource.Bundled] uses the
+ * verified KMediaMpv runtime on every published target. On iOS, its CocoaPod
+ * embeds and signs the native XCFrameworks at build time. Applications can opt
+ * into a custom runtime with [MpvRuntimeSource.System] or [MpvRuntimeSource.ExplicitPath].
  */
 @Stable
 data class MpvPlaybackOptions(
@@ -53,7 +53,12 @@ data class MpvPlaybackOptions(
  */
 @Stable
 sealed interface MpvRuntimeSource {
-    /** Uses the verified KMediaMpv runtime dependency where one is published for this target. */
+    /**
+     * Uses the verified KMediaMpv runtime published for this target.
+     *
+     * Desktop and Android receive it as a transitive Maven dependency. iOS
+     * resolves the version-matched KMediaMpv CocoaPod embedded by Xcode.
+     */
     data object Bundled : MpvRuntimeSource
 
     /**
@@ -113,8 +118,9 @@ expect fun inspectMpvBackend(options: MpvPlaybackOptions = MpvPlaybackOptions())
 /**
  * Creates an opt-in KMediaMpv-backed state.
  *
- * Bundled targets receive KMediaMpv transitively. Windows and iOS require the
- * application-supplied runtime selected in [MpvPlaybackOptions.runtimeSource].
+ * Bundled desktop and Android targets receive KMediaMpv transitively. On iOS,
+ * add the version-matched KMediaMpv CocoaPod once; the default source then
+ * resolves its embedded, code-signed framework automatically.
  */
 expect fun createMpvVideoPlayerState(options: MpvPlaybackOptions = MpvPlaybackOptions()): VideoPlayerState
 

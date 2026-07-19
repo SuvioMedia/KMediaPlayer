@@ -100,21 +100,14 @@ private sealed interface IosMpvRuntimeResult {
 }
 
 private fun resolveIosMpvRuntime(options: MpvPlaybackOptions): IosMpvRuntimeResult {
-    if (options.runtimeSource == MpvRuntimeSource.Bundled) {
-        return unavailable(
-            MpvBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING,
-            "The iOS adapter cannot extract native code from Maven. Embed a code-signed libmpv " +
-                "framework in the application and select MpvRuntimeSource.System or ExplicitPath.",
-        )
-    }
-
+    val frameworkRoot = NSBundle.mainBundle.privateFrameworksPath
     val candidates =
         when (val source = options.runtimeSource) {
-            MpvRuntimeSource.Bundled -> emptyList()
+            MpvRuntimeSource.Bundled ->
+                listOfNotNull(iosBundledMpvFrameworkPath(frameworkRoot))
             MpvRuntimeSource.System ->
                 buildList<String?> {
                     add(null)
-                    val frameworkRoot = NSBundle.mainBundle.privateFrameworksPath
                     if (frameworkRoot != null) {
                         add("$frameworkRoot/KMediaMpv.framework/KMediaMpv")
                         add("$frameworkRoot/MPV.framework/MPV")
@@ -160,6 +153,16 @@ private fun resolveIosMpvRuntime(options: MpvPlaybackOptions): IosMpvRuntimeResu
             strongestFailure = probe
         }
     }
+    if (options.runtimeSource == MpvRuntimeSource.Bundled &&
+        strongestFailure == CMP_MPV_LIBRARY_NOT_FOUND.toInt()
+    ) {
+        return unavailable(
+            MpvBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING,
+            "The verified KMediaMpv iOS framework is not embedded in this application. " +
+                "Add the version-matched KMediaMpv CocoaPod so Xcode embeds and signs its XCFrameworks. " +
+                "MpvRuntimeSource.System and ExplicitPath remain available for a custom libmpv.",
+        )
+    }
     if (options.runtimeSource is MpvRuntimeSource.ExplicitPath &&
         strongestFailure == CMP_MPV_LIBRARY_NOT_FOUND.toInt()
     ) {
@@ -170,6 +173,9 @@ private fun resolveIosMpvRuntime(options: MpvPlaybackOptions): IosMpvRuntimeResu
     }
     return unavailable(strongestFailure.toPublicReason(), strongestFailure.toGuidance())
 }
+
+internal fun iosBundledMpvFrameworkPath(frameworkRoot: String?): String? =
+    frameworkRoot?.trimEnd('/')?.let { "$it/KMediaMpv.framework/KMediaMpv" }
 
 private fun unavailable(
     reason: MpvBackendUnavailableReason,
