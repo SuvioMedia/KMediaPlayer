@@ -269,11 +269,11 @@ discontinuity timestamp mapping, and a non-independent seek restarts only from a
 - **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `2.0.x` line.
 - **Android:** the library is built and verified for `arm64-v8a` and `armeabi-v7a` with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Android x86/x86_64 is unsupported. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`; HDR still depends on the device and active display.
 - **Android MPV adapter:** `composemediaplayer-mpv` uses `minSdk = 28` and publishes ARM runtimes only.
-- **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. Add the
-  version-matched KMediaMpv CocoaPod once; Xcode embeds and signs its audited
-  XCFramework graph, and the default `Bundled` source resolves it automatically.
-- **Windows MPV adapter:** KMediaMpv bundles the verified x86_64 UCRT DLL graph.
-  The default `Bundled` source extracts, verifies, and preloads it on Java 25.
+- **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. iOS applications must embed
+  a code-signed libmpv framework and select `MpvRuntimeSource.System` or `ExplicitPath`; native
+  code cannot be extracted from a Maven artifact into an iOS process at runtime.
+- **Windows MPV adapter:** supports application-supplied 64-bit libmpv on Java 25. The current
+  KMediaMpv desktop artifact does not bundle a Windows DLL.
 - **iOS:** iOS 16.2 or newer is required. Published targets are `iosArm64` and `iosSimulatorArm64` only; Intel simulators are unsupported. An Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
 - **macOS JVM:** Apple Silicon and macOS 14 or newer are required by the native AVFoundation/Metal bridge.
 - **Windows JVM:** Windows 10 1809 (build 17763) or newer is required; confirmed HDR additionally requires an active Advanced Color output and the packaged P010/D3D11 presenter.
@@ -289,12 +289,11 @@ MPV is a separate adapter artifact. The dependency direction is:
 
 The main artifact never imports MPV. Both modules share only the state, event,
 capability, backend-factory, and renderer SPI from `composemediaplayer-core`.
-On Android, Linux, Apple Silicon macOS, and Windows x86_64, the MPV adapter
-carries the matching KMediaMpv runtime transitively, so the application does
-not add KMediaMpv Maven coordinates separately. On iOS, CocoaPods performs the
-required build-time download, embedding, and signing; the application does not
-supply native binaries or paths. The adapter never downloads executable code
-at runtime.
+On Android, Linux, and Apple Silicon macOS, the MPV adapter carries the matching
+KMediaMpv runtime transitively, so the application does not add KMediaMpv
+coordinates separately. Windows and iOS keep the same adapter API but use a
+native runtime supplied by the application. The adapter never downloads native
+code.
 
 This dependency inversion is the reason for the `2.0.0` major version. Existing
 applications can keep depending on `composemediaplayer`; it re-exports `core`
@@ -364,14 +363,17 @@ val playerState = rememberVideoPlayerState(backend)
 ```
 
 The default runtime source is the verified KMediaMpv bundle. Keep that default
-on Android, Linux, Apple Silicon macOS, and Windows x86_64:
+on Android, Linux, and Apple Silicon macOS. On Windows, install or ship a
+compatible 64-bit libmpv next to the application and select the platform loader:
 
 ```kotlin
-val playerState = rememberMpvVideoPlayerState()
+val options = MpvPlaybackOptions(
+    runtimeSource = MpvRuntimeSource.System,
+)
 ```
 
-`System` and `ExplicitPath` are optional overrides for applications that
-deliberately ship a different compatible libmpv:
+If the DLL is not discoverable through the Windows loader, pass its absolute
+path explicitly:
 
 ```kotlin
 val options = MpvPlaybackOptions(
@@ -381,35 +383,24 @@ val options = MpvPlaybackOptions(
 )
 ```
 
-On iOS 16.2+, add the KMediaMpv release podspec to the application target. The
-podspec pins the XCFramework archive by SHA-256; CocoaPods downloads the graph,
-and Xcode embeds and signs all twelve dynamic frameworks:
-
-```ruby
-target 'iosApp' do
-  pod 'KMediaMpv',
-      :podspec => 'https://github.com/Shusek/KMediaMpv/releases/download/v0.2.0/KMediaMpv.podspec'
-end
-```
-
-Run `pod install` (or the Kotlin CocoaPods `podInstall` task), open the
-generated `.xcworkspace`, and keep the default `Bundled` source. This build-time
-step is required because iOS cannot extract unsigned executable code from a
-Maven artifact at runtime. `System` still recognizes linked symbols and
-`KMediaMpv.framework/KMediaMpv`, `MPV.framework/MPV`, or
-`libmpv.framework/libmpv`; `ExplicitPath` accepts only a code-signed binary
-inside the application bundle.
+On iOS, embed and code-sign a dynamic libmpv framework in the application. A
+linked framework can be resolved with `System`; the adapter also recognizes
+`KMediaMpv.framework/KMediaMpv`, `MPV.framework/MPV`, and
+`libmpv.framework/libmpv` under the app's `Frameworks` directory. Alternatively,
+pass the framework binary path from `NSBundle` using `ExplicitPath`. iOS rejects
+paths outside the signed application bundle.
 
 `inspectMpvBackend()` reports a missing runtime, unsupported target, or rejected
 native payload without falling back silently. `rememberVideoPlayerState()`
 continues to select the normal platform backend.
 
 The verified bundled runtime supports Android API 28+ on `arm64-v8a` and
-`armeabi-v7a`, Linux on x86_64 and ARM64, macOS on ARM64, Windows x86_64, and
-iOS device/Apple Silicon simulator ARM64. Android x86, Android x86_64, macOS
-x86_64, Intel iOS simulators, and Windows ARM64 are not supported. The bundled
-runtime has networking disabled, so use local media and subtitle files. Desktop
-applications run on Java 25 with `--enable-native-access=ALL-UNNAMED`.
+`armeabi-v7a`, Linux on x86_64 and ARM64, and macOS on ARM64. Application-supplied
+runtime mode additionally supports Windows x86_64 and iOS device/simulator
+ARM64. Android x86, Android x86_64, macOS x86_64, Intel iOS simulators, and
+Windows ARM64 are not supported. The bundled runtime has networking disabled,
+so use local media and subtitle files. Desktop applications run on Java 25 with
+`--enable-native-access=ALL-UNNAMED`.
 
 The core, default player, and adapter code remain under this repository's own
 license. The separately
