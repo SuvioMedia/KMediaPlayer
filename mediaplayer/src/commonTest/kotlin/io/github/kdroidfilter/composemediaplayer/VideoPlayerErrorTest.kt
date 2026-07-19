@@ -61,6 +61,7 @@ class VideoPlayerErrorTest {
                 VideoPlayerError.NoSourceError("No source"),
                 VideoPlayerError.TimeoutError("Timeout"),
                 VideoPlayerError.HlsError("HLS error", type = "networkError", details = "manifestLoadError"),
+                VideoPlayerError.DrmError("DRM error"),
                 VideoPlayerError.UnknownError("Unknown error"),
             )
 

@@ -295,6 +295,14 @@ jobs:
           :mediaplayer-ass:wasmJsBrowserTest
           :mediaplayer-dolbyvision:wasmJsBrowserTest --no-daemon --continue
 
+      - name: Repeat the mediaplayer Wasm suite with the legacy engine
+        run: >-
+          ./gradlew :mediaplayer:wasmJsBrowserTest
+          -PcomposeMediaPlayer.wasmTestPlaybackEngine=legacy --no-daemon
+
+      - name: Build the production Wasm sample
+        run: ./gradlew :sample:composeApp:wasmJsBrowserDistribution --no-daemon
+
       - name: Upload Wasm test results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
@@ -311,6 +319,102 @@ jobs:
             mediaplayer-dolbyvision/build/test-results/
             mediaplayer-core/build/reports/tests/
             mediaplayer-core/build/test-results/
+          if-no-files-found: warn
+
+  wasm-edge-smoke:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          java-version: '25'
+          distribution: temurin
+          cache: gradle
+
+      - name: Smoke-test the real Movi CDN module in Microsoft Edge
+        shell: pwsh
+        run: |
+          $edgePath = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path $edgePath)) {
+            throw "Microsoft Edge was not found at $edgePath"
+          }
+          $env:CHROME_BIN = $edgePath
+          ./gradlew.bat :mediaplayer:wasmJsBrowserTest `
+            --tests '*MoviRealPackageBrowserTest*' --no-daemon
+
+      - name: Upload Edge smoke-test results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: test-results-wasm-edge
+          path: |
+            mediaplayer/build/reports/tests/
+            mediaplayer/build/test-results/
+          if-no-files-found: warn
+
+  wasm-firefox-smoke:
+    continue-on-error: true
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          java-version: '25'
+          distribution: temurin
+          cache: gradle
+
+      - name: Smoke-test the real Movi CDN module in Firefox
+        run: >-
+          ./gradlew :mediaplayer:wasmJsBrowserTest
+          --tests '*MoviRealPackageBrowserTest*'
+          -PcomposeMediaPlayer.wasmTestBrowser=firefox --no-daemon
+
+      - name: Upload Firefox smoke-test results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: test-results-wasm-firefox
+          path: |
+            mediaplayer/build/reports/tests/
+            mediaplayer/build/test-results/
+          if-no-files-found: warn
+
+  wasm-safari-smoke:
+    continue-on-error: true
+    timeout-minutes: 20
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          java-version: '25'
+          distribution: temurin
+          cache: gradle
+
+      - name: Smoke-test the real Movi CDN module in Safari
+        run: >-
+          ./gradlew :mediaplayer:wasmJsBrowserTest
+          --tests '*MoviRealPackageBrowserTest*'
+          -PcomposeMediaPlayer.wasmTestBrowser=safari --no-daemon
+
+      - name: Upload Safari smoke-test results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: test-results-wasm-safari
+          path: |
+            mediaplayer/build/reports/tests/
+            mediaplayer/build/test-results/
           if-no-files-found: warn
 
   consumer:
@@ -464,7 +568,7 @@ jobs:
 
   verification-complete:
     if: always()
-    needs: [jvm, android, ios, wasm-js, consumer, quality, abi]
+    needs: [jvm, android, ios, wasm-js, wasm-edge-smoke, consumer, quality, abi]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every verification job

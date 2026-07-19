@@ -1,14 +1,27 @@
 package io.github.kdroidfilter.composemediaplayer
 
 /**
- * Browser dependency configuration for optional media features that cannot be imported as ES modules.
+ * Browser dependency configuration for externally hosted media components.
  *
- * The defaults use an exact Matroska parser version protected by subresource integrity. Applications
- * with an offline or strict-CSP deployment should self-host the same file and set both properties before
- * creating a player. Setting [matroskaSubtitlesScriptUrl] to an empty string disables embedded MKV subtitle
- * extraction without affecting normal video playback.
+ * Set overrides before opening the first affected media source. Applications with an offline or strict-CSP
+ * deployment can self-host the same immutable files.
  */
 object WebMediaDependencyConfig {
+    /**
+     * ES module used by [WebPlaybackEngine.MOVI].
+     *
+     * The default is an exact, immutable CDN release. KMediaPlayer imports it at runtime and does not bundle
+     * MoviPlayer or its media Wasm in its own artifacts. The URL must identify a public module and must not
+     * contain credentials.
+     */
+    var moviPlayerModuleUrl: String =
+        "https://cdn.jsdelivr.net/npm/movi-player@0.3.5/dist/player.js"
+
+    /**
+     * Browser bundle used for legacy embedded MKV subtitle extraction.
+     *
+     * Setting this to an empty string disables that extraction without affecting normal video playback.
+     */
     var matroskaSubtitlesScriptUrl: String =
         "https://cdn.jsdelivr.net/npm/matroska-subtitles@3.3.2/dist/matroska-subtitles.min.js"
 

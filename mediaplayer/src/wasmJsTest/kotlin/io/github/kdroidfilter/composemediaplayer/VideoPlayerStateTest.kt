@@ -29,6 +29,11 @@ import kotlin.time.Duration.Companion.seconds
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class VideoPlayerStateTest {
+    private fun createVideoPlayerState(): VideoPlayerState =
+        io.github.kdroidfilter.composemediaplayer.createVideoPlayerState(
+            playbackOptions = VideoPlaybackOptions(webPlaybackEngine = configuredWebTestPlaybackEngine()),
+        )
+
     /**
      * Test the creation of VideoPlayerState
      */
@@ -43,6 +48,18 @@ class VideoPlayerStateTest {
         assertEquals(0f, playerState.sliderPos)
         assertEquals(1f, playerState.volume)
         assertEquals(1f, playerState.playbackSpeed)
+        assertEquals(
+            configuredWebTestPlaybackEngine(),
+            (playerState as DefaultVideoPlayerState).playbackOptions.webPlaybackEngine,
+        )
+        assertEquals(
+            if (configuredWebTestPlaybackEngine() == WebPlaybackEngine.LEGACY) {
+                LEGACY_RENDERING_BACKEND
+            } else {
+                MOVI_RENDERING_BACKEND
+            },
+            playerState.renderingInfo.backend,
+        )
         assertFalse(playerState.loop)
         assertEquals("00:00", playerState.positionText)
         assertEquals("00:00", playerState.durationText)
@@ -734,16 +751,25 @@ class VideoPlayerStateTest {
     }
 
     @Test
-    fun testMatroskaParserUsesPinnedIntegrityProtectedDefaultAndCanBeDisabled() =
+    fun testExternalMediaDependenciesUsePinnedDefaultsAndCanBeOverridden() =
         runTest {
+            assertTrue(WebMediaDependencyConfig.moviPlayerModuleUrl.contains("movi-player@0.3.5/"))
+            assertTrue(WebMediaDependencyConfig.moviPlayerModuleUrl.endsWith("/dist/player.js"))
             assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.contains("@3.3.2/"))
             assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity.startsWith("sha384-"))
 
+            val previousMoviUrl = WebMediaDependencyConfig.moviPlayerModuleUrl
             val previousUrl = WebMediaDependencyConfig.matroskaSubtitlesScriptUrl
             try {
+                WebMediaDependencyConfig.moviPlayerModuleUrl = "https://cdn.example.test/movi-player.js"
                 WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = ""
+                assertEquals(
+                    "https://cdn.example.test/movi-player.js",
+                    WebMediaDependencyConfig.moviPlayerModuleUrl,
+                )
                 assertFalse(ensureMatroskaSubtitlesModuleLoaded())
             } finally {
+                WebMediaDependencyConfig.moviPlayerModuleUrl = previousMoviUrl
                 WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = previousUrl
             }
         }
@@ -836,6 +862,18 @@ class VideoPlayerStateTest {
         return events
     }
 }
+
+@Suppress("UNUSED_PARAMETER")
+private fun configuredWebTestPlaybackEngine(): WebPlaybackEngine =
+    when (val configured = readConfiguredWebTestPlaybackEngine().lowercase()) {
+        "movi" -> WebPlaybackEngine.MOVI
+        "legacy" -> WebPlaybackEngine.LEGACY
+        else -> error("Missing or invalid Karma playback engine: '$configured'.")
+    }
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun readConfiguredWebTestPlaybackEngine(): String =
+    js("String(globalThis.__karma__?.config?.kmpPlaybackEngine || '')")
 
 @OptIn(ExperimentalWasmJsInterop::class)
 private fun canRequestFullscreenFromCurrentContext(): Boolean =

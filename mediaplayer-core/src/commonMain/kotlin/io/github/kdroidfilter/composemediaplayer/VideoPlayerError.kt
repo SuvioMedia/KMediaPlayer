@@ -15,6 +15,7 @@ package io.github.kdroidfilter.composemediaplayer
  * - `NoSourceError`: Indicates that no usable source was provided or resolved.
  * - `TimeoutError`: Indicates a load or playback operation timed out.
  * - `HlsError`: Represents HLS manifest/segment/controller failures.
+ * - `DrmError`: Represents DRM configuration, license, or EME failures.
  * - `ColorPipelineError`: Indicates that a requested color pipeline cannot be configured safely.
  * - `UnknownError`: Covers any issues that do not fit into the other categories.
  */
@@ -52,6 +53,10 @@ sealed class VideoPlayerError {
         val type: String? = null,
         val details: String? = null,
         val fatal: Boolean = true,
+    ) : VideoPlayerError()
+
+    data class DrmError(
+        val message: String,
     ) : VideoPlayerError()
 
     data class ColorPipelineError(
