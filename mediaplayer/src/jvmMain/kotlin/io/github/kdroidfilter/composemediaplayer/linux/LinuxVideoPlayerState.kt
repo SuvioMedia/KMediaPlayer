@@ -32,6 +32,7 @@ import io.github.kdroidfilter.composemediaplayer.JvmLibVlcSubtitleStream
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcTrackInfo
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
@@ -320,9 +321,11 @@ class LinuxVideoPlayerState(
 
     private val _currentTime = mutableStateOf(Duration.ZERO)
     private val _duration = mutableStateOf(Duration.ZERO)
+    private var _chapters by mutableStateOf(emptyList<MediaChapter>())
     override val currentTime: Duration get() = _currentTime.value
     override val preciseCurrentTime: Duration get() = _currentTime.value
     override val duration: Duration get() = _duration.value
+    override val chapters: List<MediaChapter> get() = _chapters
 
     private val _aspectRatio = mutableStateOf(16f / 9f)
     override val aspectRatio: Float get() = _aspectRatio.value
@@ -454,6 +457,7 @@ class LinuxVideoPlayerState(
         lifecycle.launchSourceOperation(
             onScheduled = {
                 clearDesktopAssSubtitleRenderer()
+                _chapters = emptyList()
                 lastUri = uri
                 lastRequestHeaders = sanitizedHeaders
                 resetLinuxColorPipeline()
@@ -486,6 +490,9 @@ class LinuxVideoPlayerState(
                         JvmLibVlcMediaProbe.probe(uri, sanitizedHeaders)
                     }
                 activeSourceColorInfo = sourceProbe.videoColorInfo
+                withContext(Dispatchers.Main) {
+                    _chapters = sourceProbe.chapters
+                }
                 activeDecoderName = "GStreamer (decoder element not reported)"
                 nativeDecoderNameResolved = false
                 colorOutputVerified = false
@@ -920,6 +927,7 @@ class LinuxVideoPlayerState(
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
         withContext(Dispatchers.Main) {
+            _chapters = trackInfo.chapters
             _availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
             _availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
             currentAudioTrack =
@@ -2920,6 +2928,7 @@ class LinuxVideoPlayerState(
             isLoading = false
             _currentTime.value = Duration.ZERO
             _duration.value = Duration.ZERO
+            _chapters = emptyList()
             _positionText.value = "00:00"
             _durationText.value = "00:00"
             _aspectRatio.value = 16f / 9f

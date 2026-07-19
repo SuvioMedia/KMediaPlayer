@@ -176,6 +176,7 @@ open class DefaultVideoPlayerState(
     override val currentTime: Duration get() = delegate.currentTime
     override val preciseCurrentTime: Duration get() = delegate.preciseCurrentTime
     override val duration: Duration get() = delegate.duration
+    override val chapters: List<MediaChapter> get() = delegate.chapters
     override val bufferedRanges: List<BufferedRange> get() = delegate.bufferedRanges
     override val bufferedPercent: Float get() = delegate.bufferedPercent
     override val availableHlsQualities: List<HlsQualityVariant> get() = delegate.availableHlsQualities

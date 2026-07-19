@@ -25,19 +25,43 @@ import java.io.InputStream
 @UnstableApi
 internal class AndroidColorAwareHlsPlaylistParserFactory(
     private val delegate: HlsPlaylistParserFactory = DefaultHlsPlaylistParserFactory(),
+    private val onMultivariantPlaylist: (
+        (
+            uri: Uri,
+            manifestText: String,
+            variableDefinitions: Map<String, String>,
+            variantPlaylistUris: Set<Uri>,
+        ) -> Unit
+    )? = null,
+    private val onMediaPlaylist: ((uri: Uri, playlist: HlsMediaPlaylist) -> Unit)? = null,
 ) : HlsPlaylistParserFactory {
     override fun createPlaylistParser(): ParsingLoadable.Parser<HlsPlaylist> =
-        ColorAwareMasterPlaylistParser(delegate.createPlaylistParser())
+        ColorAwareMasterPlaylistParser(
+            delegate = delegate.createPlaylistParser(),
+            onMultivariantPlaylist = onMultivariantPlaylist,
+        )
 
     override fun createPlaylistParser(
         multivariantPlaylist: HlsMultivariantPlaylist,
         previousMediaPlaylist: HlsMediaPlaylist?,
-    ): ParsingLoadable.Parser<HlsPlaylist> = delegate.createPlaylistParser(multivariantPlaylist, previousMediaPlaylist)
+    ): ParsingLoadable.Parser<HlsPlaylist> =
+        ObservingMediaPlaylistParser(
+            delegate = delegate.createPlaylistParser(multivariantPlaylist, previousMediaPlaylist),
+            onMediaPlaylist = onMediaPlaylist,
+        )
 }
 
 @UnstableApi
 private class ColorAwareMasterPlaylistParser(
     private val delegate: ParsingLoadable.Parser<HlsPlaylist>,
+    private val onMultivariantPlaylist: (
+        (
+            uri: Uri,
+            manifestText: String,
+            variableDefinitions: Map<String, String>,
+            variantPlaylistUris: Set<Uri>,
+        ) -> Unit
+    )?,
 ) : ParsingLoadable.Parser<HlsPlaylist> {
     override fun parse(
         uri: Uri,
@@ -55,6 +79,12 @@ private class ColorAwareMasterPlaylistParser(
 
         val parsed = delegate.parse(uri, ByteArrayInputStream(bytes))
         return if (parsed is HlsMultivariantPlaylist) {
+            onMultivariantPlaylist?.invoke(
+                uri,
+                bytes.toString(Charsets.UTF_8),
+                parsed.variableDefinitions,
+                parsed.variants.mapTo(linkedSetOf()) { it.url },
+            )
             parsed.withVideoRangeAnnotations(
                 masterPlaylistUri = uri,
                 manifestText = bytes.toString(Charsets.UTF_8),
@@ -64,6 +94,51 @@ private class ColorAwareMasterPlaylistParser(
         }
     }
 }
+
+@UnstableApi
+private class ObservingMediaPlaylistParser(
+    private val delegate: ParsingLoadable.Parser<HlsPlaylist>,
+    private val onMediaPlaylist: ((uri: Uri, playlist: HlsMediaPlaylist) -> Unit)?,
+) : ParsingLoadable.Parser<HlsPlaylist> {
+    override fun parse(
+        uri: Uri,
+        inputStream: InputStream,
+    ): HlsPlaylist =
+        delegate.parse(uri, inputStream).also { playlist ->
+            (playlist as? HlsMediaPlaylist)?.let { onMediaPlaylist?.invoke(uri, it) }
+        }
+}
+
+internal fun parseHlsChapterJsonUri(
+    masterPlaylistUri: Uri,
+    manifestText: String,
+    variableDefinitions: Map<String, String>,
+): Uri? =
+    manifestText
+        .lineSequence()
+        .map(String::trim)
+        .firstNotNullOfOrNull { line ->
+            if (!line.startsWith(HLS_SESSION_DATA_PREFIX)) return@firstNotNullOfOrNull null
+            val attributes = parseHlsAttributeList(line.removePrefix(HLS_SESSION_DATA_PREFIX))
+            if (attributes["DATA-ID"] != APPLE_HLS_CHAPTERS_DATA_ID) return@firstNotNullOfOrNull null
+            attributes["URI"]
+                ?.replaceHlsVariableReferences(variableDefinitions)
+                ?.let { reference -> UriUtil.resolveToUri(masterPlaylistUri.toString(), reference) }
+        }
+
+private fun parseHlsAttributeList(value: String): Map<String, String> =
+    buildMap {
+        HLS_ATTRIBUTE_REGEX.findAll(value).forEach { match ->
+            val rawValue = match.groupValues[2]
+            put(
+                match.groupValues[1],
+                rawValue
+                    .removeSurrounding("\"")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\"),
+            )
+        }
+    }
 
 @UnstableApi
 private fun HlsMultivariantPlaylist.withVideoRangeAnnotations(
@@ -244,8 +319,11 @@ private fun InputStream.readAtMost(maximumBytes: Int): ByteArray {
 private val VIDEO_RANGE_REGEX = Regex("VIDEO-RANGE=(SDR|PQ|HLG)(?:,|$)")
 private val URI_ATTRIBUTE_REGEX = Regex("(?:^|[:,])URI=\"([^\"]+)\"")
 private val HLS_VARIABLE_REFERENCE_REGEX = Regex("\\{\\$([A-Za-z0-9_-]+)\\}")
+private val HLS_ATTRIBUTE_REGEX = Regex("([A-Z0-9-]+)=(\"(?:[^\"\\\\]|\\\\.)*\"|[^,]*)")
 private const val HLS_STREAM_INF_PREFIX = "#EXT-X-STREAM-INF:"
 private const val HLS_I_FRAME_STREAM_INF_PREFIX = "#EXT-X-I-FRAME-STREAM-INF:"
+private const val HLS_SESSION_DATA_PREFIX = "#EXT-X-SESSION-DATA:"
+private const val APPLE_HLS_CHAPTERS_DATA_ID = "com.apple.hls.chapters"
 private const val MAX_ANNOTATED_MASTER_PLAYLIST_BYTES = 4 * 1024 * 1024
 private const val PLAYLIST_READ_BUFFER_BYTES = 16 * 1024
 private const val MAX_VARIABLE_EXPANSION_PASSES = 16

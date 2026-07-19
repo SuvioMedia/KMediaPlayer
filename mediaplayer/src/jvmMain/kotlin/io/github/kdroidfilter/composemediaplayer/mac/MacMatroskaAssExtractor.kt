@@ -13,6 +13,7 @@ import java.net.URI
 import java.net.URLConnection
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.Locale
 import kotlin.math.roundToLong
 
 private const val EBML_ID_SEGMENT = 0x18538067L
@@ -20,6 +21,18 @@ private const val EBML_ID_INFO = 0x1549A966L
 private const val EBML_ID_TRACKS = 0x1654AE6BL
 private const val EBML_ID_TRACK_ENTRY = 0xAEL
 private const val EBML_ID_ATTACHMENTS = 0x1941A469L
+private const val EBML_ID_CHAPTERS = 0x1043A770L
+private const val EBML_ID_EDITION_ENTRY = 0x45B9L
+private const val EBML_ID_EDITION_FLAG_HIDDEN = 0x45BDL
+private const val EBML_ID_EDITION_FLAG_DEFAULT = 0x45DBL
+private const val EBML_ID_CHAPTER_ATOM = 0xB6L
+private const val EBML_ID_CHAPTER_TIME_START = 0x91L
+private const val EBML_ID_CHAPTER_TIME_END = 0x92L
+private const val EBML_ID_CHAPTER_FLAG_HIDDEN = 0x98L
+private const val EBML_ID_CHAPTER_DISPLAY = 0x80L
+private const val EBML_ID_CHAP_STRING = 0x85L
+private const val EBML_ID_CHAP_LANGUAGE = 0x437CL
+private const val EBML_ID_CHAP_LANGUAGE_IETF = 0x437DL
 private const val EBML_ID_ATTACHED_FILE = 0x61A7L
 private const val EBML_ID_CLUSTER = 0x1F43B675L
 private const val EBML_ID_TIMECODE_SCALE = 0x2AD7B1L
@@ -150,6 +163,7 @@ internal object MacMatroskaAssExtractor {
                     MacMatroskaProbeInfo(
                         durationSeconds = state.durationSeconds(),
                         tracks = state.tracks.toList(),
+                        chapters = state.selectedChapters(),
                     ),
                 subtitleData =
                     targetStreamIndex?.let {
@@ -502,10 +516,15 @@ internal object MacMatroskaAssExtractor {
                 EBML_ID_INFO -> parseInfo(input, element.endPosition, state)
                 EBML_ID_TRACKS -> {
                     parseTracks(input, element.endPosition, state)
-                    if (stopAfterTracks) return
+                    if (stopAfterTracks && state.editions.isNotEmpty()) return
+                }
+                EBML_ID_CHAPTERS -> {
+                    parseChapters(input, element.endPosition, state)
+                    if (stopAfterTracks && state.tracks.isNotEmpty()) return
                 }
                 EBML_ID_ATTACHMENTS -> parseAttachments(input, element.endPosition, state)
                 EBML_ID_CLUSTER -> {
+                    if (stopAfterTracks) return
                     if (state.targetTrack != null) {
                         parseCluster(input, element.endPosition, state)
                     } else {
@@ -515,6 +534,133 @@ internal object MacMatroskaAssExtractor {
                 else -> input.skipElement(element)
             }
         }
+    }
+
+    private fun parseChapters(
+        input: EbmlInput,
+        endPosition: Long,
+        state: MatroskaScanState,
+    ) {
+        while (input.position < endPosition && !input.isAtEnd()) {
+            val element = input.readElementHeaderOrNull() ?: break
+            when (element.id) {
+                EBML_ID_EDITION_ENTRY -> state.editions += parseEditionEntry(input, element.endPosition)
+                else -> input.skipElement(element)
+            }
+        }
+    }
+
+    private fun parseEditionEntry(
+        input: EbmlInput,
+        endPosition: Long,
+    ): MatroskaEdition {
+        var isDefault = false
+        var isHidden = false
+        val chapters = mutableListOf<MacMatroskaChapter>()
+        while (input.position < endPosition && !input.isAtEnd()) {
+            val element = input.readElementHeaderOrNull() ?: break
+            when (element.id) {
+                EBML_ID_EDITION_FLAG_DEFAULT -> isDefault = input.readUIntElement(element) == 1L
+                EBML_ID_EDITION_FLAG_HIDDEN -> isHidden = input.readUIntElement(element) == 1L
+                EBML_ID_CHAPTER_ATOM ->
+                    chapters +=
+                        parseChapterAtom(
+                            input = input,
+                            endPosition = element.endPosition,
+                            inheritedHidden = isHidden,
+                        )
+                else -> input.skipElement(element)
+            }
+        }
+        return MatroskaEdition(
+            isDefault = isDefault,
+            isHidden = isHidden,
+            chapters = chapters,
+        )
+    }
+
+    private fun parseChapterAtom(
+        input: EbmlInput,
+        endPosition: Long,
+        inheritedHidden: Boolean,
+    ): List<MacMatroskaChapter> {
+        var startNs: Long? = null
+        var endNs: Long? = null
+        var isHidden = inheritedHidden
+        val labels = mutableListOf<MatroskaChapterLabel>()
+        val nested = mutableListOf<MacMatroskaChapter>()
+        while (input.position < endPosition && !input.isAtEnd()) {
+            val element = input.readElementHeaderOrNull() ?: break
+            when (element.id) {
+                EBML_ID_CHAPTER_TIME_START -> startNs = input.readUIntElement(element)
+                EBML_ID_CHAPTER_TIME_END -> endNs = input.readUIntElement(element)
+                EBML_ID_CHAPTER_FLAG_HIDDEN -> isHidden = inheritedHidden || input.readUIntElement(element) == 1L
+                EBML_ID_CHAPTER_DISPLAY ->
+                    parseChapterDisplay(input, element.endPosition)?.let(labels::add)
+                EBML_ID_CHAPTER_ATOM ->
+                    nested +=
+                        parseChapterAtom(
+                            input = input,
+                            endPosition = element.endPosition,
+                            inheritedHidden = isHidden,
+                        )
+                else -> input.skipElement(element)
+            }
+        }
+
+        val startMs = startNs?.div(NANOSECONDS_PER_MILLISECOND)
+        val selectedLabel = selectMatroskaChapterLabel(labels)
+        val ownChapter =
+            startMs
+                ?.takeIf { it >= 0L }
+                ?.let { start ->
+                    MacMatroskaChapter(
+                        startMs = start,
+                        endMs =
+                            endNs
+                                ?.div(NANOSECONDS_PER_MILLISECOND)
+                                ?.takeIf { it > start },
+                        title = selectedLabel?.title,
+                        language = selectedLabel?.language,
+                        isHidden = isHidden,
+                    )
+                }
+        return (listOfNotNull(ownChapter) + nested).map { chapter ->
+            if (isHidden && !chapter.isHidden) chapter.copy(isHidden = true) else chapter
+        }
+    }
+
+    private fun parseChapterDisplay(
+        input: EbmlInput,
+        endPosition: Long,
+    ): MatroskaChapterLabel? {
+        var title = ""
+        var language: String? = null
+        while (input.position < endPosition && !input.isAtEnd()) {
+            val element = input.readElementHeaderOrNull() ?: break
+            when (element.id) {
+                EBML_ID_CHAP_STRING -> title = input.readStringElement(element)
+                EBML_ID_CHAP_LANGUAGE -> language = input.readStringElement(element)
+                EBML_ID_CHAP_LANGUAGE_IETF -> language = input.readStringElement(element)
+                else -> input.skipElement(element)
+            }
+        }
+        return title.trim().takeIf(String::isNotEmpty)?.let { MatroskaChapterLabel(it, language) }
+    }
+
+    private fun selectMatroskaChapterLabel(labels: List<MatroskaChapterLabel>): MatroskaChapterLabel? {
+        if (labels.isEmpty()) return null
+        val preferred = Locale.getDefault().toLanguageTag()
+        labels.firstOrNull { it.language.equals(preferred, ignoreCase = true) }?.let { return it }
+        val preferredPrimary = preferred.substringBefore('-')
+        labels
+            .firstOrNull {
+                it.language
+                    ?.substringBefore('-')
+                    .equals(preferredPrimary, ignoreCase = true)
+            }?.let { return it }
+        return labels.firstOrNull { it.language.isNullOrBlank() || it.language.equals("und", ignoreCase = true) }
+            ?: labels.first()
     }
 
     private fun parseInfo(
@@ -964,6 +1110,15 @@ private val RECURSIVE_BYTE_ELEMENT_IDS =
 internal data class MacMatroskaProbeInfo(
     val durationSeconds: Double?,
     val tracks: List<MacMatroskaTrack>,
+    val chapters: List<MacMatroskaChapter> = emptyList(),
+)
+
+internal data class MacMatroskaChapter(
+    val startMs: Long,
+    val endMs: Long?,
+    val title: String?,
+    val language: String?,
+    val isHidden: Boolean,
 )
 
 internal data class MacMatroskaTrack(
@@ -1025,6 +1180,7 @@ private data class MatroskaScanState(
     var nextStreamIndex: Int = 0
     var targetTrack: MacMatroskaTrack? = null
     val tracks = mutableListOf<MacMatroskaTrack>()
+    val editions = mutableListOf<MatroskaEdition>()
     val fonts = mutableListOf<MacAssFontAttachment>()
     val dialogueLines = mutableListOf<String>()
     private val dialogueKeys = mutableSetOf<String>()
@@ -1032,6 +1188,16 @@ private data class MatroskaScanState(
     fun ticksToMs(ticks: Long): Long = (ticks * timecodeScale.toDouble() / 1_000_000.0).roundToLong()
 
     fun durationSeconds(): Double? = durationTicks?.let { it * timecodeScale.toDouble() / 1_000_000_000.0 }
+
+    fun selectedChapters(): List<MacMatroskaChapter> {
+        val edition = editions.firstOrNull(MatroskaEdition::isDefault) ?: editions.firstOrNull()
+        return edition
+            ?.chapters
+            .orEmpty()
+            .map { chapter ->
+                if (edition?.isHidden == true && !chapter.isHidden) chapter.copy(isHidden = true) else chapter
+            }
+    }
 
     fun addDialogueLine(line: String) {
         if (dialogueKeys.add(line)) dialogueLines.add(line)
@@ -1042,6 +1208,19 @@ private data class MatroskaVideoInfo(
     val width: Int?,
     val height: Int?,
 )
+
+private data class MatroskaEdition(
+    val isDefault: Boolean,
+    val isHidden: Boolean,
+    val chapters: List<MacMatroskaChapter>,
+)
+
+private data class MatroskaChapterLabel(
+    val title: String,
+    val language: String?,
+)
+
+private const val NANOSECONDS_PER_MILLISECOND = 1_000_000L
 
 private data class MatroskaAudioInfo(
     val channels: Int?,

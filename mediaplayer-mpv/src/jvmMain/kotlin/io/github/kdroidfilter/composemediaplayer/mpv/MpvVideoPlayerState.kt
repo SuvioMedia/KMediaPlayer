@@ -12,6 +12,7 @@ import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableException
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableReason
@@ -317,6 +318,7 @@ internal class MpvVideoPlayerState(
                 val now = System.currentTimeMillis()
                 if (_hasMedia && now - lastTrackRefreshMs >= TRACK_REFRESH_INTERVAL_MS) {
                     refreshTracks()
+                    refreshChapters()
                     lastTrackRefreshMs = now
                 }
             }
@@ -330,6 +332,7 @@ internal class MpvVideoPlayerState(
     private fun onFileLoaded() {
         refreshSnapshot()
         refreshTracks()
+        refreshChapters()
         sourceLoaded()
     }
 
@@ -441,6 +444,49 @@ internal class MpvVideoPlayerState(
             discoveredSubtitles = discoveredSubtitles,
             selectedAudio = selectedAudio,
             selectedSubtitle = selectedSubtitle,
+        )
+    }
+
+    private fun refreshChapters() {
+        if (disposed.get()) return
+        val count = engine.getProperty("chapter-list/count").positiveIntOrNull(allowZero = true) ?: return
+        val discovered =
+            buildList {
+                repeat(count) { index ->
+                    val base = "chapter-list/$index"
+                    val start =
+                        engine
+                            .getProperty("$base/time")
+                            ?.toDoubleOrNull()
+                            ?.takeIf { it.isFinite() && it >= 0.0 }
+                            ?.seconds
+                            ?: return@repeat
+                    add(
+                        start to
+                            engine
+                                .getProperty("$base/title")
+                                ?.trim()
+                                ?.takeIf(String::isNotEmpty),
+                    )
+                }
+            }.distinct()
+                .sortedBy(Pair<Duration, String?>::first)
+
+        replaceDiscoveredChapters(
+            discovered.mapIndexed { index, (start, title) ->
+                val end =
+                    discovered
+                        .asSequence()
+                        .drop(index + 1)
+                        .map(Pair<Duration, String?>::first)
+                        .firstOrNull { it > start }
+                        ?: _duration.takeIf { it.isFinite() && it > start }
+                MediaChapter(
+                    start = start,
+                    end = end,
+                    title = title,
+                )
+            },
         )
     }
 

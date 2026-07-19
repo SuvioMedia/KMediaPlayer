@@ -40,6 +40,7 @@ This repository is a personal fork maintained for my own projects and integratio
     - [Custom Overlay UI](#custom-overlay-ui)
   - [Video Playback via URL or Local Files](#video-playback-via-url-or-local-files)
   - [HLS Quality Selection](#hls-quality-selection)
+  - [Chapters](#chapters)
   - [Full Controls](#full-controls)
   - [Progress Indicators](#progress-indicators)
   - [Error Handling](#error-handling)
@@ -75,6 +76,7 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 - **Initial Playback Control**: Choose whether videos automatically play or remain paused after opening.
 - **Custom Video Player UI**: Fully customizable using Compose Multiplatform, with support for custom overlays that display even in fullscreen mode.
 - **HLS Streaming**: Native HLS playback on Android, iOS, macOS, Windows, and Linux, with the pinned `hls.js` fallback on compatible Wasm browsers.
+- **Media Chapters**: Observe embedded chapter titles and time ranges, resolve the active chapter, and seek to a chapter through one common multiplatform API.
 - **Fullscreen Mode**: Toggle between windowed and fullscreen playback modes.
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
 - **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
@@ -678,6 +680,44 @@ when (val result = quality?.let { playerState.selectHlsQuality(it.id) } ?: playe
 ```
 
 Use `currentHlsQuality` and `hlsQualityMode` to reflect the current state in custom controls. `Selected` and `Auto` mean the request was applied; `NotFound` means the variant id was stale or from another source; `NotSupported` means the current platform or source does not expose HLS variants. Android, iOS and desktop targets currently report `NotSupported` for this API.
+
+### Chapters
+
+Chapters are exposed through the common `VideoPlayerState` API and arrive asynchronously after a
+source is opened:
+
+```kotlin
+playerState.chapters.forEach { chapter ->
+    println("${chapter.startMs}..${chapter.endMs}: ${chapter.title}")
+}
+
+playerState.currentChapter?.let { chapter ->
+    println("Now playing: ${chapter.title}")
+}
+
+playerState.chapters.firstOrNull()?.let(playerState::seekToChapter)
+```
+
+`MediaChapter` contains `start`, optional exclusive `end`, `title`, BCP 47 `language`, and
+`isHidden`, plus millisecond and duration convenience properties. Missing ends are inferred from
+the next distinct chapter start or the media duration when available. Hidden chapters remain in
+the list so the application can decide whether to show them. `chapters` is cleared when the
+logical source changes; internal remux or color-conversion source swaps retain it.
+
+| Source | Android | iOS | Desktop JVM | Web |
+|---|---:|---:|---:|---:|
+| Matroska/WebM editions and chapter atoms | Media3 | AVFoundation when supported | Built-in parser | Browser/backend dependent |
+| MP4/MOV/3GP Nero `chpl` and QuickTime chapter tracks | Media3 | AVFoundation | Built-in parser | Browser/backend dependent |
+| ID3 `CHAP`/`CTOC` | Media3 | AVFoundation when supported | Built-in parser | Browser/backend dependent |
+| ASF/WMV markers | Backend dependent | — | Built-in parser | — |
+| Apple HLS JSON chapters | VOD/Event | VOD/Event | VOD/Event | `hls.js`, VOD/Event |
+| WebVTT `<track kind="chapters">` | Backend dependent | AVFoundation when supported | Backend dependent | Built in |
+| Optional MPV backend | Backend API dependent | — | Native `chapter-list` | — |
+
+Matroska selects the default edition, or the first edition when none is marked default, chooses
+the best available localized display label, and flattens nested atoms into the public list.
+Apple HLS JSON discovery intentionally excludes sliding live playlists; generic HLS
+`EXT-X-DATERANGE` metadata is not treated as chapters.
 
 ### Browser MKV parser loading
 

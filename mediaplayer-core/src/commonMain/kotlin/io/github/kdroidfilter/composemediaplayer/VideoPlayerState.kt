@@ -136,6 +136,27 @@ interface VideoPlayerState {
      * Returns the total duration of the media.
      */
     val duration: Duration
+
+    /**
+     * Chapters discovered in the currently loaded media source.
+     *
+     * The list is populated asynchronously and is cleared when the logical media source is
+     * released or replaced. An empty list means that no chapters have been discovered yet or that
+     * the current source contains none.
+     */
+    val chapters: List<MediaChapter>
+        get() = emptyList()
+
+    /**
+     * The chapter containing [currentTime], using half-open `[start, end)` ranges.
+     *
+     * Missing chapter ends are resolved from the next distinct chapter start and then from
+     * [duration]. When overlapping chapters contain the current position, the most specific
+     * chapter is selected deterministically.
+     */
+    val currentChapter: MediaChapter?
+        get() = resolveCurrentMediaChapter(chapters, currentTime, duration)
+
     val currentTimeMs: Long
         get() = currentTime.inWholeMilliseconds
     val preciseCurrentTimeMs: Long
@@ -200,6 +221,15 @@ interface VideoPlayerState {
      */
     fun seekToMs(timeMs: Long) {
         seekTo(timeMs.coerceAtLeast(0L).milliseconds)
+    }
+
+    /**
+     * Seeks to the beginning of [chapter].
+     *
+     * Callers should pass an item from the current [chapters] snapshot.
+     */
+    fun seekToChapter(chapter: MediaChapter) {
+        seekTo(chapter.start)
     }
 
     /**
@@ -483,6 +513,42 @@ interface VideoPlayerState {
         const val SLIDER_SCALE = 1000f
         private const val PERCENT_SCALE = 100.0
     }
+}
+
+private fun resolveCurrentMediaChapter(
+    chapters: List<MediaChapter>,
+    position: Duration,
+    mediaDuration: Duration,
+): MediaChapter? {
+    if (chapters.isEmpty() || position < Duration.ZERO) return null
+
+    data class Candidate(
+        val chapter: MediaChapter,
+        val effectiveEnd: Duration?,
+        val sourceIndex: Int,
+    )
+
+    val candidates =
+        chapters.mapIndexedNotNull { index, chapter ->
+            if (position < chapter.start) return@mapIndexedNotNull null
+            val effectiveEnd =
+                chapter.end
+                    ?: chapters
+                        .asSequence()
+                        .map(MediaChapter::start)
+                        .filter { it > chapter.start }
+                        .minOrNull()
+                    ?: mediaDuration.takeIf { it.isFinite() && it > chapter.start }
+            if (effectiveEnd != null && position >= effectiveEnd) return@mapIndexedNotNull null
+            Candidate(chapter = chapter, effectiveEnd = effectiveEnd, sourceIndex = index)
+        }
+    return candidates
+        .maxWithOrNull(
+            compareBy<Candidate> { it.chapter.start }
+                .thenByDescending { candidate ->
+                    candidate.effectiveEnd?.minus(candidate.chapter.start) ?: Duration.INFINITE
+                }.thenByDescending { it.sourceIndex },
+        )?.chapter
 }
 
 private object EmptyPlaybackEvents {

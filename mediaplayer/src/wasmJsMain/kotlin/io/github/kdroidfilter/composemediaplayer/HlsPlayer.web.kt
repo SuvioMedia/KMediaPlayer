@@ -138,7 +138,7 @@ internal suspend fun HTMLVideoElement.configureHlsSource(
     return true
 }
 
-@Suppress("UNUSED_PARAMETER")
+@Suppress("LongMethod", "UNUSED_PARAMETER")
 private fun setupHlsSource(
     hlsModule: JsAny,
     video: HTMLVideoElement,
@@ -170,11 +170,184 @@ private fun setupHlsSource(
                 if (useCredentials) options.credentials = "include";
                 return options;
             };
+            video.__composeMediaPlayerHlsSourceUri = sourceUri;
+            video.__composeMediaPlayerHlsChapterRows = "";
+
+            const notifyTracksChanged = function() {
+                if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;
+                try {
+                    onTracksChanged();
+                } catch (error) {
+                    const message = error && error.stack ? error.stack : (error && error.message ? error.message : String(error));
+                    try { onTracksChangedError(String(message)); } catch (_) {}
+                }
+            };
+            const parseSessionAttributes = function(value) {
+                const attrs = {};
+                const re = /([A-Z0-9-]+)=("[^"]*"|[^,]*)/g;
+                let match;
+                while ((match = re.exec(value)) !== null) {
+                    const raw = match[2] || "";
+                    attrs[match[1]] = raw.charAt(0) === "\"" ? raw.slice(1, -1) : raw;
+                }
+                return attrs;
+            };
+            const hlsVariableDefinitions = function(lines) {
+                const definitions = {};
+                for (let i = 0; i < lines.length; i += 1) {
+                    const line = lines[i].trim();
+                    if (line.indexOf("#EXT-X-DEFINE:") !== 0) continue;
+                    const attrs = parseSessionAttributes(line.substring("#EXT-X-DEFINE:".length));
+                    if (attrs.NAME && Object.prototype.hasOwnProperty.call(attrs, "VALUE")) {
+                        definitions[attrs.NAME] = attrs.VALUE;
+                    }
+                }
+                return definitions;
+            };
+            const expandHlsVariables = function(value, definitions) {
+                let result = String(value || "");
+                for (let pass = 0; pass < 8; pass += 1) {
+                    const before = result;
+                    Object.keys(definitions).forEach(function(name) {
+                        const marker = "{" + String.fromCharCode(36) + name + "}";
+                        result = result.split(marker).join(definitions[name]);
+                    });
+                    if (result === before) break;
+                }
+                return result;
+            };
+            const chapterJsonUri = function(playlistText, baseUrl) {
+                const lines = String(playlistText || "").split(/\r?\n/);
+                const definitions = hlsVariableDefinitions(lines);
+                for (let i = 0; i < lines.length; i += 1) {
+                    const line = lines[i].trim();
+                    if (line.indexOf("#EXT-X-SESSION-DATA:") !== 0) continue;
+                    const attrs = parseSessionAttributes(line.substring("#EXT-X-SESSION-DATA:".length));
+                    if (attrs["DATA-ID"] !== "com.apple.hls.chapters" || !attrs.URI) continue;
+                    try {
+                        return new URL(expandHlsVariables(attrs.URI, definitions), baseUrl).toString();
+                    } catch (_) {
+                        return "";
+                    }
+                }
+                return "";
+            };
+            const firstVariantUri = function(playlistText, baseUrl) {
+                const lines = String(playlistText || "").split(/\r?\n/);
+                const definitions = hlsVariableDefinitions(lines);
+                for (let i = 0; i < lines.length; i += 1) {
+                    if (lines[i].trim().indexOf("#EXT-X-STREAM-INF:") !== 0) continue;
+                    for (let next = i + 1; next < lines.length; next += 1) {
+                        const candidate = lines[next].trim();
+                        if (!candidate || candidate.charAt(0) === "#") continue;
+                        try {
+                            return new URL(expandHlsVariables(candidate, definitions), baseUrl).toString();
+                        } catch (_) {
+                            return "";
+                        }
+                    }
+                }
+                return "";
+            };
+            const isStableChapterTimeline = function(playlistText) {
+                const text = String(playlistText || "");
+                return /#EXT-X-PLAYLIST-TYPE\s*:\s*(VOD|EVENT)(?:\s|$)/i.test(text) ||
+                    /#EXT-X-ENDLIST(?:\s|$)/i.test(text);
+            };
+            const chooseChapterTitle = function(titles) {
+                if (!Array.isArray(titles)) return { title: "", language: "" };
+                const usable = titles.filter(function(item) {
+                    return item && typeof item.title === "string" && item.title.trim().length > 0;
+                });
+                if (!usable.length) return { title: "", language: "" };
+                const preferred =
+                    typeof navigator !== "undefined" && Array.isArray(navigator.languages)
+                        ? navigator.languages.map(function(value) { return String(value || "").toLowerCase(); })
+                        : [];
+                for (let i = 0; i < preferred.length; i += 1) {
+                    const exact = usable.find(function(item) {
+                        return String(item.language || "").toLowerCase() === preferred[i];
+                    });
+                    if (exact) return { title: exact.title.trim(), language: String(exact.language || "") };
+                }
+                for (let i = 0; i < preferred.length; i += 1) {
+                    const primary = preferred[i].split("-")[0];
+                    const matched = usable.find(function(item) {
+                        return primary && String(item.language || "").toLowerCase().split("-")[0] === primary;
+                    });
+                    if (matched) return { title: matched.title.trim(), language: String(matched.language || "") };
+                }
+                const neutral = usable.find(function(item) {
+                    const language = String(item.language || "").toLowerCase();
+                    return !language || language === "und";
+                });
+                const selected = neutral || usable[0];
+                return { title: selected.title.trim(), language: String(selected.language || "") };
+            };
+            const serializeChapterJson = function(payload) {
+                if (!Array.isArray(payload)) return "";
+                const rows = [];
+                payload.forEach(function(entry) {
+                    if (!entry || typeof entry !== "object") return;
+                    const startSeconds = Number(entry["start-time"]);
+                    if (!Number.isFinite(startSeconds) || startSeconds < 0) return;
+                    const startMs = Math.round(startSeconds * 1000);
+                    if (!Number.isSafeInteger(startMs)) return;
+                    const durationSeconds = Number(entry.duration);
+                    let endMs = "";
+                    if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+                        const candidate = Math.round((startSeconds + durationSeconds) * 1000);
+                        if (Number.isSafeInteger(candidate) && candidate > startMs) endMs = String(candidate);
+                    }
+                    const label = chooseChapterTitle(entry.titles);
+                    rows.push([
+                        String(startMs),
+                        endMs,
+                        label.title,
+                        label.language,
+                        "0"
+                    ].map(encodeURIComponent).join("|"));
+                });
+                return rows.join("\n");
+            };
+            const fetchText = function(uri) {
+                return fetch(uri, fetchOptions())
+                    .then(function(response) { return response.ok ? response.text() : ""; });
+            };
+            const loadHlsChapterRows = function() {
+                fetchText(sourceUri)
+                    .then(function(masterText) {
+                        if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return null;
+                        const jsonUri = chapterJsonUri(masterText, sourceUri);
+                        if (!jsonUri) return null;
+                        const mediaUri = firstVariantUri(masterText, sourceUri);
+                        const stableTimeline =
+                            mediaUri
+                                ? fetchText(mediaUri).then(isStableChapterTimeline)
+                                : Promise.resolve(isStableChapterTimeline(masterText));
+                        return stableTimeline.then(function(isStable) {
+                            if (!isStable || video.__composeMediaPlayerHlsSourceUri !== sourceUri) return null;
+                            return fetchText(jsonUri).then(function(jsonText) {
+                                if (!jsonText || jsonText.length > 4194304) return null;
+                                try { return serializeChapterJson(JSON.parse(jsonText)); } catch (_) { return null; }
+                            });
+                        });
+                    })
+                    .then(function(rows) {
+                        if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;
+                        video.__composeMediaPlayerHlsChapterRows = rows || "";
+                        notifyTracksChanged();
+                    })
+                    .catch(function() {
+                        if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;
+                        video.__composeMediaPlayerHlsChapterRows = "";
+                        notifyTracksChanged();
+                    });
+            };
             if (!Hls || typeof Hls.isSupported !== "function" || !Hls.isSupported()) {
                 video.src = sourceUri;
-                video.__composeMediaPlayerHlsSourceUri = sourceUri;
                 video.load();
-                onTracksChanged();
+                notifyTracksChanged();
             } else {
                 if (video.__composeMediaPlayerHls) {
                     try { video.__composeMediaPlayerHls.destroy(); } catch (_) {}
@@ -197,18 +370,9 @@ private fun setupHlsSource(
                     }
                 });
                 video.__composeMediaPlayerHls = hls;
-                video.__composeMediaPlayerHlsSourceUri = sourceUri;
                 video.__composeMediaPlayerHlsSubtitleRows = "";
 
-                const sync = function() {
-                    if (video.__composeMediaPlayerHlsSourceUri !== sourceUri) return;
-                    try {
-                        onTracksChanged();
-                    } catch (error) {
-                        const message = error && error.stack ? error.stack : (error && error.message ? error.message : String(error));
-                        try { onTracksChangedError(String(message)); } catch (_) {}
-                    }
-                };
+                const sync = notifyTracksChanged;
                 const syncAfterDecodedFrame = function() {
                     sync();
                     if (typeof video.requestVideoFrameCallback === "function") {
@@ -296,6 +460,7 @@ private fun setupHlsSource(
                         sync();
                     });
             }
+            loadHlsChapterRows();
         }
         """,
     )
@@ -314,6 +479,7 @@ private fun destroyHlsController(video: HTMLVideoElement): Unit =
                 video.__composeMediaPlayerHls = null;
             }
             video.__composeMediaPlayerHlsSubtitleRows = "";
+            video.__composeMediaPlayerHlsChapterRows = "";
             video.__composeMediaPlayerHlsSourceUri = "";
         }
         """,

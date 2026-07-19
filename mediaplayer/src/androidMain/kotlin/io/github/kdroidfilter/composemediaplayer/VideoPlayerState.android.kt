@@ -554,6 +554,7 @@ open class DefaultVideoPlayerState(
     private var sourceGeneration = 0L
     private var currentSourceSpec: AndroidSourceSpec? = null
     private var sourceConversionJob: Job? = null
+    private var hlsChapterDiscovery: AndroidHlsChapterDiscovery? = null
     private var externalAssLoadJob: Job? = null
     private var sourceConversionAttemptGeneration: Long? = null
     private var allowAutomaticDolbyVisionConversion = true
@@ -2356,6 +2357,8 @@ open class DefaultVideoPlayerState(
     // Time tracking
     private var _currentTime by mutableStateOf(Duration.ZERO)
     private var _duration by mutableStateOf(Duration.ZERO)
+    private var _chapters by mutableStateOf(emptyList<MediaChapter>())
+    private val discoveredChapterRows = mutableListOf<RawMediaChapter>()
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
     override val currentTime: Duration get() = _currentTime
@@ -2367,6 +2370,7 @@ open class DefaultVideoPlayerState(
                 _currentTime
             }
     override val duration: Duration get() = _duration
+    override val chapters: List<MediaChapter> get() = _chapters
     override val bufferedRanges: List<BufferedRange>
         get() {
             val player = exoPlayer ?: return emptyList()
@@ -2697,6 +2701,7 @@ open class DefaultVideoPlayerState(
                                 _isPlaying = player.isPlaying
                                 if (player.isPlaying) startPositionUpdates()
                                 extractFormatMetadata(player)
+                                syncMediaChapters(player)
                                 if (sourceLoadedSessionId != mediaSessionId && mediaSessionId != 0L && _hasMedia) {
                                     sourceLoadedSessionId = mediaSessionId
                                     emitPlaybackEvent { sessionId, sampledAtMs ->
@@ -2811,7 +2816,25 @@ open class DefaultVideoPlayerState(
                         applyDynamicRangeTrackSelection(player, tracks)
                         maybePrepareProfile7BeforeDecoder(tracks)
                         syncAvailableMediaTracks(player)
+                        syncMediaChapters(player)
                     }
+                }
+            }
+
+            override fun onTimelineChanged(
+                timeline: Timeline,
+                reason: Int,
+            ) {
+                if (isCurrentSourceCallback(generation)) {
+                    exoPlayer?.let(::syncMediaChapters)
+                }
+            }
+
+            override fun onMetadata(metadata: Metadata) {
+                if (!isCurrentSourceCallback(generation)) return
+                exoPlayer?.let { player ->
+                    mergeMediaChapterRows(player.media3ChapterRows(metadata))
+                    publishMediaChapters()
                 }
             }
 
@@ -3028,6 +3051,7 @@ open class DefaultVideoPlayerState(
                     ?: mediaItem.mediaId
             sourceLoadedSessionId = 0L
             wasStalled = false
+            clearMediaChapters()
             if (hadPreviousSource) {
                 emitSourceReleasedForSession(previousSessionId)
             }
@@ -3123,10 +3147,32 @@ open class DefaultVideoPlayerState(
                     cache = cacheLease?.cache,
                     requestHeaders = requestHeaders,
                 )
+            val expectedMediaSessionId = mediaSessionId
+            val chapterDiscovery =
+                AndroidHlsChapterDiscovery(
+                    dataSourceFactory = dataSourceFactory,
+                    scope = coroutineScope,
+                    onRows = { rows ->
+                        if (
+                            !isPlayerReleased &&
+                            mediaSessionId == expectedMediaSessionId &&
+                            currentSourceSpec != null
+                        ) {
+                            mergeMediaChapterRows(rows)
+                            publishMediaChapters()
+                        }
+                    },
+                )
+            hlsChapterDiscovery?.cancel()
+            hlsChapterDiscovery = chapterDiscovery
             return HlsMediaSource
                 .Factory(dataSourceFactory)
-                .setPlaylistParserFactory(AndroidColorAwareHlsPlaylistParserFactory())
-                .createMediaSource(mediaItem)
+                .setPlaylistParserFactory(
+                    AndroidColorAwareHlsPlaylistParserFactory(
+                        onMultivariantPlaylist = chapterDiscovery::observeMultivariantPlaylist,
+                        onMediaPlaylist = chapterDiscovery::observeMediaPlaylist,
+                    ),
+                ).createMediaSource(mediaItem)
         }
         if (requestHeaders.isEmpty()) return null
         return buildAndroidMediaSourceFactory(
@@ -3806,6 +3852,30 @@ open class DefaultVideoPlayerState(
         }
     }
 
+    private fun syncMediaChapters(player: Player) {
+        mergeMediaChapterRows(player.media3ChapterRows())
+        publishMediaChapters()
+    }
+
+    private fun mergeMediaChapterRows(rows: List<RawMediaChapter>) {
+        rows.forEach { row ->
+            if (discoveredChapterRows.none { existing -> existing == row }) {
+                discoveredChapterRows += row
+            }
+        }
+    }
+
+    private fun publishMediaChapters() {
+        _chapters = normalizeMediaChapters(discoveredChapterRows, _duration)
+    }
+
+    private fun clearMediaChapters() {
+        hlsChapterDiscovery?.cancel()
+        hlsChapterDiscovery = null
+        discoveredChapterRows.clear()
+        _chapters = emptyList()
+    }
+
     private fun resetStates(keepMedia: Boolean = false) {
         _currentTime = Duration.ZERO
         _duration = Duration.ZERO
@@ -3854,6 +3924,7 @@ open class DefaultVideoPlayerState(
         _availableSubtitleTracks.removeAll { it.isEmbedded }
         updateNativeSubtitleVisibility()
         if (!keepMedia) {
+            clearMediaChapters()
             _hasMedia = false
             sourceLoadedSessionId = 0L
         }

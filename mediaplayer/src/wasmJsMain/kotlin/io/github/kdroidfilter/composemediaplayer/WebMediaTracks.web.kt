@@ -40,6 +40,9 @@ internal fun DefaultVideoPlayerState.syncWebMediaTracks(video: HTMLVideoElement)
             subtitlesEnabled = true
         }
     }
+
+    replaceWebTextTrackChapters(parseWebMediaChapterRows(readWebChapterRows(video)))
+    replaceWebHlsChapters(parseWebMediaChapterRows(readHlsChapterRows(video)))
 }
 
 internal fun HTMLVideoElement.applySelectedAudioTrack(track: AudioTrack?) {
@@ -129,6 +132,22 @@ private fun parseSubtitleTrackRows(rows: String): SubtitleTrackSnapshot {
     return SubtitleTrackSnapshot(tracks = tracks, selectedId = selectedId)
 }
 
+internal fun parseWebMediaChapterRows(rows: String): List<RawMediaChapter> =
+    rows
+        .lineSequence()
+        .filter(String::isNotBlank)
+        .mapNotNull { row ->
+            val columns = row.split('|').map(::decodeUriComponent)
+            if (columns.size < WEB_CHAPTER_COLUMN_COUNT) return@mapNotNull null
+            RawMediaChapter(
+                startMs = columns[0].toLongOrNull() ?: return@mapNotNull null,
+                endMs = columns[1].toLongOrNull(),
+                title = columns[2].ifBlank { null },
+                language = columns[3].ifBlank { null },
+                isHidden = columns[4] == "1",
+            )
+        }.toList()
+
 private fun decodeUriComponent(value: String): String = js("decodeURIComponent(value)")
 
 private fun readWebAudioTrackRows(video: HTMLVideoElement): String =
@@ -198,6 +217,80 @@ private fun readWebTextTrackRows(video: HTMLVideoElement): String =
         """,
     )
 
+private fun readWebChapterRows(video: HTMLVideoElement): String =
+    js(
+        """
+        (function() {
+            const list = video.textTracks;
+            if (!list || typeof list.length !== "number") return "";
+
+            const preferredLanguages =
+                typeof navigator !== "undefined" && Array.isArray(navigator.languages)
+                    ? navigator.languages.map(function(value) { return String(value || "").toLowerCase(); })
+                    : [];
+            const languageScore = function(language) {
+                const candidate = String(language || "").toLowerCase();
+                for (let i = 0; i < preferredLanguages.length; i += 1) {
+                    if (candidate && candidate === preferredLanguages[i]) return i;
+                }
+                const candidatePrimary = candidate.split("-")[0];
+                for (let i = 0; i < preferredLanguages.length; i += 1) {
+                    if (candidatePrimary && candidatePrimary === preferredLanguages[i].split("-")[0]) {
+                        return 100 + i;
+                    }
+                }
+                return candidate && candidate !== "und" ? 300 : 200;
+            };
+
+            const chapterTracks = [];
+            for (let i = 0; i < list.length; i += 1) {
+                const track = list[i];
+                if (!track || String(track.kind || "").toLowerCase() !== "chapters") continue;
+                try {
+                    if (track.mode === "disabled") track.mode = "hidden";
+                } catch (_) {}
+                chapterTracks.push({ track: track, index: i, score: languageScore(track.language) });
+            }
+            chapterTracks.sort(function(left, right) {
+                return left.score - right.score || left.index - right.index;
+            });
+            if (!chapterTracks.length) return "";
+
+            const selected = chapterTracks[0].track;
+            const cues = selected.cues;
+            if (!cues || typeof cues.length !== "number") return "";
+            const rows = [];
+            for (let i = 0; i < cues.length; i += 1) {
+                const cue = cues[i];
+                if (!cue) continue;
+                const startSeconds = Number(cue.startTime);
+                const endSeconds = Number(cue.endTime);
+                if (!Number.isFinite(startSeconds) || startSeconds < 0) continue;
+                const startMs = Math.round(startSeconds * 1000);
+                const endMs =
+                    Number.isFinite(endSeconds) && endSeconds > startSeconds
+                        ? String(Math.round(endSeconds * 1000))
+                        : "";
+                let title = cue.text == null ? "" : String(cue.text);
+                if (typeof cue.getCueAsHTML === "function") {
+                    try {
+                        const fragment = cue.getCueAsHTML();
+                        if (fragment && fragment.textContent != null) title = String(fragment.textContent);
+                    } catch (_) {}
+                }
+                rows.push([
+                    String(startMs),
+                    endMs,
+                    title,
+                    selected.language ? String(selected.language) : "",
+                    "0"
+                ].map(encodeURIComponent).join("|"));
+            }
+            return rows.join("\n");
+        })()
+        """,
+    )
+
 private fun readHlsAudioTrackRows(video: HTMLVideoElement): String =
     js(
         """
@@ -234,6 +327,15 @@ private fun readHlsSubtitleTrackRows(video: HTMLVideoElement): String =
         """
         (function() {
             return video.__composeMediaPlayerHlsSubtitleRows || "";
+        })()
+        """,
+    )
+
+private fun readHlsChapterRows(video: HTMLVideoElement): String =
+    js(
+        """
+        (function() {
+            return video.__composeMediaPlayerHlsChapterRows || "";
         })()
         """,
     )
@@ -296,6 +398,14 @@ private fun selectWebTextTrackById(
             if (list && typeof list.length === "number") {
                 for (let i = 0; i < list.length; i += 1) {
                     const track = list[i];
+                    const kind = track && track.kind ? String(track.kind).toLowerCase() : "";
+                    if (kind === "chapters") {
+                        try {
+                            if (track.mode === "disabled") track.mode = "hidden";
+                        } catch (_) {}
+                        continue;
+                    }
+                    if (kind && ["subtitles", "captions"].indexOf(kind) === -1) continue;
                     const sourceId = track && track.id ? String(track.id) : "";
                     const stableKey = sourceId || [
                         track && track.label ? String(track.label) : "",
@@ -381,17 +491,42 @@ private fun attachWebMediaTrackListeners(
             }
             video.__composeMediaPlayerTrackListenerRecords = [];
 
+            const records = video.__composeMediaPlayerTrackListenerRecords;
+            const attachChapterCueListeners = function() {
+                const tracks = video.textTracks;
+                if (!tracks || typeof tracks.length !== "number") return;
+                for (let i = 0; i < tracks.length; i += 1) {
+                    const track = tracks[i];
+                    if (!track || String(track.kind || "").toLowerCase() !== "chapters") continue;
+                    try {
+                        if (track.mode === "disabled") track.mode = "hidden";
+                    } catch (_) {}
+                    if (typeof track.addEventListener !== "function") continue;
+                    const alreadyAttached = records.some(function(record) {
+                        return record.list === track && record.eventName === "cuechange";
+                    });
+                    if (alreadyAttached) continue;
+                    const handler = function() { onChange(); };
+                    track.addEventListener("cuechange", handler);
+                    records.push({ list: track, eventName: "cuechange", handler: handler });
+                }
+            };
+
             const attach = function(list) {
                 if (!list || typeof list.addEventListener !== "function") return;
                 ["addtrack", "removetrack", "change"].forEach(function(eventName) {
-                    const handler = function() { onChange(); };
+                    const handler = function() {
+                        attachChapterCueListeners();
+                        onChange();
+                    };
                     list.addEventListener(eventName, handler);
-                    video.__composeMediaPlayerTrackListenerRecords.push({ list, eventName, handler });
+                    records.push({ list, eventName, handler });
                 });
             };
 
             attach(video.audioTracks);
             attach(video.textTracks);
+            attachChapterCueListeners();
         }
         """,
     )
@@ -410,3 +545,5 @@ private fun detachWebMediaTrackListeners(video: HTMLVideoElement): Unit =
         }
         """,
     )
+
+private const val WEB_CHAPTER_COLUMN_COUNT = 5

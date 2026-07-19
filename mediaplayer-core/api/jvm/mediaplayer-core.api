@@ -467,6 +467,31 @@ public final class io/github/kdroidfilter/composemediaplayer/MasteringDisplayMet
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/MediaChapter {
+	public static final field $stable I
+	public synthetic fun <init> (JLkotlin/time/Duration;Ljava/lang/String;Ljava/lang/String;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (JLkotlin/time/Duration;Ljava/lang/String;Ljava/lang/String;ZLkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1-UwyO8pc ()J
+	public final fun component2-FghU774 ()Lkotlin/time/Duration;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Z
+	public final fun copy-MSY_5wg (JLkotlin/time/Duration;Ljava/lang/String;Ljava/lang/String;Z)Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
+	public static synthetic fun copy-MSY_5wg$default (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;JLkotlin/time/Duration;Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDuration-FghU774 ()Lkotlin/time/Duration;
+	public final fun getDurationMs ()Ljava/lang/Long;
+	public final fun getEnd-FghU774 ()Lkotlin/time/Duration;
+	public final fun getEndMs ()Ljava/lang/Long;
+	public final fun getLanguage ()Ljava/lang/String;
+	public final fun getStart-UwyO8pc ()J
+	public final fun getStartMs ()J
+	public final fun getTitle ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun isHidden ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/MediaSourceSpec {
 	public static final field $stable I
 	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
@@ -836,8 +861,10 @@ public final class io/github/kdroidfilter/composemediaplayer/PreviewableVideoPla
 	public fun getBufferedPercent ()F
 	public fun getBufferedRanges ()Ljava/util/List;
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public fun getChapters ()Ljava/util/List;
 	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
 	public fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
+	public fun getCurrentChapter ()Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
 	public fun getCurrentSubtitleTrack ()Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;
 	public fun getCurrentTime-UwyO8pc ()J
@@ -899,6 +926,7 @@ public final class io/github/kdroidfilter/composemediaplayer/PreviewableVideoPla
 	public fun seekStart (F)V
 	public fun seekTo (F)V
 	public fun seekTo-LRDsOJo (J)V
+	public fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
 	public fun seekToMs (J)V
 	public fun seekToProgress (F)V
 	public fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
@@ -1549,8 +1577,10 @@ public abstract interface class io/github/kdroidfilter/composemediaplayer/VideoP
 	public fun getBufferedPercent ()F
 	public fun getBufferedRanges ()Ljava/util/List;
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public fun getChapters ()Ljava/util/List;
 	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
 	public abstract fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
+	public fun getCurrentChapter ()Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
 	public abstract fun getCurrentSubtitleTrack ()Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;
 	public abstract fun getCurrentTime-UwyO8pc ()J
@@ -1615,6 +1645,7 @@ public abstract interface class io/github/kdroidfilter/composemediaplayer/VideoP
 	public fun seekStart (F)V
 	public abstract fun seekTo (F)V
 	public fun seekTo-LRDsOJo (J)V
+	public fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
 	public fun seekToMs (J)V
 	public fun seekToProgress (F)V
 	public abstract fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
@@ -1662,7 +1693,9 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoPlayerState$De
 	public static fun getBufferedPercent (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)F
 	public static fun getBufferedRanges (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Ljava/util/List;
 	public static fun getCapabilities (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public static fun getChapters (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Ljava/util/List;
 	public static fun getColorPipelineStatus (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lkotlinx/coroutines/flow/StateFlow;
+	public static fun getCurrentChapter (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
 	public static fun getCurrentHlsQuality (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
 	public static fun getCurrentTimeMs (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)J
 	public static fun getDiagnostics (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;
@@ -1699,6 +1732,7 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoPlayerState$De
 	public static fun seekFinished (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)V
 	public static fun seekStart (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;F)V
 	public static fun seekTo-LRDsOJo (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;J)V
+	public static fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
 	public static fun seekToMs (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;J)V
 	public static fun seekToProgress (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;F)V
 	public static fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;

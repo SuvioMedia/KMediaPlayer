@@ -327,6 +327,9 @@ open class DefaultVideoPlayerState(
 
     private var _currentDuration by mutableStateOf(Duration.ZERO)
     private var _currentTime by mutableStateOf(Duration.ZERO)
+    private var _chapters by mutableStateOf(emptyList<MediaChapter>())
+    private var webTextTrackChapterRows = emptyList<RawMediaChapter>()
+    private var webHlsChapterRows = emptyList<RawMediaChapter>()
     private val _bufferedRanges = mutableStateListOf<BufferedRange>()
     internal var preciseCurrentTimeProvider: (() -> Duration)? = null
     internal var durationProvider: (() -> Duration)? = null
@@ -337,6 +340,7 @@ open class DefaultVideoPlayerState(
             val observedDuration = _currentDuration
             return durationProvider?.invoke() ?: observedDuration
         }
+    override val chapters: List<MediaChapter> get() = _chapters
     override val bufferedRanges: List<BufferedRange> get() = _bufferedRanges
 
     // Job for handling seek operations
@@ -777,6 +781,30 @@ open class DefaultVideoPlayerState(
         metadata.audioSampleRate = null
     }
 
+    internal fun replaceWebTextTrackChapters(rows: List<RawMediaChapter>) {
+        webTextTrackChapterRows = rows
+        publishWebMediaChapters()
+    }
+
+    internal fun replaceWebHlsChapters(rows: List<RawMediaChapter>) {
+        webHlsChapterRows = rows
+        publishWebMediaChapters()
+    }
+
+    private fun publishWebMediaChapters() {
+        _chapters =
+            normalizeMediaChapters(
+                rows = webHlsChapterRows + webTextTrackChapterRows,
+                mediaDuration = duration,
+            )
+    }
+
+    private fun clearWebMediaChapters() {
+        webTextTrackChapterRows = emptyList()
+        webHlsChapterRows = emptyList()
+        _chapters = emptyList()
+    }
+
     /**
      * Applies volume changes with throttling to prevent performance issues
      */
@@ -1154,6 +1182,7 @@ open class DefaultVideoPlayerState(
         resetWebColorRendererRuntime(resetHdrFailure = true)
         clearHlsQualityState()
         resetSourceTracks()
+        clearWebMediaChapters()
         clearMetadata()
         renderingInfo.update(
             backend = "HTML5 video",
@@ -1337,6 +1366,7 @@ open class DefaultVideoPlayerState(
         clearPendingSeekRequest()
         clearHlsQualityState()
         resetSourceTracks()
+        clearWebMediaChapters()
         clearMetadata()
         resetPlaybackCallback?.invoke()
         _requestHeaders = emptyMap()
@@ -1521,8 +1551,12 @@ open class DefaultVideoPlayerState(
         forceUpdate: Boolean = false,
     ) {
         checkNotDisposed()
+        val durationChanged = _currentDuration != duration
         _currentTime = currentTime
         _currentDuration = duration
+        if (durationChanged && (webTextTrackChapterRows.isNotEmpty() || webHlsChapterRows.isNotEmpty())) {
+            publishWebMediaChapters()
+        }
 
         val now = TimeSource.Monotonic.markNow()
         if (forceUpdate || now - lastUpdateTime >= 250.milliseconds) {
@@ -1588,6 +1622,7 @@ open class DefaultVideoPlayerState(
         _currentDuration = Duration.ZERO
         _bufferedRanges.clear()
         _diagnostics = PlaybackDiagnostics()
+        clearWebMediaChapters()
         seekingState = false
         seekEventActive = false
         stallEventActive = false

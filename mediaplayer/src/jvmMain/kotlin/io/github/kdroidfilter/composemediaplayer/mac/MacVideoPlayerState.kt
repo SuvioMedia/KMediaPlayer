@@ -39,6 +39,7 @@ import io.github.kdroidfilter.composemediaplayer.JvmLibVlcSubtitleStream
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcTrackInfo
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.PreparedVideoPipelineSource
@@ -389,9 +390,11 @@ class MacVideoPlayerState(
 
     private val _currentTime = mutableStateOf(Duration.ZERO)
     private val _duration = mutableStateOf(Duration.ZERO)
+    private var _chapters by mutableStateOf(emptyList<MediaChapter>())
     override val currentTime: Duration get() = _currentTime.value
     override val preciseCurrentTime: Duration get() = _currentTime.value
     override val duration: Duration get() = _duration.value
+    override val chapters: List<MediaChapter> get() = _chapters
 
     // Non-blocking aspect ratio property
     private val _aspectRatio = mutableStateOf(16f / 9f)
@@ -590,11 +593,14 @@ class MacVideoPlayerState(
             playbackOptions.extensions.any { extension ->
                 extension is VideoSourcePipelineExtension && extension.availability.canContribute
             }
+        val sourceProbe = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
+        withContext(Dispatchers.Main) {
+            _chapters = sourceProbe.chapters
+        }
         if (candidateLibVlcBackend == null && !hasSourcePipelineExtension) {
             return MacPlaybackSourceResolution(uri, requestHeaders)
         }
 
-        val sourceProbe = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
         activeSourceColorInfo = sourceProbe.videoColorInfo
         activeDecoderColorCapabilities = DecoderColorCapabilities()
         val hlsSource = uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
@@ -663,6 +669,7 @@ class MacVideoPlayerState(
         lifecycle.launchSourceOperation(
             onScheduled = {
                 clearPendingSeekRequests()
+                _chapters = emptyList()
                 frameEpoch.incrementAndGet()
                 lastUri = uri
                 lastRequestHeaders = sanitizedHeaders
@@ -1486,6 +1493,7 @@ class MacVideoPlayerState(
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
         withContext(Dispatchers.Main) {
+            _chapters = trackInfo.chapters
             _availableAudioTracks.removeAll { isMacLibVlcAudioTrackId(it.id) }
             _availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
             currentAudioTrack =
@@ -3253,6 +3261,7 @@ class MacVideoPlayerState(
             isLoading = false
             _currentTime.value = Duration.ZERO
             _duration.value = Duration.ZERO
+            _chapters = emptyList()
             _positionText.value = "00:00"
             _durationText.value = "00:00"
             _aspectRatio.value = 16f / 9f

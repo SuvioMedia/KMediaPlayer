@@ -21,6 +21,7 @@ import io.github.kdroidfilter.composemediaplayer.util.toSecondsDouble
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.readValue
 import kotlinx.cinterop.useContents
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,10 +42,12 @@ import platform.Foundation.NSKeyValueChangeNewKey
 import platform.Foundation.NSKeyValueObservingOptionNew
 import platform.Foundation.NSKeyValueObservingOptions
 import platform.Foundation.NSKeyValueObservingProtocol
+import platform.Foundation.NSLocale
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSURL
 import platform.Foundation.addObserver
+import platform.Foundation.preferredLanguages
 import platform.Foundation.removeObserver
 import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDidEnterBackgroundNotification
@@ -55,6 +58,7 @@ import platform.darwin.NSEC_PER_SEC
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
+import kotlin.math.roundToLong
 import kotlin.time.Duration
 
 actual fun createVideoPlayerState(
@@ -921,6 +925,8 @@ open class DefaultVideoPlayerState(
 
     private var _currentTime by mutableStateOf(Duration.ZERO)
     private var _duration by mutableStateOf(Duration.ZERO)
+    private var _chapters by mutableStateOf(emptyList<MediaChapter>())
+    private var iosChapterRows = emptyList<RawMediaChapter>()
     override val currentTime: Duration get() = _currentTime
     override val preciseCurrentTime: Duration
         get() {
@@ -929,6 +935,7 @@ open class DefaultVideoPlayerState(
             return CMTimeGetSeconds(item.currentTime()).secondsAsDuration()
         }
     override val duration: Duration get() = _duration
+    override val chapters: List<MediaChapter> get() = _chapters
 
     // Observable video aspect ratio (default to 16:9)
     private var _videoAspectRatio by mutableStateOf(16.0 / 9.0)
@@ -978,6 +985,60 @@ open class DefaultVideoPlayerState(
         _metadata.mimeType = null
         _metadata.audioChannels = 2
         _metadata.audioSampleRate = null
+    }
+
+    private fun discoverIosChapters(
+        asset: AVAsset,
+        expectedSessionId: Long,
+        sourceUri: String,
+    ) {
+        val preferredLanguages = NSLocale.preferredLanguages.mapNotNull { it as? String }
+        asset.loadChapterMetadataGroupsBestMatchingPreferredLanguages(preferredLanguages) { groups, _ ->
+            val rows =
+                groups
+                    .orEmpty()
+                    .mapNotNull { groupValue ->
+                        val group = groupValue as? AVTimedMetadataGroup ?: return@mapNotNull null
+                        val (startSeconds, durationSeconds) =
+                            group.timeRange.useContents {
+                                CMTimeGetSeconds(start.readValue()) to CMTimeGetSeconds(duration.readValue())
+                            }
+                        if (!startSeconds.isFinite() || startSeconds < 0.0) return@mapNotNull null
+
+                        val items = group.items.mapNotNull { it as? AVMetadataItem }
+                        val titleItem =
+                            items.firstOrNull { it.commonKey == AVMetadataCommonKeyTitle }
+                                ?: items.firstOrNull { !it.stringValue.isNullOrBlank() }
+                        val endMs =
+                            durationSeconds
+                                .takeIf { it.isFinite() && it > 0.0 }
+                                ?.let { ((startSeconds + it) * 1_000.0).roundToLong() }
+                        RawMediaChapter(
+                            startMs = (startSeconds * 1_000.0).roundToLong(),
+                            endMs = endMs,
+                            title = titleItem?.stringValue,
+                            language = titleItem?.extendedLanguageTag,
+                        )
+                    }
+
+            dispatch_async(dispatch_get_main_queue()) {
+                if (isDisposed || mediaSessionId != expectedSessionId || activeSourceUri != sourceUri) {
+                    return@dispatch_async
+                }
+                iosChapterRows = rows
+                refreshIosChapters()
+            }
+        }
+    }
+
+    private fun refreshIosChapters() {
+        val itemDurationSeconds = player?.currentItem?.let { CMTimeGetSeconds(it.duration) }
+        val isHlsSource = activeSourceUri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
+        if (isHlsSource && itemDurationSeconds?.isFinite() != true) {
+            _chapters = emptyList()
+            return
+        }
+        _chapters = normalizeMediaChapters(iosChapterRows, _duration)
     }
 
     private fun startPositionUpdates(
@@ -1131,6 +1192,7 @@ open class DefaultVideoPlayerState(
                 _durationText = formatTime(duration)
             }
         }
+        refreshIosChapters()
         if (sourceLoadedSessionId != mediaSessionId && mediaSessionId != 0L) {
             sourceLoadedSessionId = mediaSessionId
             emitPlaybackEvent { sessionId, sampledAtMs ->
@@ -1517,6 +1579,8 @@ open class DefaultVideoPlayerState(
         _playbackSpeed = 1.0f
         _isLoading = true
         resetMetadata()
+        iosChapterRows = emptyList()
+        _chapters = emptyList()
         _hasMedia = false
 
         cleanupCurrentPlayer()
@@ -1534,6 +1598,7 @@ open class DefaultVideoPlayerState(
         // safely in the KVO readyToPlay callback, avoiding ObjC exceptions
         // from accessing track properties on an unloaded/failed asset.
         val asset = AVURLAsset.URLAssetWithURL(nsUrl, activeSourceRequestHeaders.avAssetOptions())
+        discoverIosChapters(asset, sessionId, uri)
         val playerItem = AVPlayerItem(asset)
 
         nsUrl.lastPathComponent?.let { _metadata.title = it }
@@ -1707,6 +1772,8 @@ open class DefaultVideoPlayerState(
         _durationText = "00:00"
         sliderPos = 0f
         resetMetadata()
+        iosChapterRows = emptyList()
+        _chapters = emptyList()
         activeSourceColorInfo = VideoColorInfo()
         observedHdr10PlusInfo = null
         unavailableProjectionHdrRanges.clear()
@@ -1866,6 +1933,8 @@ open class DefaultVideoPlayerState(
         }
 
         resetMetadata()
+        iosChapterRows = emptyList()
+        _chapters = emptyList()
         activeSourceColorInfo = VideoColorInfo()
         observedHdr10PlusInfo = null
         unavailableProjectionHdrRanges.clear()

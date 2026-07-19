@@ -36,6 +36,7 @@ import io.github.kdroidfilter.composemediaplayer.JvmLibVlcSubtitleStream
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcTrackInfo
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX
+import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
@@ -366,6 +367,7 @@ class WindowsVideoPlayerState(
 
     private var _currentTime by mutableStateOf(Duration.ZERO)
     private var _duration by mutableStateOf(Duration.ZERO)
+    private var _chapters by mutableStateOf(emptyList<MediaChapter>())
     private var _progress by mutableStateOf(0f)
     override var sliderPos: Float
         get() = _progress * VideoPlayerState.SLIDER_SCALE
@@ -520,6 +522,7 @@ class WindowsVideoPlayerState(
     override val currentTime: Duration get() = _currentTime
     override val preciseCurrentTime: Duration get() = _currentTime
     override val duration: Duration get() = _duration
+    override val chapters: List<MediaChapter> get() = _chapters
     private var errorMessage: String? by mutableStateOf(null)
 
     // Fullscreen state
@@ -799,6 +802,7 @@ class WindowsVideoPlayerState(
         lifecycle.launchSourceOperation(
             onScheduled = {
                 clearDesktopAssSubtitleRenderer()
+                _chapters = emptyList()
                 lastUri = uri
                 lastRequestHeaders = sanitizedHeaders
                 _playbackSpeed = 1.0f
@@ -902,6 +906,7 @@ class WindowsVideoPlayerState(
                     } else {
                         containerProbe
                     }
+                _chapters = sourceProbe.chapters
                 val isLiveSource = normalizedUri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
                 val strictHdrRequest =
                     playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR ||
@@ -1423,6 +1428,7 @@ class WindowsVideoPlayerState(
         }
 
     private fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
+        _chapters = trackInfo.chapters
         _availableAudioTracks.removeAll { isLibVlcAudioTrackId(it.id) }
         _availableAudioTracks.addAll(trackInfo.audioStreams.map { it.track })
         currentAudioTrack =
@@ -2595,6 +2601,7 @@ class WindowsVideoPlayerState(
         _progress = 0f
         _currentTime = Duration.ZERO
         _duration = Duration.ZERO
+        _chapters = emptyList()
         _metadata = VideoMetadata()
         isLoading = false
         errorMessage = null

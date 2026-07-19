@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
 import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
@@ -56,6 +57,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
     protected var _isFullscreen by mutableStateOf(false)
     protected var _currentTime by mutableStateOf(Duration.ZERO)
     protected var _duration by mutableStateOf(Duration.ZERO)
+    protected var _chapters by mutableStateOf(emptyList<MediaChapter>())
     protected var _aspectRatio by mutableStateOf(DEFAULT_ASPECT_RATIO)
     protected var _error by mutableStateOf<VideoPlayerError?>(null)
     protected var _currentAudioTrack by mutableStateOf<AudioTrack?>(null)
@@ -87,6 +89,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
     final override val error: VideoPlayerError? get() = _error
     final override val currentTime: Duration get() = _currentTime
     final override val duration: Duration get() = _duration
+    final override val chapters: List<MediaChapter> get() = _chapters
     final override val positionText: String get() = _currentTime.asClockText()
     final override val durationText: String get() = _duration.asClockText()
     final override val aspectRatio: Float get() = _aspectRatio
@@ -362,6 +365,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
         _isPlaying = initializePlayerState == InitialPlayerState.PLAY
         _currentTime = Duration.ZERO
         _duration = Duration.ZERO
+        _chapters = emptyList()
         _sliderPos = 0f
         _aspectRatio = DEFAULT_ASPECT_RATIO
         clearMetadata()
@@ -401,6 +405,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
             _isSeeking = false
             _currentTime = Duration.ZERO
             _duration = Duration.ZERO
+            _chapters = emptyList()
             _sliderPos = 0f
             _aspectRatio = DEFAULT_ASPECT_RATIO
             clearMetadata()
@@ -464,6 +469,12 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
             _subtitlesEnabled = selectedSubtitle != null
             renderingInfo.subtitleSource =
                 selectedSubtitle?.let { track -> if (track.isEmbedded) "embedded" else "external" }
+        }
+    }
+
+    protected fun replaceDiscoveredChapters(chapters: List<MediaChapter>) {
+        Snapshot.withMutableSnapshot {
+            _chapters = chapters
         }
     }
 

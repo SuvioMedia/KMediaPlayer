@@ -11,6 +11,8 @@ package io.github.kdroidfilter.composemediaplayer
 import io.github.kdroidfilter.composemediaplayer.mac.MacMatroskaAssExtractor
 import io.github.kdroidfilter.composemediaplayer.mac.MacMatroskaProbeInfo
 import io.github.kdroidfilter.composemediaplayer.mac.MacMatroskaTrack
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 internal object JvmLibVlcMediaProbe {
     fun probe(
@@ -56,10 +58,33 @@ internal object JvmLibVlcMediaProbe {
     private fun probeWithBuiltInMatroskaReader(
         uri: String,
         requestHeaders: Map<String, String>,
-    ): JvmLibVlcTrackInfo =
-        runCatching {
-            MacMatroskaAssExtractor.probe(uri, requestHeaders)?.toLibVlcTrackInfo()
-        }.getOrNull() ?: JvmLibVlcTrackInfo()
+    ): JvmLibVlcTrackInfo {
+        val containerInfo =
+            runCatching {
+                MacMatroskaAssExtractor.probe(uri, requestHeaders)?.toLibVlcTrackInfo()
+            }.getOrNull() ?: JvmLibVlcTrackInfo()
+        val fallback =
+            runCatching {
+                JvmMediaChapterProbe.probe(uri, requestHeaders)
+            }.getOrNull() ?: return containerInfo
+        if (fallback.rows.isEmpty()) return containerInfo
+
+        val durationSeconds =
+            containerInfo.durationSeconds
+                ?: fallback.durationMs?.div(1_000.0)
+        val fallbackChapters =
+            normalizeMediaChapters(
+                rows = fallback.rows,
+                mediaDuration =
+                    durationSeconds
+                        ?.takeIf { it.isFinite() && it > 0.0 }
+                        ?.seconds ?: Duration.ZERO,
+            )
+        return containerInfo.copy(
+            durationSeconds = durationSeconds,
+            chapters = containerInfo.chapters.ifEmpty { fallbackChapters },
+        )
+    }
 
     private fun MacMatroskaProbeInfo.toLibVlcTrackInfo(): JvmLibVlcTrackInfo {
         val audioTracks = tracks.filter { it.isAudio() }
@@ -104,6 +129,20 @@ internal object JvmLibVlcMediaProbe {
                             ),
                     )
                 },
+            chapters =
+                normalizeMediaChapters(
+                    rows =
+                        chapters.map { chapter ->
+                            RawMediaChapter(
+                                startMs = chapter.startMs,
+                                endMs = chapter.endMs,
+                                title = chapter.title,
+                                language = chapter.language,
+                                isHidden = chapter.isHidden,
+                            )
+                        },
+                    mediaDuration = durationSeconds?.seconds ?: Duration.ZERO,
+                ),
         )
     }
 
@@ -445,6 +484,7 @@ internal data class JvmLibVlcTrackInfo(
     val videoColorInfo: VideoColorInfo = VideoColorInfo(),
     val audioStreams: List<JvmLibVlcAudioStream> = emptyList(),
     val subtitleStreams: List<JvmLibVlcSubtitleStream> = emptyList(),
+    val chapters: List<MediaChapter> = emptyList(),
 )
 
 internal data class JvmLibVlcAudioStream(
