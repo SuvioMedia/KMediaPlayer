@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import io.github.kdroidfilter.composemediaplayer.BackendVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerBackend
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.inspectMpvBackend
@@ -14,6 +15,8 @@ fun publishedBackends(options: MpvPlaybackOptions = MpvPlaybackOptions()): List<
 
 fun publishedMpvAvailability(options: MpvPlaybackOptions = MpvPlaybackOptions()): MpvBackendAvailability =
     inspectMpvBackend(options)
+
+fun applicationSuppliedMpvOptions(): MpvPlaybackOptions = MpvPlaybackOptions(runtimeSource = MpvRuntimeSource.System)
 
 @Composable
 fun PublishedMpvSurface(playerState: VideoPlayerState) {

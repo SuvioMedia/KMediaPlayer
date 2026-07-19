@@ -79,7 +79,7 @@ class AbstractMpvVideoPlayerStateTest {
 
         state.clearExternalSubtitleTracks()
 
-        assertEquals(listOf(embedded), state.availableSubtitleTracks)
+        assertEquals(listOf(embedded), state.availableSubtitleTracks.toList())
         assertFalse(state.subtitlesEnabled)
         assertEquals(listOf(external), state.removedExternalSubtitles)
     }

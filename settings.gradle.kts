@@ -132,6 +132,8 @@ dependencyResolutionManagement {
                 includeModule("io.github.shusek", "composemediaplayer-kmediabridge-jvm")
                 includeModule("io.github.shusek", "composemediaplayer-mpv")
                 includeModule("io.github.shusek", "composemediaplayer-mpv-android")
+                includeModule("io.github.shusek", "composemediaplayer-mpv-iosarm64")
+                includeModule("io.github.shusek", "composemediaplayer-mpv-iossimulatorarm64")
                 includeModule("io.github.shusek", "composemediaplayer-mpv-jvm")
             }
         }

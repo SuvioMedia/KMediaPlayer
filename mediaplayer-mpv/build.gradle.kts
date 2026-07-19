@@ -1,9 +1,13 @@
+import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.file.Directory
+import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 import java.io.DataInputStream
 import java.util.zip.ZipFile
+import org.gradle.jvm.tasks.Jar as JvmJar
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -24,6 +28,52 @@ val releaseSigningEnabled =
         .gradleProperty("releaseSigningEnabled")
         .map(String::toBoolean)
         .getOrElse(false)
+val appleMpvNativeDirectory = layout.projectDirectory.dir("native/apple")
+val iosArm64MpvBridge = layout.buildDirectory.dir("generated/appleMpvBridge/ios-arm64")
+val iosSimulatorArm64MpvBridge =
+    layout.buildDirectory.dir("generated/appleMpvBridge/ios-simulator-arm64")
+val skipAppleMpvBridgeBuild =
+    providers
+        .gradleProperty("composeMediaPlayer.skipMpvAppleNativeBuild")
+        .orElse(providers.gradleProperty("composeMediaPlayer.skipNativeBuild"))
+        .orElse(providers.environmentVariable("COMPOSE_MEDIA_PLAYER_SKIP_NATIVE_BUILD"))
+        .map { it.equals("true", ignoreCase = true) }
+        .getOrElse(false)
+val canBuildAppleMpvBridge = Os.isFamily(Os.FAMILY_MAC) && !skipAppleMpvBridgeBuild
+
+fun registerAppleMpvBridgeBuild(
+    taskName: String,
+    target: String,
+    outputDirectory: Provider<Directory>,
+) = tasks.register<Exec>(taskName) {
+    description = "Builds the libmpv dynamic-loader bridge for $target."
+    group = "build"
+    enabled = canBuildAppleMpvBridge
+    workingDir(layout.projectDirectory)
+    commandLine(
+        "bash",
+        appleMpvNativeDirectory.file("build-bridge.sh").asFile.absolutePath,
+        target,
+        outputDirectory.get().asFile.absolutePath,
+    )
+    inputs.file(appleMpvNativeDirectory.file("build-bridge.sh"))
+    inputs.file(appleMpvNativeDirectory.file("ComposeMediaPlayerMpvBridge.c"))
+    inputs.file(appleMpvNativeDirectory.file("include/ComposeMediaPlayerMpvBridge.h"))
+    outputs.file(outputDirectory.map { it.file("libcomposemediaplayer_mpv_bridge.a") })
+}
+
+val buildIosArm64MpvBridge =
+    registerAppleMpvBridgeBuild(
+        taskName = "buildIosArm64MpvBridge",
+        target = "ios-arm64",
+        outputDirectory = iosArm64MpvBridge,
+    )
+val buildIosSimulatorArm64MpvBridge =
+    registerAppleMpvBridgeBuild(
+        taskName = "buildIosSimulatorArm64MpvBridge",
+        target = "ios-simulator-arm64",
+        outputDirectory = iosSimulatorArm64MpvBridge,
+    )
 
 group = projectGroup
 version = projectVersion
@@ -52,6 +102,22 @@ kotlin {
         }
     }
 
+    listOf(
+        iosArm64() to iosArm64MpvBridge,
+        iosSimulatorArm64() to iosSimulatorArm64MpvBridge,
+    ).forEach { (target, bridgeOutput) ->
+        target.compilations.getByName("main") {
+            cinterops.create("appleMpv") {
+                defFile(project.file("src/nativeInterop/cinterop/appleMpv.def"))
+                includeDirs.headerFilterOnly(appleMpvNativeDirectory.dir("include").asFile)
+                extraOpts(
+                    "-libraryPath",
+                    bridgeOutput.get().asFile.absolutePath,
+                )
+            }
+        }
+    }
+
     sourceSets {
         commonMain.dependencies {
             api(project(":mediaplayer-core"))
@@ -76,7 +142,28 @@ kotlin {
         jvmTest.dependencies {
             implementation(kotlin("test-junit"))
         }
+        iosMain.dependencies {
+            implementation(libs.compose.ui)
+            implementation(libs.kotlinx.coroutines.core)
+        }
+        iosTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
+        }
     }
+}
+
+tasks.matching { it.name.startsWith("link") && it.name.endsWith("IosArm64") }.configureEach {
+    dependsOn(buildIosArm64MpvBridge)
+}
+tasks.matching { it.name.startsWith("link") && it.name.endsWith("IosSimulatorArm64") }.configureEach {
+    dependsOn(buildIosSimulatorArm64MpvBridge)
+}
+tasks.matching { it.name == "cinteropAppleMpvIosArm64" }.configureEach {
+    dependsOn(buildIosArm64MpvBridge)
+}
+tasks.matching { it.name == "cinteropAppleMpvIosSimulatorArm64" }.configureEach {
+    dependsOn(buildIosSimulatorArm64MpvBridge)
 }
 
 val java25ClassFileVersion = 69
@@ -151,7 +238,7 @@ mavenPublishing {
 
     pom {
         name.set("Compose Media Player MPV Backend")
-        description.set("Optional MPV backend for Compose Media Player on Android ARM and supported desktop targets.")
+        description.set("Optional MPV backend for Compose Media Player on Android, iOS, Linux, macOS, and Windows.")
         inceptionYear.set("2025")
         url.set("https://github.com/Shusek/KMediaPlayer")
 
@@ -210,3 +297,20 @@ tasks.configureEach {
         dependsOn(validateReleaseVersion)
     }
 }
+
+tasks
+    .withType<JvmJar>()
+    .matching {
+        it.name == "sourcesJar" ||
+            (it.name.startsWith("ios", ignoreCase = true) && it.name.endsWith("SourcesJar"))
+    }.configureEach {
+        from(layout.projectDirectory.dir("src/commonMain/resources/META-INF")) {
+            into("META-INF")
+        }
+        from(appleMpvNativeDirectory) {
+            into("native/apple")
+        }
+        from(layout.projectDirectory.dir("src/nativeInterop/cinterop")) {
+            into("nativeInterop/cinterop")
+        }
+    }

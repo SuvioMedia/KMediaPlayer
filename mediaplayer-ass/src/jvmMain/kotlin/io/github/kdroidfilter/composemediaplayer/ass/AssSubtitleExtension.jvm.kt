@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.ass
 
+import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitleFont
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitlePipelineExtension
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitleRenderer
@@ -12,7 +13,9 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 
-actual class AssSubtitleExtension actual constructor() : DesktopSubtitlePipelineExtension {
+actual class AssSubtitleExtension actual constructor(
+    @Suppress("UNUSED_PARAMETER") config: AssSubtitleRendererConfig,
+) : DesktopSubtitlePipelineExtension {
     actual override val id: String = ID
 
     actual override val availability: VideoPipelineExtensionAvailability

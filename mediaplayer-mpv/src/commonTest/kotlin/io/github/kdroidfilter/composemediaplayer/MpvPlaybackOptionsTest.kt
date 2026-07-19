@@ -15,6 +15,7 @@ class MpvPlaybackOptionsTest {
             MpvPlaybackOptions.DEFAULT_MAX_DESKTOP_RENDER_PIXELS,
             options.maxDesktopRenderPixels,
         )
+        assertEquals(MpvRuntimeSource.Bundled, options.runtimeSource)
     }
 
     @Test

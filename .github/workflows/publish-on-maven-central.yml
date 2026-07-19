@@ -183,6 +183,7 @@ jobs:
           -PpublicationVersion="$RELEASE_VERSION"
           -PgithubPagesMavenRepository="$RUNNER_TEMP/gh-pages/maven"
           -PcomposeMediaPlayer.skipNativeBuild=true
+          -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
           --no-configuration-cache --no-daemon
 
@@ -221,10 +222,24 @@ jobs:
             composemediaplayer-core
             composemediaplayer
             composemediaplayer-mpv
+            composemediaplayer-mpv-iosarm64
+            composemediaplayer-mpv-iossimulatorarm64
           )
           for artifact_id in "${expected_coordinates[@]}"; do
             pom="$repository/io/github/shusek/$artifact_id/$RELEASE_VERSION/$artifact_id-$RELEASE_VERSION.pom"
             test -s "$pom" || { echo "Missing staged coordinate: io.github.shusek:$artifact_id:$RELEASE_VERSION" >&2; exit 1; }
+          done
+
+          mpv_artifacts=(
+            composemediaplayer-mpv
+            composemediaplayer-mpv-android
+            composemediaplayer-mpv-iosarm64
+            composemediaplayer-mpv-iossimulatorarm64
+            composemediaplayer-mpv-jvm
+          )
+          for artifact in "${mpv_artifacts[@]}"; do
+            pom="$repository/io/github/shusek/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom"
+            test -s "$pom" || { echo "Missing staged MPV coordinate: $artifact:$RELEASE_VERSION" >&2; exit 1; }
           done
 
           extension_api_artifacts=(
@@ -380,6 +395,7 @@ jobs:
           -PpublicationVersion="$RELEASE_VERSION"
           -PreleaseSigningEnabled=true
           -PcomposeMediaPlayer.skipNativeBuild=true
+          -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
           --no-configuration-cache --no-daemon
         env:

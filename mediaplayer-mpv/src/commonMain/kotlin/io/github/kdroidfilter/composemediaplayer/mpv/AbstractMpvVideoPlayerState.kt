@@ -31,7 +31,7 @@ import kotlin.time.Duration
 /**
  * Shared observable state and command semantics for MPV platform adapters.
  *
- * Android and desktop keep only native source resolution, runtime polling and rendering.
+ * Android, iOS, and desktop keep only native source resolution, runtime polling and rendering.
  * This class deliberately contains no KMediaMpv or libmpv types, which keeps the common
  * adapter contract testable without loading a native runtime.
  */

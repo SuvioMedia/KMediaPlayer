@@ -501,7 +501,7 @@ kotlin {
             implementation(libs.kotlinx.browser)
             implementation(libs.compose.foundation)
             implementation(libs.compose.ui)
-            implementation(npm("jassub", "2.5.1"))
+            implementation(npm("jassub", "2.5.7"))
         }
         wasmJsTest.dependencies {
             implementation(kotlin("test"))

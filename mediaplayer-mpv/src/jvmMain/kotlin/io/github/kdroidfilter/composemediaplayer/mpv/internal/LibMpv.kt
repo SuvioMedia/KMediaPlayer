@@ -437,7 +437,7 @@ internal class LibMpvLibrary private constructor(
                     },
                 guidance =
                     "No compatible user-provided libmpv was found. Install or build libmpv separately, " +
-                        "then pass an absolute path with MpvLibrarySource.ExplicitPath.",
+                        "then pass an absolute path with MpvRuntimeSource.ExplicitPath.",
             )
         }
 

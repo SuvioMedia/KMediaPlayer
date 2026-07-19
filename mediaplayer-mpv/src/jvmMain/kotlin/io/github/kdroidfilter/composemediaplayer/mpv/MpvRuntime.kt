@@ -24,7 +24,7 @@ internal sealed interface MpvLibrarySource {
         init {
             require(name.isNotBlank()) { "The libmpv system-library name must not be blank." }
             require('/' !in name && '\\' !in name) {
-                "Use MpvLibrarySource.ExplicitPath for a filesystem path."
+                "Use MpvRuntimeSource.ExplicitPath for a filesystem path."
             }
         }
     }
@@ -161,7 +161,9 @@ internal fun resolveMpvRuntime(
     if (!isMpvDesktopPlatformSupported(osName, architecture)) {
         throw MpvRuntimeResolutionFailure(
             reason = MpvUnavailableReason.UNSUPPORTED_PLATFORM,
-            guidance = "The MPV backend on macOS requires Apple Silicon (arm64).",
+            guidance =
+                "The MPV desktop backend supports Linux x86_64/ARM64, macOS ARM64, " +
+                    "and Windows x86_64.",
         )
     }
     return when (val source = config.librarySource) {
@@ -181,7 +183,8 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
             reason = MpvUnavailableReason.UNSUPPORTED_PLATFORM,
             guidance =
                 "The bundled KMediaMpv runtime does not support this desktop. " +
-                    "Supported targets are Linux x86_64/ARM64 and macOS ARM64.",
+                    "Use MpvRuntimeSource.System or ExplicitPath with an application-supplied " +
+                    "libmpv on Windows x86_64. Bundled targets are Linux x86_64/ARM64 and macOS ARM64.",
         )
     }
 
@@ -220,7 +223,8 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
             guidance =
                 if (reason == MpvUnavailableReason.UNSUPPORTED_PLATFORM) {
                     "The bundled KMediaMpv runtime does not support this desktop. " +
-                        "Supported targets are Linux x86_64/ARM64 and macOS ARM64."
+                        "Use MpvRuntimeSource.System or ExplicitPath with an application-supplied " +
+                        "libmpv on Windows x86_64. Bundled targets are Linux x86_64/ARM64 and macOS ARM64."
                 } else {
                     "The bundled KMediaMpv runtime was rejected (${failure.reason().name})."
                 },
@@ -247,7 +251,7 @@ internal fun isBundledMpvDesktopSupported(
     ) ||
         (
             normalizedOsName.contains("linux") &&
-                normalizedArchitecture in setOf("amd64", "x86_64", "aarch64", "arm64")
+                normalizedArchitecture in setOf("amd64", "x86_64", "x86-64", "x64", "aarch64", "arm64")
         )
 }
 
@@ -256,8 +260,16 @@ internal fun isMpvDesktopPlatformSupported(
     architecture: String,
 ): Boolean {
     val normalizedOsName = osName.lowercase()
-    if (!normalizedOsName.contains("mac") && !normalizedOsName.contains("darwin")) return true
-    return architecture.lowercase() in setOf("aarch64", "arm64")
+    val normalizedArchitecture = architecture.lowercase()
+    return when {
+        normalizedOsName.contains("mac") || normalizedOsName.contains("darwin") ->
+            normalizedArchitecture in setOf("aarch64", "arm64")
+        normalizedOsName.contains("win") ->
+            normalizedArchitecture in setOf("amd64", "x86_64", "x86-64", "x64")
+        normalizedOsName.contains("linux") ->
+            normalizedArchitecture in setOf("amd64", "x86_64", "x86-64", "x64", "aarch64", "arm64")
+        else -> false
+    }
 }
 
 internal fun MpvRuntimeException.Reason.toMpvUnavailableReason(): MpvUnavailableReason =

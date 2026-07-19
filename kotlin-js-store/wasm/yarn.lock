@@ -17,10 +17,10 @@ hls.js@1.6.16:
   resolved "https://registry.yarnpkg.com/hls.js/-/hls.js-1.6.16.tgz#e2e7e79b68357cb3f8aa82dec0a36c9c2701f5c0"
   integrity sha512-VSIRpLfRwlAAdGL4wiTucx2ScRipo0ed1FBatWkyt832jC4CReKstga6yIhYVwGu9LOBjuX9wzmRMeQdBJtzEA==
 
-jassub@2.5.1:
-  version "2.5.1"
-  resolved "https://registry.yarnpkg.com/jassub/-/jassub-2.5.1.tgz#dea0b9df4f521d11545bb7924b3daa272a599f3d"
-  integrity sha512-cQrQa42zfhNCBcNsYfep8E9acLW66PP87M3ZiNyWPEUyj4JBGhi7buf6aOhUbkNRkHe9iA+TNTZms0JJcS7zIA==
+jassub@2.5.7:
+  version "2.5.7"
+  resolved "https://registry.yarnpkg.com/jassub/-/jassub-2.5.7.tgz#01418b282f1fefeb570a86eb7735d9879e4b1a05"
+  integrity sha512-ynn0D65lsQwkBhnTi7WqJ7upy7jHMq+ePP637rI2x7cQYVJlsG8zrAacP5DCq9nO+W3lY0IXRT2VzjBwSpHzWA==
   dependencies:
     abslink "^1.2.2"
     lfa-ponyfill "^1.1.0"

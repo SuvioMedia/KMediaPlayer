@@ -2,6 +2,8 @@ package io.github.kdroidfilter.composemediaplayer.mpv
 
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableReason
+import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
 import io.github.kdroidfilter.composemediaplayer.inspectMpvBackend
 import io.github.shusek.kmediampv.runtime.desktop.MpvRuntimeException
 import java.nio.file.Files
@@ -33,6 +35,7 @@ class MpvRuntimeTest {
     @Test
     fun bundledDesktopMatrixRejectsPlatformsWithoutPublishedPayloads() {
         assertTrue(isBundledMpvDesktopSupported("Linux", "amd64"))
+        assertTrue(isBundledMpvDesktopSupported("Linux", "x64"))
         assertTrue(isBundledMpvDesktopSupported("Linux", "aarch64"))
         assertTrue(isBundledMpvDesktopSupported("Mac OS X", "arm64"))
 
@@ -46,6 +49,9 @@ class MpvRuntimeTest {
         assertTrue(isMpvDesktopPlatformSupported("Mac OS X", "arm64"))
         assertFalse(isMpvDesktopPlatformSupported("Mac OS X", "x86_64"))
         assertTrue(isMpvDesktopPlatformSupported("Linux", "x86_64"))
+        assertTrue(isMpvDesktopPlatformSupported("Windows 11", "amd64"))
+        assertFalse(isMpvDesktopPlatformSupported("Windows 11", "aarch64"))
+        assertFalse(isMpvDesktopPlatformSupported("FreeBSD", "amd64"))
 
         val failure =
             assertFailsWith<MpvRuntimeResolutionFailure> {
@@ -59,6 +65,47 @@ class MpvRuntimeTest {
                 )
             }
         assertEquals(MpvUnavailableReason.UNSUPPORTED_PLATFORM, failure.reason)
+    }
+
+    @Test
+    fun windowsIsAValidExternalRuntimeTargetWithoutPretendingItIsBundled() {
+        assertFalse(isBundledMpvDesktopSupported("Windows 11", "amd64"))
+        assertTrue(isMpvDesktopPlatformSupported("Windows 11", "amd64"))
+
+        val missingLibrary =
+            Path
+                .of(System.getProperty("java.io.tmpdir"))
+                .resolve("missing-windows-libmpv-${UUID.randomUUID()}.dll")
+                .toAbsolutePath()
+        val availability =
+            MpvRuntime.inspect(
+                MpvRuntimeConfig(
+                    librarySource = MpvLibrarySource.ExplicitPath(missingLibrary),
+                ),
+            )
+
+        val unavailable = assertIs<MpvRuntimeAvailability.Unavailable>(availability)
+        assertEquals(MpvUnavailableReason.LIBRARY_NOT_FOUND, unavailable.reason)
+    }
+
+    @Test
+    fun publicRuntimeSourceValidatesExplicitPaths() {
+        assertFailsWith<IllegalArgumentException> {
+            MpvRuntimeSource.ExplicitPath(" ")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            MpvRuntimeSource.ExplicitPath("/tmp/libmpv\u0000.dylib")
+        }
+        val unavailable =
+            inspectMpvBackend(
+                MpvPlaybackOptions(
+                    runtimeSource = MpvRuntimeSource.ExplicitPath("relative-libmpv"),
+                ),
+            )
+        assertEquals(
+            MpvBackendUnavailableReason.INVALID_RUNTIME,
+            assertIs<MpvBackendAvailability.Unavailable>(unavailable).reason,
+        )
     }
 
     @Test

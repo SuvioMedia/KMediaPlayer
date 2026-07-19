@@ -26,8 +26,9 @@ Backend and extension implementations never depend on the default player:
 - `composemediaplayer-ass`, `composemediaplayer-dolbyvision`, and
   `composemediaplayer-kmediabridge` implement extension contracts directly.
   They can be compiled and published without the default player.
-- `composemediaplayer-mpv` owns the optional Android/JVM adapter and depends
-  directly on the matching KMediaMpv runtime.
+- `composemediaplayer-mpv` owns the optional Android/iOS/JVM adapter. Android
+  and the bundled Linux/macOS path depend directly on the matching KMediaMpv
+  runtime; Windows and iOS accept an application-supplied native runtime.
 
 The `verifyBackendModuleBoundaries` Gradle task rejects a dependency from the
 default player to MPV or KMediaBridge/FFmpeg, from an extension implementation
@@ -60,6 +61,11 @@ default player closes when the source is replaced or the player is disposed.
 This prevents one extension instance from coupling the lifetime of multiple
 players.
 
+Browser subtitle extensions can keep implementing the original
+`WebSubtitlePipelineExtension.SubtitleOverlay` overload. Extensions that need exact projection and
+`ContentScale` geometry should also override the overload that receives `displayElement` and
+`contentScale`; the default implementation delegates to the original hook for source compatibility.
+
 The isolated extension consumer test resolves published ASS, Dolby Vision, and
 KMediaBridge coordinates plus the extension API while deliberately excluding
 `composemediaplayer`. It fails if the default player appears on the runtime
@@ -87,7 +93,8 @@ An application that uses only an optional backend can omit
 `composemediaplayer` entirely and render through `BackendVideoPlayerSurface`
 from core. The isolated MPV consumer test is intentionally compiled with only
 the published `composemediaplayer-mpv` coordinate; its transitive graph contains
-core and KMediaMpv, but no default-player implementation.
+core and the platform runtime where one is published, but no default-player
+implementation.
 
 ## Implementing another backend
 
@@ -114,20 +121,32 @@ runtime types out of its public ABI.
 
 `AbstractMpvVideoPlayerState` contains the shared state machine, value
 normalization, seek semantics, source lifecycle, events, metadata, callbacks,
-and audio/subtitle bookkeeping. Android and desktop implementations retain only
-native source resolution, runtime commands/events, polling, and rendering.
+and audio/subtitle bookkeeping. Android, iOS, and desktop implementations retain
+only native source resolution, runtime commands/events, polling, and rendering.
 
-The adapter is published only for Android and JVM. Its KMediaMpv runtime
-supports Android API 28+ on `arm64-v8a` and `armeabi-v7a`, Linux x86_64/ARM64,
-and macOS ARM64. Android x86/x86_64 and macOS x86_64 are not release targets.
+The adapter publishes Android, JVM, `iosArm64`, and `iosSimulatorArm64`
+variants. Its verified KMediaMpv runtime supports Android API 28+ on
+`arm64-v8a` and `armeabi-v7a`, Linux x86_64/ARM64, and macOS ARM64.
+Application-supplied mode adds Windows x86_64 and iOS ARM64. Android
+x86/x86_64, macOS x86_64, Windows ARM64, and Intel iOS simulators are not
+release targets.
+
+The iOS variant links only a small dynamic-loader bridge into the KLIB. It
+resolves libmpv symbols from a code-signed framework already linked or embedded
+by the application. This keeps signing and App Store packaging under the
+application's control and avoids an invalid extract-and-load design inside the
+iOS sandbox.
 
 ## Distribution and licensing boundary
 
 The core, extension API, default player, and adapters use this repository's license. The
 separately published KMediaMpv runtime is the boundary that carries the native
-license notices, corresponding source, and recipient relinking materials. The
-adapter consumes that runtime as a normal transitive dependency; it does not
-copy the native payload or relicense the application-facing contracts.
+license notices, corresponding source, and recipient relinking materials where
+the bundled runtime is available. The adapter consumes that runtime as a normal
+transitive dependency; it does not copy the native payload or relicense the
+application-facing contracts. An application-supplied Windows/iOS libmpv
+runtime remains the application's distribution and license-compliance
+responsibility.
 
 KMediaBridge follows the same separation: the KMediaPlayer adapter owns only
 the extension-facing API and translation layer. The separately published

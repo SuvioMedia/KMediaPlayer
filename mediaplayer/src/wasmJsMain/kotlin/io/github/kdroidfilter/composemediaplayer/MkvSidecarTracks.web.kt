@@ -10,11 +10,13 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.w3c.dom.HTMLScriptElement
 import org.w3c.dom.HTMLVideoElement
 import kotlin.js.ExperimentalWasmJsInterop
+import kotlin.js.JsAny
 import kotlin.js.js
 import kotlin.time.Duration.Companion.seconds
 
 private const val MATROSKA_SUBTITLES_SCRIPT_ID = "compose-media-player-matroska-subtitles"
 private const val MKV_TRACK_PROBE_RANGE_HEADER = "bytes=0-65535"
+private const val MKV_FONT_FILES_CHANGED_EVENT = "composemediaplayer:mkv-fonts-changed"
 private val MATROSKA_SCRIPT_LOAD_TIMEOUT = 15.seconds
 
 internal const val MKV_AUDIO_TRACK_ID_PREFIX = "mkv:audio:"
@@ -64,6 +66,7 @@ internal suspend fun HTMLVideoElement.configureMkvSidecarTracks(
         onWarning = { message ->
             webVideoLogger.w { message }
         },
+        storeFontAttachment = ::storeMkvFontAttachment,
     )
 }
 
@@ -151,6 +154,7 @@ private fun startMkvSidecarProbe(
     onTracksChanged: () -> Unit,
     onTracksChangedError: (String) -> Unit,
     onWarning: (String) -> Unit,
+    storeFontAttachment: (HTMLVideoElement, JsAny, String, JsAny) -> String,
 ): Unit =
     js(
         """
@@ -195,6 +199,9 @@ private fun startMkvSidecarProbe(
                     try { URL.revokeObjectURL(url); } catch (_) {}
                 });
             }
+            const hadMkvFontFiles =
+                Array.isArray(video.__composeMediaPlayerMkvFontFiles) &&
+                video.__composeMediaPlayerMkvFontFiles.length > 0;
 
             const abort = new AbortController();
             video.__composeMediaPlayerMkvAbort = abort;
@@ -207,6 +214,13 @@ private fun startMkvSidecarProbe(
             video.__composeMediaPlayerMkvSelectedSubtitleTrackId = "";
             video.__composeMediaPlayerMkvSourceUri = sourceUri;
             video.__composeMediaPlayerMkvExtractingSubtitleTrackId = "";
+            video.__composeMediaPlayerMkvFontFiles = [];
+            video.__composeMediaPlayerMkvFontFileMetadata = [];
+            video.__composeMediaPlayerMkvFontFileKeys = new Set();
+            video.__composeMediaPlayerMkvFontTotalBytes = 0;
+            if (hadMkvFontFiles) {
+                try { video.dispatchEvent(new Event("${MKV_FONT_FILES_CHANGED_EVENT}")); } catch (_) {}
+            }
             if (video.__composeMediaPlayerMkvExtractAbort) {
                 try { video.__composeMediaPlayerMkvExtractAbort.abort(); } catch (_) {}
                 video.__composeMediaPlayerMkvExtractAbort = null;
@@ -844,6 +858,10 @@ private fun startMkvSubtitleExtraction(
                     target.language = fresh.language || target.language;
                 }
             });
+            parser.on("file", function(file) {
+                const warning = storeFontAttachment(video, file, sourceUri, extractAbort);
+                if (warning) warn("MKV font attachment", warning);
+            });
             parser.on("subtitle", function(subtitle, trackNumber) {
                 if (String(trackNumber) !== targetNumber) return;
                 const end = subtitle.time + subtitle.duration;
@@ -912,6 +930,171 @@ private fun startMkvSubtitleExtraction(
         """,
     )
 
+@Suppress("LongMethod", "UNUSED_PARAMETER")
+internal fun storeMkvFontAttachment(
+    video: HTMLVideoElement,
+    file: JsAny,
+    sourceUri: String,
+    extractAbort: JsAny,
+): String =
+    js(
+        """
+        (function() {
+            if (
+                !file ||
+                !extractAbort ||
+                !extractAbort.signal ||
+                extractAbort.signal.aborted ||
+                video.__composeMediaPlayerMkvExtractAbort !== extractAbort ||
+                video.__composeMediaPlayerMkvSourceUri !== sourceUri
+            ) {
+                return "";
+            }
+
+            const filename = String(file.filename || "").trim();
+            const displayName = filename || "unnamed font";
+            const cleanFilename = filename.split(/[?#]/, 1)[0].toLowerCase();
+            const mimetype = String(file.mimetype || "")
+                .split(";", 1)[0]
+                .trim()
+                .toLowerCase();
+            const extensionMatch = /\.([^.\/\\]+)$/.exec(cleanFilename);
+            const extension = extensionMatch ? extensionMatch[1] : "";
+            const fontExtensions = new Set(["ttf", "otf", "ttc", "woff", "woff2"]);
+            const fontMimetypes = new Set([
+                "font/ttf",
+                "font/otf",
+                "font/sfnt",
+                "font/collection",
+                "font/woff",
+                "font/woff2",
+                "application/font-sfnt",
+                "application/font-woff",
+                "application/font-woff2",
+                "application/vnd.ms-opentype",
+                "application/x-font-ttf",
+                "application/x-font-truetype",
+                "application/x-truetype-font",
+                "application/x-font-opentype",
+                "application/x-font-otf",
+                "application/x-font-ttc",
+                "application/x-font-collection",
+                "application/x-font-woff",
+                "application/x-font-woff2",
+                "application/x-woff"
+            ]);
+            const genericMimetypes = new Set([
+                "",
+                "application/octet-stream",
+                "binary/octet-stream",
+                "application/x-binary",
+                "application/unknown",
+                "unknown/unknown"
+            ]);
+            if (
+                !fontMimetypes.has(mimetype) &&
+                !(fontExtensions.has(extension) && genericMimetypes.has(mimetype))
+            ) {
+                return "";
+            }
+
+            try {
+                const data = file.data;
+                if (!(data instanceof Uint8Array)) {
+                    return displayName + " has invalid binary data";
+                }
+
+                const size = data.byteLength;
+                const maxFontBytes = 16 * 1024 * 1024;
+                const maxTotalFontBytes = 32 * 1024 * 1024;
+                const maxFontFiles = 64;
+                if (!Number.isFinite(size) || size <= 0) {
+                    return displayName + " is empty";
+                }
+                if (size > maxFontBytes) {
+                    return displayName + " exceeds the 16 MiB per-font limit";
+                }
+
+                const fontFiles =
+                    Array.isArray(video.__composeMediaPlayerMkvFontFiles)
+                        ? video.__composeMediaPlayerMkvFontFiles
+                        : [];
+                const fontMetadata =
+                    Array.isArray(video.__composeMediaPlayerMkvFontFileMetadata)
+                        ? video.__composeMediaPlayerMkvFontFileMetadata
+                        : [];
+                const fontKeys =
+                    video.__composeMediaPlayerMkvFontFileKeys instanceof Set
+                        ? video.__composeMediaPlayerMkvFontFileKeys
+                        : new Set();
+                const totalBytes =
+                    Number.isFinite(video.__composeMediaPlayerMkvFontTotalBytes)
+                        ? Math.max(0, video.__composeMediaPlayerMkvFontTotalBytes)
+                        : 0;
+                const key = cleanFilename + "\n" + mimetype + "\n" + size;
+                if (fontKeys.has(key)) {
+                    for (let index = 0; index < fontMetadata.length; index += 1) {
+                        const metadata = fontMetadata[index];
+                        const existingData = fontFiles[index];
+                        const existingFilename =
+                            metadata
+                                ? String(metadata.filename || "").trim().split(/[?#]/, 1)[0].toLowerCase()
+                                : "";
+                        const existingMimetype =
+                            metadata
+                                ? String(metadata.mimetype || "").split(";", 1)[0].trim().toLowerCase()
+                                : "";
+                        if (
+                            !metadata ||
+                            existingFilename !== cleanFilename ||
+                            existingMimetype !== mimetype ||
+                            Number(metadata.size) !== size ||
+                            !(existingData instanceof Uint8Array) ||
+                            existingData.byteLength !== size
+                        ) {
+                            continue;
+                        }
+                        let identical = true;
+                        for (let byteIndex = 0; byteIndex < size; byteIndex += 1) {
+                            if (existingData[byteIndex] !== data[byteIndex]) {
+                                identical = false;
+                                break;
+                            }
+                        }
+                        if (identical) return "";
+                    }
+                }
+                if (fontFiles.length >= maxFontFiles) {
+                    return "the 64-font limit has been reached";
+                }
+                if (totalBytes + size > maxTotalFontBytes) {
+                    return displayName + " exceeds the 32 MiB total font limit";
+                }
+
+                const copiedData = new Uint8Array(size);
+                copiedData.set(data);
+                fontKeys.add(key);
+                fontFiles.push(copiedData);
+                fontMetadata.push({ filename, mimetype, size });
+                video.__composeMediaPlayerMkvFontFiles = fontFiles;
+                video.__composeMediaPlayerMkvFontFileMetadata = fontMetadata;
+                video.__composeMediaPlayerMkvFontFileKeys = fontKeys;
+                video.__composeMediaPlayerMkvFontTotalBytes = totalBytes + size;
+                try {
+                    video.dispatchEvent(new Event("${MKV_FONT_FILES_CHANGED_EVENT}"));
+                } catch (error) {
+                    return "stored " + displayName + " but could not notify the renderer: " +
+                        (error && error.message ? error.message : String(error));
+                }
+                return "";
+            } catch (error) {
+                return displayName + " could not be copied: " +
+                    (error && error.message ? error.message : String(error));
+            }
+        })()
+        """,
+    )
+
 internal fun HTMLVideoElement.cancelMkvSubtitleExtraction() {
     cancelMkvSubtitleExtraction(this)
 }
@@ -953,6 +1136,9 @@ private fun destroyMkvSidecarTracks(video: HTMLVideoElement): Unit =
                     try { URL.revokeObjectURL(url); } catch (_) {}
                 });
             }
+            const hadMkvFontFiles =
+                Array.isArray(video.__composeMediaPlayerMkvFontFiles) &&
+                video.__composeMediaPlayerMkvFontFiles.length > 0;
             video.__composeMediaPlayerMkvAudioRows = "";
             video.__composeMediaPlayerMkvSubtitleRows = "";
             video.__composeMediaPlayerMkvAudioTrackData = [];
@@ -962,6 +1148,13 @@ private fun destroyMkvSidecarTracks(video: HTMLVideoElement): Unit =
             video.__composeMediaPlayerMkvSelectedSubtitleTrackId = "";
             video.__composeMediaPlayerMkvExtractingSubtitleTrackId = "";
             video.__composeMediaPlayerMkvSourceUri = "";
+            video.__composeMediaPlayerMkvFontFiles = [];
+            video.__composeMediaPlayerMkvFontFileMetadata = [];
+            video.__composeMediaPlayerMkvFontFileKeys = new Set();
+            video.__composeMediaPlayerMkvFontTotalBytes = 0;
+            if (hadMkvFontFiles) {
+                try { video.dispatchEvent(new Event("${MKV_FONT_FILES_CHANGED_EVENT}")); } catch (_) {}
+            }
         }
         """,
     )

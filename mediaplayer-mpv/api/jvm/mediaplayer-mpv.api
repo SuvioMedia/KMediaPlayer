@@ -51,17 +51,19 @@ public final class io/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions 
 	public static final field DEFAULT_MAX_DESKTOP_RENDER_PIXELS I
 	public static final field MAX_DESKTOP_RENDER_PIXELS I
 	public fun <init> ()V
-	public fun <init> (Ljava/lang/String;ZZI)V
-	public synthetic fun <init> (Ljava/lang/String;ZZIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;ZZILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;)V
+	public synthetic fun <init> (Ljava/lang/String;ZZILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component2 ()Z
 	public final fun component3 ()Z
 	public final fun component4 ()I
-	public final fun copy (Ljava/lang/String;ZZI)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;Ljava/lang/String;ZZIILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
+	public final fun component5 ()Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;
+	public final fun copy (Ljava/lang/String;ZZILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;Ljava/lang/String;ZZILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getMaxDesktopRenderPixels ()I
 	public final fun getPreserveAssStyles ()Z
+	public final fun getRuntimeSource ()Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;
 	public final fun getSubtitleFontsDirectory ()Ljava/lang/String;
 	public final fun getUseEmbeddedFonts ()Z
 	public fun hashCode ()I
@@ -82,6 +84,37 @@ public final class io/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions_
 	public static synthetic fun createMpvVideoPlayerState$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
 	public static final fun inspectMpvBackend (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability;
 	public static synthetic fun inspectMpvBackend$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/MpvRuntimeSource {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvRuntimeSource$Bundled : io/github/kdroidfilter/composemediaplayer/MpvRuntimeSource {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource$Bundled;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvRuntimeSource$ExplicitPath : io/github/kdroidfilter/composemediaplayer/MpvRuntimeSource {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource$ExplicitPath;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource$ExplicitPath;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource$ExplicitPath;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/MpvRuntimeSource$System : io/github/kdroidfilter/composemediaplayer/MpvRuntimeSource {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource$System;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/MpvVideoPlayerBackend : io/github/kdroidfilter/composemediaplayer/VideoPlayerBackend {

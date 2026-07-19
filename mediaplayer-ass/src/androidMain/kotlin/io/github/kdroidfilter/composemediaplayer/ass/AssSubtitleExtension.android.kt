@@ -12,6 +12,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import io.github.kdroidfilter.composemediaplayer.AndroidSubtitleBackend
 import io.github.kdroidfilter.composemediaplayer.AndroidSubtitlePipelineExtension
+import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPipelineExtensionAvailability
@@ -27,7 +28,9 @@ import io.github.kdroidfilter.composemediaplayer.subtitle.loadAndroidAssSubtitle
 import io.github.kdroidfilter.composemediaplayer.subtitle.usesAndroidLibass
 
 @UnstableApi
-actual class AssSubtitleExtension actual constructor() : AndroidSubtitlePipelineExtension {
+actual class AssSubtitleExtension actual constructor(
+    @Suppress("UNUSED_PARAMETER") config: AssSubtitleRendererConfig,
+) : AndroidSubtitlePipelineExtension {
     actual override val id: String = ID
     actual override val availability: VideoPipelineExtensionAvailability
         get() =

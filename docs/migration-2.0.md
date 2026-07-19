@@ -57,6 +57,29 @@ Blank or duplicate extension identifiers are rejected. Check `options.extensionS
 distinguish an installed and available runtime from a degraded or unavailable one. Unavailable
 extensions remain diagnostic entries but contribute no capabilities and are not invoked.
 
+Browser ASS configuration is no longer a mutable process-wide singleton. Replace assignments such
+as `AssSubtitleRendererConfig.debug = true` or `queryFonts = true` with an immutable configuration
+owned by the extension:
+
+```kotlin
+val assExtension =
+    AssSubtitleExtension(
+        config =
+            AssSubtitleRendererConfig(
+                debug = true,
+                fontQueryMode = AssFontQueryMode.LOCAL,
+            ),
+    )
+```
+
+The old Boolean `queryFonts = false/true` maps to
+`AssFontQueryMode.DISABLED/LOCAL`. Use `LOCAL_AND_REMOTE` only when remote font lookup and its
+network/privacy behavior are explicitly intended. Empty override URL strings become `null`; the
+zero-argument `AssSubtitleExtension()` remains available and uses bundled JASSUB assets.
+Configuration is a snapshot rather than a live global: create and install a new extension instance
+when these settings need to change. This is an intentional binary break for previously compiled
+Kotlin/Native and Wasm consumers of the old extension constructor; recompile them against 2.0.
+
 The Android KMediaBridge entry point is `KMediaBridgeAndroidExtension`; the desktop JVM entry point
 is `KMediaBridgeDesktopExtension`. The latter defaults to its audited bundled runtime and can be
 given a compatible external KMediaBridge runtime directory. It never treats a system

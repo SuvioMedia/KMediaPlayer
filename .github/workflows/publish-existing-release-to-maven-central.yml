@@ -61,6 +61,10 @@ jobs:
             composemediaplayer-extension-api-jvm
             composemediaplayer
             composemediaplayer-mpv
+            composemediaplayer-mpv-android
+            composemediaplayer-mpv-iosarm64
+            composemediaplayer-mpv-iossimulatorarm64
+            composemediaplayer-mpv-jvm
             composemediaplayer-ass
             composemediaplayer-ass-android
             composemediaplayer-ass-iosarm64
@@ -247,6 +251,7 @@ jobs:
           -PpublicationVersion="${{ steps.release_ref.outputs.version }}"
           -PreleaseSigningEnabled=true
           -PcomposeMediaPlayer.skipNativeBuild=true
+          -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
           --no-configuration-cache --no-daemon
         env:

@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import io.github.kdroidfilter.composemediaplayer.mpv.MpvLibrarySource
 import io.github.kdroidfilter.composemediaplayer.mpv.MpvRuntime
 import io.github.kdroidfilter.composemediaplayer.mpv.MpvRuntimeAvailability
 import io.github.kdroidfilter.composemediaplayer.mpv.MpvRuntimeConfig
@@ -26,13 +27,22 @@ actual fun inspectMpvBackend(options: MpvPlaybackOptions): MpvBackendAvailabilit
         } catch (_: IllegalArgumentException) {
             return MpvBackendAvailability.Unavailable(
                 reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
-                guidance = "The MPV subtitle-font directory must be an absolute desktop path.",
+                guidance =
+                    "MPV runtime paths must be valid absolute desktop paths; " +
+                        "the subtitle-font directory must also exist before player creation.",
             )
         }
 
     return when (val availability = MpvRuntime.inspect(config)) {
         is MpvRuntimeAvailability.Available ->
-            MpvBackendAvailability.Available(backend = "KMediaMpv desktop")
+            MpvBackendAvailability.Available(
+                backend =
+                    if (options.runtimeSource == MpvRuntimeSource.Bundled) {
+                        "KMediaMpv desktop"
+                    } else {
+                        "libmpv desktop"
+                    },
+            )
         is MpvRuntimeAvailability.Unavailable ->
             MpvBackendAvailability.Unavailable(
                 reason = availability.reason.toPublicReason(),
@@ -50,7 +60,9 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
                 availability =
                     MpvBackendAvailability.Unavailable(
                         reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
-                        guidance = "The MPV subtitle-font directory must be an absolute desktop path.",
+                        guidance =
+                            "MPV runtime paths must be valid absolute desktop paths; " +
+                                "the subtitle-font directory must also exist before player creation.",
                     ),
                 cause = failure,
             )
@@ -70,6 +82,21 @@ private fun MpvPlaybackOptions.toDesktopRuntimeConfig(): MpvRuntimeConfig {
             }
         }
     return MpvRuntimeConfig(
+        librarySource =
+            when (val source = runtimeSource) {
+                MpvRuntimeSource.Bundled -> MpvLibrarySource.Bundled
+                MpvRuntimeSource.System -> MpvLibrarySource.Automatic
+                is MpvRuntimeSource.ExplicitPath -> {
+                    val path =
+                        try {
+                            Path.of(source.path)
+                        } catch (failure: InvalidPathException) {
+                            throw IllegalArgumentException("Invalid libmpv path.", failure)
+                        }
+                    require(path.isAbsolute) { "The libmpv path must be absolute." }
+                    MpvLibrarySource.ExplicitPath(path)
+                }
+            },
         preserveAssStyles = preserveAssStyles,
         useEmbeddedFonts = useEmbeddedFonts,
         subtitleFontsDirectory = fontsDirectory,

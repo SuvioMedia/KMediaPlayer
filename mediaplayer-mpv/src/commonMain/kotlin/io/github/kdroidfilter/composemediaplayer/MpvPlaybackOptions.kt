@@ -14,7 +14,11 @@ import androidx.compose.runtime.remember
  * trusted fonts for external ASS/SSA subtitles. Embedded media fonts do not require it.
  * @param preserveAssStyles preserves script positioning and styling when `true`.
  * @param useEmbeddedFonts allows fonts embedded in the media container.
- * @param maxDesktopRenderPixels upper bound for a software-rendered desktop frame.
+ * @param maxDesktopRenderPixels upper bound for a software-rendered desktop or iOS frame.
+ * @param runtimeSource native libmpv source. [MpvRuntimeSource.Bundled] keeps the
+ * verified KMediaMpv runtime on currently published Android and desktop targets.
+ * Windows and iOS applications can opt into an app-supplied runtime with
+ * [MpvRuntimeSource.System] or [MpvRuntimeSource.ExplicitPath].
  */
 @Stable
 data class MpvPlaybackOptions(
@@ -22,6 +26,7 @@ data class MpvPlaybackOptions(
     val preserveAssStyles: Boolean = true,
     val useEmbeddedFonts: Boolean = true,
     val maxDesktopRenderPixels: Int = DEFAULT_MAX_DESKTOP_RENDER_PIXELS,
+    val runtimeSource: MpvRuntimeSource = MpvRuntimeSource.Bundled,
 ) {
     init {
         require(subtitleFontsDirectory == null || subtitleFontsDirectory.isNotBlank()) {
@@ -38,6 +43,39 @@ data class MpvPlaybackOptions(
     companion object {
         const val DEFAULT_MAX_DESKTOP_RENDER_PIXELS: Int = 16_777_216
         const val MAX_DESKTOP_RENDER_PIXELS: Int = 67_108_864
+    }
+}
+
+/**
+ * Selects who supplies the native libmpv binary.
+ *
+ * The adapter never downloads native code at runtime.
+ */
+@Stable
+sealed interface MpvRuntimeSource {
+    /** Uses the verified KMediaMpv runtime dependency where one is published for this target. */
+    data object Bundled : MpvRuntimeSource
+
+    /**
+     * Uses the platform loader.
+     *
+     * Desktop searches conservative libmpv library names. On iOS this resolves
+     * symbols from a framework already linked or embedded by the application.
+     */
+    data object System : MpvRuntimeSource
+
+    /**
+     * Loads an absolute native-library path supplied by the application.
+     *
+     * On iOS the path must point to a code-signed framework binary inside the app.
+     */
+    data class ExplicitPath(
+        val path: String,
+    ) : MpvRuntimeSource {
+        init {
+            require(path.isNotBlank()) { "The libmpv path must not be blank." }
+            require('\u0000' !in path) { "The libmpv path must not contain NUL." }
+        }
     }
 }
 
@@ -75,7 +113,8 @@ expect fun inspectMpvBackend(options: MpvPlaybackOptions = MpvPlaybackOptions())
 /**
  * Creates an opt-in KMediaMpv-backed state.
  *
- * The adapter supplies its matching KMediaMpv runtime transitively.
+ * Bundled targets receive KMediaMpv transitively. Windows and iOS require the
+ * application-supplied runtime selected in [MpvPlaybackOptions.runtimeSource].
  */
 expect fun createMpvVideoPlayerState(options: MpvPlaybackOptions = MpvPlaybackOptions()): VideoPlayerState
 

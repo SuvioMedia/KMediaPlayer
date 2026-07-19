@@ -8,6 +8,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.HtmlElementView
+import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 
 @Composable
@@ -45,6 +46,7 @@ actual fun VideoPlayerSurface(
                 mutableStateOf(false)
             }
         var videoElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLVideoElement?>(null) }
+        var projectionElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLElement?>(null) }
         var videoRatio by remember(surfaceMediaSessionId) { mutableStateOf<Float?>(null) }
         val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
         val usesProjectionRenderer =
@@ -150,10 +152,20 @@ actual fun VideoPlayerSurface(
                     enabled = usesControlledColorRenderer,
                     isProjection = usesProjectionRenderer,
                     modifier = Modifier.fillMaxSize(),
+                    onElementChanged = { element -> projectionElement = element },
+                    onElementReleased = { element ->
+                        if (projectionElement === element) {
+                            projectionElement = null
+                        }
+                    },
                 )
+                val displayElement: HTMLElement? =
+                    if (usesControlledColorRenderer) projectionElement else videoElement
                 subtitleExtension?.SubtitleOverlay(
                     playerState = playerState,
                     videoElement = videoElement,
+                    displayElement = displayElement,
+                    contentScale = contentScale,
                     modifier = Modifier.fillMaxSize(),
                     onActiveChanged = { active -> styledSubtitleActive = active },
                 )
@@ -169,24 +181,30 @@ private fun WebProjectionCanvas(
     enabled: Boolean,
     isProjection: Boolean,
     modifier: Modifier,
+    onElementChanged: (HTMLElement?) -> Unit,
+    onElementReleased: (HTMLElement) -> Unit,
 ) {
-    if (!enabled) return
     val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
     val sourceColorInfo = colorPipelineStatus.source
     val plannedOutput = colorPipelineStatus.plannedOutputDynamicRange
     val videoProjectionLabel = if (isProjection) playerState.projection.renderingInfoLabel() else null
     if (
+        !enabled ||
         sourceColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN ||
         plannedOutput == VideoDynamicRange.UNKNOWN
     ) {
+        SideEffect { onElementChanged(null) }
         return
     }
 
     key(plannedOutput) {
         HtmlElementView(
-            factory = { createWebProjectionCanvasElement() },
+            factory = {
+                createWebProjectionCanvasElement().also(onElementChanged)
+            },
             modifier = modifier,
             update = { canvas ->
+                onElementChanged(canvas)
                 canvas.applyWebProjectionCanvasStyle()
                 val video = videoElement
                 if (video != null) {
@@ -250,6 +268,7 @@ private fun WebProjectionCanvas(
             },
             onRelease = { canvas ->
                 canvas.disposeWebProjectionRenderer()
+                onElementReleased(canvas)
             },
         )
     }

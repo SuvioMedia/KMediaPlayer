@@ -7,31 +7,46 @@
 // - Show declarations: true
 
 // Library unique name: <io.github.shusek:mediaplayer-ass>
-final object io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig { // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig|null[0]
-    final var debug // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.debug|{}debug[0]
+final enum class io.github.kdroidfilter.composemediaplayer/AssFontQueryMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/AssFontQueryMode> { // io.github.kdroidfilter.composemediaplayer/AssFontQueryMode|null[0]
+    enum entry DISABLED // io.github.kdroidfilter.composemediaplayer/AssFontQueryMode.DISABLED|null[0]
+    enum entry LOCAL // io.github.kdroidfilter.composemediaplayer/AssFontQueryMode.LOCAL|null[0]
+    enum entry LOCAL_AND_REMOTE // io.github.kdroidfilter.composemediaplayer/AssFontQueryMode.LOCAL_AND_REMOTE|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/AssFontQueryMode.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/AssFontQueryMode> // io.github.kdroidfilter.composemediaplayer/AssFontQueryMode.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/AssFontQueryMode // io.github.kdroidfilter.composemediaplayer/AssFontQueryMode.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/AssFontQueryMode> // io.github.kdroidfilter.composemediaplayer/AssFontQueryMode.values|values#static(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig { // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig|null[0]
+    constructor <init>(kotlin/Boolean = ..., kotlin/String? = ..., kotlin/String? = ..., kotlin/String? = ..., kotlin/String? = ..., kotlin/String = ..., kotlin.collections/List<kotlin/String> = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ..., io.github.kdroidfilter.composemediaplayer/AssFontQueryMode = ..., kotlin/Boolean = ...) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.<init>|<init>(kotlin.Boolean;kotlin.String?;kotlin.String?;kotlin.String?;kotlin.String?;kotlin.String;kotlin.collections.List<kotlin.String>;kotlin.collections.Map<kotlin.String,kotlin.String>;io.github.kdroidfilter.composemediaplayer.AssFontQueryMode;kotlin.Boolean){}[0]
+
+    final val availableFontUrls // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.availableFontUrls|{}availableFontUrls[0]
+        final fun <get-availableFontUrls>(): kotlin.collections/Map<kotlin/String, kotlin/String> // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.availableFontUrls.<get-availableFontUrls>|<get-availableFontUrls>(){}[0]
+    final val debug // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.debug|{}debug[0]
         final fun <get-debug>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.debug.<get-debug>|<get-debug>(){}[0]
-        final fun <set-debug>(kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.debug.<set-debug>|<set-debug>(kotlin.Boolean){}[0]
-    final var enabled // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.enabled|{}enabled[0]
+    final val enabled // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.enabled|{}enabled[0]
         final fun <get-enabled>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.enabled.<get-enabled>|<get-enabled>(){}[0]
-        final fun <set-enabled>(kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.enabled.<set-enabled>|<set-enabled>(kotlin.Boolean){}[0]
-    final var fallbackFontFamily // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontFamily|{}fallbackFontFamily[0]
+    final val fallbackFontFamily // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontFamily|{}fallbackFontFamily[0]
         final fun <get-fallbackFontFamily>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontFamily.<get-fallbackFontFamily>|<get-fallbackFontFamily>(){}[0]
-        final fun <set-fallbackFontFamily>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontFamily.<set-fallbackFontFamily>|<set-fallbackFontFamily>(kotlin.String){}[0]
-    final var fallbackFontUrl // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontUrl|{}fallbackFontUrl[0]
-        final fun <get-fallbackFontUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontUrl.<get-fallbackFontUrl>|<get-fallbackFontUrl>(){}[0]
-        final fun <set-fallbackFontUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontUrl.<set-fallbackFontUrl>|<set-fallbackFontUrl>(kotlin.String){}[0]
-    final var modernWasmUrl // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.modernWasmUrl|{}modernWasmUrl[0]
-        final fun <get-modernWasmUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.modernWasmUrl.<get-modernWasmUrl>|<get-modernWasmUrl>(){}[0]
-        final fun <set-modernWasmUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.modernWasmUrl.<set-modernWasmUrl>|<set-modernWasmUrl>(kotlin.String){}[0]
-    final var queryFonts // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.queryFonts|{}queryFonts[0]
-        final fun <get-queryFonts>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.queryFonts.<get-queryFonts>|<get-queryFonts>(){}[0]
-        final fun <set-queryFonts>(kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.queryFonts.<set-queryFonts>|<set-queryFonts>(kotlin.Boolean){}[0]
-    final var wasmUrl // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.wasmUrl|{}wasmUrl[0]
-        final fun <get-wasmUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.wasmUrl.<get-wasmUrl>|<get-wasmUrl>(){}[0]
-        final fun <set-wasmUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.wasmUrl.<set-wasmUrl>|<set-wasmUrl>(kotlin.String){}[0]
-    final var workerUrl // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.workerUrl|{}workerUrl[0]
-        final fun <get-workerUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.workerUrl.<get-workerUrl>|<get-workerUrl>(){}[0]
-        final fun <set-workerUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.workerUrl.<set-workerUrl>|<set-workerUrl>(kotlin.String){}[0]
+    final val fallbackFontUrl // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontUrl|{}fallbackFontUrl[0]
+        final fun <get-fallbackFontUrl>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fallbackFontUrl.<get-fallbackFontUrl>|<get-fallbackFontUrl>(){}[0]
+    final val fontQueryMode // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fontQueryMode|{}fontQueryMode[0]
+        final fun <get-fontQueryMode>(): io.github.kdroidfilter.composemediaplayer/AssFontQueryMode // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.fontQueryMode.<get-fontQueryMode>|<get-fontQueryMode>(){}[0]
+    final val modernWasmUrl // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.modernWasmUrl|{}modernWasmUrl[0]
+        final fun <get-modernWasmUrl>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.modernWasmUrl.<get-modernWasmUrl>|<get-modernWasmUrl>(){}[0]
+    final val preloadFontUrls // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.preloadFontUrls|{}preloadFontUrls[0]
+        final fun <get-preloadFontUrls>(): kotlin.collections/List<kotlin/String> // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.preloadFontUrls.<get-preloadFontUrls>|<get-preloadFontUrls>(){}[0]
+    final val wasmUrl // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.wasmUrl|{}wasmUrl[0]
+        final fun <get-wasmUrl>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.wasmUrl.<get-wasmUrl>|<get-wasmUrl>(){}[0]
+    final val workerUrl // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.workerUrl|{}workerUrl[0]
+        final fun <get-workerUrl>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.workerUrl.<get-workerUrl>|<get-workerUrl>(){}[0]
+
+    final fun copy(kotlin/Boolean = ..., kotlin/String? = ..., kotlin/String? = ..., kotlin/String? = ..., kotlin/String? = ..., kotlin/String = ..., kotlin.collections/List<kotlin/String> = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ..., io.github.kdroidfilter.composemediaplayer/AssFontQueryMode = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.copy|copy(kotlin.Boolean;kotlin.String?;kotlin.String?;kotlin.String?;kotlin.String?;kotlin.String;kotlin.collections.List<kotlin.String>;kotlin.collections.Map<kotlin.String,kotlin.String>;io.github.kdroidfilter.composemediaplayer.AssFontQueryMode;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig.toString|toString(){}[0]
 }
 
 final val io.github.kdroidfilter.composemediaplayer.ass/io_github_kdroidfilter_composemediaplayer_ass_AssSubtitleExtension$stableprop // io.github.kdroidfilter.composemediaplayer.ass/io_github_kdroidfilter_composemediaplayer_ass_AssSubtitleExtension$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_ass_AssSubtitleExtension$stableprop[0]
@@ -42,7 +57,7 @@ final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_compo
 
 // Targets: [ios]
 final class io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension : io.github.kdroidfilter.composemediaplayer/IosSubtitlePipelineExtension { // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension|null[0]
-    constructor <init>() // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.<init>|<init>(){}[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig = ...) // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.<init>|<init>(io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig){}[0]
 
     final val availability // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.availability|{}availability[0]
         final fun <get-availability>(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.availability.<get-availability>|<get-availability>(){}[0]
@@ -56,7 +71,7 @@ final class io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension :
 
 // Targets: [wasmJs]
 final class io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension : io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension { // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension|null[0]
-    constructor <init>() // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.<init>|<init>(){}[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer/AssSubtitleRendererConfig = ...) // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.<init>|<init>(io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig){}[0]
 
     final val availability // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.availability|{}availability[0]
         final fun <get-availability>(): io.github.kdroidfilter.composemediaplayer/VideoPipelineExtensionAvailability // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.availability.<get-availability>|<get-availability>(){}[0]
@@ -66,4 +81,5 @@ final class io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension :
         final fun <get-supportedSubtitleFormats>(): kotlin.collections/Set<io.github.kdroidfilter.composemediaplayer/SubtitleFormat> // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.supportedSubtitleFormats.<get-supportedSubtitleFormats>|<get-supportedSubtitleFormats>(){}[0]
 
     final fun SubtitleOverlay(io.github.kdroidfilter.composemediaplayer/VideoPlayerState, org.w3c.dom/HTMLVideoElement?, androidx.compose.ui/Modifier, kotlin/Function1<kotlin/Boolean, kotlin/Unit>, androidx.compose.runtime/Composer?, kotlin/Int) // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.SubtitleOverlay|SubtitleOverlay(io.github.kdroidfilter.composemediaplayer.VideoPlayerState;org.w3c.dom.HTMLVideoElement?;androidx.compose.ui.Modifier;kotlin.Function1<kotlin.Boolean,kotlin.Unit>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]
+    final fun SubtitleOverlay(io.github.kdroidfilter.composemediaplayer/VideoPlayerState, org.w3c.dom/HTMLVideoElement?, org.w3c.dom/HTMLElement?, androidx.compose.ui.layout/ContentScale, androidx.compose.ui/Modifier, kotlin/Function1<kotlin/Boolean, kotlin/Unit>, androidx.compose.runtime/Composer?, kotlin/Int) // io.github.kdroidfilter.composemediaplayer.ass/AssSubtitleExtension.SubtitleOverlay|SubtitleOverlay(io.github.kdroidfilter.composemediaplayer.VideoPlayerState;org.w3c.dom.HTMLVideoElement?;org.w3c.dom.HTMLElement?;androidx.compose.ui.layout.ContentScale;androidx.compose.ui.Modifier;kotlin.Function1<kotlin.Boolean,kotlin.Unit>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]
 }

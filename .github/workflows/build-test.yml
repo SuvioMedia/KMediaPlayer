@@ -234,6 +234,8 @@ jobs:
           :mediaplayer-extension-api:iosSimulatorArm64Test
           :mediaplayer:compileKotlinIosArm64
           :mediaplayer:iosSimulatorArm64Test
+          :mediaplayer-mpv:compileKotlinIosArm64
+          :mediaplayer-mpv:iosSimulatorArm64Test
           :mediaplayer-ass:compileKotlinIosArm64
           :mediaplayer-ass:iosSimulatorArm64Test
           :mediaplayer-dolbyvision:compileKotlinIosArm64
@@ -253,6 +255,8 @@ jobs:
             mediaplayer/build/test-results/
             mediaplayer-extension-api/build/reports/tests/
             mediaplayer-extension-api/build/test-results/
+            mediaplayer-mpv/build/reports/tests/
+            mediaplayer-mpv/build/test-results/
             mediaplayer-ass/build/reports/tests/
             mediaplayer-ass/build/test-results/
             mediaplayer-dolbyvision/build/reports/tests/
@@ -378,7 +382,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Test Maven metadata recovery helper
+      - name: Test repository helper scripts
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
       - name: Set up JDK 25
@@ -454,6 +458,7 @@ jobs:
           :mediaplayer-dolbyvision:checkKotlinAbi
           :mediaplayer-kmediabridge:checkKotlinAbi
           -PcomposeMediaPlayer.skipNativeBuild=true
+          -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
           --no-daemon --continue
 

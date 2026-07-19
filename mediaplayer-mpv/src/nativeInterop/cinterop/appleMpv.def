@@ -1,0 +1,5 @@
+package = io.github.kdroidfilter.composemediaplayer.mpv.native
+headers = ComposeMediaPlayerMpvBridge.h
+headerFilter = ComposeMediaPlayerMpvBridge.h
+staticLibraries = libcomposemediaplayer_mpv_bridge.a
+linkerOpts = -framework CoreFoundation -framework CoreGraphics -framework UIKit

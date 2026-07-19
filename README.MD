@@ -84,7 +84,7 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 - **3D/VR Projection**: Configure and auto-detect flat 3D, VR180, VR360, fisheye, and EAC projection modes. Android uses Media3's controlled frame processor, Apple targets use Metal, Windows uses a Media Foundation/D3D11 P010 presenter, Linux uses an optional P010/DMABuf Vulkan presenter on supported Wayland systems, and Web progressively selects WebGPU HDR or a color-managed SDR fallback.
 - **Typed HDR pipeline**: `DynamicRangePolicy` selects a confirmed native HDR path, a controlled renderer, or a verified HDR-to-SDR fallback. `VideoColorPipelineStatus` reports source, decoder, active display, surface, metadata handling, planned output, confirmed output, and fallback reason separately.
 - **Error handling** Simple error handling for network or playback issues.
-- **Optional MPV backend**: `composemediaplayer-mpv` is an Android/JVM adapter
+- **Optional MPV backend**: `composemediaplayer-mpv` is an Android/iOS/JVM adapter
   with libass-based ASS/SSA subtitle support. The default artifact has no MPV
   dependency; applications add the adapter only to the platform source sets
   where they select it.
@@ -265,6 +265,11 @@ discontinuity timestamp mapping, and a non-independent seek restarts only from a
 - **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `2.0.x` line.
 - **Android:** the library is built and verified for `arm64-v8a` and `armeabi-v7a` with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Android x86/x86_64 is unsupported. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`; HDR still depends on the device and active display.
 - **Android MPV adapter:** `composemediaplayer-mpv` uses `minSdk = 28` and publishes ARM runtimes only.
+- **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. iOS applications must embed
+  a code-signed libmpv framework and select `MpvRuntimeSource.System` or `ExplicitPath`; native
+  code cannot be extracted from a Maven artifact into an iOS process at runtime.
+- **Windows MPV adapter:** supports application-supplied 64-bit libmpv on Java 25. The current
+  KMediaMpv desktop artifact does not bundle a Windows DLL.
 - **iOS:** iOS 16.2 or newer is required. Published targets are `iosArm64` and `iosSimulatorArm64` only; Intel simulators are unsupported. An Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
 - **macOS JVM:** Apple Silicon and macOS 14 or newer are required by the native AVFoundation/Metal bridge.
 - **Windows JVM:** Windows 10 1809 (build 17763) or newer is required; confirmed HDR additionally requires an active Advanced Color output and the packaged P010/D3D11 presenter.
@@ -280,8 +285,11 @@ MPV is a separate adapter artifact. The dependency direction is:
 
 The main artifact never imports MPV. Both modules share only the state, event,
 capability, backend-factory, and renderer SPI from `composemediaplayer-core`.
-The MPV adapter carries the matching KMediaMpv runtime transitively, so the
-application does not add KMediaMpv coordinates separately.
+On Android, Linux, and Apple Silicon macOS, the MPV adapter carries the matching
+KMediaMpv runtime transitively, so the application does not add KMediaMpv
+coordinates separately. Windows and iOS keep the same adapter API but use a
+native runtime supplied by the application. The adapter never downloads native
+code.
 
 This dependency inversion is the reason for the `2.0.0` major version. Existing
 applications can keep depending on `composemediaplayer`; it re-exports `core`
@@ -302,13 +310,16 @@ kotlin {
         jvmMain.dependencies {
             implementation("io.github.shusek:composemediaplayer-mpv:<player-version>")
         }
+        iosMain.dependencies {
+            implementation("io.github.shusek:composemediaplayer-mpv:<player-version>")
+        }
     }
 }
 ```
 
-The MPV-specific wiring below belongs in `androidMain` or `jvmMain`. If a
-library targets only Android and desktop JVM, it may put the adapter in
-`commonMain` instead.
+The MPV-specific wiring below belongs in `androidMain`, `jvmMain`, or `iosMain`.
+A library whose complete target matrix is supported by the adapter may put the
+dependency in `commonMain` instead.
 
 An MPV-only application does not need `composemediaplayer` at all. Depend on
 `composemediaplayer-mpv` (which brings `composemediaplayer-core` transitively)
@@ -347,15 +358,45 @@ val backend: VideoPlayerBackend = mpvVideoPlayerBackend()
 val playerState = rememberVideoPlayerState(backend)
 ```
 
+The default runtime source is the verified KMediaMpv bundle. Keep that default
+on Android, Linux, and Apple Silicon macOS. On Windows, install or ship a
+compatible 64-bit libmpv next to the application and select the platform loader:
+
+```kotlin
+val options = MpvPlaybackOptions(
+    runtimeSource = MpvRuntimeSource.System,
+)
+```
+
+If the DLL is not discoverable through the Windows loader, pass its absolute
+path explicitly:
+
+```kotlin
+val options = MpvPlaybackOptions(
+    runtimeSource = MpvRuntimeSource.ExplicitPath(
+        "C:\\Program Files\\MyApp\\runtime\\mpv-2.dll",
+    ),
+)
+```
+
+On iOS, embed and code-sign a dynamic libmpv framework in the application. A
+linked framework can be resolved with `System`; the adapter also recognizes
+`KMediaMpv.framework/KMediaMpv`, `MPV.framework/MPV`, and
+`libmpv.framework/libmpv` under the app's `Frameworks` directory. Alternatively,
+pass the framework binary path from `NSBundle` using `ExplicitPath`. iOS rejects
+paths outside the signed application bundle.
+
 `inspectMpvBackend()` reports a missing runtime, unsupported target, or rejected
 native payload without falling back silently. `rememberVideoPlayerState()`
 continues to select the normal platform backend.
 
-The verified runtime supports Android API 28+ on `arm64-v8a` and
-`armeabi-v7a`, Linux on x86_64 and ARM64, and macOS on ARM64. Android x86,
-Android x86_64, and macOS x86_64 are intentionally not published. The bundled
-runtime has networking disabled, so use local media and subtitle files. Desktop
-applications run on Java 25 with `--enable-native-access=ALL-UNNAMED`.
+The verified bundled runtime supports Android API 28+ on `arm64-v8a` and
+`armeabi-v7a`, Linux on x86_64 and ARM64, and macOS on ARM64. Application-supplied
+runtime mode additionally supports Windows x86_64 and iOS device/simulator
+ARM64. Android x86, Android x86_64, macOS x86_64, Intel iOS simulators, and
+Windows ARM64 are not supported. The bundled runtime has networking disabled,
+so use local media and subtitle files. Desktop applications run on Java 25 with
+`--enable-native-access=ALL-UNNAMED`.
 
 The core, default player, and adapter code remain under this repository's own
 license. The separately
@@ -943,7 +984,7 @@ not expose a writable CPU video frame.
 
 #### Browser ASS/SSA subtitles with JASSUB/libass
 
-Full ASS/SSA rendering on `wasmJs` is provided by the optional `composemediaplayer-ass` artifact and is active only when `AssSubtitleExtension()` is present in `VideoPlaybackOptions.extensions`. The optional artifact declares the pinned `jassub` npm dependency, so applications do not add JASSUB, libass, worker scripts or WASM files manually. The browser bundler emits JASSUB's default worker, WASM and fallback font assets; a core-only browser build contains none of them.
+Full ASS/SSA rendering on `wasmJs` is provided by the optional `composemediaplayer-ass` artifact and is active only when `AssSubtitleExtension()` is present in `VideoPlaybackOptions.extensions`. The optional artifact currently pins JASSUB 2.5.7 as an npm dependency, so applications do not add JASSUB, libass, worker scripts or WASM files manually. The browser bundler emits JASSUB's default worker, WASM and fallback font assets; a core-only browser build contains none of them.
 
 Create stable player options and then select an `.ass` or `.ssa` subtitle track:
 
@@ -969,16 +1010,23 @@ LaunchedEffect(Unit) {
 
 If you use `VideoPlayerControls`, the selected track is rendered automatically by `VideoPlayerSurface`. If you build custom controls, keep using the same `playerState.selectSubtitleTrack(...)` and `playerState.disableSubtitles()` APIs and inspect the returned `TrackSelectionResult` when you need to handle unsupported or missing tracks.
 
-You can configure the renderer once in your browser entry point before rendering your Compose app:
+Browser renderer configuration is immutable and belongs to the installed extension instance:
 
 ```kotlin
 import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
+import io.github.kdroidfilter.composemediaplayer.AssFontQueryMode
 
-fun main() {
-    AssSubtitleRendererConfig.debug = false
-    AssSubtitleRendererConfig.queryFonts = false
-
-    // Start your Compose app here.
+val playbackOptions = remember {
+    VideoPlaybackOptions(
+        extensions = listOf(
+            AssSubtitleExtension(
+                config = AssSubtitleRendererConfig(
+                    fontQueryMode = AssFontQueryMode.DISABLED,
+                    debug = false,
+                ),
+            ),
+        ),
+    )
 }
 ```
 
@@ -987,27 +1035,44 @@ Configuration options:
 | Option | Default | Description |
 | :--- | :--- | :--- |
 | `enabled` | `true` | Enables or disables browser ASS/SSA rendering. When disabled, ASS/SSA tracks are ignored by the JASSUB renderer. |
-| `workerUrl` | `""` | Optional URL for a self-hosted JASSUB worker. Leave empty to use the bundled npm asset. |
-| `wasmUrl` | `""` | Optional URL for `jassub-worker.wasm`. Leave empty to use the bundled npm asset. |
-| `modernWasmUrl` | `""` | Optional URL for `jassub-worker-modern.wasm`. Leave empty to use the bundled npm asset. |
-| `fallbackFontUrl` | `""` | Optional URL for the fallback font used by libass. Leave empty to use JASSUB defaults. |
+| `workerUrl` | `null` | Optional URL for a self-hosted JASSUB worker. Leave unset to use the bundled npm asset. |
+| `wasmUrl` | `null` | Optional URL for `jassub-worker.wasm`. Leave unset to use the bundled npm asset. |
+| `modernWasmUrl` | `null` | Optional URL for `jassub-worker-modern.wasm`. Leave unset to use the bundled npm asset. |
+| `fallbackFontUrl` | `null` | Optional URL for the fallback font used by libass. Leave unset to use JASSUB defaults. |
 | `fallbackFontFamily` | `"liberation sans"` | Font family name mapped to `fallbackFontUrl`. |
-| `queryFonts` | `false` | Lets JASSUB query browser fonts when supported. This may prompt or vary by browser. |
+| `preloadFontUrls` | `emptyList()` | Font URLs fetched eagerly when the renderer starts. |
+| `availableFontUrls` | `emptyMap()` | Case-insensitive font-family-to-URL mappings fetched only when required. |
+| `fontQueryMode` | `DISABLED` | `LOCAL` enables browser font discovery; `LOCAL_AND_REMOTE` also enables JASSUB's remote font lookup and its privacy/network implications. |
 | `debug` | `false` | Enables JASSUB debug logging. |
 
 For production deployments you can optionally self-host the worker, WASM and fallback font assets. This is useful when your hosting/CDN needs explicit cache headers, predictable URLs, or a strict Content Security Policy:
 
 ```kotlin
-AssSubtitleRendererConfig.workerUrl = "/jassub/worker/worker.js"
-AssSubtitleRendererConfig.wasmUrl = "/jassub/wasm/jassub-worker.wasm"
-AssSubtitleRendererConfig.modernWasmUrl = "/jassub/wasm/jassub-worker-modern.wasm"
-AssSubtitleRendererConfig.fallbackFontUrl = "/jassub/default.woff2"
+AssSubtitleExtension(
+    config = AssSubtitleRendererConfig(
+        workerUrl = "/jassub/worker/worker.js",
+        wasmUrl = "/jassub/wasm/jassub-worker.wasm",
+        modernWasmUrl = "/jassub/wasm/jassub-worker-modern.wasm",
+        fallbackFontUrl = "/jassub/default.woff2",
+    ),
+)
 ```
 
 The URLs may be relative to your app base URL or absolute. Prefer same-origin URLs. If you host the video, subtitle, worker, WASM or font files on another domain, configure CORS headers so the browser can load them from your app origin.
 
 Browser notes:
-- ASS/SSA rendering requires browser support for `OffscreenCanvas` and `canvas.transferControlToOffscreen()`.
+
+- ASS/SSA rendering requires Worker, WebAssembly, `OffscreenCanvas`,
+  `canvas.transferControlToOffscreen()`, `requestVideoFrameCallback()` and the other browser
+  primitives reported by extension availability. Missing support leaves the Compose fallback active.
+- For JASSUB's multithreaded path, serve the document with
+  `Cross-Origin-Embedder-Policy: require-corp` and
+  `Cross-Origin-Opener-Policy: same-origin`. Without them JASSUB automatically uses its
+  single-threaded fallback.
+- Browser MKV ASS extraction streams new dialogue events into one JASSUB session. Supported embedded
+  fonts are added automatically, with limits of 16 MiB per font, 32 MiB total and 64 files.
+- Subtitle geometry follows `Fit`, `Crop`, `FillBounds`, `FillWidth` and `FillHeight`. Projection
+  subtitles remain a flat screen-space overlay over the projected canvas.
 - Web fullscreen should keep the same video element alive; entering fullscreen should not restart playback.
 - SRT and VTT do not use JASSUB. They continue to use the Compose subtitle renderer.
 - Android, iOS and desktop JVM use the same extension entry point but do not use this JASSUB

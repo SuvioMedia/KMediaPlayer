@@ -17,6 +17,14 @@ internal actual fun mpvBackendInfo(): VideoPlayerBackendInfo =
     )
 
 actual fun inspectMpvBackend(options: MpvPlaybackOptions): MpvBackendAvailability {
+    if (options.runtimeSource != MpvRuntimeSource.Bundled) {
+        return MpvBackendAvailability.Unavailable(
+            reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
+            guidance =
+                "Android accepts only MpvRuntimeSource.Bundled; its JNI runtime is supplied " +
+                    "by kmedia-mpv-runtime-android.",
+        )
+    }
     if (!options.preserveAssStyles || !options.useEmbeddedFonts) {
         return MpvBackendAvailability.Unavailable(
             reason = MpvBackendUnavailableReason.INVALID_RUNTIME,

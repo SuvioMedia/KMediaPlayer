@@ -55,7 +55,7 @@ owner-scoped or `remember`-created instance keeps the player backend and lifecyc
 | Platform | Optional backend | Behavior with `AssSubtitleExtension()` |
 | :--- | :--- | :--- |
 | Android | libass 0.17.5 | Full ASS/SSA styles, positioning, effects, animation and karaoke for external tracks and raw Matroska tracks; supported embedded font attachments are passed to libass. The AAR contains `arm64-v8a` and `armeabi-v7a`. |
-| Browser Wasm | JASSUB 2.5.1 / libass Wasm | Full presentation for selected ASS/SSA sources through a transparent canvas overlay. The consumer bundler emits JASSUB's worker, Wasm modules and fallback font. |
+| Browser Wasm | Bundled JASSUB 2.5.7 / libass Wasm | Full presentation for selected ASS/SSA sources through a transparent canvas overlay. The consumer bundler emits JASSUB's worker, Wasm modules and fallback font; embedded Matroska font attachments are streamed into the active renderer. |
 | macOS JVM | Bundled libass 0.17.5 | Full ASS/SSA rendering in the Apple Silicon Compose/Skia canvas path with CoreText, complex HarfBuzz shaping and embedded Matroska font attachments. Intel macOS is not published. |
 | Windows/Linux JVM | Bundled libass (Windows 0.17.4, Linux 0.17.5) | Full ASS/SSA rendering in writable BGRA frame paths, including styles, animation, karaoke and embedded Matroska fonts. The JAR carries x86_64 and ARM64 runtimes; users do not install libass. Windows uses DirectWrite and Linux uses the host's normal fontconfig configuration. Native HDR/color and native libVLC surfaces retain their platform subtitle route. |
 | iOS | Bundled libass 0.17.5 | Full authored rendering for external ASS/SSA tracks on iOS arm64 and the arm64 Simulator. The extension uses CoreText and a transparent UIKit overlay; no x86 iOS target is built. Embedded Matroska ASS extraction is not yet exposed by AVFoundation, so this route is external-track only. |
@@ -84,28 +84,59 @@ under `META-INF/kmediaplayer/android-ass`.
 
 ## Browser Wasm notes
 
-The module owns the pinned `jassub` npm dependency. JASSUB resolves its default worker, normal and
+The module owns the pinned JASSUB 2.5.7 npm dependency. JASSUB resolves its default worker, normal and
 SIMD Wasm modules, and fallback font through module-relative URLs, so consumers do not copy those
-assets manually. Production applications may override the URLs before creating the player:
+assets manually. Browser settings are immutable and scoped to the installed extension:
 
 ```kotlin
+import io.github.kdroidfilter.composemediaplayer.AssFontQueryMode
 import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
+import io.github.kdroidfilter.composemediaplayer.ass.AssSubtitleExtension
 
-AssSubtitleRendererConfig.workerUrl = "/jassub/worker/worker.js"
-AssSubtitleRendererConfig.wasmUrl = "/jassub/wasm/jassub-worker.wasm"
-AssSubtitleRendererConfig.modernWasmUrl = "/jassub/wasm/jassub-worker-modern.wasm"
-AssSubtitleRendererConfig.fallbackFontUrl = "/jassub/default.woff2"
+val assExtension =
+    AssSubtitleExtension(
+        config =
+            AssSubtitleRendererConfig(
+                workerUrl = "/jassub/worker/worker.js",
+                wasmUrl = "/jassub/wasm/jassub-worker.wasm",
+                modernWasmUrl = "/jassub/wasm/jassub-worker-modern.wasm",
+                fallbackFontUrl = "/jassub/default.woff2",
+                preloadFontUrls = listOf("/fonts/Brand-Regular.woff2"),
+                availableFontUrls = mapOf("Brand Medium" to "/fonts/Brand-Medium.woff2"),
+                fontQueryMode = AssFontQueryMode.DISABLED,
+                debug = false,
+            ),
+    )
 ```
 
 The defaults work with the standard Kotlin/Wasm browser bundle. Custom URLs may be relative to the
 application base URL or absolute; cross-origin video, subtitle, worker, Wasm and font resources need
-appropriate CORS headers. The browser requires `Worker`, WebAssembly, `OffscreenCanvas` and
-`canvas.transferControlToOffscreen()`. If the optional renderer cannot become active, the player
-keeps the Compose dialogue fallback.
+appropriate CORS headers. The browser requires Worker, WebAssembly, `OffscreenCanvas`,
+`canvas.transferControlToOffscreen()`, `requestVideoFrameCallback()`, ResizeObserver and JASSUB's
+remaining runtime primitives.
+Extension availability reports a missing primitive before the renderer is selected. Constructor,
+worker, source and resize failures keep the Compose dialogue fallback active.
 
-`AssSubtitleRendererConfig.queryFonts` opts into browser font discovery where supported, and
-`AssSubtitleRendererConfig.debug` enables JASSUB diagnostics. Android ignores these browser-only
-settings.
+`AssFontQueryMode.LOCAL` opts into browser font discovery where supported.
+`AssFontQueryMode.LOCAL_AND_REMOTE` additionally enables JASSUB's remote font lookup, including its
+network and privacy implications; the default is `DISABLED`. Android, iOS and desktop ignore these
+browser-only settings.
+
+For the multithreaded JASSUB path, serve the application document with:
+
+```text
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Opener-Policy: same-origin
+```
+
+Without these headers JASSUB automatically uses its single-threaded fallback. These headers can
+restrict cross-origin embeds and resources, so the application deployment must opt in deliberately.
+
+The overlay follows the visible video geometry for `Fit`, `Crop`, `FillBounds`, `FillWidth` and
+`FillHeight`; projected video keeps subtitles as a flat screen-space overlay. Subtitle offsets are
+applied live, including while paused. Partial embedded MKV ASS/SSA extraction appends events to one
+JASSUB session instead of recreating its worker. Matroska font attachments in TTF, OTF, TTC, WOFF
+and WOFF2 formats are added automatically, up to 16 MiB per font, 32 MiB total and 64 files.
 
 ## macOS JVM notes
 

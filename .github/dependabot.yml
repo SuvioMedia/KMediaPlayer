@@ -8,3 +8,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+# Kotlin/JS npm(...) declarations in Gradle scripts are not parsed by
+# Dependabot. The scheduled Kotlin/JS npm Dependency Check alerts maintainers
+# when a literal pin stops matching the registry's latest tag.
