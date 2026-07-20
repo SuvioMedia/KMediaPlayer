@@ -339,8 +339,7 @@ jobs:
         run: |
           ./gradlew.bat kotlinWasmNpmInstall --no-daemon --no-parallel
           @(
-            "build/wasm/node_modules/@js-joda/core",
-            "build/wasm/node_modules/hls.js"
+            "build/wasm/node_modules/@js-joda/core"
           ) | ForEach-Object {
             if (-not (Test-Path $_)) {
               throw "Required Wasm browser dependency was not installed: $_"

@@ -12,11 +12,6 @@ abslink@^1.2.2:
   resolved "https://registry.yarnpkg.com/abslink/-/abslink-1.2.2.tgz#c4af9cc65d7ebb1db45069429daf53f1015bb01c"
   integrity sha512-HCOItvzORPjMzddCmEpbH8+W1VM3yjH+CR7DLtxlxFKX/jz5twJbm7KLfblO7eKLnXINLah8Hk2ZAJqxXeSkOg==
 
-hls.js@1.6.16:
-  version "1.6.16"
-  resolved "https://registry.yarnpkg.com/hls.js/-/hls.js-1.6.16.tgz#e2e7e79b68357cb3f8aa82dec0a36c9c2701f5c0"
-  integrity sha512-VSIRpLfRwlAAdGL4wiTucx2ScRipo0ed1FBatWkyt832jC4CReKstga6yIhYVwGu9LOBjuX9wzmRMeQdBJtzEA==
-
 jassub@2.5.7:
   version "2.5.7"
   resolved "https://registry.yarnpkg.com/jassub/-/jassub-2.5.7.tgz#01418b282f1fefeb570a86eb7735d9879e4b1a05"

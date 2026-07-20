@@ -41,6 +41,50 @@ class MoviPlaybackAdapterTest {
     }
 
     @Test
+    fun legacyRejectsAdaptiveStreamingManifests() {
+        val options = VideoPlaybackOptions(webPlaybackEngine = WebPlaybackEngine.LEGACY)
+
+        listOf(
+            "https://media.example.test/master.m3u8",
+            "https://media.example.test/manifest.mpd?token=redacted",
+            "https://media.example.test/channel.ism/Manifest",
+        ).forEach { sourceUri ->
+            val decision = options.webPlaybackDecision(sourceUri = sourceUri)
+
+            assertEquals(WebPlaybackRoute.REJECTED, decision.route)
+            assertIs<VideoPlayerError.SourceError>(decision.error)
+        }
+    }
+
+    @Test
+    fun strictColorPolicyRejectsAdaptiveStreamingInsteadOfUsingLegacy() {
+        val decision =
+            VideoPlaybackOptions(dynamicRangePolicy = DynamicRangePolicy.FORCE_SDR)
+                .webPlaybackDecision(sourceUri = "https://media.example.test/manifest.mpd")
+
+        assertEquals(WebPlaybackRoute.REJECTED, decision.route)
+        assertIs<VideoPlayerError.ColorPipelineError>(decision.error)
+    }
+
+    @Test
+    fun openingAdaptiveStreamingWithLegacyFailsBeforeSurfaceInitialization() {
+        val state =
+            DefaultVideoPlayerState(
+                VideoPlaybackOptions(webPlaybackEngine = WebPlaybackEngine.LEGACY),
+            )
+        try {
+            state.openUri("https://media.example.test/manifest.mpd")
+
+            assertEquals(WebPlaybackRoute.REJECTED, state.webPlaybackDecision.route)
+            assertIs<VideoPlayerError.SourceError>(state.error)
+            assertFalse(state.isLoading)
+            assertFalse(state.isPlaying)
+        } finally {
+            state.dispose()
+        }
+    }
+
+    @Test
     fun strictClearColorPoliciesUseLegacy() {
         assertEquals(
             WebPlaybackRoute.LEGACY,
@@ -300,6 +344,48 @@ class MoviPlaybackAdapterTest {
 
     @Test
     @OptIn(ExperimentalWasmJsInterop::class)
+    fun selectingExternalAssDisablesMoviEmbeddedSubtitlesForTheJassubOverlay() =
+        runTest {
+            val module = createFakeMoviModule()
+            val state = createVideoPlayerState() as DefaultVideoPlayerState
+            var session: MoviPlaybackSession? = null
+            try {
+                state.openUri("https://media.example.test/movie.mkv", InitialPlayerState.PAUSE)
+                val createdSession =
+                    MoviPlaybackSession(
+                        playerState = state,
+                        mediaSessionId = state.mediaSessionId,
+                        canvas = document.createElement("canvas") as HTMLCanvasElement,
+                        onNativeVideoElement = {},
+                        onVideoRatio = {},
+                        moduleLoader = { module },
+                    )
+                session = createdSession
+                createdSession.load(
+                    sourceUri = requireNotNull(state.sourceUri),
+                    sourceFile = null,
+                    mediaHeaders = emptyMap(),
+                    drmConfiguration = null,
+                )
+                val externalAss =
+                    SubtitleTrack(
+                        label = "External ASS",
+                        language = "en",
+                        src = "https://media.example.test/subtitles.ass",
+                    )
+                state.addSubtitleTrack(externalAss)
+
+                assertEquals(TrackSelectionResult.Selected(externalAss.id), state.selectSubtitleTrack(externalAss))
+                assertEquals("null", readFakeMoviSubtitleSelections(fakeMoviPlayerAt(module, 0)))
+                assertEquals(externalAss, state.currentSubtitleTrack)
+            } finally {
+                session?.destroy()
+                state.dispose()
+            }
+        }
+
+    @Test
+    @OptIn(ExperimentalWasmJsInterop::class)
     fun fakeMoviForwardsEverySubscribedEvent() {
         val player =
             createMoviPlayer(
@@ -494,6 +580,7 @@ private fun createFakeMoviModule(): JsAny =
                     this.duration = 12;
                     this.activeAudioId = 1;
                     this.activeVideoId = -1;
+                    this.selectedSubtitleIds = [];
                     this.audioTracks = [
                         {
                             id: 1,
@@ -625,7 +712,8 @@ private fun createFakeMoviModule(): JsAny =
                     return true;
                 }
 
-                selectSubtitleTrack() {
+                selectSubtitleTrack(id) {
+                    this.selectedSubtitleIds.push(id == null ? "null" : String(id));
                     return true;
                 }
 
@@ -732,3 +820,7 @@ private fun emitFakeMoviBufferUpdate(player: JsAny): Unit =
 @Suppress("UNUSED_PARAMETER")
 @OptIn(ExperimentalWasmJsInterop::class)
 private fun fakeMoviDestroyCount(player: JsAny): Int = js("player.destroyCount")
+
+@Suppress("UNUSED_PARAMETER")
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun readFakeMoviSubtitleSelections(player: JsAny): String = js("player.selectedSubtitleIds.join('|')")

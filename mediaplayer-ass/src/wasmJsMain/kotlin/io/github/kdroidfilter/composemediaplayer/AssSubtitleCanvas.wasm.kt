@@ -12,10 +12,12 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.HtmlElementView
+import kotlinx.coroutines.isActive
 import org.w3c.dom.HTMLCanvasElement
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
@@ -39,7 +41,6 @@ internal fun AssSubtitleCanvas(
             playerState.subtitlesEnabled &&
             subtitleTrack?.resolvedFormat()?.isAssFamily == true &&
             subtitleTrack.src.isNotBlank() &&
-            videoElement != null &&
             displayElement != null
 
     if (!shouldRenderAss) {
@@ -144,4 +145,67 @@ internal fun AssSubtitleCanvas(
             contentScaleMode = contentScale.toAssSubtitleContentScaleMode(),
         )
     }
+
+    AssSubtitleManualRenderEffects(
+        playerState = playerState,
+        session = session,
+        video = video,
+        display = display,
+        contentScale = contentScale,
+    )
+}
+
+@Composable
+private fun AssSubtitleManualRenderEffects(
+    playerState: VideoPlayerState,
+    session: JsAny?,
+    video: HTMLVideoElement?,
+    display: HTMLElement,
+    contentScale: ContentScale,
+) {
+    LaunchedEffect(session, video, display, playerState.isPlaying) {
+        if (session == null || video != null || !playerState.isPlaying) return@LaunchedEffect
+        while (isActive) {
+            withFrameNanos {
+                renderAssSubtitleFrame(
+                    session = session,
+                    mediaTimeSeconds = playerState.assSubtitleMediaTimeSeconds(),
+                    repaint = false,
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(
+        session,
+        video,
+        display,
+        playerState.isPlaying,
+        playerState.currentTime,
+        playerState.userDragging,
+        playerState.sliderPos,
+        playerState.duration,
+        playerState.subtitleOffset,
+        contentScale,
+        playerState.isFullscreen,
+    ) {
+        if (session == null || video != null || playerState.isPlaying) return@LaunchedEffect
+        withFrameNanos {
+            renderAssSubtitleFrame(
+                session = session,
+                mediaTimeSeconds = playerState.assSubtitleMediaTimeSeconds(),
+                repaint = true,
+            )
+        }
+    }
+}
+
+private fun VideoPlayerState.assSubtitleMediaTimeSeconds(): Double {
+    val position =
+        if (userDragging) {
+            duration * (sliderPos / VideoPlayerState.SLIDER_SCALE).toDouble().coerceIn(0.0, 1.0)
+        } else {
+            preciseCurrentTime
+        }
+    return position.toDouble(DurationUnit.SECONDS)
 }

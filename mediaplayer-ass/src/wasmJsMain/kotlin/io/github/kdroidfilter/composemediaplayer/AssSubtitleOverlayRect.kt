@@ -181,14 +181,6 @@ private fun checkAssSubtitleRendererCapabilities(enabled: Boolean): String =
             if (typeof fetch !== "function") missing.push("Fetch");
             if (typeof Promise !== "function") missing.push("Promise");
             if (typeof Proxy !== "function") missing.push("Proxy");
-            const videoPrototype =
-                typeof HTMLVideoElement === "function" ? HTMLVideoElement.prototype : null;
-            if (
-                !videoPrototype ||
-                typeof videoPrototype.requestVideoFrameCallback !== "function"
-            ) {
-                missing.push("requestVideoFrameCallback");
-            }
             return missing.length === 0
                 ? ""
                 : "JASSUB cannot run because this browser is missing: " + missing.join(", ") + ".";

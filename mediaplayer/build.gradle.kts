@@ -247,7 +247,6 @@ kotlin {
         wasmJsMain.dependencies {
             implementation(libs.kotlinx.browser)
             implementation(libs.compose.ui)
-            implementation(npm("hls.js", "1.6.16"))
         }
 
         wasmJsTest.dependencies {

@@ -13,7 +13,7 @@ internal const val ASS_MKV_FONTS_CHANGED_EVENT: String = "composemediaplayer:mkv
 
 @Suppress("TooGenericExceptionCaught")
 internal fun createAssSubtitleRendererSession(
-    video: HTMLVideoElement,
+    video: HTMLVideoElement?,
     canvas: HTMLCanvasElement,
     displayElement: HTMLElement,
     subUrl: String,
@@ -101,7 +101,7 @@ private fun AssFontQueryMode.toJassubQueryFonts(): String =
 
 @Suppress("UNUSED_PARAMETER")
 private fun createJassubRendererOptions(
-    video: HTMLVideoElement,
+    video: HTMLVideoElement?,
     canvas: HTMLCanvasElement,
     subUrl: String,
     workerUrl: String?,
@@ -160,11 +160,10 @@ private fun createJassubRendererOptions(
 
                 const subContent = decodeDataUrl(subUrl);
                 const embeddedFonts =
-                    Array.isArray(video.__composeMediaPlayerMkvFontFiles)
+                    video && Array.isArray(video.__composeMediaPlayerMkvFontFiles)
                         ? video.__composeMediaPlayerMkvFontFiles.slice()
                         : [];
                 const options = {
-                    video: video,
                     canvas: canvas,
                     queryFonts: queryFonts === "disabled" ? false : queryFonts,
                     timeOffset: timeOffsetSeconds,
@@ -178,6 +177,9 @@ private fun createJassubRendererOptions(
                     __composeMediaPlayerFallbackFontUrl: fallbackFontUrl,
                     __composeMediaPlayerFallbackFontFamily: fallbackFontFamily
                 };
+                if (video) {
+                    options.video = video;
+                }
 
                 if (subContent != null) {
                     options.subContent = subContent;
@@ -310,7 +312,7 @@ internal fun hardenJassubLocalFontQuery(
 internal fun configureJassubRendererSession(
     instance: JsAny,
     options: JsAny,
-    video: HTMLVideoElement,
+    video: HTMLVideoElement?,
     canvas: HTMLCanvasElement,
     displayElement: HTMLElement,
     contentScaleMode: String,
@@ -341,6 +343,9 @@ internal fun configureJassubRendererSession(
                 layoutDirty: true,
                 layoutFrame: 0,
                 layoutRunning: false,
+                lastManualFrame: null,
+                lastManualWidth: 0,
+                lastManualHeight: 0,
                 destroyPromise: null,
                 queue: Promise.resolve(instance.ready),
                 loadedFonts: new Set(options.__composeMediaPlayerInitialFonts || [])
@@ -396,11 +401,13 @@ internal fun configureJassubRendererSession(
                     session.styleObserver.disconnect();
                     session.styleObserver = null;
                 }
-                video.removeEventListener("loadedmetadata", session.scheduleLayout);
-                video.removeEventListener("resize", session.scheduleLayout);
-                video.removeEventListener("seeked", session.scheduleLayout);
-                video.removeEventListener("pause", session.scheduleLayout);
-                video.removeEventListener("${ASS_MKV_FONTS_CHANGED_EVENT}", session.syncFonts);
+                if (video) {
+                    video.removeEventListener("loadedmetadata", session.scheduleLayout);
+                    video.removeEventListener("resize", session.scheduleLayout);
+                    video.removeEventListener("seeked", session.scheduleLayout);
+                    video.removeEventListener("pause", session.scheduleLayout);
+                    video.removeEventListener("${ASS_MKV_FONTS_CHANGED_EVENT}", session.syncFonts);
+                }
                 if (session.layoutFrame) {
                     cancelAnimationFrame(session.layoutFrame);
                     session.layoutFrame = 0;
@@ -480,7 +487,7 @@ internal fun configureJassubRendererSession(
 
             function readLayout() {
                 const wrapper = canvas.parentElement;
-                const target = session.displayElement || video;
+                const target = session.displayElement || video || canvas;
                 if (!wrapper || !target) return null;
                 const wrapperRect = wrapper.getBoundingClientRect();
                 const targetRect = target.getBoundingClientRect();
@@ -493,12 +500,18 @@ internal fun configureJassubRendererSession(
                     return null;
                 }
 
-                const wholeDisplay = target !== video;
+                const mediaWidth = video
+                    ? Number(video.videoWidth || 0)
+                    : Number(target.width || canvas.width || 0);
+                const mediaHeight = video
+                    ? Number(video.videoHeight || 0)
+                    : Number(target.height || canvas.height || 0);
+                const wholeDisplay = Boolean(video && target !== video);
                 const encoded = layoutCalculator(
                     targetRect.width,
                     targetRect.height,
-                    Number(video.videoWidth || 0),
-                    Number(video.videoHeight || 0),
+                    mediaWidth,
+                    mediaHeight,
                     session.contentScaleMode,
                     wholeDisplay
                 );
@@ -549,6 +562,65 @@ internal fun configureJassubRendererSession(
                     session.active = true;
                     onReady();
                 }
+                if (!video && session.lastManualFrame) {
+                    renderManualFrame(session.lastManualFrame, true);
+                }
+            }
+
+            function readManualFrameSize() {
+                const target = session.displayElement || canvas;
+                const ratio = Number(globalThis.devicePixelRatio || 1);
+                let width = Number(target && target.width || 0);
+                let height = Number(target && target.height || 0);
+                if (width > 0 && height > 0) return { width: width, height: height };
+
+                const rect = target && target.getBoundingClientRect
+                    ? target.getBoundingClientRect()
+                    : null;
+                width = Number(rect && rect.width || session.targetStyle && session.targetStyle.width || 0);
+                height = Number(rect && rect.height || session.targetStyle && session.targetStyle.height || 0);
+                return {
+                    width: Math.max(1, Math.round(width * ratio)),
+                    height: Math.max(1, Math.round(height * ratio))
+                };
+            }
+
+            function renderManualFrame(frame, repaint) {
+                if (
+                    video ||
+                    session.disposed ||
+                    session.failed ||
+                    !session.active ||
+                    !frame ||
+                    !Number.isFinite(frame.mediaTime)
+                ) {
+                    return;
+                }
+                if (!instance || typeof instance.manualRender !== "function") {
+                    fail(new Error("JASSUB canvas-only rendering is unavailable."));
+                    return;
+                }
+                const size = readManualFrameSize();
+                if (
+                    size.width !== session.lastManualWidth ||
+                    size.height !== session.lastManualHeight
+                ) {
+                    session.lastManualWidth = size.width;
+                    session.lastManualHeight = size.height;
+                    session.scheduleLayout();
+                }
+                const task = Promise.resolve(
+                    instance.manualRender(
+                        {
+                            expectedDisplayTime: performance.now(),
+                            width: size.width,
+                            height: size.height,
+                            mediaTime: frame.mediaTime
+                        },
+                        Boolean(repaint)
+                    )
+                );
+                task.catch(fail);
             }
 
             function runLayout() {
@@ -589,16 +661,22 @@ internal fun configureJassubRendererSession(
 
             session.updateLayout = function(nextDisplayElement, nextContentScaleMode) {
                 if (session.disposed) return;
-                session.displayElement = nextDisplayElement || video;
+                session.displayElement = nextDisplayElement || video || canvas;
                 session.contentScaleMode = nextContentScaleMode;
                 if (session.resizeObserver) {
                     session.resizeObserver.disconnect();
                     const wrapper = canvas.parentElement;
                     if (wrapper) session.resizeObserver.observe(wrapper);
                     if (session.displayElement) session.resizeObserver.observe(session.displayElement);
-                    session.resizeObserver.observe(video);
+                    if (video) session.resizeObserver.observe(video);
                 }
                 session.scheduleLayout();
+            };
+
+            session.renderFrame = function(mediaTime, repaint) {
+                if (session.disposed || !Number.isFinite(mediaTime)) return;
+                session.lastManualFrame = { mediaTime: mediaTime };
+                renderManualFrame(session.lastManualFrame, repaint);
             };
 
             session.updateOffset = function(offsetSeconds) {
@@ -638,7 +716,7 @@ internal fun configureJassubRendererSession(
             };
 
             session.syncFonts = function() {
-                if (session.disposed) return;
+                if (session.disposed || !video) return;
                 const available =
                     Array.isArray(video.__composeMediaPlayerMkvFontFiles)
                         ? video.__composeMediaPlayerMkvFontFiles
@@ -664,7 +742,7 @@ internal fun configureJassubRendererSession(
             const initialWrapper = canvas.parentElement;
             if (initialWrapper) session.resizeObserver.observe(initialWrapper);
             session.resizeObserver.observe(displayElement);
-            session.resizeObserver.observe(video);
+            if (video) session.resizeObserver.observe(video);
             session.styleObserver = new MutationObserver(function() {
                 if (session.disposed || styleMatchesTarget()) return;
                 requestAnimationFrame(function() {
@@ -672,11 +750,13 @@ internal fun configureJassubRendererSession(
                 });
             });
             session.styleObserver.observe(canvas, { attributes: true, attributeFilter: ["style"] });
-            video.addEventListener("loadedmetadata", session.scheduleLayout);
-            video.addEventListener("resize", session.scheduleLayout);
-            video.addEventListener("seeked", session.scheduleLayout);
-            video.addEventListener("pause", session.scheduleLayout);
-            video.addEventListener("${ASS_MKV_FONTS_CHANGED_EVENT}", session.syncFonts);
+            if (video) {
+                video.addEventListener("loadedmetadata", session.scheduleLayout);
+                video.addEventListener("resize", session.scheduleLayout);
+                video.addEventListener("seeked", session.scheduleLayout);
+                video.addEventListener("pause", session.scheduleLayout);
+                video.addEventListener("${ASS_MKV_FONTS_CHANGED_EVENT}", session.syncFonts);
+            }
 
             Promise.resolve(instance.ready).then(
                 function() {
@@ -730,6 +810,22 @@ internal fun updateAssSubtitleRendererLayout(
         {
             if (session && typeof session.updateLayout === "function") {
                 session.updateLayout(displayElement, contentScaleMode);
+            }
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+internal fun renderAssSubtitleFrame(
+    session: JsAny?,
+    mediaTimeSeconds: Double,
+    repaint: Boolean,
+): Unit =
+    js(
+        """
+        {
+            if (session && typeof session.renderFrame === "function") {
+                session.renderFrame(mediaTimeSeconds, repaint);
             }
         }
         """,

@@ -27,11 +27,15 @@ as either `MoviPlayer 0.3.5` or `HTML5 video (legacy)`.
 |---|---|
 | MP4, WebM, MKV, AVI, MPEG-TS, HLS, DASH or MSS with default options | Movi canvas |
 | DRM adaptive source | Movi/Shaka native video |
-| `WebPlaybackEngine.LEGACY` | Previous HTML video / hls.js implementation |
-| Clear source with `REQUIRE_HDR`, `FORCE_SDR`, or non-`AUTO` Dolby Vision | Legacy |
+| `WebPlaybackEngine.LEGACY` with a non-adaptive source | Native HTML video |
+| `WebPlaybackEngine.LEGACY` with a recognized HLS, DASH or MSS manifest | Rejected with `SourceError` |
+| Non-adaptive clear source with `REQUIRE_HDR`, `FORCE_SDR`, or non-`AUTO` Dolby Vision | Legacy |
+| Adaptive clear source with a strict color policy | Rejected with `ColorPipelineError` |
 | DRM plus strict color, projection, or non-default texture crop | Rejected with `DrmError` |
 
-A Movi error is terminal for that session. It never causes an automatic legacy retry.
+A Movi error is terminal for that session. It never causes an automatic legacy retry. KMediaPlayer
+does not ship `hls.js`, dash.js, Shaka Player, or another adaptive-streaming implementation for the
+legacy route; HLS, DASH and MSS are delegated exclusively to the externally loaded Movi module.
 
 ## Adapter boundaries
 
@@ -58,9 +62,11 @@ container and hides the canvas. For SDR projection, KMediaPlayer samples the hid
 through the existing WebGL projection renderer. Movi source color metadata is exposed, but decoder,
 surface and output color evidence remain unknown; an `isHDR` flag alone never confirms HDR output.
 
-Embedded subtitles use Movi. External SRT/VTT/ASS timing remains in KMediaPlayer's Compose overlay.
-Full browser JASSUB styling and embedded-font support currently require
-`WebPlaybackEngine.LEGACY`.
+Embedded subtitles use Movi. External SRT/VTT timing remains in KMediaPlayer's Compose overlay.
+When `AssSubtitleExtension()` is installed, external ASS/SSA uses JASSUB with both engines: clear
+Movi playback drives JASSUB's canvas-only mode from the Movi clock, and DRM uses the native video
+element. JASSUB rendering of embedded ASS/SSA and container font attachments still requires the
+legacy MKV extraction route; KMediaPlayer does not re-demux Movi sources.
 
 ## Verification matrix
 
@@ -70,6 +76,7 @@ The following checks are part of the repository:
 |---|---|
 | Routing, fail-closed DRM/color combinations, redaction and model mapping | Automated Wasm unit test |
 | Audio accept/reject semantics and rapid repeated switches | Automated Wasm unit test |
+| External ASS selection disables Movi subtitles; JASSUB manual mode receives the Movi time and canvas dimensions | Automated Wasm browser tests |
 | Real CDN module with a generated MKV containing `en` and `pl` Opus tracks, real switch, continued playback and seek | Blocking Chrome test |
 | Real CDN module with MP4, WebM, a browser Blob URL and a direct FileKit browser `File` | Blocking Chrome test |
 | Real CDN module with HLS and DASH served from deterministic local manifests and segments | Blocking Chrome test |
@@ -95,7 +102,7 @@ dedicated `continue-on-error` jobs for the first integration release. Their repo
 CI artifacts so observed failures and browser limitations are visible without blocking publication.
 The browser can also be selected locally with
 `-PcomposeMediaPlayer.wasmTestBrowser=chrome|firefox|safari`. Canvas PiP, full Movi HDR/projection
-parity and advanced JASSUB are explicitly non-blocking.
+parity and JASSUB rendering of embedded Movi subtitles are explicitly non-blocking.
 
 Local verification on 2026-07-20 passed the complete Chrome suite with both `MOVI` and `LEGACY`;
 the `MOVI` run imported the external module from the configured CDN. The earlier Firefox Headless

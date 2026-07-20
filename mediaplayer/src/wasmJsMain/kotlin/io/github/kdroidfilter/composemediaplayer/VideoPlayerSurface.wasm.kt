@@ -65,10 +65,7 @@ private fun LegacyWebVideoPlayerSurface(
     if (playerState.hasMedia) {
         val surfaceMediaSessionId = playerState.mediaSessionId
         val subtitleTrack = playerState.currentSubtitleTrack
-        val subtitleExtension =
-            playerState.webSubtitlePipelineExtensions.firstOrNull { extension ->
-                subtitleTrack?.resolvedFormat()?.let(extension::supportsSubtitleFormat) == true
-            }
+        val subtitleExtension = playerState.activeWebSubtitleExtension(subtitleTrack)
         var styledSubtitleActive by
             remember(surfaceMediaSessionId, subtitleTrack?.id, subtitleExtension?.id) {
                 mutableStateOf(false)
@@ -212,10 +209,17 @@ private fun MoviWebVideoPlayerSurface(
     if (!playerState.hasMedia) return
 
     val surfaceMediaSessionId = playerState.mediaSessionId
+    val subtitleTrack = playerState.currentSubtitleTrack
+    val subtitleExtension = playerState.activeWebSubtitleExtension(subtitleTrack)
     val scope = rememberCoroutineScope()
+    var styledSubtitleActive by
+        remember(surfaceMediaSessionId, subtitleTrack?.id, subtitleExtension?.id) {
+            mutableStateOf(false)
+        }
     var containerElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLElement?>(null) }
     var canvasElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLCanvasElement?>(null) }
     var nativeVideoElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLVideoElement?>(null) }
+    var projectionElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLElement?>(null) }
     var session by remember(surfaceMediaSessionId) { mutableStateOf<MoviPlaybackSession?>(null) }
     var videoRatio by remember(surfaceMediaSessionId) { mutableStateOf<Float?>(null) }
     val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
@@ -303,12 +307,20 @@ private fun MoviWebVideoPlayerSurface(
         nativeVideoElement?.configureAsMoviDrmSurface(contentScale)
     }
 
+    val subtitleDisplayElement =
+        moviSubtitleDisplayElement(
+            route = playerState.webPlaybackDecision.route,
+            usesSdrProjectionCanvas = usesSdrProjectionCanvas,
+            nativeVideoElement = nativeVideoElement,
+            projectionElement = projectionElement,
+            canvasElement = canvasElement,
+        )
     VideoContentLayout(
         playerState = playerState,
         modifier = modifier,
         videoRatio = videoRatio,
         contentScale = contentScale,
-        suppressComposeAss = false,
+        suppressComposeAss = styledSubtitleActive,
         overlay = overlay,
     ) {
         key(surfaceMediaSessionId) {
@@ -333,10 +345,39 @@ private fun MoviWebVideoPlayerSurface(
                 sourceCanvas = canvasElement,
                 enabled = usesSdrProjectionCanvas,
                 modifier = Modifier.fillMaxSize(),
+                onElementChanged = { element -> projectionElement = element },
+            )
+            subtitleExtension?.SubtitleOverlay(
+                playerState = playerState,
+                videoElement = nativeVideoElement,
+                displayElement = subtitleDisplayElement,
+                contentScale = contentScale,
+                modifier = Modifier.fillMaxSize(),
+                onActiveChanged = { active -> styledSubtitleActive = active },
             )
         }
     }
 }
+
+private fun DefaultVideoPlayerState.activeWebSubtitleExtension(
+    subtitleTrack: SubtitleTrack?,
+): WebSubtitlePipelineExtension? =
+    webSubtitlePipelineExtensions.firstOrNull { extension ->
+        subtitleTrack?.resolvedFormat()?.let(extension::supportsSubtitleFormat) == true
+    }
+
+private fun moviSubtitleDisplayElement(
+    route: WebPlaybackRoute,
+    usesSdrProjectionCanvas: Boolean,
+    nativeVideoElement: HTMLVideoElement?,
+    projectionElement: HTMLElement?,
+    canvasElement: HTMLCanvasElement?,
+): HTMLElement? =
+    when {
+        route == WebPlaybackRoute.MOVI_DRM -> nativeVideoElement
+        usesSdrProjectionCanvas -> projectionElement
+        else -> canvasElement
+    }
 
 @Composable
 private fun MoviSdrProjectionCanvas(
@@ -344,17 +385,24 @@ private fun MoviSdrProjectionCanvas(
     sourceCanvas: HTMLCanvasElement?,
     enabled: Boolean,
     modifier: Modifier,
+    onElementChanged: (HTMLElement?) -> Unit,
 ) {
     if (!enabled || sourceCanvas == null) {
-        SideEffect { sourceCanvas?.restoreAfterMoviProjection() }
+        SideEffect {
+            sourceCanvas?.restoreAfterMoviProjection()
+            onElementChanged(null)
+        }
         return
     }
 
     key(sourceCanvas) {
         HtmlElementView(
-            factory = ::createWebProjectionCanvasElement,
+            factory = {
+                createWebProjectionCanvasElement().also(onElementChanged)
+            },
             modifier = modifier,
             update = { projectionCanvas ->
+                onElementChanged(projectionCanvas)
                 projectionCanvas.applyWebProjectionCanvasStyle()
                 projectionCanvas.configureWebSdrProjectionRenderer(
                     sourceCanvas = sourceCanvas,
@@ -379,6 +427,7 @@ private fun MoviSdrProjectionCanvas(
                 )
             },
             onRelease = { projectionCanvas ->
+                onElementChanged(null)
                 projectionCanvas.disposeWebProjectionRenderer()
                 sourceCanvas.restoreAfterMoviProjection()
             },

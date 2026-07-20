@@ -21,9 +21,12 @@ internal data class WebPlaybackDecision(
 internal fun VideoPlaybackOptions.webPlaybackDecision(
     projection: VideoProjectionSettings = this.projection,
     textureCrop: VideoTextureCrop = projectionTextureCrop,
+    sourceUri: String? = null,
 ): WebPlaybackDecision {
+    val adaptiveStreamingFormat = sourceUri?.webAdaptiveStreamingFormatOrNull()
     if (webPlaybackEngine == WebPlaybackEngine.LEGACY) {
-        return WebPlaybackDecision(WebPlaybackRoute.LEGACY)
+        return adaptiveStreamingFormat?.legacyPlaybackRejection()
+            ?: WebPlaybackDecision(WebPlaybackRoute.LEGACY)
     }
 
     val drm = webDrmConfiguration
@@ -54,8 +57,30 @@ internal fun VideoPlaybackOptions.webPlaybackDecision(
     }
 
     if (strictColorPolicy) {
+        if (adaptiveStreamingFormat != null) {
+            return WebPlaybackDecision(
+                route = WebPlaybackRoute.REJECTED,
+                error =
+                    VideoPlayerError.ColorPipelineError(
+                        reason = ColorPipelineFallbackReason.PLATFORM_RUNTIME_UNAVAILABLE,
+                        message =
+                            "${adaptiveStreamingFormat.name} playback on WebAssembly requires Movi, " +
+                                "which cannot guarantee the requested strict color policy.",
+                    ),
+            )
+        }
         return WebPlaybackDecision(WebPlaybackRoute.LEGACY)
     }
 
     return WebPlaybackDecision(WebPlaybackRoute.MOVI)
 }
+
+private fun WebAdaptiveStreamingFormat.legacyPlaybackRejection(): WebPlaybackDecision =
+    WebPlaybackDecision(
+        route = WebPlaybackRoute.REJECTED,
+        error =
+            VideoPlayerError.SourceError(
+                "$name playback on WebAssembly requires WebPlaybackEngine.MOVI; " +
+                    "the legacy engine does not include an adaptive-streaming implementation.",
+            ),
+    )

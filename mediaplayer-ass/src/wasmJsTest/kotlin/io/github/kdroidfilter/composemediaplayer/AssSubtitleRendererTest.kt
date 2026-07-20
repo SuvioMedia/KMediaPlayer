@@ -218,6 +218,79 @@ class AssSubtitleRendererTest {
         }
 
     @Test
+    fun canvasOnlySessionRendersFromTheSuppliedMoviClockAndCanvasSize() =
+        runTest {
+            val wrapper = document.createElement("div") as HTMLElement
+            val moviCanvas =
+                (document.createElement("canvas") as HTMLCanvasElement).apply {
+                    width = 1_920
+                    height = 1_080
+                }
+            val subtitleCanvas = document.createElement("canvas") as HTMLCanvasElement
+            wrapper.appendChild(moviCanvas)
+            wrapper.appendChild(subtitleCanvas)
+            document.body?.appendChild(wrapper)
+            stubElementRect(wrapper, width = 320.0, height = 180.0)
+            stubElementRect(moviCanvas, width = 320.0, height = 180.0)
+
+            val originalResizeObserver = installNoopResizeObserver()
+            var session: JsAny? = null
+            try {
+                val rendered = CompletableDeferred<ManualRenderCall>()
+                val failure = CompletableDeferred<String>()
+                val instance =
+                    createFakeRenderer(
+                        onResize = { _, _ -> },
+                        onProcessData = {},
+                        onAddFonts = {},
+                        onDestroy = {},
+                        onTerminate = {},
+                        onManualRender = { mediaTime, width, height, repaint ->
+                            rendered.complete(
+                                ManualRenderCall(
+                                    mediaTime = mediaTime,
+                                    width = width,
+                                    height = height,
+                                    repaint = repaint,
+                                ),
+                            )
+                        },
+                    )
+                session =
+                    configureJassubRendererSession(
+                        instance = instance,
+                        options = createFakeSessionOptions("initial", assScript(dialogues = emptyList())),
+                        video = null,
+                        canvas = subtitleCanvas,
+                        displayElement = moviCanvas,
+                        contentScaleMode = "contain",
+                        layoutCalculator = { width, height, _, _, _, _ -> "0|0|$width|$height" },
+                        streamUpdateCalculator = ::computeAssSubtitleStreamUpdate,
+                        renderDimensionCalculator = ::assSubtitleRenderDimension,
+                        onReady = {},
+                        onError = { message -> failure.complete(message) },
+                        onRestartRequired = { failure.complete("unexpected restart") },
+                    )
+
+                renderAssSubtitleFrame(
+                    session = session,
+                    mediaTimeSeconds = 12.5,
+                    repaint = true,
+                )
+
+                assertEquals(
+                    ManualRenderCall(mediaTime = 12.5, width = 1_920, height = 1_080, repaint = true),
+                    rendered.awaitReal(),
+                )
+                assertTrue(!failure.isCompleted)
+            } finally {
+                disposeAssSubtitleRendererSession(session)
+                restoreResizeObserver(originalResizeObserver)
+                wrapper.remove()
+            }
+        }
+
+    @Test
     fun invalidCustomResourceUrlReportsFallbackInsteadOfEscaping() {
         val video = document.createElement("video") as HTMLVideoElement
         val canvas = document.createElement("canvas") as HTMLCanvasElement
@@ -431,6 +504,7 @@ private fun createFakeRenderer(
     onAddFonts: (Int) -> Unit,
     onDestroy: () -> Unit,
     onTerminate: () -> Unit,
+    onManualRender: (Double, Int, Int, Boolean) -> Unit = { _, _, _, _ -> },
     destroyCompletes: Boolean = true,
 ): JsAny =
     js(
@@ -452,6 +526,10 @@ private fun createFakeRenderer(
                     return Promise.resolve(true);
                 }
             },
+            manualRender: function(frame, repaint) {
+                onManualRender(frame.mediaTime, frame.width, frame.height, Boolean(repaint));
+                return Promise.resolve();
+            },
             destroy: function() {
                 onDestroy();
                 return destroyCompletes ? Promise.resolve() : new Promise(function() {});
@@ -464,6 +542,13 @@ private fun createFakeRenderer(
         })
         """,
     )
+
+private data class ManualRenderCall(
+    val mediaTime: Double,
+    val width: Int,
+    val height: Int,
+    val repaint: Boolean,
+)
 
 private fun createRejectingLocalFontRenderer(): JsAny =
     js(

@@ -74,9 +74,10 @@ enum class WebPlaybackEngine {
     MOVI,
 
     /**
-     * Use the previous HTML5 video/hls.js implementation.
+     * Use native HTML5 video without a bundled adaptive-streaming implementation.
      *
-     * This is an explicit compatibility route. A Movi failure never switches to this engine automatically.
+     * This is an explicit compatibility route for non-adaptive sources. Recognized HLS, DASH and MSS manifests
+     * require [MOVI], and a Movi failure never switches to this engine automatically.
      */
     LEGACY,
 }

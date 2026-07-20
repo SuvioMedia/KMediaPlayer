@@ -675,25 +675,6 @@ class VideoPlayerStateTest {
     }
 
     @Test
-    fun testHlsQualityRowsIgnoreInvalidVariantsAndMetrics() {
-        val snapshot =
-            parseHlsQualityRows(
-                listOf(
-                    "hls:good|720p|1280|720|2500000|avc1|1|0",
-                    "|Missing id|1920|1080|5000000|avc1|0|0",
-                    "hls:missing-label||1920|1080|5000000|avc1|0|0",
-                    "hls:partial|Partial|-1|0|-500|avc1|0|0",
-                ).joinToString("\n"),
-            )
-
-        assertEquals(2, snapshot.variants.size)
-        assertEquals("hls:good", snapshot.selectedId)
-        assertFalse(snapshot.autoMode)
-        assertEquals(HlsQualityVariant("hls:good", "720p", 1280, 720, 2500000, "avc1"), snapshot.variants[0])
-        assertEquals(HlsQualityVariant("hls:partial", "Partial", codecs = "avc1"), snapshot.variants[1])
-    }
-
-    @Test
     fun testBufferedRangeRowsIgnoreInvalidRanges() {
         val playerState = createVideoPlayerState() as DefaultVideoPlayerState
 
@@ -721,33 +702,36 @@ class VideoPlayerStateTest {
     @Test
     fun testWebCapabilitiesClassifySources() {
         val playerState = createVideoPlayerState()
+        val adaptiveStreamingSupported = configuredWebTestPlaybackEngine() == WebPlaybackEngine.MOVI
 
         assertFalse(playerState.canPlaySource(""))
         assertTrue(playerState.canPlaySource("blob:https://example.test/video"))
         assertTrue(playerState.canPlaySource("data:video/mp4;base64,AAA"))
-        assertTrue(playerState.canPlaySource("https://example.test/playlist.m3u8"))
+        assertEquals(
+            adaptiveStreamingSupported,
+            playerState.canPlaySource("https://example.test/playlist.m3u8"),
+        )
+        assertEquals(
+            adaptiveStreamingSupported,
+            playerState.canPlaySource("https://example.test/manifest.mpd"),
+        )
+        assertEquals(
+            adaptiveStreamingSupported,
+            playerState.canPlaySource("https://example.test/channel.ism/Manifest"),
+        )
+        assertEquals(
+            adaptiveStreamingSupported,
+            playerState.canPlaySource(
+                uri = "https://example.test/opaque-stream",
+                mimeType = "application/dash+xml",
+            ),
+        )
         assertFalse(playerState.canPlaySource("file:///movie.mp4"))
         assertFalse(playerState.canPlaySource("file:///movie.mkv"))
         assertFalse(playerState.canPlaySource("""C:\Videos\movie.mp4"""))
         assertFalse(playerState.canPlaySource("""\\server\share\movie.mp4"""))
 
         playerState.dispose()
-    }
-
-    @Test
-    fun testBundledHlsModuleIsAvailableOffline() {
-        assertTrue(ensureHlsModuleLoaded())
-    }
-
-    @Test
-    fun testBundledHlsModuleDoesNotOverwriteHostGlobal() {
-        installGlobalHlsSentinel()
-        try {
-            assertTrue(ensureHlsModuleLoaded())
-            assertTrue(isGlobalHlsSentinelIntact())
-        } finally {
-            restoreGlobalHlsAfterSentinel()
-        }
     }
 
     @Test
@@ -885,38 +869,5 @@ private fun canRequestFullscreenFromCurrentContext(): Boolean =
             navigator.userActivation &&
             navigator.userActivation.isActive
         )
-        """,
-    )
-
-@OptIn(ExperimentalWasmJsInterop::class)
-private fun installGlobalHlsSentinel(): Unit =
-    js(
-        """
-        {
-            globalThis.__composeMediaPlayerHadOwnHls = Object.prototype.hasOwnProperty.call(globalThis, "Hls");
-            globalThis.__composeMediaPlayerPreviousHls = globalThis.Hls;
-            globalThis.__composeMediaPlayerHlsSentinel = { owner: "host" };
-            globalThis.Hls = globalThis.__composeMediaPlayerHlsSentinel;
-        }
-        """,
-    )
-
-@OptIn(ExperimentalWasmJsInterop::class)
-private fun isGlobalHlsSentinelIntact(): Boolean = js("globalThis.Hls === globalThis.__composeMediaPlayerHlsSentinel")
-
-@OptIn(ExperimentalWasmJsInterop::class)
-private fun restoreGlobalHlsAfterSentinel(): Unit =
-    js(
-        """
-        {
-            if (globalThis.__composeMediaPlayerHadOwnHls) {
-                globalThis.Hls = globalThis.__composeMediaPlayerPreviousHls;
-            } else {
-                delete globalThis.Hls;
-            }
-            delete globalThis.__composeMediaPlayerHadOwnHls;
-            delete globalThis.__composeMediaPlayerPreviousHls;
-            delete globalThis.__composeMediaPlayerHlsSentinel;
-        }
         """,
     )

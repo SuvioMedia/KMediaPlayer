@@ -17,18 +17,16 @@ private data class SubtitleTrackSnapshot(
 )
 
 internal fun DefaultVideoPlayerState.syncWebMediaTracks(video: HTMLVideoElement) {
-    val hlsAudioRows = readHlsAudioTrackRows(video)
     val webAudioRows = readWebAudioTrackRows(video)
     val audioSnapshot =
-        parseAudioTrackRows(hlsAudioRows.ifBlank { webAudioRows.ifBlank { readMkvAudioTrackRows(video) } })
+        parseAudioTrackRows(webAudioRows.ifBlank { readMkvAudioTrackRows(video) })
     replaceAvailableAudioTracks(audioSnapshot.tracks)
     audioSnapshot.selectedId?.let { selectedId ->
         currentAudioTrack = audioSnapshot.tracks.firstOrNull { it.id == selectedId } ?: currentAudioTrack
     }
 
     val subtitleRows =
-        listOf(readWebTextTrackRows(video), readHlsSubtitleTrackRows(video))
-            .plus(readMkvSubtitleTrackRows(video))
+        listOf(readWebTextTrackRows(video), readMkvSubtitleTrackRows(video))
             .filter { it.isNotBlank() }
             .joinToString("\n")
     val subtitleSnapshot = parseSubtitleTrackRows(subtitleRows)
@@ -42,13 +40,10 @@ internal fun DefaultVideoPlayerState.syncWebMediaTracks(video: HTMLVideoElement)
     }
 
     replaceWebTextTrackChapters(parseWebMediaChapterRows(readWebChapterRows(video)))
-    replaceWebHlsChapters(parseWebMediaChapterRows(readHlsChapterRows(video)))
 }
 
 internal fun HTMLVideoElement.applySelectedAudioTrack(track: AudioTrack?) {
-    if (track?.id?.startsWith(HLS_AUDIO_TRACK_ID_PREFIX) == true) {
-        selectHlsAudioTrackById(video = this, selectedId = track.id)
-    } else if (track?.id?.startsWith(MKV_AUDIO_TRACK_ID_PREFIX) == true) {
+    if (track?.id?.startsWith(MKV_AUDIO_TRACK_ID_PREFIX) == true) {
         selectMkvAudioTrackById(video = this, selectedId = track.id)
     } else {
         selectWebAudioTrackById(video = this, selectedId = track?.id)
@@ -291,55 +286,6 @@ private fun readWebChapterRows(video: HTMLVideoElement): String =
         """,
     )
 
-private fun readHlsAudioTrackRows(video: HTMLVideoElement): String =
-    js(
-        """
-        (function() {
-            const hls = video.__composeMediaPlayerHls;
-            const list = hls && hls.audioTracks;
-            if (!list || typeof list.length !== "number") return "";
-
-            const rows = [];
-            const selectedIndex = typeof hls.audioTrack === "number" ? hls.audioTrack : -1;
-            for (let i = 0; i < list.length; i += 1) {
-                const track = list[i] || {};
-                const language = track.lang || track.language || "";
-                const name = track.name || language || "";
-                const stableKey = track.id || track.url || track.uri || [name, language, track.groupId || "", String(i)].join("|");
-                const id = "${HLS_AUDIO_TRACK_ID_PREFIX}" + encodeURIComponent(stableKey);
-                rows.push([
-                    id,
-                    name,
-                    language,
-                    selectedIndex === i ? "1" : "0",
-                    String(i),
-                    "",
-                    track.default ? "1" : "0"
-                ].map(encodeURIComponent).join("|"));
-            }
-            return rows.join("\n");
-        })()
-        """,
-    )
-
-private fun readHlsSubtitleTrackRows(video: HTMLVideoElement): String =
-    js(
-        """
-        (function() {
-            return video.__composeMediaPlayerHlsSubtitleRows || "";
-        })()
-        """,
-    )
-
-private fun readHlsChapterRows(video: HTMLVideoElement): String =
-    js(
-        """
-        (function() {
-            return video.__composeMediaPlayerHlsChapterRows || "";
-        })()
-        """,
-    )
-
 private fun readMkvAudioTrackRows(video: HTMLVideoElement): String =
     js(
         """
@@ -418,32 +364,6 @@ private fun selectWebTextTrackById(
                         track.mode = selectedId && id === selectedId ? "showing" : "disabled";
                     } catch (_) {
                         // Ignore browser-specific native text track limitations.
-                    }
-                }
-            }
-        }
-        """,
-    )
-
-private fun selectHlsAudioTrackById(
-    video: HTMLVideoElement,
-    selectedId: String?,
-): Unit =
-    js(
-        """
-        {
-            const hls = video.__composeMediaPlayerHls;
-            if (hls && selectedId && selectedId.indexOf("${HLS_AUDIO_TRACK_ID_PREFIX}") === 0) {
-                const list = hls.audioTracks || [];
-                for (let i = 0; i < list.length; i += 1) {
-                    const track = list[i] || {};
-                    const language = track.lang || track.language || "";
-                    const name = track.name || language || "";
-                    const stableKey = track.id || track.url || track.uri || [name, language, track.groupId || "", String(i)].join("|");
-                    const id = "${HLS_AUDIO_TRACK_ID_PREFIX}" + encodeURIComponent(stableKey);
-                    if (id === selectedId) {
-                        hls.audioTrack = i;
-                        return;
                     }
                 }
             }

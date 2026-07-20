@@ -48,9 +48,7 @@ internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOpt
         supportsMkv =
             usesMovi ||
                 canPlayWebMimeType(MATROSKA_MIME_TYPE),
-        supportsHls =
-            usesMovi ||
-                isWebHlsPlaybackSupported(),
+        supportsHls = usesMovi,
         supportsPiP = isWebPictureInPictureSupported(),
         displayColorCapabilities = queryWebDisplayColorCapabilities(),
         rendererColorCapabilities = queryWebRendererColorCapabilities(),
@@ -81,6 +79,7 @@ open class DefaultVideoPlayerState(
             playbackOptions.webPlaybackDecision(
                 projection = projection,
                 textureCrop = projectionTextureCrop,
+                sourceUri = sourceUri,
             )
     internal val webSubtitlePipelineExtensions: List<WebSubtitlePipelineExtension> =
         playbackOptions.extensions
@@ -369,7 +368,6 @@ open class DefaultVideoPlayerState(
     private var _currentTime by mutableStateOf(Duration.ZERO)
     private var _chapters by mutableStateOf(emptyList<MediaChapter>())
     private var webTextTrackChapterRows = emptyList<RawMediaChapter>()
-    private var webHlsChapterRows = emptyList<RawMediaChapter>()
     private val _bufferedRanges = mutableStateListOf<BufferedRange>()
     internal var preciseCurrentTimeProvider: (() -> Duration)? = null
     internal var durationProvider: (() -> Duration)? = null
@@ -969,22 +967,16 @@ open class DefaultVideoPlayerState(
         publishWebMediaChapters()
     }
 
-    internal fun replaceWebHlsChapters(rows: List<RawMediaChapter>) {
-        webHlsChapterRows = rows
-        publishWebMediaChapters()
-    }
-
     private fun publishWebMediaChapters() {
         _chapters =
             normalizeMediaChapters(
-                rows = webHlsChapterRows + webTextTrackChapterRows,
+                rows = webTextTrackChapterRows,
                 mediaDuration = duration,
             )
     }
 
     private fun clearWebMediaChapters() {
         webTextTrackChapterRows = emptyList()
-        webHlsChapterRows = emptyList()
         _chapters = emptyList()
     }
 
@@ -1750,11 +1742,21 @@ open class DefaultVideoPlayerState(
         mimeType: String?,
     ): Boolean {
         checkNotDisposed()
+        val playbackRoute =
+            playbackOptions
+                .webPlaybackDecision(
+                    projection = projection,
+                    textureCrop = projectionTextureCrop,
+                    sourceUri = uri,
+                ).route
+        if (playbackRoute == WebPlaybackRoute.REJECTED) return false
         return canPlayWebSource(
             uri = uri,
             mimeType = mimeType,
             capabilities = capabilities,
-            useMovi = playbackOptions.webPlaybackEngine == WebPlaybackEngine.MOVI,
+            useMovi =
+                playbackRoute == WebPlaybackRoute.MOVI ||
+                    playbackRoute == WebPlaybackRoute.MOVI_DRM,
         )
     }
 
@@ -1844,7 +1846,7 @@ open class DefaultVideoPlayerState(
         val durationChanged = _currentDuration != duration
         _currentTime = currentTime
         _currentDuration = duration
-        if (durationChanged && (webTextTrackChapterRows.isNotEmpty() || webHlsChapterRows.isNotEmpty())) {
+        if (durationChanged && webTextTrackChapterRows.isNotEmpty()) {
             publishWebMediaChapters()
         }
 
@@ -2004,10 +2006,13 @@ private fun canPlayWebSource(
 
     val normalizedMimeType = mimeType?.substringBefore(';')?.trim()?.lowercase()
     val cleanUri = uri.substringBefore('?').substringBefore('#').lowercase()
+    val adaptiveStreamingFormat =
+        normalizedMimeType.webAdaptiveStreamingMimeFormatOrNull()
+            ?: cleanUri.webAdaptiveStreamingFormatOrNull()
+    if (adaptiveStreamingFormat != null) return useMovi
     if (useMovi && (normalizedMimeType in MOVI_MEDIA_MIME_TYPES || cleanUri.hasMoviMediaExtension())) {
         return true
     }
-    if (normalizedMimeType.isHlsMimeType() || cleanUri.endsWith(".m3u8")) return true
     if (normalizedMimeType != null) return canPlayWebMimeType(normalizedMimeType)
 
     val extension = cleanUri.substringAfterLast('.', "")
@@ -2018,7 +2023,6 @@ private fun canPlayWebSource(
             "ogg", "ogv" -> "video/ogg"
             "mov" -> "video/quicktime"
             "mkv" -> MATROSKA_MIME_TYPE
-            "m3u8" -> "application/vnd.apple.mpegurl"
             else -> null
         }
     return inferredMimeType?.let(::canPlayWebMimeType) ?: true
@@ -2041,9 +2045,3 @@ private fun canPlayWebMimeType(mimeType: String): Boolean =
 
 private fun isWebPictureInPictureSupported(): Boolean =
     js("""!!(document.pictureInPictureEnabled || document.webkitPictureInPictureEnabled)""")
-
-private fun String?.isHlsMimeType(): Boolean =
-    this == "application/vnd.apple.mpegurl" ||
-        this == "application/x-mpegurl" ||
-        this == "audio/mpegurl" ||
-        this == "audio/x-mpegurl"

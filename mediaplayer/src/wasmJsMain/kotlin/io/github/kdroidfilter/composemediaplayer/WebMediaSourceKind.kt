@@ -5,7 +5,6 @@ internal enum class WebMediaSourceKind {
     LOCAL_BLOB,
     LOCAL_FILE,
     DATA,
-    REMOTE_HLS,
     REMOTE_MEDIA,
     OTHER,
     ;
@@ -14,13 +13,10 @@ internal enum class WebMediaSourceKind {
         get() = this == LOCAL_BLOB || this == LOCAL_FILE || this == DATA
 
     val shouldUseCors: Boolean
-        get() = this == REMOTE_HLS || this == REMOTE_MEDIA
+        get() = this == REMOTE_MEDIA
 
     val allowsCorsRetry: Boolean
         get() = shouldUseCors
-
-    val allowsHlsController: Boolean
-        get() = this == REMOTE_HLS
 }
 
 internal fun String.toWebMediaSourceKind(): WebMediaSourceKind {
@@ -32,8 +28,38 @@ internal fun String.toWebMediaSourceKind(): WebMediaSourceKind {
         lower.startsWith("blob:") -> WebMediaSourceKind.LOCAL_BLOB
         lower.startsWith("file:") -> WebMediaSourceKind.LOCAL_FILE
         lower.startsWith("data:") -> WebMediaSourceKind.DATA
-        lower.startsWith("http://") || lower.startsWith("https://") ->
-            if (trimmed.isHlsSource()) WebMediaSourceKind.REMOTE_HLS else WebMediaSourceKind.REMOTE_MEDIA
+        lower.startsWith("http://") || lower.startsWith("https://") -> WebMediaSourceKind.REMOTE_MEDIA
         else -> WebMediaSourceKind.OTHER
     }
 }
+
+internal enum class WebAdaptiveStreamingFormat {
+    HLS,
+    DASH,
+    MSS,
+}
+
+internal fun String.webAdaptiveStreamingFormatOrNull(): WebAdaptiveStreamingFormat? {
+    val cleanUri = substringBefore('?').substringBefore('#').trim().lowercase()
+    return when {
+        cleanUri.endsWith(".m3u8") -> WebAdaptiveStreamingFormat.HLS
+        cleanUri.endsWith(".mpd") -> WebAdaptiveStreamingFormat.DASH
+        cleanUri.endsWith(".ism") ||
+            cleanUri.endsWith(".isml") ||
+            cleanUri.contains(".ism/manifest") ||
+            cleanUri.contains(".isml/manifest") -> WebAdaptiveStreamingFormat.MSS
+        else -> null
+    }
+}
+
+internal fun String?.webAdaptiveStreamingMimeFormatOrNull(): WebAdaptiveStreamingFormat? =
+    when (this?.substringBefore(';')?.trim()?.lowercase()) {
+        "application/vnd.apple.mpegurl",
+        "application/x-mpegurl",
+        "audio/mpegurl",
+        "audio/x-mpegurl",
+        -> WebAdaptiveStreamingFormat.HLS
+        "application/dash+xml" -> WebAdaptiveStreamingFormat.DASH
+        "application/vnd.ms-sstr+xml" -> WebAdaptiveStreamingFormat.MSS
+        else -> null
+    }

@@ -55,7 +55,7 @@ owner-scoped or `remember`-created instance keeps the player backend and lifecyc
 | Platform | Optional backend | Behavior with `AssSubtitleExtension()` |
 | :--- | :--- | :--- |
 | Android | libass 0.17.5 | Full ASS/SSA styles, positioning, effects, animation and karaoke for external tracks and raw Matroska tracks; supported embedded font attachments are passed to libass. The AAR contains `arm64-v8a` and `armeabi-v7a`. |
-| Browser Wasm | Bundled JASSUB 2.5.7 / libass Wasm | Full presentation for selected ASS/SSA sources through a transparent canvas overlay. The consumer bundler emits JASSUB's worker, Wasm modules and fallback font; embedded Matroska font attachments are streamed into the active renderer. |
+| Browser Wasm | Bundled JASSUB 2.5.7 / libass Wasm | Full presentation for selected external ASS/SSA sources through a transparent canvas overlay on Movi and legacy playback. Clear Movi uses JASSUB's manual canvas clock; video-backed playback uses `requestVideoFrameCallback`. Legacy Matroska extraction also streams embedded font attachments into the active renderer. |
 | macOS JVM | Bundled libass 0.17.5 | Full ASS/SSA rendering in the Apple Silicon Compose/Skia canvas path with CoreText, complex HarfBuzz shaping and embedded Matroska font attachments. Intel macOS is not published. |
 | Windows/Linux JVM | Bundled libass (Windows 0.17.4, Linux 0.17.5) | Full ASS/SSA rendering in writable BGRA frame paths, including styles, animation, karaoke and embedded Matroska fonts. The JAR carries x86_64 and ARM64 runtimes; users do not install libass. Windows uses DirectWrite and Linux uses the host's normal fontconfig configuration. Native HDR/color and native libVLC surfaces retain their platform subtitle route. |
 | iOS | Bundled libass 0.17.5 | Full authored rendering for external ASS/SSA tracks on iOS arm64 and the arm64 Simulator. The extension uses CoreText and a transparent UIKit overlay; no x86 iOS target is built. Embedded Matroska ASS extraction is not yet exposed by AVFoundation, so this route is external-track only. |
@@ -112,8 +112,9 @@ val assExtension =
 The defaults work with the standard Kotlin/Wasm browser bundle. Custom URLs may be relative to the
 application base URL or absolute; cross-origin video, subtitle, worker, Wasm and font resources need
 appropriate CORS headers. The browser requires Worker, WebAssembly, `OffscreenCanvas`,
-`canvas.transferControlToOffscreen()`, `requestVideoFrameCallback()`, ResizeObserver and JASSUB's
-remaining runtime primitives.
+`canvas.transferControlToOffscreen()`, ResizeObserver and JASSUB's remaining runtime primitives.
+Video-backed playback uses `requestVideoFrameCallback()` and JASSUB's included polyfill; clear Movi
+playback uses canvas-only manual rendering.
 Extension availability reports a missing primitive before the renderer is selected. Constructor,
 worker, source and resize failures keep the Compose dialogue fallback active.
 

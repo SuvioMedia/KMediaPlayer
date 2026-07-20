@@ -21,8 +21,9 @@ public interface WebSubtitlePipelineExtension : SubtitlePipelineExtension {
      *
      * [displayElement] is the video in the direct rendering path and the controlled-renderer
      * canvas when video frames are presented through a projection or color-managed surface.
-     * The default implementation preserves compatibility with extensions implementing the
-     * original hook.
+     * [videoElement] is null for canvas-only playback engines; extensions can then synchronize
+     * against [VideoPlayerState.preciseCurrentTime]. The default implementation preserves
+     * compatibility with extensions implementing the original hook.
      */
     @Composable
     public fun SubtitleOverlay(

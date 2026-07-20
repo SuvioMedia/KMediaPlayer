@@ -660,7 +660,6 @@ private fun matchesCurrentSource(
         """
         (function() {
             if (!sourceUri) return false;
-            if (video.__composeMediaPlayerHlsSourceUri === sourceUri) return true;
 
             const candidates = [video.currentSrc || "", video.src || ""].filter(Boolean);
             for (let i = 0; i < candidates.length; i += 1) {
@@ -702,7 +701,6 @@ private fun stopPlaybackQualityDiagnostics(video: HTMLVideoElement): Unit =
 internal fun HTMLVideoElement.cleanupWebVideoElement() {
     stopPlaybackQualityDiagnostics()
     safePause()
-    destroyHlsController()
     destroyMkvSidecarTracks()
     removeManagedEventListeners()
     removeWebMediaTrackListeners(this)
@@ -1101,26 +1099,8 @@ internal fun VideoPlayerEffects(
                     video.markMediaSession(mediaSessionId, sourceUri)
                     playerState.attachPreparedPipelineSource(video)
                     playerState.clearError()
-                    if (sourceKind.allowsHlsController) {
-                        video.destroyMkvSidecarTracks()
-                        val configured =
-                            video.configureHlsSource(
-                                playerState = playerState,
-                                sourceUri = sourceUri,
-                                requestHeadersJson = requestHeaders.browserRequestHeadersJsonObjectString(),
-                                useCredentials = useCredentials,
-                                scope = scope,
-                                mediaSessionId = mediaSessionId,
-                            )
-                        if (configured) {
-                            if (!playerState.isCurrentMediaSession(mediaSessionId)) return@let
-                            if (playerState.isPlaying) video.safePlay() else video.safePause()
-                            return@let
-                        }
-                    }
 
                     playerState.applyHlsQualityCallback = null
-                    video.destroyHlsController()
                     video.destroyMkvSidecarTracks()
                     video.src = sourceUri
                     video.load()
@@ -1140,7 +1120,6 @@ internal fun VideoPlayerEffects(
                     playerState.detachPreparedPipelineSource(video)
                     playerState.applyHlsQualityCallback = null
                     video.safePause()
-                    video.destroyHlsController()
                     video.destroyMkvSidecarTracks()
                     video.removeAttribute("src")
                     video.load()
