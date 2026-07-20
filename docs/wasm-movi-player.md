@@ -112,10 +112,13 @@ The browser can also be selected locally with
 `-PcomposeMediaPlayer.wasmTestBrowser=chrome|firefox|safari`. Canvas PiP and full Movi
 HDR/projection parity are explicitly non-blocking.
 
-Local verification on 2026-07-20 passed the complete Chrome suite with both `MOVI` and `LEGACY`;
-the `MOVI` run imported the external module from the configured CDN. The earlier Firefox Headless
-smoke also passed. Edge and Safari results remain owned by their platform CI jobs and must be
-reviewed from those artifacts before a release decision.
+Release verification on 2026-07-20 passed the complete Chrome suite with both `MOVI` and `LEGACY`;
+the `MOVI` run imported the external module from the configured CDN. The blocking Microsoft Edge
+job also passed the exact-CDN-module smoke suite. Firefox Headless passed four of five real-package
+scenarios, including MKV dual-audio switching and seek; only the combined adaptive test failed when
+the DASH route rejected H.264/AAC representations that the runner reported as unsupported. The
+hosted Safari runner did not capture Safari within Karma's retry budget, so it executed no playback
+tests and Safari remains unverified for this release.
 
 ## Release and dependency policy
 
