@@ -291,6 +291,8 @@ open class DefaultVideoPlayerState(
     internal var applyAudioTrackCallback: ((AudioTrack?) -> Unit)? = null
     internal var applyAudioTrackSelectionCallback: ((AudioTrack?) -> TrackSelectionResult)? = null
     internal var applySubtitleTrackCallback: ((SubtitleTrack?) -> Unit)? = null
+    internal var deferMoviAudioTrackConfirmation: Boolean = false
+    internal var deferMoviEmbeddedSubtitleConfirmation: Boolean = false
 
     // Playback control properties
     private var _volume by mutableStateOf(1.0f)
@@ -903,18 +905,28 @@ open class DefaultVideoPlayerState(
 
         renderingInfo.update(
             backend = MOVI_RENDERING_BACKEND,
-            container = snapshot.formatName,
-            videoDecoder = activeVideo?.codec?.let { "Movi auto ($it)" } ?: "Movi auto decoder",
+            container = snapshot.diagnostics?.container ?: snapshot.formatName,
+            videoDecoder =
+                snapshot.diagnostics
+                    ?.decoder
+                    ?.let { decoder -> activeVideo?.codec?.let { "$decoder ($it)" } ?: decoder }
+                    ?: activeVideo?.codec?.let { "Movi auto ($it)" }
+                    ?: "Movi auto decoder",
             videoRenderer =
                 if (playbackOptions.webDrmConfiguration != null) {
                     "Movi/Shaka HTMLVideoElement"
                 } else if (projection.requiresProjectionRenderer) {
                     "Movi canvas projection"
                 } else {
-                    "Movi canvas"
+                    snapshot.diagnostics?.renderer ?: "Movi canvas"
                 },
             audioRenderer = "Movi audio renderer",
-            subtitleRenderer = "Movi embedded subtitle renderer",
+            subtitleRenderer =
+                if (snapshot.subtitleTracks.any { it.src.startsWith("blob:") }) {
+                    "KMediaPlayer overlay (Movi embedded text export)"
+                } else {
+                    "Movi embedded subtitle renderer"
+                },
             subtitleSource = if (snapshot.subtitleTracks.isEmpty()) null else "Embedded",
             videoProjection = projection.renderingInfoLabel(),
         )
@@ -925,7 +937,11 @@ open class DefaultVideoPlayerState(
                 bitrate = activeVideo?.bitrate,
                 currentHlsQuality = currentHlsQuality,
                 bufferedRanges = bufferedRanges,
-                notes = "MoviPlayer 0.3.5",
+                notes =
+                    listOfNotNull(
+                        MOVI_RENDERING_BACKEND,
+                        snapshot.diagnostics?.backend,
+                    ).distinct().joinToString(" / "),
             ),
         )
 
@@ -1042,6 +1058,11 @@ open class DefaultVideoPlayerState(
             return TrackSelectionResult.NotFound(track.id)
         }
 
+        if (track.isEmbedded && deferMoviEmbeddedSubtitleConfirmation) {
+            applySubtitleTrackCallback?.invoke(track)
+            return TrackSelectionResult.Selected(track.id)
+        }
+
         currentSubtitleTrack = track
         subtitlesEnabled = true
         applySubtitleTrackCallback?.invoke(track)
@@ -1122,6 +1143,7 @@ open class DefaultVideoPlayerState(
         if (explicitSelection != null) {
             val result = explicitSelection(track)
             if (!result.isApplied) return result
+            if (deferMoviAudioTrackConfirmation) return result
 
             val appliedTrack =
                 when (result) {
@@ -1897,6 +1919,8 @@ open class DefaultVideoPlayerState(
         applyAudioTrackCallback = null
         applyAudioTrackSelectionCallback = null
         applySubtitleTrackCallback = null
+        deferMoviAudioTrackConfirmation = false
+        deferMoviEmbeddedSubtitleConfirmation = false
         resetPlaybackCallback = null
         playbackEndedCallback = null
         restartCallback = null
@@ -1966,7 +1990,7 @@ private const val DEFAULT_ASPECT_RATIO = 16f / 9f
 private const val DOLBY_VISION_PROFILE_7 = 7
 private const val MOVI_AUTO_VIDEO_TRACK_ID = -1
 private const val BITS_PER_KILOBIT = 1000
-internal const val MOVI_RENDERING_BACKEND = "MoviPlayer 0.3.5"
+internal const val MOVI_RENDERING_BACKEND = "@shusek/movi-player 0.3.5-kmp.1"
 internal const val LEGACY_RENDERING_BACKEND = "HTML5 video (legacy)"
 private val WEB_SUPPORTED_URI_SCHEMES = setOf("blob", "data", "http", "https")
 private val MOVI_MEDIA_EXTENSIONS =

@@ -737,8 +737,8 @@ class VideoPlayerStateTest {
     @Test
     fun testExternalMediaDependenciesUsePinnedDefaultsAndCanBeOverridden() =
         runTest {
-            assertTrue(WebMediaDependencyConfig.moviPlayerModuleUrl.contains("movi-player@0.3.5/"))
-            assertTrue(WebMediaDependencyConfig.moviPlayerModuleUrl.endsWith("/dist/player.js"))
+            assertTrue(WebMediaDependencyConfig.moviPlayerModuleUrl.contains("Shusek/movi-player@v0.3.5-kmp.1/"))
+            assertTrue(WebMediaDependencyConfig.moviPlayerModuleUrl.endsWith("/cdn/engine.js"))
             assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.contains("@3.3.2/"))
             assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity.startsWith("sha384-"))
 

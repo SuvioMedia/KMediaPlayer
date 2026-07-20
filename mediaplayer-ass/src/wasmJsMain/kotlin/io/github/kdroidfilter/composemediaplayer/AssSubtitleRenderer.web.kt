@@ -36,6 +36,7 @@ internal fun createAssSubtitleRendererSession(
         try {
             createJassubRendererOptions(
                 video = video,
+                fontCarrier = video ?: displayElement,
                 canvas = canvas,
                 subUrl = subUrl,
                 workerUrl = config.workerUrl,
@@ -102,6 +103,7 @@ private fun AssFontQueryMode.toJassubQueryFonts(): String =
 @Suppress("UNUSED_PARAMETER")
 private fun createJassubRendererOptions(
     video: HTMLVideoElement?,
+    fontCarrier: HTMLElement,
     canvas: HTMLCanvasElement,
     subUrl: String,
     workerUrl: String?,
@@ -160,8 +162,8 @@ private fun createJassubRendererOptions(
 
                 const subContent = decodeDataUrl(subUrl);
                 const embeddedFonts =
-                    video && Array.isArray(video.__composeMediaPlayerMkvFontFiles)
-                        ? video.__composeMediaPlayerMkvFontFiles.slice()
+                    fontCarrier && Array.isArray(fontCarrier.__composeMediaPlayerMkvFontFiles)
+                        ? fontCarrier.__composeMediaPlayerMkvFontFiles.slice()
                         : [];
                 const options = {
                     canvas: canvas,
@@ -327,6 +329,7 @@ internal fun configureJassubRendererSession(
     js(
         """
         (function() {
+            const fontCarrier = video || displayElement;
             const session = {
                 disposed: false,
                 failed: false,
@@ -401,12 +404,14 @@ internal fun configureJassubRendererSession(
                     session.styleObserver.disconnect();
                     session.styleObserver = null;
                 }
+                if (fontCarrier) {
+                    fontCarrier.removeEventListener("${ASS_MKV_FONTS_CHANGED_EVENT}", session.syncFonts);
+                }
                 if (video) {
                     video.removeEventListener("loadedmetadata", session.scheduleLayout);
                     video.removeEventListener("resize", session.scheduleLayout);
                     video.removeEventListener("seeked", session.scheduleLayout);
                     video.removeEventListener("pause", session.scheduleLayout);
-                    video.removeEventListener("${ASS_MKV_FONTS_CHANGED_EVENT}", session.syncFonts);
                 }
                 if (session.layoutFrame) {
                     cancelAnimationFrame(session.layoutFrame);
@@ -716,10 +721,10 @@ internal fun configureJassubRendererSession(
             };
 
             session.syncFonts = function() {
-                if (session.disposed || !video) return;
+                if (session.disposed || !fontCarrier) return;
                 const available =
-                    Array.isArray(video.__composeMediaPlayerMkvFontFiles)
-                        ? video.__composeMediaPlayerMkvFontFiles
+                    Array.isArray(fontCarrier.__composeMediaPlayerMkvFontFiles)
+                        ? fontCarrier.__composeMediaPlayerMkvFontFiles
                         : [];
                 const additions = [];
                 available.forEach(function(font) {
@@ -755,7 +760,9 @@ internal fun configureJassubRendererSession(
                 video.addEventListener("resize", session.scheduleLayout);
                 video.addEventListener("seeked", session.scheduleLayout);
                 video.addEventListener("pause", session.scheduleLayout);
-                video.addEventListener("${ASS_MKV_FONTS_CHANGED_EVENT}", session.syncFonts);
+            }
+            if (fontCarrier) {
+                fontCarrier.addEventListener("${ASS_MKV_FONTS_CHANGED_EVENT}", session.syncFonts);
             }
 
             Promise.resolve(instance.ready).then(

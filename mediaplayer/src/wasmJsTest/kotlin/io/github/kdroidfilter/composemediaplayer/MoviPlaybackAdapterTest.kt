@@ -3,6 +3,7 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import kotlinx.browser.document
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -204,6 +205,10 @@ class MoviPlaybackAdapterTest {
                 "https://license.example.test/widevine",
                 "",
                 "license-value",
+                "https://license.example.test/widevine",
+                "license-value",
+                "host",
+                "0",
             ).joinToString("|"),
             readFakeMoviConfiguration(player),
         )
@@ -235,13 +240,14 @@ class MoviPlaybackAdapterTest {
             parseMoviSnapshotRows(
                 listOf(
                     "M|matroska%2Cwebm|12.5|2400000|Two%20languages",
-                    "A|1|English|en|2|48000|128000|1|1",
-                    "A|2|Polski|pl|2|48000|128000|0|0",
-                    "S|3|English%20CC|en|0",
-                    "V|-1|av1|1920|1080|24|2100000|yuv420p10le|bt2020|smpte2084|bt2020nc|tv|1|1",
-                    "V|7|av1|1920|1080|24|2100000|yuv420p10le|bt2020|smpte2084|bt2020nc|tv|1|0",
-                    "C|0|5|Intro",
-                    "C|5|12.5|Main",
+                    "A|1|English|en|2|48000|128000|true|true",
+                    "A|2|Polski|pl|2|48000|128000|false|false",
+                    "S|3|English%20CC|en|true|ass|text|blob%3Aembedded-ass|ass",
+                    "V|-1|av1|1920|1080|24|2100000|yuv420p10le|bt2020|smpte2084|bt2020nc|tv|true|true",
+                    "V|7|av1|1920|1080|24|2100000|yuv420p10le|bt2020|smpte2084|bt2020nc|tv|true|false",
+                    "C|0|5|Intro|pl|true|chapter-1",
+                    "C|5|12.5|Main|en|false|chapter-2",
+                    "D|progressive-wasm|webcodecs|canvas|matroska",
                 ).joinToString("\n"),
             )
         val state = createVideoPlayerState() as DefaultVideoPlayerState
@@ -252,13 +258,18 @@ class MoviPlaybackAdapterTest {
             assertEquals(listOf("en", "pl"), state.availableAudioTracks.map(AudioTrack::language))
             assertEquals("${MOVI_AUDIO_TRACK_ID_PREFIX}1", state.currentAudioTrack?.id)
             assertEquals(1, state.availableSubtitleTracks.count(SubtitleTrack::isEmbedded))
+            assertEquals("blob:embedded-ass", state.currentSubtitleTrack?.src)
+            assertEquals(SubtitleFormat.ASS, state.currentSubtitleTrack?.format)
             assertEquals(2, state.chapters.size)
+            assertEquals("pl", state.chapters.first().language)
+            assertTrue(state.chapters.first().isHidden)
             assertEquals(listOf("$MOVI_VIDEO_TRACK_ID_PREFIX${7}"), state.availableHlsQualities.map { it.id })
             assertEquals(HlsQualityMode.AUTO, state.hlsQualityMode)
             assertNull(state.currentHlsQuality)
             assertEquals(1920, state.metadata.width)
             assertEquals(1080, state.metadata.height)
             assertEquals(MOVI_RENDERING_BACKEND, state.renderingInfo.backend)
+            assertContains(state.renderingInfo.videoDecoder.orEmpty(), "webcodecs")
             assertEquals(VideoDynamicRange.HDR10, state.colorPipelineStatus.value.source.dynamicRange)
             assertNull(state.colorPipelineStatus.value.decoderName)
             assertFalse(state.colorPipelineStatus.value.decoderCapabilities.isKnown)
@@ -341,6 +352,58 @@ class MoviPlaybackAdapterTest {
             state.dispose()
         }
     }
+
+    @Test
+    @OptIn(ExperimentalWasmJsInterop::class)
+    fun transactionalMoviAudioSelectionReportsDefinitiveSuccessAndFailure() =
+        runTest {
+            val player = createTransactionalTrackPlayer()
+            val accepted = CompletableDeferred<Pair<String, String?>>()
+            selectMoviAudioTrack(
+                player = player,
+                trackId = 2,
+                automatic = false,
+            ) { status, message -> accepted.complete(status to message) }
+
+            assertEquals("success" to null, accepted.await())
+            assertEquals("2", readTransactionalMoviActiveAudio(player))
+
+            val rejected = CompletableDeferred<Pair<String, String?>>()
+            selectMoviAudioTrack(
+                player = player,
+                trackId = 99,
+                automatic = false,
+            ) { status, message -> rejected.complete(status to message) }
+
+            val failure = rejected.await()
+            assertEquals("failed", failure.first)
+            assertContains(failure.second.orEmpty(), "rejected")
+            assertEquals("2", readTransactionalMoviActiveAudio(player))
+        }
+
+    @Test
+    @OptIn(ExperimentalWasmJsInterop::class)
+    fun embeddedTextExportCreatesBlobAndPublishesFontsToMoviCanvas() =
+        runTest {
+            val player = createTransactionalTrackPlayer()
+            val canvas = document.createElement("canvas") as HTMLCanvasElement
+            val selected = CompletableDeferred<Pair<String, String?>>()
+            try {
+                selectMoviSubtitleTrack(
+                    player = player,
+                    canvas = canvas,
+                    trackId = 3,
+                ) { status, message -> selected.complete(status to message) }
+
+                assertEquals("success" to null, selected.await())
+                assertEquals(
+                    listOf("3", "ass", "true", "1", "true").joinToString("|"),
+                    readTransactionalMoviSubtitleExport(player, canvas),
+                )
+            } finally {
+                releaseTransactionalMoviSubtitleExports(player)
+            }
+        }
 
     @Test
     @OptIn(ExperimentalWasmJsInterop::class)
@@ -734,6 +797,131 @@ private fun createFakeMoviModule(): JsAny =
         """,
     )
 
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun createTransactionalTrackPlayer(): JsAny =
+    js(
+        """
+        ({
+            activeAudioId: 1,
+            activeSubtitleId: null,
+            audioTracks: [
+                { id: 1, type: "audio", language: "en", label: "English" },
+                { id: 2, type: "audio", language: "pl", label: "Polski" }
+            ],
+            subtitleTracks: [
+                {
+                    id: 3,
+                    type: "subtitle",
+                    codec: "ass",
+                    subtitleType: "text",
+                    language: "pl",
+                    label: "Polski ASS"
+                }
+            ],
+            getSubtitleTracks: function() {
+                return this.subtitleTracks;
+            },
+            selectTrack: function(request) {
+                if (request.kind === "audio") {
+                    const target = request.trackId == null ? this.audioTracks[0] :
+                        this.audioTracks.find(function(track) {
+                            return track.id === request.trackId;
+                        });
+                    if (!target || target.id === 99) {
+                        return Promise.resolve({
+                            kind: "audio",
+                            status: "failed",
+                            activeTrack: this.audioTracks.find(
+                                (track) => track.id === this.activeAudioId
+                            ),
+                            error: new Error("fake decoder rejected the track")
+                        });
+                    }
+                    this.activeAudioId = target.id;
+                    return Promise.resolve({
+                        kind: "audio",
+                        status: request.trackId == null ? "auto" : "selected",
+                        activeTrack: target
+                    });
+                }
+                if (request.kind === "subtitle") {
+                    const target = request.trackId == null ? null :
+                        this.subtitleTracks.find(function(track) {
+                            return track.id === request.trackId;
+                        });
+                    this.activeSubtitleId = target ? target.id : null;
+                    return Promise.resolve({
+                        kind: "subtitle",
+                        status: target ? "selected" : "disabled",
+                        activeTrack: target
+                    });
+                }
+                return Promise.resolve({ kind: request.kind, status: "not-supported" });
+            },
+            exportEmbeddedTextTrack: function(trackId) {
+                return Promise.resolve({
+                    trackId: trackId,
+                    format: "ass",
+                    content: "[Script Info]\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hej\n",
+                    attachments: [
+                        {
+                            name: "Example.ttf",
+                            mimeType: "font/ttf",
+                            kind: "font",
+                            data: new Uint8Array([0, 1, 2, 3])
+                        }
+                    ],
+                    warnings: []
+                });
+            }
+        })
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun readTransactionalMoviActiveAudio(player: JsAny): String =
+    js("String(player.__composeMediaPlayerConfirmedAudioTrackId)")
+
+@Suppress("UNUSED_PARAMETER")
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun readTransactionalMoviSubtitleExport(
+    player: JsAny,
+    canvas: HTMLCanvasElement,
+): String =
+    js(
+        """
+        (function() {
+            const exported = player.__composeMediaPlayerSubtitleExports.get(3);
+            const fonts = canvas.__composeMediaPlayerMkvFontFiles || [];
+            return [
+                player.activeSubtitleId,
+                exported && exported.format,
+                !!(exported && typeof exported.url === "string" && exported.url.indexOf("blob:") === 0),
+                fonts.length,
+                fonts[0] instanceof File
+            ].join("|");
+        })()
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun releaseTransactionalMoviSubtitleExports(player: JsAny): Unit =
+    js(
+        """
+        {
+            const exports = player.__composeMediaPlayerSubtitleExports;
+            if (exports) {
+                exports.forEach(function(value) {
+                    if (value && value.url) URL.revokeObjectURL(value.url);
+                });
+                exports.clear();
+            }
+        }
+        """,
+    )
+
 @Suppress("UNUSED_PARAMETER")
 @OptIn(ExperimentalWasmJsInterop::class)
 private fun readFakeMoviConfiguration(player: JsAny): String =
@@ -746,7 +934,11 @@ private fun readFakeMoviConfiguration(player: JsAny): String =
             player.config.source.headers.Authorization || "",
             player.config.licenseUrl || "",
             player.config.licenseHeaders["X-Media"] || "",
-            player.config.licenseHeaders.Authorization || ""
+            player.config.licenseHeaders.Authorization || "",
+            player.config.drmConfig && player.config.drmConfig.licenseUrl || "",
+            player.config.drmConfig && player.config.drmConfig.licenseHeaders.Authorization || "",
+            player.config.embeddedTextSubtitleRenderer || "",
+            String(player.config.logger && player.config.logger.level)
         ].join("|")
         """,
     )

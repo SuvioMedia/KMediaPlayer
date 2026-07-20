@@ -237,12 +237,13 @@ class AssSubtitleRendererTest {
             var session: JsAny? = null
             try {
                 val rendered = CompletableDeferred<ManualRenderCall>()
+                val fontsAdded = CompletableDeferred<Int>()
                 val failure = CompletableDeferred<String>()
                 val instance =
                     createFakeRenderer(
                         onResize = { _, _ -> },
                         onProcessData = {},
-                        onAddFonts = {},
+                        onAddFonts = { count -> fontsAdded.complete(count) },
                         onDestroy = {},
                         onTerminate = {},
                         onManualRender = { mediaTime, width, height, repaint ->
@@ -282,6 +283,8 @@ class AssSubtitleRendererTest {
                     ManualRenderCall(mediaTime = 12.5, width = 1_920, height = 1_080, repaint = true),
                     rendered.awaitReal(),
                 )
+                publishFakeMkvFont(moviCanvas)
+                assertEquals(1, fontsAdded.awaitReal())
                 assertTrue(!failure.isCompleted)
             } finally {
                 disposeAssSubtitleRendererSession(session)
@@ -602,7 +605,7 @@ private fun subtitleDataUrl(content: String): String =
 private fun readFakeRendererTimeOffset(instance: JsAny): Double = js("Number(instance.timeOffset)")
 
 @Suppress("UNUSED_PARAMETER")
-private fun publishFakeMkvFont(video: HTMLVideoElement): Unit =
+private fun publishFakeMkvFont(video: HTMLElement): Unit =
     js(
         """
         {

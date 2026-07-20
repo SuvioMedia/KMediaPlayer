@@ -104,7 +104,20 @@ class MoviRealPackageBrowserTest {
                 assertEquals(listOf("en", "pl"), state.availableAudioTracks.map(AudioTrack::language))
                 val polish = state.availableAudioTracks.single { it.language == "pl" }
                 assertIs<TrackSelectionResult.Selected>(state.selectAudioTrack(polish))
-                assertEquals(polish.id, state.currentAudioTrack?.id)
+                var audioSwitchPollAttempt = 0
+                while (
+                    state.currentAudioTrack?.id != polish.id &&
+                    state.error == null &&
+                    audioSwitchPollAttempt < AUDIO_SWITCH_POLL_ATTEMPTS
+                ) {
+                    awaitBrowserDelay(AUDIO_SWITCH_POLL_INTERVAL_MS)
+                    audioSwitchPollAttempt += 1
+                }
+                assertEquals(
+                    polish.id,
+                    state.currentAudioTrack?.id,
+                    "Movi audio selection was not confirmed; error=${state.error}",
+                )
 
                 state.play()
                 var playbackPollAttempt = 0
@@ -569,6 +582,8 @@ private const val SEEK_POLL_ATTEMPTS = 200
 private const val SEEK_POLL_INTERVAL_MS = 25
 private const val PLAYBACK_POLL_ATTEMPTS = 200
 private const val PLAYBACK_POLL_INTERVAL_MS = 25
+private const val AUDIO_SWITCH_POLL_ATTEMPTS = 200
+private const val AUDIO_SWITCH_POLL_INTERVAL_MS = 25
 private val MINIMUM_PLAYBACK_PROGRESS = 50.milliseconds
 private const val MOVI_FIXTURE_ORIGIN = "https://kmp-movi-fixture.invalid"
 private const val MOVI_RANGE_FIXTURE_URL = "$MOVI_FIXTURE_ORIGIN/__kmp_movi__/range/movie.mkv"
