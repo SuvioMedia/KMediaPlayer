@@ -137,6 +137,54 @@ internal fun HTMLCanvasElement.configureWebProjectionRenderer(
     }
 }
 
+/**
+ * Reuses the established SDR WebGL projection renderer with an already-decoded canvas as its texture source.
+ *
+ * Movi owns decoding and paints into [sourceCanvas]; this function only samples that canvas and applies the same
+ * projection/crop/view transform used by the legacy HTML video route. It deliberately has no HDR branch because
+ * sampling Movi's canvas cannot prove an HDR decoder, surface, or output path.
+ */
+internal fun HTMLCanvasElement.configureWebSdrProjectionRenderer(
+    sourceCanvas: HTMLCanvasElement,
+    projection: VideoProjectionSettings,
+    projectionView: VideoProjectionViewSettings,
+    textureCrop: VideoTextureCrop,
+    onConfigured: () -> Unit,
+    onError: (String) -> Unit,
+) {
+    val normalized = projection.normalized()
+    val normalizedView = projectionView.normalized()
+    val plan =
+        normalized.toVideoProjectionRenderPlan(
+            VideoProjectionRenderOptions(textureCrop = textureCrop),
+        )
+    val leftEye = plan.leftEyeTexture
+    val rightEye = plan.rightEyeTexture
+    configureWebGlProjectionRenderer(
+        canvas = this,
+        video = sourceCanvas,
+        projectionType = normalized.projectionType.projectionShaderCode,
+        fovDegrees = plan.mesh.horizontalFovDegrees,
+        stereo = plan.stereo,
+        leftLeft = leftEye.left,
+        leftTop = leftEye.top,
+        leftRight = leftEye.right,
+        leftBottom = leftEye.bottom,
+        leftRotation = leftEye.rotation.ordinal,
+        rightLeft = rightEye.left,
+        rightTop = rightEye.top,
+        rightRight = rightEye.right,
+        rightBottom = rightEye.bottom,
+        rightRotation = rightEye.rotation.ordinal,
+        viewYawDegrees = normalizedView.yawDegrees,
+        viewPitchDegrees = normalizedView.pitchDegrees,
+        viewRollDegrees = normalizedView.rollDegrees,
+        viewZoom = normalizedView.zoom,
+        onConfigured = onConfigured,
+        onError = onError,
+    )
+}
+
 internal fun HTMLCanvasElement.disposeWebProjectionRenderer() {
     disposeWebProjectionRenderer(this)
 }
@@ -144,7 +192,7 @@ internal fun HTMLCanvasElement.disposeWebProjectionRenderer() {
 @Suppress("LongMethod", "LongParameterList", "UNUSED_PARAMETER")
 private fun configureWebGlProjectionRenderer(
     canvas: HTMLCanvasElement,
-    video: HTMLVideoElement,
+    video: HTMLElement,
     projectionType: Int,
     fovDegrees: Float,
     stereo: Boolean,
@@ -405,7 +453,10 @@ private fun configureWebGlProjectionRenderer(
                 gl.clearColor(0, 0, 0, 1);
                 gl.clear(gl.COLOR_BUFFER_BIT);
 
-                if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+                const sourceReady = video instanceof HTMLCanvasElement
+                    ? video.width > 0 && video.height > 0
+                    : video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+                if (sourceReady) {
                     try {
                         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
                         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
@@ -428,7 +479,7 @@ private fun configureWebGlProjectionRenderer(
                                 video.parentElement.style.setProperty("z-index", "-2", "important");
                             }
                             renderer.onError(
-                                "WebGL projection cannot sample this video. " +
+                                "WebGL projection cannot sample this media surface. " +
                                 "Serve it with CORS headers or disable projection. " +
                                 (error && error.message ? error.message : String(error))
                             );

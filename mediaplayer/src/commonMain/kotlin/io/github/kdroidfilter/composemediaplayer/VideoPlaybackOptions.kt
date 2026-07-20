@@ -63,6 +63,49 @@ enum class VideoProjectionDetectionMode {
     DISABLED,
 }
 
+/**
+ * Selects the playback engine used by the WebAssembly target.
+ */
+enum class WebPlaybackEngine {
+    /**
+     * Use the externally loaded Movi player for demuxing, decoding, adaptive streaming, audio-track selection,
+     * and DRM.
+     */
+    MOVI,
+
+    /**
+     * Use the previous HTML5 video/hls.js implementation.
+     *
+     * This is an explicit compatibility route. A Movi failure never switches to this engine automatically.
+     */
+    LEGACY,
+}
+
+/**
+ * Runtime-only DRM configuration for the WebAssembly player.
+ *
+ * The license URL and request headers are passed only to the license request made by Movi/Shaka. They are never
+ * reused as media request headers. [toString] deliberately redacts all values so accidental logging cannot expose
+ * license endpoints or credentials.
+ */
+@Stable
+class WebDrmConfiguration(
+    val licenseUrl: String,
+    licenseRequestHeaders: Map<String, String> = emptyMap(),
+) {
+    val licenseRequestHeaders: Map<String, String> = licenseRequestHeaders.toMap()
+
+    init {
+        require(licenseUrl.isNotBlank()) { "The DRM license URL must not be blank." }
+        require(this.licenseRequestHeaders.keys.none(String::isBlank)) {
+            "DRM license request header names must not be blank."
+        }
+    }
+
+    override fun toString(): String =
+        "WebDrmConfiguration(licenseUrl=<redacted>, licenseRequestHeaders=<redacted:${licenseRequestHeaders.size}>)"
+}
+
 @Stable
 data class VideoPlaybackOptions(
     val dynamicRangePolicy: DynamicRangePolicy = DynamicRangePolicy.AUTO,
@@ -74,6 +117,8 @@ data class VideoPlaybackOptions(
     val projectionViewControlMode: VideoProjectionViewControlMode = VideoProjectionViewControlMode.AUTO,
     val projectionTextureCrop: VideoTextureCrop = VideoTextureCrop(),
     val projectionDetectionMode: VideoProjectionDetectionMode = VideoProjectionDetectionMode.AUTO,
+    val webPlaybackEngine: WebPlaybackEngine = WebPlaybackEngine.MOVI,
+    val webDrmConfiguration: WebDrmConfiguration? = null,
 ) {
     init {
         val invalidIds = extensions.map(VideoPipelineExtension::id).filter(String::isBlank)

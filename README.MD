@@ -16,7 +16,7 @@
 - **Media Foundation** (via JNI) for Windows
 - **AVPlayer** (via JNI) for macOS and iOS
 - **Media3** for Android
-- **HTML5 Player** for WASM
+- **MoviPlayer 0.3.5** for WASM, with the previous HTML5 video/hls.js route available as an explicit compatibility mode
 
 ## Project Status
 
@@ -33,6 +33,7 @@ This repository is a personal fork maintained for my own projects and integratio
 - [Compatibility Table](#-compatibility-table)
 - [Getting Started](#-getting-started)
   - [Initialization](#initialization)
+  - [Wasm playback engines](#wasm-playback-engines)
   - [Displaying the Video Surface](#displaying-the-video-surface)
     - [Content Scaling](#content-scaling)
     - [Surface type](#surface-type)
@@ -75,7 +76,7 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 - **Media Controls**: Includes play, pause, loop toggle, volume control, playback speed, loop playback and timeline slider.
 - **Initial Playback Control**: Choose whether videos automatically play or remain paused after opening.
 - **Custom Video Player UI**: Fully customizable using Compose Multiplatform, with support for custom overlays that display even in fullscreen mode.
-- **HLS Streaming**: Native HLS playback on Android, iOS, macOS, Windows, and Linux, with the pinned `hls.js` fallback on compatible Wasm browsers.
+- **Adaptive Streaming**: Native HLS playback on Android, iOS, macOS, Windows, and Linux. Wasm uses MoviPlayer for HLS, DASH and Smooth Streaming by default; the pinned `hls.js` path remains available through explicit legacy mode.
 - **Media Chapters**: Observe embedded chapter titles and time ranges, resolve the active chapter, and seek to a chapter through one common multiplatform API.
 - **Fullscreen Mode**: Toggle between windowed and fullscreen playback modes.
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
@@ -92,20 +93,23 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 ## ✨ Supported Video Formats
 | Format | Windows                                                                                                           | Linux  | macOS & iOS                                                       | Android | WASM |
 |--------|-------------------------------------------------------------------------------------------------------------------|-------------------|-----------------------------------------------------------------------------|-----------------|-------------------|
-| **Player** | [MediaFoundation](https://learn.microsoft.com/en-us/windows/win32/medfound/microsoft-media-foundation-sdk) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | [HTML5 Video](https://www.w3schools.com/html/html5_video.asp) |
+| **Player** | [MediaFoundation](https://learn.microsoft.com/en-us/windows/win32/medfound/microsoft-media-foundation-sdk) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | [MoviPlayer 0.3.5](https://github.com/mrujjwalg/movi-player) (default), HTML5 video/hls.js (legacy) |
 | MP4 (H.264) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ✅ |
-| AVI | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
-| MKV | ⚠️†                                                                                                                | ✅ | ⚠️†                                                                          | ✅ | ❌ |
+| AVI | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ✅§ |
+| MKV | ⚠️†                                                                                                                | ✅ | ⚠️†                                                                          | ✅ | ✅§ |
 | MOV | ✅                                                                                                                 | ✅ | ✅                                                                           | ❌ | ✅ |
 | FLV | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
 | WEBM | ⚠️†                                                                                                                | ✅ | ⚠️†                                                                          | ✅ | ✅ |
 | WMV | ✅                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
 | 3GP | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ❌ |
-| HLS (M3U8) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ✅‡ |
+| MPEG-TS | ✅                                                                                                             | ✅ | ✅                                                                           | ✅ | ✅§ |
+| HLS (M3U8) | ✅                                                                                                         | ✅ | ✅                                                                           | ✅ | ✅§ |
+| MPEG-DASH (MPD) | Backend dependent                                                                                      | Backend dependent | Backend dependent                                               | ✅ | ✅§ |
+| Smooth Streaming (MSS) | Backend dependent                                                                                | Backend dependent | Backend dependent                                               | ❌ | ✅§ |
 
 > The Android artifact includes the matching Media3 HLS module; consumers do not need to add it separately.
 
-> ‡ Browser HLS support uses the browser's native implementation when available and the bundled, version-locked `hls.js` dependency when Media Source Extensions are available.
+> § Wasm loads the exact `movi-player@0.3.5` programmatic module from a versioned CDN URL at runtime. MoviPlayer and its media Wasm are not bundled in KMediaPlayer artifacts. Container support still depends on the codecs and browser primitives available at runtime. `WebPlaybackEngine.LEGACY` restores the previous native HTML video / pinned `hls.js` behavior; it does not support the additional Movi containers.
 
 > † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC, or the explicitly installed `composemediaplayer-kmediabridge` extension when the platform backend cannot demux the source directly. The default player contains no KMediaBridge or FFmpeg dependency. The optional bridge dynamically loads privately named LGPL FFmpeg libraries in-process—there is no `ffmpeg`/`ffprobe` executable or system installation. It remuxes compatible local video/audio into bounded-memory CMAF/HLS without re-encoding; the macOS runtime can also tone-map explicit HDR10/HDR10+/HLG to limited-range BT.709 for `FORCE_SDR` and burn embedded text subtitles for confirmed SDR input. Strictly validated HEVC Main 10 HDR10/HDR10+/HLG remains tagged as an HDR sample-copy route under HDR-preserving policies; the platform color pipeline still has to confirm the decoder, surface and display before reporting HDR output. Unsupported conversion requests fail closed or use an explicitly available VLC fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
@@ -143,7 +147,7 @@ val hdr10PlusSupport = mediaSupport.dynamicRangeSupport(VideoDynamicRange.HDR10_
 val showHdr10PlusSources = hdr10PlusSupport == VideoDynamicRangeSupport.SUPPORTED
 ```
 
-`MediaSupport.query()` checks the current platform contract for URI schemes and known container/adaptive formats such as MKV and HLS, plus codec support reported by the backend. On browser targets it also asks `HTMLVideoElement.canPlayType` for MIME types that the browser can report before playback.
+`MediaSupport.query()` checks the current platform contract for URI schemes and known container/adaptive formats such as MKV and HLS, plus codec support reported by the backend. On browser targets it recognizes Movi's supported containers and still asks `HTMLVideoElement.canPlayType` for MIME types used by legacy playback.
 
 Display support is a preflight snapshot of the active output, not evidence that a future playback
 surface reached HDR. `UNSUPPORTED` means the platform produced a known capability set without that
@@ -265,11 +269,11 @@ discontinuity timestamp mapping, and a non-independent seek restarts only from a
 - **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `2.0.x` line.
 - **Android:** the library is built and verified for `arm64-v8a` and `armeabi-v7a` with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Android x86/x86_64 is unsupported. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`; HDR still depends on the device and active display.
 - **Android MPV adapter:** `composemediaplayer-mpv` uses `minSdk = 28` and publishes ARM runtimes only.
-- **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. Add the
-  version-matched KMediaMpv CocoaPod once; Xcode embeds and signs its audited
-  XCFramework graph, and the default `Bundled` source resolves it automatically.
-- **Windows MPV adapter:** KMediaMpv bundles the verified x86_64 UCRT DLL graph.
-  The default `Bundled` source extracts, verifies, and preloads it on Java 25.
+- **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. iOS applications must embed
+  a code-signed libmpv framework and select `MpvRuntimeSource.System` or `ExplicitPath`; native
+  code cannot be extracted from a Maven artifact into an iOS process at runtime.
+- **Windows MPV adapter:** supports application-supplied 64-bit libmpv on Java 25. The current
+  KMediaMpv desktop artifact does not bundle a Windows DLL.
 - **iOS:** iOS 16.2 or newer is required. Published targets are `iosArm64` and `iosSimulatorArm64` only; Intel simulators are unsupported. An Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
 - **macOS JVM:** Apple Silicon and macOS 14 or newer are required by the native AVFoundation/Metal bridge.
 - **Windows JVM:** Windows 10 1809 (build 17763) or newer is required; confirmed HDR additionally requires an active Advanced Color output and the packaged P010/D3D11 presenter.
@@ -285,12 +289,11 @@ MPV is a separate adapter artifact. The dependency direction is:
 
 The main artifact never imports MPV. Both modules share only the state, event,
 capability, backend-factory, and renderer SPI from `composemediaplayer-core`.
-On Android, Linux, Apple Silicon macOS, and Windows x86_64, the MPV adapter
-carries the matching KMediaMpv runtime transitively, so the application does
-not add KMediaMpv Maven coordinates separately. On iOS, CocoaPods performs the
-required build-time download, embedding, and signing; the application does not
-supply native binaries or paths. The adapter never downloads executable code
-at runtime.
+On Android, Linux, and Apple Silicon macOS, the MPV adapter carries the matching
+KMediaMpv runtime transitively, so the application does not add KMediaMpv
+coordinates separately. Windows and iOS keep the same adapter API but use a
+native runtime supplied by the application. The adapter never downloads native
+code.
 
 This dependency inversion is the reason for the `2.0.0` major version. Existing
 applications can keep depending on `composemediaplayer`; it re-exports `core`
@@ -360,14 +363,17 @@ val playerState = rememberVideoPlayerState(backend)
 ```
 
 The default runtime source is the verified KMediaMpv bundle. Keep that default
-on Android, Linux, Apple Silicon macOS, and Windows x86_64:
+on Android, Linux, and Apple Silicon macOS. On Windows, install or ship a
+compatible 64-bit libmpv next to the application and select the platform loader:
 
 ```kotlin
-val playerState = rememberMpvVideoPlayerState()
+val options = MpvPlaybackOptions(
+    runtimeSource = MpvRuntimeSource.System,
+)
 ```
 
-`System` and `ExplicitPath` are optional overrides for applications that
-deliberately ship a different compatible libmpv:
+If the DLL is not discoverable through the Windows loader, pass its absolute
+path explicitly:
 
 ```kotlin
 val options = MpvPlaybackOptions(
@@ -377,35 +383,24 @@ val options = MpvPlaybackOptions(
 )
 ```
 
-On iOS 16.2+, add the KMediaMpv release podspec to the application target. The
-podspec pins the XCFramework archive by SHA-256; CocoaPods downloads the graph,
-and Xcode embeds and signs all twelve dynamic frameworks:
-
-```ruby
-target 'iosApp' do
-  pod 'KMediaMpv',
-      :podspec => 'https://github.com/Shusek/KMediaMpv/releases/download/v0.2.0/KMediaMpv.podspec'
-end
-```
-
-Run `pod install` (or the Kotlin CocoaPods `podInstall` task), open the
-generated `.xcworkspace`, and keep the default `Bundled` source. This build-time
-step is required because iOS cannot extract unsigned executable code from a
-Maven artifact at runtime. `System` still recognizes linked symbols and
-`KMediaMpv.framework/KMediaMpv`, `MPV.framework/MPV`, or
-`libmpv.framework/libmpv`; `ExplicitPath` accepts only a code-signed binary
-inside the application bundle.
+On iOS, embed and code-sign a dynamic libmpv framework in the application. A
+linked framework can be resolved with `System`; the adapter also recognizes
+`KMediaMpv.framework/KMediaMpv`, `MPV.framework/MPV`, and
+`libmpv.framework/libmpv` under the app's `Frameworks` directory. Alternatively,
+pass the framework binary path from `NSBundle` using `ExplicitPath`. iOS rejects
+paths outside the signed application bundle.
 
 `inspectMpvBackend()` reports a missing runtime, unsupported target, or rejected
 native payload without falling back silently. `rememberVideoPlayerState()`
 continues to select the normal platform backend.
 
 The verified bundled runtime supports Android API 28+ on `arm64-v8a` and
-`armeabi-v7a`, Linux on x86_64 and ARM64, macOS on ARM64, Windows x86_64, and
-iOS device/Apple Silicon simulator ARM64. Android x86, Android x86_64, macOS
-x86_64, Intel iOS simulators, and Windows ARM64 are not supported. The bundled
-runtime has networking disabled, so use local media and subtitle files. Desktop
-applications run on Java 25 with `--enable-native-access=ALL-UNNAMED`.
+`armeabi-v7a`, Linux on x86_64 and ARM64, and macOS on ARM64. Application-supplied
+runtime mode additionally supports Windows x86_64 and iOS device/simulator
+ARM64. Android x86, Android x86_64, macOS x86_64, Intel iOS simulators, and
+Windows ARM64 are not supported. The bundled runtime has networking disabled,
+so use local media and subtitle files. Desktop applications run on Java 25 with
+`--enable-native-access=ALL-UNNAMED`.
 
 The core, default player, and adapter code remain under this repository's own
 license. The separately
@@ -447,6 +442,75 @@ Before using Compose Media Player, you need to create a state for the video play
 ```kotlin
 val playerState = rememberVideoPlayerState()
 ```
+
+### Wasm playback engines
+
+Wasm uses the programmatic `movi-player/player` API as an externally hosted, lazily imported
+engine. The public state, Compose surface, controls, overlays and fullscreen API stay unchanged.
+The exact `0.3.5` module is fetched from jsDelivr only when the first Movi source is opened;
+choosing legacy mode does not request it, and KMediaPlayer does not bundle Movi or its media Wasm.
+
+```kotlin
+val options = remember {
+    VideoPlaybackOptions(
+        webPlaybackEngine = WebPlaybackEngine.MOVI, // default
+    )
+}
+val playerState = rememberVideoPlayerState(playbackOptions = options)
+```
+
+Offline, strict-CSP, or controlled-hosting deployments can replace the public module URL before
+opening the first Movi source:
+
+```kotlin
+WebMediaDependencyConfig.moviPlayerModuleUrl = "/vendor/movi-player-0.3.5/player.js"
+```
+
+The configured URL executes as an ES module. Pin an immutable compatible build and never place
+credentials in the URL.
+
+Use the explicit compatibility route when an application requires the previous HTML5 video/hls.js
+implementation or full browser JASSUB rendering:
+
+```kotlin
+VideoPlaybackOptions(webPlaybackEngine = WebPlaybackEngine.LEGACY)
+```
+
+There is no automatic fallback from Movi to legacy after an error. Clear sources using
+`REQUIRE_HDR`, `FORCE_SDR`, or a non-`AUTO` Dolby Vision policy are routed to legacy before player
+initialization. DRM combined with one of those strict color policies, projection, or non-default
+texture cropping fails closed with `VideoPlayerError.DrmError`.
+
+For adaptive DRM, media headers and license headers are intentionally separate:
+
+```kotlin
+val options = VideoPlaybackOptions(
+    webDrmConfiguration = WebDrmConfiguration(
+        licenseUrl = "https://license.example.invalid/widevine",
+        licenseRequestHeaders = mapOf("Authorization" to "<runtime value>"),
+    ),
+)
+
+playerState.openUri(
+    uri = "https://media.example.invalid/manifest.mpd",
+    requestHeaders = mapOf("X-Media-Token" to "<runtime value>"),
+)
+```
+
+DRM values are retained only by the runtime objects. `WebDrmConfiguration.toString()`, diagnostics
+and adapter errors redact the license URL and headers, and the adapter forces Movi's process-wide
+logger to `SILENT` before player construction so upstream error payloads cannot disclose request
+data. Applications must likewise avoid logging or persisting their input values. DRM uses
+Movi/Shaka's native video element, so canvas-only features are unavailable.
+
+Movi reports source color metadata when available, but KMediaPlayer deliberately leaves decoder,
+surface and output dynamic range as `UNKNOWN`; `isHDR` is not evidence that HDR reached the display.
+SDR projection samples the hidden Movi canvas through KMediaPlayer's existing WebGL projection
+renderer. Advanced JASSUB with embedded fonts, canvas PiP, and a confirmed Movi HDR/projection route
+are outside the first integration release. See [Wasm Movi integration](docs/wasm-movi-player.md).
+
+The Wasm sample starts with a bundled MKV containing `en` and `pl` Opus tracks. Add
+`?engine=legacy` to the sample URL to exercise the compatibility path.
 
 ### Displaying the Video Surface
 
@@ -716,7 +780,10 @@ Check the [sample project](sample/composeApp/src/commonMain/kotlin/sample/app/Ap
 
 ### HLS Quality Selection
 
-Browser playback exposes HLS quality variants when the source is handled through `hls.js`. The list is populated after the HLS manifest has been loaded, so custom controls should render quality options from `availableHlsQualities` and handle an empty list as "not available yet" or "not supported by this backend".
+Browser playback exposes adaptive video variants from Movi video tracks by default and from
+`hls.js` in legacy mode. Movi's track id `-1` is represented as automatic selection rather than a
+selectable variant. The list is populated after the manifest has loaded, so custom controls should
+handle an empty list as "not available yet" or "not supported by this backend".
 
 ```kotlin
 val quality = playerState.availableHlsQualities.firstOrNull { it.height == 720 }
@@ -771,7 +838,10 @@ Apple HLS JSON discovery intentionally excludes sliding live playlists; generic 
 
 ### Browser MKV parser loading
 
-Embedded MKV subtitle extraction on Wasm loads the exact `matroska-subtitles` 3.3.2 browser bundle with a pinned SHA-384 subresource-integrity value. Strict-CSP or offline deployments can self-host that same file; configure both values before creating a player:
+In `WebPlaybackEngine.LEGACY`, embedded MKV subtitle extraction loads the exact
+`matroska-subtitles` 3.3.2 browser bundle with a pinned SHA-384 subresource-integrity value.
+Movi discovers and renders embedded subtitle tracks itself. Strict-CSP or offline legacy
+deployments can self-host the parser bundle; configure both values before creating a player:
 
 ```kotlin
 WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = "/vendor/matroska-subtitles-3.3.2.min.js"
@@ -993,13 +1063,19 @@ not expose a writable CPU video frame.
 
 #### Browser ASS/SSA subtitles with JASSUB/libass
 
-Full ASS/SSA rendering on `wasmJs` is provided by the optional `composemediaplayer-ass` artifact and is active only when `AssSubtitleExtension()` is present in `VideoPlaybackOptions.extensions`. The optional artifact currently pins JASSUB 2.5.7 as an npm dependency, so applications do not add JASSUB, libass, worker scripts or WASM files manually. The browser bundler emits JASSUB's default worker, WASM and fallback font assets; a core-only browser build contains none of them.
+Full ASS/SSA rendering on `wasmJs` is provided by the optional `composemediaplayer-ass` artifact and
+currently requires `WebPlaybackEngine.LEGACY` plus `AssSubtitleExtension()` in
+`VideoPlaybackOptions.extensions`. Movi handles embedded subtitles in its own renderer, while
+external subtitles retain KMediaPlayer's Compose overlay; full JASSUB styling and embedded-font
+parity are not part of the first Movi integration release. The optional artifact pins JASSUB 2.5.7,
+so legacy applications do not add JASSUB, libass, worker scripts or WASM files manually.
 
 Create stable player options and then select an `.ass` or `.ssa` subtitle track:
 
 ```kotlin
 val playbackOptions = remember {
     VideoPlaybackOptions(
+        webPlaybackEngine = WebPlaybackEngine.LEGACY,
         extensions = listOf(AssSubtitleExtension()),
     )
 }
@@ -1027,6 +1103,7 @@ import io.github.kdroidfilter.composemediaplayer.AssFontQueryMode
 
 val playbackOptions = remember {
     VideoPlaybackOptions(
+        webPlaybackEngine = WebPlaybackEngine.LEGACY,
         extensions = listOf(
             AssSubtitleExtension(
                 config = AssSubtitleRendererConfig(
@@ -1089,7 +1166,13 @@ Browser notes:
 
 #### Selecting Embedded Audio and Subtitle Tracks
 
-When the backend exposes tracks from the media container, they are available through the player state. Browser targets read native `audioTracks` and `textTracks` from the `<video>` element, Android reads Media3 track groups, and the desktop JVM libVLC/external HLS fallbacks expose embedded audio/subtitle tracks when probing is available.
+When the backend exposes tracks from the media container, they are available through the player
+state. The default Wasm route maps Movi's numeric ids to stable KMediaPlayer string ids and calls
+Movi's real track-selection API; a rejected switch returns `Failed` without changing state or
+emitting `TrackChanged`. Passing `null` restores the initially selected/default audio track rather
+than muting it. Legacy browsers read native `audioTracks` and `textTracks` from the `<video>`
+element, Android reads Media3 track groups, and the desktop JVM libVLC/external HLS fallbacks expose
+embedded audio/subtitle tracks when probing is available.
 
 ```kotlin
 val audioTrack = playerState.availableAudioTracks.firstOrNull()
@@ -1309,7 +1392,7 @@ when (val result = playerState.clearCache()) {
 ## 🔍 Metadata Support
 
 > [!WARNING]
-> Metadata support is experimental. There may be inconsistencies between platforms, and on WASM it's currently limited to width and height only.
+> Metadata support is experimental. There may be inconsistencies between platforms. The default Wasm route maps the fields exposed by Movi; individual containers may omit them.
 
 The player can extract the following metadata:
 - Title

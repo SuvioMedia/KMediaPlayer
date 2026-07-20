@@ -296,6 +296,7 @@ fun PlayerScreen(
                         is VideoPlayerError.NoSourceError -> "Source: ${error.message}"
                         is VideoPlayerError.TimeoutError -> "Timeout: ${error.message}"
                         is VideoPlayerError.HlsError -> "HLS: ${error.message}"
+                        is VideoPlayerError.DrmError -> "DRM: ${error.message}"
                         is VideoPlayerError.ColorPipelineError ->
                             "Color pipeline (${error.reason.name}): ${error.message}"
                         is VideoPlayerError.UnknownError -> "Error: ${error.message}"

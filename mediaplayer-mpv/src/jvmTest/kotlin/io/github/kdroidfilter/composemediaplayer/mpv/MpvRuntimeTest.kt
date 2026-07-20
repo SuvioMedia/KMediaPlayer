@@ -33,15 +33,13 @@ class MpvRuntimeTest {
     }
 
     @Test
-    fun bundledDesktopMatrixMatchesPublishedPayloads() {
+    fun bundledDesktopMatrixRejectsPlatformsWithoutPublishedPayloads() {
         assertTrue(isBundledMpvDesktopSupported("Linux", "amd64"))
         assertTrue(isBundledMpvDesktopSupported("Linux", "x64"))
         assertTrue(isBundledMpvDesktopSupported("Linux", "aarch64"))
         assertTrue(isBundledMpvDesktopSupported("Mac OS X", "arm64"))
-        assertTrue(isBundledMpvDesktopSupported("Windows 11", "amd64"))
-        assertTrue(isBundledMpvDesktopSupported("Windows 11", "x64"))
 
-        assertFalse(isBundledMpvDesktopSupported("Windows 11", "aarch64"))
+        assertFalse(isBundledMpvDesktopSupported("Windows 11", "amd64"))
         assertFalse(isBundledMpvDesktopSupported("Mac OS X", "x86_64"))
         assertFalse(isBundledMpvDesktopSupported("Linux", "x86"))
     }
@@ -70,8 +68,8 @@ class MpvRuntimeTest {
     }
 
     @Test
-    fun windowsIsBothABundledAndOptionalExternalRuntimeTarget() {
-        assertTrue(isBundledMpvDesktopSupported("Windows 11", "amd64"))
+    fun windowsIsAValidExternalRuntimeTargetWithoutPretendingItIsBundled() {
+        assertFalse(isBundledMpvDesktopSupported("Windows 11", "amd64"))
         assertTrue(isMpvDesktopPlatformSupported("Windows 11", "amd64"))
 
         val missingLibrary =

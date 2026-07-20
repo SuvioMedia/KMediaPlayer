@@ -48,14 +48,16 @@ fun App(
     initialSubtitleUrl: String? = null,
     demoSubtitleEnabled: Boolean = true,
     initialMuted: Boolean = false,
+    initialLoop: Boolean = false,
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
     initialProjection: VideoProjectionSettings = VideoProjectionSettings(),
 ) {
     AppTheme {
         var currentScreen by remember { mutableStateOf(Screen.Player) }
         val playerState = rememberRenderableVideoPlayerState(playbackOptions = playbackOptions)
-        LaunchedEffect(playerState, initialMuted) {
+        LaunchedEffect(playerState, initialMuted, initialLoop) {
             if (initialMuted) playerState.volume = 0f
+            playerState.loop = initialLoop
         }
         LaunchedEffect(playerState, initialProjection) {
             playerState.projection = initialProjection

@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalComposeUiApi::class)
+@file:OptIn(ExperimentalComposeUiApi::class, kotlin.js.ExperimentalWasmJsInterop::class)
 
 package io.github.kdroidfilter.composemediaplayer
 
@@ -8,6 +8,9 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.HtmlElementView
+import kotlinx.browser.document
+import kotlinx.coroutines.launch
+import org.w3c.dom.HTMLCanvasElement
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 
@@ -34,6 +37,31 @@ actual fun VideoPlayerSurface(
         "Unsupported video player state: ${playerState::class}"
     }
 
+    when (playerState.webPlaybackDecision.route) {
+        WebPlaybackRoute.MOVI,
+        WebPlaybackRoute.MOVI_DRM,
+        -> MoviWebVideoPlayerSurface(playerState, modifier, contentScale, overlay)
+        WebPlaybackRoute.LEGACY -> LegacyWebVideoPlayerSurface(playerState, modifier, contentScale, overlay)
+        WebPlaybackRoute.REJECTED ->
+            VideoContentLayout(
+                playerState = playerState,
+                modifier = modifier,
+                videoRatio = null,
+                contentScale = contentScale,
+                suppressComposeAss = false,
+                overlay = overlay,
+                videoElementContent = {},
+            )
+    }
+}
+
+@Composable
+private fun LegacyWebVideoPlayerSurface(
+    playerState: DefaultVideoPlayerState,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit,
+) {
     if (playerState.hasMedia) {
         val surfaceMediaSessionId = playerState.mediaSessionId
         val subtitleTrack = playerState.currentSubtitleTrack
@@ -171,6 +199,271 @@ actual fun VideoPlayerSurface(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun MoviWebVideoPlayerSurface(
+    playerState: DefaultVideoPlayerState,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit,
+) {
+    if (!playerState.hasMedia) return
+
+    val surfaceMediaSessionId = playerState.mediaSessionId
+    val scope = rememberCoroutineScope()
+    var containerElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLElement?>(null) }
+    var canvasElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLCanvasElement?>(null) }
+    var nativeVideoElement by remember(surfaceMediaSessionId) { mutableStateOf<HTMLVideoElement?>(null) }
+    var session by remember(surfaceMediaSessionId) { mutableStateOf<MoviPlaybackSession?>(null) }
+    var videoRatio by remember(surfaceMediaSessionId) { mutableStateOf<Float?>(null) }
+    val colorPipelineStatus by playerState.colorPipelineStatus.collectAsState()
+    val usesProjectionRenderer =
+        playerState.projection.usesWebProjectionRenderer(playerState.projectionTextureCrop)
+    val usesSdrProjectionCanvas =
+        nativeVideoElement == null &&
+            usesProjectionRenderer &&
+            colorPipelineStatus.source.dynamicRange == VideoDynamicRange.SDR
+
+    DisposableEffect(
+        playerState,
+        surfaceMediaSessionId,
+        canvasElement,
+    ) {
+        val canvas = canvasElement ?: return@DisposableEffect onDispose {}
+        val sourceUri = playerState.sourceUri ?: return@DisposableEffect onDispose {}
+        val createdSession =
+            MoviPlaybackSession(
+                playerState = playerState,
+                mediaSessionId = surfaceMediaSessionId,
+                canvas = canvas,
+                onNativeVideoElement = { element ->
+                    if (playerState.isCurrentMediaSession(surfaceMediaSessionId)) {
+                        nativeVideoElement = element
+                    }
+                },
+                onVideoRatio = { ratio ->
+                    if (playerState.isCurrentMediaSession(surfaceMediaSessionId)) {
+                        videoRatio = ratio
+                    }
+                },
+            )
+        session = createdSession
+        val loadJob =
+            scope.launch {
+                createdSession.load(
+                    sourceUri = sourceUri,
+                    sourceFile = playerState.sourceFile,
+                    mediaHeaders = playerState.requestHeaders,
+                    drmConfiguration = playerState.playbackOptions.webDrmConfiguration,
+                )
+            }
+        onDispose {
+            loadJob.cancel()
+            createdSession.destroy()
+            if (session === createdSession) session = null
+            nativeVideoElement = null
+        }
+    }
+
+    DisposableEffect(containerElement, canvasElement, nativeVideoElement, contentScale) {
+        val container = containerElement
+        val canvas = canvasElement
+        val nativeVideo = nativeVideoElement
+        if (container != null && canvas != null) {
+            if (nativeVideo != null) {
+                nativeVideo.configureAsMoviDrmSurface(contentScale)
+                if (nativeVideo.parentElement !== container) {
+                    container.appendChild(nativeVideo)
+                }
+                canvas.style.display = "none"
+            } else {
+                canvas.style.display = "block"
+            }
+        }
+        onDispose {
+            if (nativeVideo != null && container != null && nativeVideo.parentElement === container) {
+                container.removeChild(nativeVideo)
+            }
+        }
+    }
+
+    LaunchedEffect(session, playerState.seekRequestId) {
+        session?.seekPending()
+    }
+    LaunchedEffect(session, playerState.projection, usesSdrProjectionCanvas) {
+        session?.applyProjection(
+            if (usesSdrProjectionCanvas) VideoProjectionSettings() else playerState.projection,
+        )
+    }
+    SideEffect {
+        session?.applyContentScale(contentScale)
+        canvasElement?.applyMoviCanvasContentScale(contentScale)
+        nativeVideoElement?.configureAsMoviDrmSurface(contentScale)
+    }
+
+    VideoContentLayout(
+        playerState = playerState,
+        modifier = modifier,
+        videoRatio = videoRatio,
+        contentScale = contentScale,
+        suppressComposeAss = false,
+        overlay = overlay,
+    ) {
+        key(surfaceMediaSessionId) {
+            HtmlElementView(
+                factory = ::createMoviSurfaceElement,
+                modifier = Modifier.fillMaxSize(),
+                update = { container ->
+                    containerElement = container
+                    container.applyMoviSurfaceStyle()
+                    val canvas = container.firstElementChild as? HTMLCanvasElement
+                    canvas?.applyMoviCanvasContentScale(contentScale)
+                    canvasElement = canvas
+                },
+                onRelease = { container ->
+                    if (containerElement === container) containerElement = null
+                    if (canvasElement?.parentElement === container) canvasElement = null
+                    container.clearMoviSurface()
+                },
+            )
+            MoviSdrProjectionCanvas(
+                playerState = playerState,
+                sourceCanvas = canvasElement,
+                enabled = usesSdrProjectionCanvas,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MoviSdrProjectionCanvas(
+    playerState: DefaultVideoPlayerState,
+    sourceCanvas: HTMLCanvasElement?,
+    enabled: Boolean,
+    modifier: Modifier,
+) {
+    if (!enabled || sourceCanvas == null) {
+        SideEffect { sourceCanvas?.restoreAfterMoviProjection() }
+        return
+    }
+
+    key(sourceCanvas) {
+        HtmlElementView(
+            factory = ::createWebProjectionCanvasElement,
+            modifier = modifier,
+            update = { projectionCanvas ->
+                projectionCanvas.applyWebProjectionCanvasStyle()
+                projectionCanvas.configureWebSdrProjectionRenderer(
+                    sourceCanvas = sourceCanvas,
+                    projection = playerState.projection,
+                    projectionView = playerState.projectionView,
+                    textureCrop = playerState.projectionTextureCrop,
+                    onConfigured = {
+                        playerState.renderingInfo.update(
+                            videoRenderer = "Movi canvas -> WebGL SDR projection canvas",
+                            notes = "Movi source color is mapped; decoder, surface, and output HDR remain unconfirmed.",
+                            videoProjection = playerState.projection.renderingInfoLabel(),
+                        )
+                    },
+                    onError = { message ->
+                        sourceCanvas.restoreAfterMoviProjection()
+                        playerState.renderingInfo.update(
+                            videoRenderer = "Movi canvas",
+                            notes = message,
+                            videoProjection = playerState.projection.renderingInfoLabel(),
+                        )
+                    },
+                )
+            },
+            onRelease = { projectionCanvas ->
+                projectionCanvas.disposeWebProjectionRenderer()
+                sourceCanvas.restoreAfterMoviProjection()
+            },
+        )
+    }
+}
+
+private fun createMoviSurfaceElement(): HTMLElement =
+    (document.createElement("div") as HTMLElement).apply {
+        className = "compose-media-player-movi"
+        applyMoviSurfaceStyle()
+        appendChild(
+            (document.createElement("canvas") as HTMLCanvasElement).apply {
+                className = "compose-media-player-movi-canvas"
+                applyMoviCanvasContentScale(ContentScale.Fit)
+            },
+        )
+    }
+
+private fun HTMLElement.applyMoviSurfaceStyle() {
+    style.apply {
+        position = "relative"
+        width = "100%"
+        height = "100%"
+        display = "flex"
+        alignItems = "center"
+        justifyContent = "center"
+        setProperty("overflow", "hidden")
+        backgroundColor = "black"
+        setProperty("pointer-events", "none")
+        setProperty("contain", "strict", "important")
+    }
+    (parentElement as? HTMLElement)?.style?.apply {
+        setProperty("z-index", "-2", "important")
+        setProperty("pointer-events", "none")
+        setProperty("overflow", "hidden", "important")
+    }
+}
+
+private fun HTMLCanvasElement.applyMoviCanvasContentScale(contentScale: ContentScale) {
+    style.apply {
+        width = "100%"
+        height = "100%"
+        display = "block"
+        backgroundColor = "black"
+        setProperty("pointer-events", "none")
+        objectFit =
+            when (contentScale) {
+                ContentScale.Crop -> "cover"
+                ContentScale.FillBounds -> "fill"
+                else -> "contain"
+            }
+    }
+}
+
+private fun HTMLCanvasElement.restoreAfterMoviProjection() {
+    style.opacity = "1"
+    (parentElement as? HTMLElement)?.style?.setProperty("z-index", "-2", "important")
+}
+
+private fun HTMLVideoElement.configureAsMoviDrmSurface(contentScale: ContentScale) {
+    controls = false
+    setAttribute("playsinline", "")
+    setAttribute("webkit-playsinline", "")
+    style.apply {
+        position = "absolute"
+        left = "0"
+        top = "0"
+        width = "100%"
+        height = "100%"
+        display = "block"
+        backgroundColor = "black"
+        setProperty("pointer-events", "none")
+        objectFit =
+            when (contentScale) {
+                ContentScale.Crop -> "cover"
+                ContentScale.FillBounds -> "fill"
+                else -> "contain"
+            }
+    }
+}
+
+private fun HTMLElement.clearMoviSurface() {
+    while (firstChild != null) {
+        removeChild(firstChild ?: break)
     }
 }
 

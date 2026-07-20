@@ -38,7 +38,7 @@ dependencyResolutionManagement {
                 .gradleProperty("kmediaBridgeRuntimeRepository")
                 .orNull
                 ?.takeIf { it.isNotBlank() }
-                ?: "https://shusek.github.io/KMediaBridge/maven"
+                ?: "https://shusek.github.io/KMediaMpv/maven"
         val kmediaBridgeRuntimeRepositoryUri = uri(kmediaBridgeRuntimeRepository)
         check(
             kmediaBridgeRuntimeRepositoryUri.scheme in setOf("https", "file") &&

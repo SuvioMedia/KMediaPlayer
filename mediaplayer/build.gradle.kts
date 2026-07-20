@@ -58,6 +58,25 @@ val releaseSigningEnabled =
         .gradleProperty("releaseSigningEnabled")
         .map(String::toBoolean)
         .getOrElse(false)
+val wasmBrowserTestBrowser =
+    providers
+        .gradleProperty("composeMediaPlayer.wasmTestBrowser")
+        .orElse("chrome")
+        .map(String::lowercase)
+        .get()
+val wasmTestPlaybackEngine =
+    providers
+        .gradleProperty("composeMediaPlayer.wasmTestPlaybackEngine")
+        .orElse("movi")
+        .map(String::lowercase)
+        .get()
+
+require(wasmBrowserTestBrowser in setOf("chrome", "firefox", "safari")) {
+    "composeMediaPlayer.wasmTestBrowser must be one of: chrome, firefox, safari."
+}
+require(wasmTestPlaybackEngine in setOf("movi", "legacy")) {
+    "composeMediaPlayer.wasmTestPlaybackEngine must be one of: movi, legacy."
+}
 
 group = projectGroup
 version = projectVersion
@@ -101,7 +120,19 @@ kotlin {
 
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
-        browser()
+        browser {
+            testTask {
+                inputs.property("composeMediaPlayer.wasmTestPlaybackEngine", wasmTestPlaybackEngine)
+                environment("KMP_WASM_TEST_PLAYBACK_ENGINE", wasmTestPlaybackEngine)
+                useKarma {
+                    when (wasmBrowserTestBrowser) {
+                        "chrome" -> useChromeHeadless()
+                        "firefox" -> useFirefoxHeadless()
+                        "safari" -> useSafari()
+                    }
+                }
+            }
+        }
         binaries.executable()
     }
 
