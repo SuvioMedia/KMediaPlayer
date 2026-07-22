@@ -1,8 +1,5 @@
 import com.android.build.api.variant.HostTestBuilder
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import java.util.zip.ZipFile
-
-val kmediaBridgeVersion = providers.gradleProperty("kmediaBridgeVersion").orElse("0.4.2")
 
 plugins {
     alias(libs.plugins.android.application)
@@ -33,9 +30,7 @@ dependencies {
     implementation(project(":mediaplayer-ass"))
     implementation(project(":mediaplayer-dolbyvision"))
     implementation(project(":mediaplayer-kmediabridge"))
-    implementation("io.github.shusek:kmedia-bridge-api:${kmediaBridgeVersion.get()}")
-    implementation("io.github.shusek:kmedia-bridge-ffmpeg:${kmediaBridgeVersion.get()}")
-    runtimeOnly("io.github.shusek:kmedia-bridge-ffmpeg-runtime-android:${kmediaBridgeVersion.get()}")
+    implementation(project(":mediaplayer-mpv"))
     implementation(libs.androidx.activityCompose)
     implementation(libs.androidx.core)
     implementation(libs.compose.foundation)
@@ -49,10 +44,8 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        minSdk =
-            libs.versions.android.minSdk
-                .get()
-                .toInt()
+        // This consumer intentionally includes the optional MPV adapter, whose contract is API 28+.
+        minSdk = 28
         targetSdk = 37
 
         applicationId = "sample.app.androidApp"
@@ -65,30 +58,36 @@ android {
     }
 }
 
-tasks.register("verifyAndroidArmNativeMatrix") {
+fun registerAndroidBackendGraphVerification(
+    name: String,
+    buildTask: String,
+    relativeArchive: String,
+) = tasks.register<Exec>(name) {
     group = "verification"
-    description = "Verifies that the sample APK contains Android ARM native payloads only."
-    dependsOn("assembleDebug")
-
-    val apk = layout.buildDirectory.file("outputs/apk/debug/androidApp-debug.apk")
-    inputs.file(apk)
-
-    doLast {
-        val supportedAbis = setOf("arm64-v8a", "armeabi-v7a")
-        ZipFile(apk.get().asFile).use { archive ->
-            val packagedAbis =
-                archive
-                    .entries()
-                    .asSequence()
-                    .filter { entry ->
-                        !entry.isDirectory &&
-                            entry.name.startsWith("lib/") &&
-                            entry.name.endsWith(".so")
-                    }.map { entry -> entry.name.removePrefix("lib/").substringBefore('/') }
-                    .toSet()
-            check(packagedAbis == supportedAbis) {
-                "Unexpected sample APK ABI matrix: expected=$supportedAbis, actual=$packagedAbis"
-            }
-        }
-    }
+    description = "Verifies two clients and exactly one shared FFmpeg runtime graph in $relativeArchive."
+    dependsOn(buildTask)
+    val archive = layout.buildDirectory.file(relativeArchive)
+    val report = layout.buildDirectory.file("reports/native-graph/$name.json")
+    inputs.file(archive)
+    inputs.file(rootProject.layout.projectDirectory.file(".github/scripts/verify_android_backend_graph.py"))
+    outputs.file(report)
+    commandLine(
+        if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3",
+        rootProject.layout.projectDirectory.file(".github/scripts/verify_android_backend_graph.py").asFile.absolutePath,
+        "--archive",
+        archive.get().asFile.absolutePath,
+        "--report",
+        report.get().asFile.absolutePath,
+    )
 }
+
+registerAndroidBackendGraphVerification(
+    name = "verifyAndroidArmNativeMatrix",
+    buildTask = "assembleDebug",
+    relativeArchive = "outputs/apk/debug/androidApp-debug.apk",
+)
+registerAndroidBackendGraphVerification(
+    name = "verifyAndroidArmNativeBundle",
+    buildTask = "bundleDebug",
+    relativeArchive = "outputs/bundle/debug/androidApp-debug.aab",
+)

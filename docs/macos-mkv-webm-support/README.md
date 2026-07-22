@@ -127,7 +127,7 @@ COMPOSE_MEDIA_PLAYER_VLC=/path/to/VLC
 -Dcomposemediaplayer.macos.vlc=/path/to/VLC
 ```
 
-The default JVM artifact has no KMediaBridge or FFmpeg dependency. The optional `composemediaplayer-kmediabridge` adapter selects a separately versioned runtime artifact that bundles dynamically linked LGPL FFmpeg libraries together with exact corresponding source, notices, checksums, SBOM inputs, and replacement instructions. The macOS subtitle flavor also builds FreeType, the LGPL FriBidi library (without its GPL tools), HarfBuzz, libunibreak, and libass from pinned sources into the dynamically replaceable `libavfilter-kmb` boundary. It does **not** bundle an `ffmpeg` executable, GPL/nonfree FFmpeg components, VLC, libVLC, mpv, IINA, or `vlcj`. User-installed libass is available only through the separate `composemediaplayer-ass` extension for the macOS Compose/Skia canvas renderer. The optional Dolby Vision component is a separate artifact and is not implied by this fallback.
+The default JVM artifact has no KMediaBridge or FFmpeg dependency. The optional `composemediaplayer-kmediabridge` adapter transitively selects a thin KMediaBridge client plus the exact shared KMediaFfmpegRuntime. That runtime dynamically provides FFmpeg, FreeType, FriBidi, HarfBuzz and libass once for both KMediaBridge and MPV, together with corresponding source, notices, checksums, SBOM and replacement instructions. It does **not** bundle an `ffmpeg` executable or GPL/nonfree FFmpeg components. User-installed libass remains available only through the separate `composemediaplayer-ass` extension for the macOS Compose/Skia canvas renderer. The optional Dolby Vision component is separate.
 
 To disable the external HLS fallback, set one of:
 

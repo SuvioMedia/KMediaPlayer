@@ -6,6 +6,17 @@
 // - Show declarations: true
 
 // Library unique name: <io.github.shusek:mediaplayer-mpv>
+final enum class io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode> { // io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode|null[0]
+    enum entry MEDIA_CODEC_COPY // io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode.MEDIA_CODEC_COPY|null[0]
+    enum entry SOFTWARE_ONLY // io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode.SOFTWARE_ONLY|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode> // io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode // io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode> // io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode.values|values#static(){}[0]
+}
+
 final enum class io.github.kdroidfilter.composemediaplayer/MpvBackendUnavailableReason : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/MpvBackendUnavailableReason> { // io.github.kdroidfilter.composemediaplayer/MpvBackendUnavailableReason|null[0]
     enum entry INITIALIZATION_FAILED // io.github.kdroidfilter.composemediaplayer/MpvBackendUnavailableReason.INITIALIZATION_FAILED|null[0]
     enum entry INVALID_RUNTIME // io.github.kdroidfilter.composemediaplayer/MpvBackendUnavailableReason.INVALID_RUNTIME|null[0]
@@ -86,8 +97,10 @@ final class io.github.kdroidfilter.composemediaplayer/MpvBackendUnavailableExcep
 }
 
 final class io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions { // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions|null[0]
-    constructor <init>(kotlin/String? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Int = ..., io.github.kdroidfilter.composemediaplayer/MpvRuntimeSource = ...) // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.<init>|<init>(kotlin.String?;kotlin.Boolean;kotlin.Boolean;kotlin.Int;io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource){}[0]
+    constructor <init>(kotlin/String? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode = ..., kotlin/Int = ..., io.github.kdroidfilter.composemediaplayer/MpvRuntimeSource = ...) // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.<init>|<init>(kotlin.String?;kotlin.Boolean;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.MpvAndroidDecodeMode;kotlin.Int;io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource){}[0]
 
+    final val androidDecodeMode // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.androidDecodeMode|{}androidDecodeMode[0]
+        final fun <get-androidDecodeMode>(): io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.androidDecodeMode.<get-androidDecodeMode>|<get-androidDecodeMode>(){}[0]
     final val maxDesktopRenderPixels // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.maxDesktopRenderPixels|{}maxDesktopRenderPixels[0]
         final fun <get-maxDesktopRenderPixels>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.maxDesktopRenderPixels.<get-maxDesktopRenderPixels>|<get-maxDesktopRenderPixels>(){}[0]
     final val preserveAssStyles // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.preserveAssStyles|{}preserveAssStyles[0]
@@ -102,9 +115,10 @@ final class io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions { // io
     final fun component1(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.component1|component1(){}[0]
     final fun component2(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.component2|component2(){}[0]
     final fun component3(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.component3|component3(){}[0]
-    final fun component4(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.component4|component4(){}[0]
-    final fun component5(): io.github.kdroidfilter.composemediaplayer/MpvRuntimeSource // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.component5|component5(){}[0]
-    final fun copy(kotlin/String? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Int = ..., io.github.kdroidfilter.composemediaplayer/MpvRuntimeSource = ...): io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.copy|copy(kotlin.String?;kotlin.Boolean;kotlin.Boolean;kotlin.Int;io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource){}[0]
+    final fun component4(): io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.component4|component4(){}[0]
+    final fun component5(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.component5|component5(){}[0]
+    final fun component6(): io.github.kdroidfilter.composemediaplayer/MpvRuntimeSource // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.component6|component6(){}[0]
+    final fun copy(kotlin/String? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/MpvAndroidDecodeMode = ..., kotlin/Int = ..., io.github.kdroidfilter.composemediaplayer/MpvRuntimeSource = ...): io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.copy|copy(kotlin.String?;kotlin.Boolean;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.MpvAndroidDecodeMode;kotlin.Int;io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/MpvPlaybackOptions.toString|toString(){}[0]

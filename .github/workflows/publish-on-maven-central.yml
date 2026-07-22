@@ -16,8 +16,32 @@ jobs:
   verify:
     uses: ./.github/workflows/build-test.yml
 
-  release:
+  shared-runtime-consumer:
     needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+      - name: Build a consumer with both public backends and verify one shared graph
+        run: >-
+          ./gradlew --no-daemon
+          :androidApp:verifyAndroidArmNativeMatrix
+          :androidApp:verifyAndroidArmNativeBundle
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: shared-runtime-graph-${{ github.sha }}
+          path: androidApp/build/reports/native-graph/
+          if-no-files-found: error
+
+  release:
+    needs: [verify, shared-runtime-consumer]
     runs-on: macos-15
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
@@ -38,8 +62,8 @@ jobs:
             echo "Release tags must use immutable SemVer, for example v1.2.3." >&2
             exit 1
           fi
-          if [[ "${version%%+*}" == *-* ]]; then
-            echo "KMediaPlayer 2.x is published only as a stable release; preview tags are forbidden." >&2
+          if [[ ! "$version" =~ ^3\.0\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "This workflow publishes the KMediaPlayer 3.0 line, including immutable RC tags." >&2
             exit 1
           fi
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then

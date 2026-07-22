@@ -20,6 +20,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
 import io.github.shusek.kmediampv.runtime.android.MpvAndroidPlayer
+import io.github.shusek.kmediampv.runtime.android.MpvAndroidDecodeMode as RuntimeMpvAndroidDecodeMode
 import io.github.shusek.kmediampv.runtime.android.MpvAndroidTrackInfo
 import io.github.vinceglb.filekit.AndroidFile
 import io.github.vinceglb.filekit.PlatformFile
@@ -48,6 +49,7 @@ import kotlin.time.Duration.Companion.seconds
 internal class AndroidMpvVideoPlayerState(
     private val context: Context,
     private val subtitleFontsDirectory: File?,
+    private val decodeMode: RuntimeMpvAndroidDecodeMode,
 ) : AbstractMpvVideoPlayerState(),
     VideoPlayerSurfaceProvider {
     private val disposed = AtomicBoolean(false)
@@ -286,7 +288,8 @@ internal class AndroidMpvVideoPlayerState(
         player.setPanscan(if (crop) 1.0 else 0.0)
     }
 
-    private fun createPlayer(): MpvAndroidPlayer = MpvAndroidPlayer.create(context, subtitleFontsDirectory)
+    private fun createPlayer(): MpvAndroidPlayer =
+        MpvAndroidPlayer.create(context, subtitleFontsDirectory, decodeMode)
 
     private suspend fun pollPlayback() {
         try {

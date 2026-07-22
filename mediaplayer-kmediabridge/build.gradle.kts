@@ -1,6 +1,8 @@
 import dev.detekt.gradle.Detekt
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
+import org.gradle.language.jvm.tasks.ProcessResources
+import org.gradle.api.tasks.testing.Test
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -28,8 +30,10 @@ val projectVersion =
     providers.gradleProperty("publicationVersion").orNull
         ?: System.getenv("VERSION")
         ?: "dev"
-val kmediaBridgeVersion = providers.gradleProperty("kmediaBridgeVersion").orElse("0.4.2")
 val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+val kmediaBridgeVersion = libs.versions.kmediaBridge.get()
+val nativeJvmTestResources =
+    providers.gradleProperty("composeMediaPlayerKMediaBridgeTestNativeResources")
 
 group = "io.github.shusek"
 version = projectVersion
@@ -65,8 +69,12 @@ kotlin {
             api(project(":mediaplayer-extension-api"))
         }
         androidMain.dependencies {
-            implementation("io.github.shusek:kmedia-bridge-api:${kmediaBridgeVersion.get()}")
-            implementation("io.github.shusek:kmedia-bridge-ffmpeg:${kmediaBridgeVersion.get()}")
+            api("io.github.shusek:kmedia-bridge-api:$kmediaBridgeVersion") {
+                version { strictly(kmediaBridgeVersion) }
+            }
+            api("io.github.shusek:kmedia-bridge-ffmpeg:$kmediaBridgeVersion") {
+                version { strictly(kmediaBridgeVersion) }
+            }
             implementation(libs.androidx.media3.datasource)
             implementation(libs.androidx.media3.exoplayer)
             implementation(libs.kotlinx.coroutines.android)
@@ -80,9 +88,12 @@ kotlin {
             }
         }
         jvmMain.dependencies {
-            implementation("io.github.shusek:kmedia-bridge-api:${kmediaBridgeVersion.get()}")
-            implementation("io.github.shusek:kmedia-bridge-ffmpeg:${kmediaBridgeVersion.get()}")
-            runtimeOnly("io.github.shusek:kmedia-bridge-ffmpeg-runtime-desktop:${kmediaBridgeVersion.get()}")
+            api("io.github.shusek:kmedia-bridge-api:$kmediaBridgeVersion") {
+                version { strictly(kmediaBridgeVersion) }
+            }
+            api("io.github.shusek:kmedia-bridge-ffmpeg:$kmediaBridgeVersion") {
+                version { strictly(kmediaBridgeVersion) }
+            }
         }
         jvmTest.dependencies {
             implementation(kotlin("test"))
@@ -90,6 +101,16 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
     }
+}
+
+nativeJvmTestResources.orNull?.let { resourcesDirectory ->
+    tasks.named<ProcessResources>("jvmTestProcessResources") {
+        from(resourcesDirectory)
+    }
+}
+
+tasks.withType<Test>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
 val consumerSmokeRepository = rootProject.layout.buildDirectory.dir("consumer-repository")

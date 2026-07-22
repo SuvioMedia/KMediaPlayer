@@ -3,6 +3,7 @@ import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
+import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 import java.io.DataInputStream
@@ -22,12 +23,15 @@ val projectVersion =
     providers.gradleProperty("publicationVersion").orNull
         ?: "dev"
 val projectGroup = "io.github.shusek"
+val kmediaMpvVersion = libs.versions.kmediaMpv.get()
 val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
 val releaseSigningEnabled =
     providers
         .gradleProperty("releaseSigningEnabled")
         .map(String::toBoolean)
         .getOrElse(false)
+val nativeJvmTestResources =
+    providers.gradleProperty("composeMediaPlayerMpvTestNativeResources")
 val appleMpvNativeDirectory = layout.projectDirectory.dir("native/apple")
 val iosArm64MpvBridge = layout.buildDirectory.dir("generated/appleMpvBridge/ios-arm64")
 val iosSimulatorArm64MpvBridge =
@@ -129,7 +133,9 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidcontextprovider)
             implementation(libs.kotlinx.coroutines.android)
-            implementation(libs.kmedia.mpv.runtime.android)
+            api("io.github.shusek:kmedia-mpv-runtime-android:$kmediaMpvVersion") {
+                version { strictly(kmediaMpvVersion) }
+            }
         }
         named("androidHostTest") {
             dependencies {
@@ -137,7 +143,9 @@ kotlin {
             }
         }
         jvmMain.dependencies {
-            implementation(libs.kmedia.mpv.runtime.desktop)
+            api("io.github.shusek:kmedia-mpv-runtime-desktop:$kmediaMpvVersion") {
+                version { strictly(kmediaMpvVersion) }
+            }
         }
         jvmTest.dependencies {
             implementation(kotlin("test-junit"))
@@ -150,6 +158,12 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
+    }
+}
+
+nativeJvmTestResources.orNull?.let { resourcesDirectory ->
+    tasks.named<ProcessResources>("jvmTestProcessResources") {
+        from(resourcesDirectory)
     }
 }
 

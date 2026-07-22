@@ -21,6 +21,30 @@ plugins {
 
 rootProject.name = "Compose-Media-Player"
 
+providers.gradleProperty("kmediaMpvProjectDir").orNull?.let { projectDirectory ->
+    includeBuild(projectDirectory) {
+        dependencySubstitution {
+            substitute(module("io.github.shusek:kmedia-mpv-runtime-android"))
+                .using(project(":runtime-android"))
+            substitute(module("io.github.shusek:kmedia-mpv-runtime-desktop"))
+                .using(project(":runtime-desktop"))
+        }
+    }
+}
+
+providers.gradleProperty("kmediaBridgeProjectDir").orNull?.let { projectDirectory ->
+    includeBuild(projectDirectory) {
+        dependencySubstitution {
+            substitute(module("io.github.shusek:kmedia-bridge-api")).using(project(":api"))
+            substitute(module("io.github.shusek:kmedia-bridge-ffmpeg")).using(project(":ffmpeg"))
+            substitute(module("io.github.shusek:kmedia-bridge-client-android"))
+                .using(project(":ffmpeg-runtime-android"))
+            substitute(module("io.github.shusek:kmedia-bridge-client-desktop"))
+                .using(project(":ffmpeg-runtime-desktop"))
+        }
+    }
+}
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
@@ -33,26 +57,6 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
-        val kmediaBridgeRuntimeRepository =
-            providers
-                .gradleProperty("kmediaBridgeRuntimeRepository")
-                .orNull
-                ?.takeIf { it.isNotBlank() }
-                ?: "https://shusek.github.io/KMediaMpv/maven"
-        val kmediaBridgeRuntimeRepositoryUri = uri(kmediaBridgeRuntimeRepository)
-        check(
-            kmediaBridgeRuntimeRepositoryUri.scheme in setOf("https", "file") &&
-                kmediaBridgeRuntimeRepositoryUri.userInfo == null,
-        ) {
-            "kmediaBridgeRuntimeRepository must be an HTTPS or local file URL without embedded credentials."
-        }
-        maven {
-            name = "kmediaBridgePublicRuntimeAndLegacy"
-            url = kmediaBridgeRuntimeRepositoryUri
-            content {
-                includeGroup("io.github.shusek")
-            }
-        }
         exclusiveContent {
             forRepository {
                 ivy {

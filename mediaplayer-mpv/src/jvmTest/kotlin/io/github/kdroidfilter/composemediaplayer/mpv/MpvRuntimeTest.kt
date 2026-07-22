@@ -25,7 +25,7 @@ class MpvRuntimeTest {
 
         val availability = inspectMpvBackend()
         if (isSupported) {
-            assertIs<MpvBackendAvailability.Available>(availability)
+            assertIs<MpvBackendAvailability.Available>(availability, availability.toString())
         } else {
             val unavailable = assertIs<MpvBackendAvailability.Unavailable>(availability)
             assertEquals(MpvBackendUnavailableReason.UNSUPPORTED_PLATFORM, unavailable.reason)
