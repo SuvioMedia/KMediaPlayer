@@ -1,8 +1,8 @@
 import dev.detekt.gradle.Detekt
+import org.gradle.api.tasks.testing.Test
+import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
-import org.gradle.language.jvm.tasks.ProcessResources
-import org.gradle.api.tasks.testing.Test
 
 plugins {
     alias(libs.plugins.multiplatform)

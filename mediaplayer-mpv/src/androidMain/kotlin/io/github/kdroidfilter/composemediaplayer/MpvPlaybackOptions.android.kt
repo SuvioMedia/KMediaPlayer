@@ -3,8 +3,8 @@ package io.github.kdroidfilter.composemediaplayer
 import com.kdroid.androidcontextprovider.ContextProvider
 import io.github.kdroidfilter.composemediaplayer.mpv.AndroidMpvVideoPlayerState
 import io.github.shusek.kmediampv.runtime.android.MpvAndroidRuntime
-import io.github.shusek.kmediampv.runtime.android.MpvAndroidDecodeMode as RuntimeMpvAndroidDecodeMode
 import java.io.File
+import io.github.shusek.kmediampv.runtime.android.MpvAndroidDecodeMode as RuntimeMpvAndroidDecodeMode
 
 internal actual fun mpvBackendInfo(): VideoPlayerBackendInfo =
     VideoPlayerBackendInfo(
