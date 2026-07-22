@@ -40,7 +40,7 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * Android adapter for the optional KMediaMpv runtime.
  *
- * KMediaMpv 0.1.x intentionally enables local files only. Network URLs and
+ * The audited KMediaMpv runtime intentionally enables local files only. Network URLs and
  * request headers are rejected instead of silently crossing that boundary.
  */
 @Stable
