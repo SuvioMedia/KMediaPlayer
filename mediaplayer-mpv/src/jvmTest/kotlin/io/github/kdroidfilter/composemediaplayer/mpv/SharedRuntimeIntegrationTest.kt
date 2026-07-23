@@ -19,9 +19,17 @@ import kotlinx.coroutines.runBlocking
 import java.awt.Font
 import java.net.URI
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.AclEntry
+import java.nio.file.attribute.AclEntryPermission
+import java.nio.file.attribute.AclEntryType
+import java.nio.file.attribute.AclFileAttributeView
+import java.nio.file.attribute.PosixFileAttributeView
+import java.nio.file.attribute.PosixFilePermission
 import java.util.Base64
+import java.util.EnumSet
 import kotlin.io.path.deleteIfExists
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -56,6 +64,7 @@ private fun exerciseSharedRuntime(firstClient: FirstClient) =
         var player: MpvVideoPlayerState? = null
         var stagedFont: Path? = null
         try {
+            makeApplicationPrivate(fontsDirectory)
             val font = loadHostTestFont()
             val copiedFont = fontsDirectory.resolve(font.source.fileName)
             Files.copy(font.source, copiedFont, StandardCopyOption.REPLACE_EXISTING)
@@ -242,6 +251,42 @@ private fun readHostTestFont(path: Path): HostTestFont? {
         require(family.isNotEmpty() && ',' !in family && '\n' !in family && '\r' !in family)
         HostTestFont(family = family, source = path)
     }.getOrNull()
+}
+
+private fun makeApplicationPrivate(directory: Path) {
+    val posixView =
+        Files.getFileAttributeView(
+            directory,
+            PosixFileAttributeView::class.java,
+            LinkOption.NOFOLLOW_LINKS,
+        )
+    if (posixView != null) {
+        posixView.setPermissions(
+            EnumSet.of(
+                PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.OWNER_EXECUTE,
+            ),
+        )
+        return
+    }
+
+    val aclView =
+        requireNotNull(
+            Files.getFileAttributeView(
+                directory,
+                AclFileAttributeView::class.java,
+                LinkOption.NOFOLLOW_LINKS,
+            ),
+        ) { "The host filesystem cannot enforce an application-private font directory." }
+    val ownerOnly =
+        AclEntry
+            .newBuilder()
+            .setType(AclEntryType.ALLOW)
+            .setPrincipal(aclView.owner)
+            .setPermissions(EnumSet.allOf(AclEntryPermission::class.java))
+            .build()
+    aclView.setAcl(listOf(ownerOnly))
 }
 
 private const val EXPECTED_RUNTIME_ID = "kmediaffmpeg-8.1.2-ass-0.17.5-78fbb23ab073fc90"
