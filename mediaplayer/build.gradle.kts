@@ -613,10 +613,6 @@ val validateReleaseVersion =
                 "Release version '$releaseVersion' is not a valid immutable SemVer version. " +
                     "Use -PpublicationVersion=<major.minor.patch>."
             }
-            check('-' !in releaseVersion.substringBefore('+')) {
-                "KMediaPlayer 2.x does not publish preview, alpha, beta or release-candidate versions; " +
-                    "use a stable major.minor.patch version."
-            }
             check(releaseGroup == "io.github.shusek") {
                 "Release group must remain 'io.github.shusek', but was '$releaseGroup'."
             }
