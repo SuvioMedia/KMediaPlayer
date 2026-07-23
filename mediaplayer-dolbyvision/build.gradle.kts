@@ -544,10 +544,6 @@ val validateReleaseVersion =
             check(semverRegex.matches(releaseVersion)) {
                 "Release version '$releaseVersion' is not valid immutable SemVer."
             }
-            check('-' !in releaseVersion.substringBefore('+')) {
-                "KMediaPlayer 2.x does not publish preview, alpha, beta or release-candidate versions; " +
-                    "use a stable major.minor.patch version."
-            }
             val releaseMajorVersion = releaseVersion.substringBefore('.').toInt()
             check(releaseMajorVersion >= hdrPipelineMajorVersion) {
                 "This branch contains the breaking KMediaPlayer 2.0 API and cannot be published as $releaseVersion."
