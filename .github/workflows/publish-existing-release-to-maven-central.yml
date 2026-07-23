@@ -248,7 +248,7 @@ jobs:
           -PcomposeMediaPlayer.skipNativeBuild=true
           -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
-          --no-configuration-cache --no-daemon
+          --refresh-dependencies --no-configuration-cache --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}

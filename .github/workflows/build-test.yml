@@ -80,7 +80,8 @@ jobs:
           :mediaplayer-dolbyvision:jvmTest :mediaplayer-dolbyvision:verifyJvmMacArmNativeMatrix
           :mediaplayer-kmediabridge:jvmTest
           :mediaplayer-mpv:jvmTest
-          --project-prop composeMediaPlayer.skipNativeBuild=true --no-daemon --continue
+          --project-prop composeMediaPlayer.skipNativeBuild=true
+          --refresh-dependencies --no-daemon --continue
 
       - name: Upload JVM test reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -142,7 +143,8 @@ jobs:
           :mediaplayer-dolbyvision:verifyAndroidArmNativeMatrix
           :mediaplayer-kmediabridge:testAndroidHostTest
           :mediaplayer-mpv:compileAndroidMain :mediaplayer-mpv:testAndroidHostTest
-          :androidApp:verifyAndroidArmNativeMatrix --no-daemon --continue
+          :androidApp:verifyAndroidArmNativeMatrix
+          --refresh-dependencies --no-daemon --continue
 
       - name: Upload Android test reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -236,7 +238,7 @@ jobs:
           :sample:composeApp:linkDebugFrameworkIosArm64
           :sample:composeApp:linkDebugFrameworkIosSimulatorArm64
           -PcomposeMediaPlayer.skipAssAppleNativeBuild=true
-          --no-daemon --continue
+          --refresh-dependencies --no-daemon --continue
 
       - name: Upload iOS test results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -457,7 +459,7 @@ jobs:
           :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion=0.0.0-consumer.${{ github.sha }}
           -PcomposeMediaPlayer.skipNativeBuild=true
-          --no-configuration-cache --no-daemon --continue
+          --refresh-dependencies --no-configuration-cache --no-daemon --continue
 
       - name: Verify Maven Central POM metadata
         run: >-
@@ -470,7 +472,7 @@ jobs:
           ./gradlew consumerSmokeTest
           -PpublicationVersion=0.0.0-consumer.${{ github.sha }}
           -PcomposeMediaPlayer.skipNativeBuild=true
-          --no-configuration-cache --no-daemon --continue
+          --refresh-dependencies --no-configuration-cache --no-daemon --continue
 
   quality:
     runs-on: ubuntu-24.04
@@ -572,7 +574,7 @@ jobs:
           -PcomposeMediaPlayer.skipNativeBuild=true
           -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
-          --no-daemon --continue
+          --refresh-dependencies --no-daemon --continue
 
   verification-complete:
     if: always()

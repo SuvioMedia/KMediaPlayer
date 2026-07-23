@@ -193,9 +193,9 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
             if (fontsDirectory == null) {
                 null
             } else {
-                MpvDesktopRuntime.resolveRuntime(fontsDirectory)
+                MpvDesktopRuntime.resolveRuntimeForLoading(fontsDirectory)
             }
-        val path = resolution?.libMpvPath() ?: MpvDesktopRuntime.resolveLibMpv()
+        val path = resolution?.libMpvPath() ?: MpvDesktopRuntime.resolveLibMpvForLoading()
         return ResolvedMpvRuntime(
             librarySource = MpvLibrarySource.ExplicitPath(path),
             requiredOptions = resolution?.requiredOptions().orEmpty(),

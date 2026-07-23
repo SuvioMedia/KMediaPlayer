@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeRequest
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSession
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
@@ -15,9 +16,11 @@ import io.github.shusek.kmediaffmpeg.runtime.KMediaAssRuntime
 import io.github.shusek.kmediaffmpeg.runtime.KMediaFfmpegRuntime
 import io.github.shusek.kmediaffmpeg.runtime.RuntimeSource
 import kotlinx.coroutines.runBlocking
+import java.awt.Font
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.Base64
 import kotlin.io.path.deleteIfExists
 import kotlin.test.Test
@@ -48,17 +51,30 @@ private fun exerciseSharedRuntime(firstClient: FirstClient) =
     runBlocking {
         val video = Files.createTempFile("kmediaplayer-shared-runtime-", ".mkv")
         val subtitle = Files.createTempFile("kmediaplayer-shared-runtime-", ".ass")
+        val fontsDirectory = Files.createTempDirectory("kmediaplayer-shared-runtime-fonts-")
         var bridge: DesktopPlaybackBridgeSession? = null
         var player: MpvVideoPlayerState? = null
+        var stagedFont: Path? = null
         try {
+            val font = loadHostTestFont()
+            val copiedFont = fontsDirectory.resolve(font.source.fileName)
+            Files.copy(font.source, copiedFont, StandardCopyOption.REPLACE_EXISTING)
+            stagedFont = copiedFont
             writeVideoFixture(video)
-            Files.writeString(subtitle, authoredAssFixture())
+            Files.writeString(subtitle, authoredAssFixture(font.family))
 
             if (firstClient == FirstClient.BRIDGE) {
                 bridge = openBridge(video)
             }
 
-            player = assertIs<MpvVideoPlayerState>(createMpvVideoPlayerState())
+            player =
+                assertIs<MpvVideoPlayerState>(
+                    createMpvVideoPlayerState(
+                        MpvPlaybackOptions(
+                            subtitleFontsDirectory = fontsDirectory.toString(),
+                        ),
+                    ),
+                )
             val baseline = openPausedAndRender(player, video)
 
             if (firstClient == FirstClient.MPV) {
@@ -98,6 +114,8 @@ private fun exerciseSharedRuntime(firstClient: FirstClient) =
             bridge?.close()
             subtitle.deleteIfExists()
             video.deleteIfExists()
+            stagedFont?.deleteIfExists()
+            fontsDirectory.deleteIfExists()
         }
     }
 
@@ -175,7 +193,7 @@ private fun writeVideoFixture(output: Path) {
 private fun java.io.InputStream?.orEmpty(): java.io.InputStream =
     requireNotNull(this) { "The shared-runtime video fixture is missing." }
 
-private fun authoredAssFixture(): String =
+private fun authoredAssFixture(fontFamily: String): String =
     """
     [Script Info]
     ScriptType: v4.00+
@@ -184,12 +202,47 @@ private fun authoredAssFixture(): String =
 
     [V4+ Styles]
     Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-    Style: Default,Arial,20,&H0000FF00,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+    Style: Default,$fontFamily,20,&H0000FF00,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,1,0,7,0,0,0,1
 
     [Events]
     Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-    Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,{\an7\pos(8,8)\p1}m 0 0 l 100 0 100 48 0 48
+    Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,{\an7\pos(8,8)}KMediaPlayer
     """.trimIndent()
+
+private data class HostTestFont(
+    val family: String,
+    val source: Path,
+)
+
+private val HOST_FONT_CANDIDATES =
+    listOf(
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/SFNS.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+    )
+
+private fun loadHostTestFont(): HostTestFont =
+    HOST_FONT_CANDIDATES
+        .asSequence()
+        .map(Path::of)
+        .mapNotNull(::readHostTestFont)
+        .firstOrNull()
+        ?: error("No supported host font was available for the MPV ASS integration test.")
+
+private fun readHostTestFont(path: Path): HostTestFont? {
+    if (!Files.isRegularFile(path)) return null
+    return runCatching {
+        val family =
+            Files.newInputStream(path).use { input ->
+                Font.createFont(Font.TRUETYPE_FONT, input).family.trim()
+            }
+        require(family.isNotEmpty() && ',' !in family && '\n' !in family && '\r' !in family)
+        HostTestFont(family = family, source = path)
+    }.getOrNull()
+}
 
 private const val EXPECTED_RUNTIME_ID = "kmediaffmpeg-8.1.2-ass-0.17.5-78fbb23ab073fc90"
 private const val EXPECTED_ASS_RUNTIME_ID = "kmediaass-0.17.5-36443523f0148567"

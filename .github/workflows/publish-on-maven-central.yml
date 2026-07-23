@@ -44,6 +44,7 @@ jobs:
           ./gradlew --no-daemon
           :androidApp:verifyAndroidArmNativeMatrix
           :androidApp:verifyAndroidArmNativeBundle
+          --refresh-dependencies
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: shared-runtime-graph-${{ github.sha }}
@@ -219,7 +220,7 @@ jobs:
           -PcomposeMediaPlayer.skipNativeBuild=true
           -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
-          --no-configuration-cache --no-daemon
+          --refresh-dependencies --no-configuration-cache --no-daemon
 
       - name: Rebuild complete GitHub Pages Maven metadata
         shell: bash
@@ -420,7 +421,7 @@ jobs:
           -PcomposeMediaPlayer.skipNativeBuild=true
           -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
-          --no-configuration-cache --no-daemon
+          --refresh-dependencies --no-configuration-cache --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
