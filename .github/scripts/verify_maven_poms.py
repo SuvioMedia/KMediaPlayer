@@ -8,6 +8,14 @@ import xml.etree.ElementTree as element_tree
 from pathlib import Path
 
 
+EXPECTED_BACKEND_DEPENDENCIES = {
+    "composemediaplayer-mpv-android": ("kmedia-mpv-runtime-android", "0.3.0-rc.1"),
+    "composemediaplayer-mpv-jvm": ("kmedia-mpv-runtime-desktop", "0.3.0-rc.1"),
+    "composemediaplayer-kmediabridge-android": ("kmedia-bridge-ffmpeg-android", "0.5.0-rc.1"),
+    "composemediaplayer-kmediabridge-jvm": ("kmedia-bridge-ffmpeg-jvm", "0.5.0-rc.1"),
+}
+
+
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", maxsplit=1)[-1]
 
@@ -55,6 +63,25 @@ def validate_pom(pom: Path, expected_version: str) -> None:
         ("scm", "url"),
     ):
         _require_text(project, path, pom)
+
+    artifact_id = (_child(project, "artifactId").text or "").strip()
+    expected_dependency = EXPECTED_BACKEND_DEPENDENCIES.get(artifact_id)
+    if expected_dependency is not None:
+        dependencies = _child(project, "dependencies")
+        values = set()
+        if dependencies is not None:
+            for dependency in dependencies:
+                if _local_name(dependency.tag) != "dependency":
+                    continue
+                group = _child(dependency, "groupId")
+                artifact = _child(dependency, "artifactId")
+                dependency_version = _child(dependency, "version")
+                if group is not None and artifact is not None and dependency_version is not None:
+                    values.add(((group.text or "").strip(), (artifact.text or "").strip(), (dependency_version.text or "").strip()))
+        expected_artifact, expected_dependency_version = expected_dependency
+        expected = ("io.github.shusek", expected_artifact, expected_dependency_version)
+        if expected not in values:
+            raise ValueError(f"{pom}: missing exact transitive backend dependency {expected}")
 
 
 def validate_repository(repository: Path, version: str) -> int:

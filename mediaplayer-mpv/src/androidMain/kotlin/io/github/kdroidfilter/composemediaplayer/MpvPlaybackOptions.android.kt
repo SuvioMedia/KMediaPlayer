@@ -4,6 +4,7 @@ import com.kdroid.androidcontextprovider.ContextProvider
 import io.github.kdroidfilter.composemediaplayer.mpv.AndroidMpvVideoPlayerState
 import io.github.shusek.kmediampv.runtime.android.MpvAndroidRuntime
 import java.io.File
+import io.github.shusek.kmediampv.runtime.android.MpvAndroidDecodeMode as RuntimeMpvAndroidDecodeMode
 
 internal actual fun mpvBackendInfo(): VideoPlayerBackendInfo =
     VideoPlayerBackendInfo(
@@ -103,6 +104,7 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
         AndroidMpvVideoPlayerState(
             context = context,
             subtitleFontsDirectory = options.androidSubtitleFontsDirectory(),
+            decodeMode = options.androidDecodeMode.toRuntimeDecodeMode(),
         )
     } catch (failure: RuntimeException) {
         throw MpvBackendUnavailableException(
@@ -126,6 +128,12 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
         )
     }
 }
+
+private fun MpvAndroidDecodeMode.toRuntimeDecodeMode(): RuntimeMpvAndroidDecodeMode =
+    when (this) {
+        MpvAndroidDecodeMode.MEDIA_CODEC_COPY -> RuntimeMpvAndroidDecodeMode.MEDIA_CODEC_COPY
+        MpvAndroidDecodeMode.SOFTWARE_ONLY -> RuntimeMpvAndroidDecodeMode.SOFTWARE_ONLY
+    }
 
 private fun MpvPlaybackOptions.androidSubtitleFontsDirectory(): File? =
     subtitleFontsDirectory?.let { configuredPath ->

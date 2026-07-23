@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import io.github.shusek.kmediampv.runtime.android.MpvAndroidDecodeMode as RuntimeMpvAndroidDecodeMode
 
 /**
  * Android adapter for the optional KMediaMpv runtime.
@@ -48,6 +49,7 @@ import kotlin.time.Duration.Companion.seconds
 internal class AndroidMpvVideoPlayerState(
     private val context: Context,
     private val subtitleFontsDirectory: File?,
+    private val decodeMode: RuntimeMpvAndroidDecodeMode,
 ) : AbstractMpvVideoPlayerState(),
     VideoPlayerSurfaceProvider {
     private val disposed = AtomicBoolean(false)
@@ -286,7 +288,7 @@ internal class AndroidMpvVideoPlayerState(
         player.setPanscan(if (crop) 1.0 else 0.0)
     }
 
-    private fun createPlayer(): MpvAndroidPlayer = MpvAndroidPlayer.create(context, subtitleFontsDirectory)
+    private fun createPlayer(): MpvAndroidPlayer = MpvAndroidPlayer.create(context, subtitleFontsDirectory, decodeMode)
 
     private suspend fun pollPlayback() {
         try {

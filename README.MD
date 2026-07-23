@@ -160,7 +160,7 @@ after an HDMI or monitor change before filtering a new source list.
 ## 🔧 Installation
 
 > [!IMPORTANT]
-> These coordinates reproduce the maintainer's tagged internal artifacts. Their availability does not change the permitted uses stated in [LICENSE](LICENSE). Every remote release uses an immutable `vMAJOR.MINOR.PATCH` tag; `dev` builds are local-only.
+> These coordinates reproduce the maintainer's tagged internal artifacts. Their availability does not change the permitted uses stated in [LICENSE](LICENSE). Every remote release uses an immutable SemVer tag, including RC tags; `dev` builds are local-only.
 
 To add Compose Media Player to your project, add the GitHub Pages Maven repository in your `settings.gradle.kts` file:
 
@@ -187,8 +187,13 @@ Pipeline integrations are separate modules:
 composemediaplayer-ass ──────────┐
 composemediaplayer-dolbyvision ──┼──> composemediaplayer-extension-api ──> composemediaplayer-core
 composemediaplayer-kmediabridge ─┘                    ↑
+composemediaplayer-mpv ───────────────────────────────┤
 composemediaplayer ───────────────────────────────────┘
 ```
+
+The MPV and KMediaBridge adapters are optional. When both are present they transitively select their
+own thin native clients and the same exact KMediaFfmpegRuntime; the base `composemediaplayer`
+artifact still contains neither backend.
 
 Normal applications receive `composemediaplayer-extension-api` transitively. Add it directly only
 when authoring an extension. An optional artifact has no effect until its stable extension instance
@@ -220,20 +225,20 @@ Without `AssSubtitleExtension()`, ASS/SSA keeps the lightweight core fallback an
 does not receive libass or JASSUB from the core artifact. See the
 [ASS component documentation](mediaplayer-ass/README.md) for platform behavior and configuration.
 
-Android applications that opt into the KMediaBridge HDR-to-SDR source bridge add the adapter with
-the same version as KMediaPlayer and the separately versioned audited LGPL runtime:
+Android applications that opt into the KMediaBridge HDR-to-SDR source bridge add only the adapter
+with the same version as KMediaPlayer:
 
 ```kotlin
 dependencies {
     implementation("io.github.shusek:composemediaplayer-kmediabridge:<version>")
-    runtimeOnly("io.github.shusek:kmedia-bridge-ffmpeg-runtime-android:0.4.2")
 }
 ```
 
 Install `KMediaBridgeAndroidExtension()` in `VideoPlaybackOptions.extensions`. The adapter is also
 published for desktop JVM, where `KMediaBridgeDesktopExtension()` enables bounded container,
 sample-copy and controlled SDR routes. The default player has no KMediaBridge dependency. The
-runtime remains a separate KMediaBridge component with its own LGPL source and relinking materials;
+client and shared KMediaFfmpegRuntime are transitive dependencies with their own license notices,
+source, SBOM and relinking materials;
 an explicitly selected external compatible runtime remains the application's responsibility. See the
 [KMediaBridge adapter documentation](mediaplayer-kmediabridge/README.md).
 
@@ -266,7 +271,7 @@ discontinuity timestamp mapping, and a non-independent seek restarts only from a
 
 - **Build JDK and desktop runtime:** Java 25 or newer. Desktop JVM classes are intentionally published as Java 25 bytecode; Java 17/21 are not supported.
 - **Gradle:** use the checked-in Gradle 9.6.1 wrapper, whose distribution checksum is verified.
-- **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `2.0.x` line.
+- **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `3.0.x` line.
 - **Android:** the library is built and verified for `arm64-v8a` and `armeabi-v7a` with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Android x86/x86_64 is unsupported. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`; HDR still depends on the device and active display.
 - **Android MPV adapter:** `composemediaplayer-mpv` uses `minSdk = 28` and publishes ARM runtimes only.
 - **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. iOS applications must embed
@@ -289,11 +294,10 @@ MPV is a separate adapter artifact. The dependency direction is:
 
 The main artifact never imports MPV. Both modules share only the state, event,
 capability, backend-factory, and renderer SPI from `composemediaplayer-core`.
-On Android, Linux, and Apple Silicon macOS, the MPV adapter carries the matching
-KMediaMpv runtime transitively, so the application does not add KMediaMpv
-coordinates separately. Windows and iOS keep the same adapter API but use a
-native runtime supplied by the application. The adapter never downloads native
-code.
+On Android and desktop JVM, the MPV adapter carries the matching KMediaMpv client transitively, so
+the application does not add KMediaMpv coordinates separately. On iOS, the exact `KMediaMpv` pod
+contains the two client XCFrameworks and depends on the exact shared runtime pod. The adapter never
+downloads native code at playback time.
 
 This dependency inversion is the reason for the `2.0.0` major version. Existing
 applications can keep depending on `composemediaplayer`; it re-exports `core`
@@ -421,6 +425,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 
 | Library Version | Kotlin Version | Compose Version | Java | Android toolchain |
 |-----------------|----------------|-----------------|------|-------------------|
+| 3.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 2.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 1.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23 |
 | 0.9.0           | 2.3.20         | 1.10.3          | See release | See release |

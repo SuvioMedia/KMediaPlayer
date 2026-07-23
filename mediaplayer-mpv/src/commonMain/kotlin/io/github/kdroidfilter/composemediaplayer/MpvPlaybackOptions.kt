@@ -14,6 +14,8 @@ import androidx.compose.runtime.remember
  * trusted fonts for external ASS/SSA subtitles. Embedded media fonts do not require it.
  * @param preserveAssStyles preserves script positioning and styling when `true`.
  * @param useEmbeddedFonts allows fonts embedded in the media container.
+ * @param androidDecodeMode selects Android video decoding. The default prefers MediaCodec
+ * copy-back and automatically falls back to software decoding when hardware decoding fails.
  * @param maxDesktopRenderPixels upper bound for a software-rendered desktop or iOS frame.
  * @param runtimeSource native libmpv source. [MpvRuntimeSource.Bundled] keeps the
  * verified KMediaMpv runtime on currently published Android and desktop targets.
@@ -25,6 +27,7 @@ data class MpvPlaybackOptions(
     val subtitleFontsDirectory: String? = null,
     val preserveAssStyles: Boolean = true,
     val useEmbeddedFonts: Boolean = true,
+    val androidDecodeMode: MpvAndroidDecodeMode = MpvAndroidDecodeMode.MEDIA_CODEC_COPY,
     val maxDesktopRenderPixels: Int = DEFAULT_MAX_DESKTOP_RENDER_PIXELS,
     val runtimeSource: MpvRuntimeSource = MpvRuntimeSource.Bundled,
 ) {
@@ -44,6 +47,15 @@ data class MpvPlaybackOptions(
         const val DEFAULT_MAX_DESKTOP_RENDER_PIXELS: Int = 16_777_216
         const val MAX_DESKTOP_RENDER_PIXELS: Int = 67_108_864
     }
+}
+
+/** Android video decode policy used by the MPV backend. Other targets ignore this option. */
+enum class MpvAndroidDecodeMode {
+    /** Prefer MediaCodec copy-back with MPV's automatic software fallback. */
+    MEDIA_CODEC_COPY,
+
+    /** Disable hardware video decoding. */
+    SOFTWARE_ONLY,
 }
 
 /**

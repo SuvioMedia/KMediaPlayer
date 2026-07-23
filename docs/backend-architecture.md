@@ -141,16 +141,14 @@ extract-and-load design inside the iOS sandbox.
 ## Distribution and licensing boundary
 
 The core, extension API, default player, and adapters use this repository's license. The
-separately published KMediaMpv runtime is the boundary that carries the native
-license notices, corresponding source, and recipient relinking materials. The
-adapter consumes desktop/Android runtimes as normal transitive dependencies
-and the Apple runtime as a build-time CocoaPod; it does not relicense the
-application-facing contracts. A caller-selected custom libmpv remains the
-application's distribution and license-compliance responsibility.
+separately published KMediaMpv packages contain the MPV-specific client and consume
+KMediaFfmpegRuntime as an exact dependency. The shared runtime carries FFmpeg/libass notices,
+corresponding source and recipient relinking materials. Android/desktop use Maven variants and
+Apple uses exact-version CocoaPods; none of these boundaries relicense the application-facing
+contracts.
 
-KMediaBridge follows the same separation: the KMediaPlayer adapter owns only
-the extension-facing API and translation layer. The separately published
-KMediaBridge runtime owns the dynamically linked FFmpeg payload, notices,
-corresponding source, SBOM inputs, and relinking instructions. A caller-selected
-external compatible runtime is outside that audited payload and remains the
-caller's licensing responsibility.
+KMediaBridge follows the same separation: the KMediaPlayer adapter owns only the extension-facing
+API and translation layer. The separately published KMediaBridge client contains only the bridge
+library and binds the same KMediaFfmpegRuntime ID as KMediaMpv. An application can therefore contain
+both backends but only one shared FFmpeg/libass graph. A caller-selected external compatible runtime
+remains the caller's licensing responsibility.

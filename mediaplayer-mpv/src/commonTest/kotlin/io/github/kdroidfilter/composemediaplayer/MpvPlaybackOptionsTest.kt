@@ -11,6 +11,7 @@ class MpvPlaybackOptionsTest {
 
         assertEquals(true, options.preserveAssStyles)
         assertEquals(true, options.useEmbeddedFonts)
+        assertEquals(MpvAndroidDecodeMode.MEDIA_CODEC_COPY, options.androidDecodeMode)
         assertEquals(
             MpvPlaybackOptions.DEFAULT_MAX_DESKTOP_RENDER_PIXELS,
             options.maxDesktopRenderPixels,
