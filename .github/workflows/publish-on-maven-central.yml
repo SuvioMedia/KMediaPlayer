@@ -29,6 +29,16 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: gradle
+      - name: Install Android NDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager | sort | tail -n 1)"
+          fi
+          "$SDKMANAGER" "ndk;29.0.14206865"
+      - name: Install Rust Android targets
+        run: rustup target add armv7-linux-androideabi aarch64-linux-android
       - name: Build a consumer with both public backends and verify one shared graph
         run: >-
           ./gradlew --no-daemon
