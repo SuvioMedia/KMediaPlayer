@@ -437,3 +437,8 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+
+      - name: Wait for Maven Central and verify both public backends
+        if: steps.maven_central.outputs.configured == 'true'
+        shell: bash
+        run: .github/scripts/verify_public_maven_release.sh "$RELEASE_VERSION"
