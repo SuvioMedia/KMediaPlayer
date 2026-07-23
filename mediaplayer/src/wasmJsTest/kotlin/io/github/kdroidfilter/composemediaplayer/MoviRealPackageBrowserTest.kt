@@ -10,6 +10,7 @@ import kotlinx.browser.document
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runTest
 import org.w3c.dom.HTMLCanvasElement
+import org.w3c.dom.HTMLVideoElement
 import kotlin.js.JsAny
 import kotlin.js.js
 import kotlin.test.Test
@@ -247,10 +248,18 @@ class MoviRealPackageBrowserTest {
             document.body?.appendChild(canvas)
             var session: MoviPlaybackSession? = null
             try {
-                listOf(
-                    moviKarmaFixtureUrl("/__kmp_movi__/hls/index.m3u8"),
-                    moviKarmaFixtureUrl("/__kmp_movi__/dash/manifest.mpd"),
-                ).forEach { sourceUrl ->
+                val adaptiveSources =
+                    buildList {
+                        add(moviKarmaFixtureUrl("/__kmp_movi__/hls/index.m3u8"))
+                        val capabilityProbe = document.createElement("video") as HTMLVideoElement
+                        val supportsDashFixture =
+                            capabilityProbe.canPlayType("video/mp4; codecs=\"avc1.42c00a\"").toString().isNotEmpty() &&
+                                capabilityProbe.canPlayType("audio/mp4; codecs=\"mp4a.40.2\"").toString().isNotEmpty()
+                        if (supportsDashFixture) {
+                            add(moviKarmaFixtureUrl("/__kmp_movi__/dash/manifest.mpd"))
+                        }
+                    }
+                adaptiveSources.forEach { sourceUrl ->
                     session?.destroy()
                     state.openUri(sourceUrl, InitialPlayerState.PAUSE)
                     val createdSession =
