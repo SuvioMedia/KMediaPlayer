@@ -2,7 +2,8 @@ package io.github.kdroidfilter.composemediaplayer.ass
 
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitleFont
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitleRenderer
-import java.io.File
+import io.github.shusek.kmediaffmpeg.runtime.KMediaAssRuntime
+import io.github.shusek.kmediaffmpeg.runtime.RuntimeSource
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
@@ -11,13 +12,11 @@ import java.lang.foreign.SymbolLookup
 import java.lang.foreign.ValueLayout
 import java.lang.invoke.MethodHandle
 import java.nio.ByteBuffer
-import java.nio.file.Files
-import java.nio.file.Path
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * JVM renderer backed by the bundled or explicitly configured libass runtime.
+ * JVM renderer backed by the shared KMediaAssRuntime.
  *
  * JDK 25's stable Foreign Function API keeps this bridge independent from a
  * platform-specific JNI shim. The libass renderer still owns shaping and
@@ -329,9 +328,9 @@ internal object SystemLibAssRuntime {
     val failureDetail: String
         get() =
             loadResult.exceptionOrNull()?.let { failure ->
-                "The bundled libass runtime and compatible 0.17.4+ overrides could not be loaded " +
+                "The shared KMediaAssRuntime could not be loaded " +
                     "(${failure::class.simpleName}: ${failure.message.orEmpty().take(MAX_FAILURE_DETAIL_LENGTH)})."
-            } ?: "A compatible bundled or configured libass runtime is available."
+            } ?: "The exact shared KMediaAssRuntime is available."
 
     fun requireLoaded(): Loaded = loadResult.getOrThrow()
 
@@ -340,69 +339,23 @@ internal object SystemLibAssRuntime {
         require(ValueLayout.ADDRESS.byteSize() == Long.SIZE_BYTES.toLong()) {
             "The desktop libass bridge supports 64-bit JVM runtimes only."
         }
-        val osName = System.getProperty("os.name", "")
-        val configuredPath =
-            System
-                .getProperty(LIBRARY_PATH_PROPERTY)
-                ?.takeIf(String::isNotBlank)
-                ?: System.getenv(LIBRARY_PATH_ENVIRONMENT)?.takeIf(String::isNotBlank)
-        val attempts = mutableListOf<String>()
-        val candidates =
-            buildList {
-                configuredPath?.let { configured ->
-                    configuredLibAssCandidates(osName, configured).forEach { candidate ->
-                        add(LibAssCandidate(candidate, "configured"))
-                    }
-                }
-                runCatching {
-                    BundledLibAssRuntime.extract(osName = osName)
-                }.fold(
-                    onSuccess = { payload ->
-                        add(
-                            LibAssCandidate(
-                                value = payload.mainLibrary.toAbsolutePath().toString(),
-                                originLabel = "bundled",
-                            ),
-                        )
-                    },
-                    onFailure = { failure ->
-                        attempts += "bundled: ${failure.message ?: failure::class.simpleName}"
-                    },
-                )
-                systemLibAssCandidates(
-                    osName = osName,
-                    configuredPath = null,
-                ).forEach { candidate ->
-                    add(LibAssCandidate(candidate, "system fallback"))
-                }
-            }.distinctBy(LibAssCandidate::value)
-
-        candidates.forEach { candidate ->
-            val arena = Arena.ofShared()
-            try {
-                val lookup = openLibAssLookup(candidate.value, osName, arena)
-                val functions = LibAssFunctions(lookup)
-                val version = functions.libraryVersion()
-                check(version >= REQUIRED_LIBASS_VERSION) {
-                    "libass at '${candidate.value}' is older than 0.17.4 " +
-                        "(0x${version.toUInt().toString(HEX_RADIX)})."
-                }
-                return Loaded(
-                    arena = arena,
-                    functions = functions,
-                    versionLabel =
-                        "0x${version.toUInt().toString(HEX_RADIX).padStart(VERSION_HEX_WIDTH, '0')}",
-                    source = candidate.value,
-                    originLabel = candidate.originLabel,
-                )
-            } catch (failure: Throwable) {
-                attempts +=
-                    "${candidate.originLabel} ${candidate.value}: " +
-                    (failure.message ?: failure::class.simpleName)
-                arena.close()
-            }
+        val report = KMediaAssRuntime.initialize(RuntimeSource.bundled())
+        check(report.runtimeId() == REQUIRED_ASS_RUNTIME_ID) {
+            "composemediaplayer-ass targets another KMediaAssRuntime ID."
         }
-        error("Tried ${attempts.joinToString(limit = MAX_REPORTED_LOAD_ATTEMPTS, truncated = "…")}")
+        val functions = LibAssFunctions(SymbolLookup.loaderLookup())
+        val version = functions.libraryVersion()
+        check(version == REQUIRED_LIBASS_VERSION) {
+            "The loaded shared libass version differs from KMediaAssRuntime's manifest."
+        }
+        return Loaded(
+            arena = Arena.global(),
+            functions = functions,
+            versionLabel =
+                "0x${version.toUInt().toString(HEX_RADIX).padStart(VERSION_HEX_WIDTH, '0')}",
+            source = "<shared-runtime>",
+            originLabel = "shared",
+        )
     }
 
     internal data class Loaded(
@@ -414,98 +367,12 @@ internal object SystemLibAssRuntime {
         val originLabel: String,
     )
 
-    private data class LibAssCandidate(
-        val value: String,
-        val originLabel: String,
-    )
-
-    private const val REQUIRED_LIBASS_VERSION = 0x01704000
-    private const val LIBRARY_PATH_PROPERTY = "composemediaplayer.ass.libraryPath"
-    private const val LIBRARY_PATH_ENVIRONMENT = "KMEDIA_ASS_LIBRARY_PATH"
+    private const val REQUIRED_LIBASS_VERSION = 0x01705000
+    private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-36443523f0148567"
     private const val MAX_FAILURE_DETAIL_LENGTH = 240
     private const val HEX_RADIX = 16
     private const val VERSION_HEX_WIDTH = 8
-    private const val MAX_REPORTED_LOAD_ATTEMPTS = 8
 }
-
-internal fun systemLibAssCandidates(
-    osName: String,
-    configuredPath: String?,
-    searchDirectories: List<String> = systemLibAssSearchDirectories(osName),
-): List<String> =
-    buildList {
-        val fileNames = libAssFileNames(osName)
-        configuredPath?.let { configured ->
-            configuredLibAssCandidates(osName, configured).forEach(::add)
-        }
-        searchDirectories
-            .asSequence()
-            .mapNotNull { directory -> runCatching { Path.of(directory) }.getOrNull() }
-            .flatMap { directory -> fileNames.asSequence().map(directory::resolve) }
-            .filter(Files::isRegularFile)
-            .map { it.toAbsolutePath().normalize().toString() }
-            .forEach(::add)
-
-        if (osName.contains("windows", ignoreCase = true)) {
-            add("ass")
-            add("libass")
-            add("libass-9")
-            add("ass-9")
-        } else if (osName.contains("linux", ignoreCase = true)) {
-            add("ass")
-            add("libass.so.9")
-            add("libass.so")
-        }
-    }.distinct()
-
-private fun configuredLibAssCandidates(
-    osName: String,
-    configuredPath: String,
-): List<String> {
-    val configured = configuredPath.trim()
-    if (configured.isEmpty()) return emptyList()
-    val path = runCatching { Path.of(configured) }.getOrNull()
-    return if (path != null && Files.isDirectory(path)) {
-        libAssFileNames(osName)
-            .map(path::resolve)
-            .filter(Files::isRegularFile)
-            .map { it.toAbsolutePath().normalize().toString() }
-    } else {
-        listOf(configured)
-    }
-}
-
-private fun libAssFileNames(osName: String): List<String> =
-    when {
-        osName.contains("windows", ignoreCase = true) ->
-            listOf("ass.dll", "libass.dll", "libass-9.dll", "ass-9.dll")
-        osName.contains("linux", ignoreCase = true) ->
-            listOf("libass.so.9", "libass.so")
-        else -> emptyList()
-    }
-
-private fun systemLibAssSearchDirectories(osName: String): List<String> =
-    buildList {
-        System
-            .getProperty("java.library.path", "")
-            .split(File.pathSeparatorChar)
-            .map(String::trim)
-            .filter(String::isNotEmpty)
-            .forEach(::add)
-        if (osName.contains("linux", ignoreCase = true)) {
-            val multiArch =
-                when (System.getProperty("os.arch", "").lowercase()) {
-                    "amd64", "x86_64" -> "x86_64-linux-gnu"
-                    "aarch64", "arm64" -> "aarch64-linux-gnu"
-                    else -> null
-                }
-            listOf("/usr/local/lib", "/usr/lib", "/lib", "/usr/lib64", "/lib64").forEach(::add)
-            if (multiArch != null) {
-                add("/usr/lib/$multiArch")
-                add("/lib/$multiArch")
-            }
-        }
-    }.distinct()
 
 internal class LibAssFunctions(
     lookup: SymbolLookup,
@@ -735,90 +602,9 @@ internal class LibAssFunctions(
 
 private fun MemorySegment.isNativePointer(): Boolean = address() != 0L
 
-private fun openLibAssLookup(
-    candidate: String,
-    osName: String,
-    arena: Arena,
-): SymbolLookup {
-    if (!candidate.isAbsoluteLibraryPath()) {
-        return SymbolLookup.libraryLookup(candidate, arena)
-    }
-    val path = Path.of(candidate).toAbsolutePath().normalize()
-    if (osName.contains("windows", ignoreCase = true)) {
-        loadWindowsLibraryWithSiblingDependencies(path)
-    }
-    return SymbolLookup.libraryLookup(path, arena)
-}
-
-/**
- * Loads the main DLL once with a search scope that includes its own directory.
- *
- * Windows' ordinary `LoadLibrary` search does not reliably include the folder
- * of an absolute-path DLL for transitive dependencies. The returned module is
- * intentionally retained for the process lifetime; the following
- * `libraryLookup` owns the symbol lookup and its own reference.
- */
-internal fun loadWindowsLibraryWithSiblingDependencies(path: Path) {
-    val linker = Linker.nativeLinker()
-    Arena.ofConfined().use { callArena ->
-        val kernel32 = SymbolLookup.libraryLookup("Kernel32.dll", callArena)
-        val loadLibraryEx =
-            linker.downcallHandle(
-                kernel32
-                    .find("LoadLibraryExW")
-                    .orElseThrow {
-                        UnsatisfiedLinkError("Kernel32.dll does not export LoadLibraryExW.")
-                    },
-                FunctionDescriptor.of(
-                    ValueLayout.ADDRESS,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_INT,
-                ),
-            )
-        val text = path.toString()
-        val nativePath =
-            callArena.allocate(
-                (text.length + NULL_TERMINATOR_CHARS).toLong() * ValueLayout.JAVA_CHAR.byteSize(),
-                ValueLayout.JAVA_CHAR.byteAlignment(),
-            )
-        text.forEachIndexed { index, character ->
-            nativePath.set(
-                ValueLayout.JAVA_CHAR,
-                index.toLong() * ValueLayout.JAVA_CHAR.byteSize(),
-                character,
-            )
-        }
-        nativePath.set(
-            ValueLayout.JAVA_CHAR,
-            text.length.toLong() * ValueLayout.JAVA_CHAR.byteSize(),
-            '\u0000',
-        )
-        val module =
-            loadLibraryEx.invokeWithArguments(
-                nativePath,
-                MemorySegment.NULL,
-                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR or LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-            ) as MemorySegment
-        check(module.isNativePointer()) {
-            "Windows could not load $path with its bundled dependency directory."
-        }
-    }
-}
-
-private fun String.isAbsoluteLibraryPath(): Boolean =
-    runCatching {
-        val path = Path.of(this)
-        path.isAbsolute || Files.exists(path)
-    }.getOrDefault(false)
-
 private fun systemFontProviderLabel(): String =
     when {
         System.getProperty("os.name", "").contains("windows", ignoreCase = true) -> "DirectWrite"
         System.getProperty("os.name", "").contains("linux", ignoreCase = true) -> "fontconfig"
         else -> "system fonts"
     }
-
-private const val NULL_TERMINATOR_CHARS = 1
-private const val LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR = 0x00000100
-private const val LOAD_LIBRARY_SEARCH_DEFAULT_DIRS = 0x00001000

@@ -64,7 +64,7 @@ fun registerAndroidBackendGraphVerification(
     relativeArchive: String,
 ) = tasks.register<Exec>(name) {
     group = "verification"
-    description = "Verifies two clients and exactly one shared FFmpeg runtime graph in $relativeArchive."
+    description = "Verifies three clients and one shared ASS/FFmpeg runtime graph in $relativeArchive."
     dependsOn(buildTask)
     val archive = layout.buildDirectory.file(relativeArchive)
     val report = layout.buildDirectory.file("reports/native-graph/$name.json")

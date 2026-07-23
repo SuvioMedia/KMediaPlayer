@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-KMediaPlayer-Internal
+
 #include "AssRgbaCompositor.h"
 
 #include <android/log.h>

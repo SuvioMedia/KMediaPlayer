@@ -21,6 +21,17 @@ plugins {
 
 rootProject.name = "Compose-Media-Player"
 
+providers.gradleProperty("kmediaFfmpegRuntimeProjectDir").orNull?.let { projectDirectory ->
+    includeBuild(projectDirectory) {
+        dependencySubstitution {
+            substitute(module("io.github.shusek:kmedia-ass-runtime-android"))
+                .using(project(":kmedia-ass-runtime-android"))
+            substitute(module("io.github.shusek:kmedia-ass-runtime-desktop"))
+                .using(project(":kmedia-ass-runtime-desktop"))
+        }
+    }
+}
+
 providers.gradleProperty("kmediaMpvProjectDir").orNull?.let { projectDirectory ->
     includeBuild(projectDirectory) {
         dependencySubstitution {

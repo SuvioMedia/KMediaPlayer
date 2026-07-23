@@ -49,26 +49,6 @@ jobs:
           cp "$root/target/aarch64-pc-windows-msvc/release/composemediaplayer_libdovi.dll" \
             "$output/windows-aarch64/composemediaplayer_dovi.dll"
 
-      - name: Build bundled Windows libass payloads
-        shell: pwsh
-        run: >-
-          ./mediaplayer-ass/native/desktop/build-windows.ps1
-          -OutputRoot ./mediaplayer-ass/build/generated/desktopAssJvmResources
-
-      - name: Verify bundled Windows libass manifests
-        shell: pwsh
-        run: |
-          @("windows-x86-64", "windows-aarch64") | ForEach-Object {
-            $root = "mediaplayer-ass/build/generated/desktopAssJvmResources/composemediaplayer/ass/native/$_"
-            if (-not (Test-Path "$root/runtime.properties")) {
-              throw "Missing bundled libass manifest for $_"
-            }
-            $main = (Get-Content "$root/runtime.properties" | Where-Object { $_ -like "mainLibrary=*" }).Split("=", 2)[1]
-            if (-not (Test-Path "$root/$main")) {
-              throw "Missing bundled libass main DLL for $_"
-            }
-          }
-
       - name: Upload Windows natives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -81,14 +61,6 @@ jobs:
         with:
           name: libdovi-jvm-windows-${{ github.sha }}
           path: build/libdoviJvmResources/
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload Windows JVM libass payloads
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: desktop-ass-windows-${{ github.sha }}
-          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
           if-no-files-found: error
           retention-days: 1
 
@@ -105,18 +77,111 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Install Apple ASS build tools
-        run: brew install meson ninja pkg-config
+      - name: Download and verify the exact KMediaAssRuntime Apple SDKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASS_RUNTIME_VERSION: 0.1.0-rc.3
+        run: |
+          set -euo pipefail
+          download="$RUNNER_TEMP/kmedia-ass-download"
+          targets="$GITHUB_WORKSPACE/mediaplayer-ass/build/kmediaAssRuntimeAppleOutputs"
+          mkdir "$download" "$targets"
+          gh release download "v$ASS_RUNTIME_VERSION" \
+            --repo Shusek/KMediaFfmpegRuntime \
+            --dir "$download" \
+            --pattern SHA256SUMS \
+            --pattern KMediaAssRuntime.podspec \
+            --pattern "kmedia-ass-runtime-$ASS_RUNTIME_VERSION-apple-xcframeworks.zip" \
+            --pattern "kmedia-ass-runtime-$ASS_RUNTIME_VERSION-ios-arm64-sdk.tar.gz" \
+            --pattern "kmedia-ass-runtime-$ASS_RUNTIME_VERSION-ios-simulator-arm64-sdk.tar.gz"
+          for target in ios-arm64 ios-simulator-arm64; do
+            name="kmedia-ass-runtime-$ASS_RUNTIME_VERSION-$target-sdk.tar.gz"
+            expected="$(awk -v p="$name" '$2 == p || $2 == "./" p {print $1}' "$download/SHA256SUMS")"
+            [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+            test "$expected" = "$(shasum -a 256 "$download/$name" | awk '{print $1}')"
+            mkdir "$targets/$target"
+            tar -xzf "$download/$name" -C "$targets/$target"
+            test -f "$targets/$target/sdk/$target/include/ass/ass.h"
+            test "$(cat "$targets/$target/ass-runtime-id.txt")" = \
+              "kmediaass-0.17.5-36443523f0148567"
+          done
+          apple_archive="kmedia-ass-runtime-$ASS_RUNTIME_VERSION-apple-xcframeworks.zip"
+          for name in "$apple_archive" KMediaAssRuntime.podspec; do
+            expected="$(awk -v p="$name" '$2 == p || $2 == "./" p {print $1}' "$download/SHA256SUMS")"
+            [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+            test "$expected" = "$(shasum -a 256 "$download/$name" | awk '{print $1}')"
+          done
+          pod_root="$GITHUB_WORKSPACE/mediaplayer-ass/build/kmediaAssRuntimePod"
+          mkdir "$pod_root"
+          ditto -x -k "$download/$apple_archive" "$pod_root"
+          cp "$download/KMediaAssRuntime.podspec" "$pod_root/"
+          echo "KMEDIA_ASS_RUNTIME_TARGETS=$targets" >> "$GITHUB_ENV"
 
-      - name: Build bundled Apple ASS payloads
+      - name: Build thin iOS ASS clients
         run: >-
-          ./gradlew :mediaplayer-ass:buildMacosArm64AppleAss
-          :mediaplayer-ass:buildIosArm64AppleAss
+          ./gradlew :mediaplayer-ass:buildIosArm64AppleAss
           :mediaplayer-ass:buildIosSimulatorArm64AppleAss
+          -PkmediaAssRuntimeAppleOutputs="$KMEDIA_ASS_RUNTIME_TARGETS"
           --no-daemon
 
-      - name: Verify bundled Apple ASS payloads
+      - name: Verify thin Apple ASS clients
         run: bash .github/scripts/verify_apple_ass_payload.sh
+
+      - name: Download and verify the exact KMediaMpv Apple pod graph
+        env:
+          MPV_VERSION: 0.3.0-rc.3
+          RUNTIME_VERSION: 0.1.0-rc.3
+        run: |
+          set -euo pipefail
+          mpv_download="$RUNNER_TEMP/kmedia-mpv-download"
+          runtime_download="$RUNNER_TEMP/kmedia-mpv-runtime-download"
+          mpv_pod="$GITHUB_WORKSPACE/mediaplayer-mpv/build/kmediaMpvPod"
+          ffmpeg_pod="$GITHUB_WORKSPACE/mediaplayer-mpv/build/kmediaFfmpegRuntimePod"
+          ass_pod="$GITHUB_WORKSPACE/mediaplayer-mpv/build/kmediaAssRuntimePod"
+          mkdir "$mpv_download" "$runtime_download" "$mpv_pod" "$ffmpeg_pod" "$ass_pod"
+
+          gh release download "v$MPV_VERSION" \
+            --repo Shusek/KMediaMpv \
+            --dir "$mpv_download" \
+            --pattern SHA256SUMS \
+            --pattern KMediaMpv.podspec \
+            --pattern "kmedia-mpv-$MPV_VERSION-apple-xcframeworks.zip"
+          mpv_archive="kmedia-mpv-$MPV_VERSION-apple-xcframeworks.zip"
+          for name in "$mpv_archive" KMediaMpv.podspec; do
+            expected="$(awk -v p="$name" '$2 == p || $2 == "./" p {print $1}' "$mpv_download/SHA256SUMS")"
+            [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+            test "$expected" = "$(shasum -a 256 "$mpv_download/$name" | awk '{print $1}')"
+          done
+          ditto -x -k "$mpv_download/$mpv_archive" "$mpv_pod"
+          cp "$mpv_download/KMediaMpv.podspec" "$mpv_pod/"
+
+          gh release download "v$RUNTIME_VERSION" \
+            --repo Shusek/KMediaFfmpegRuntime \
+            --dir "$runtime_download" \
+            --pattern SHA256SUMS \
+            --pattern KMediaAssRuntime.podspec \
+            --pattern KMediaFfmpegRuntime.podspec \
+            --pattern "kmedia-ass-runtime-$RUNTIME_VERSION-apple-xcframeworks.zip" \
+            --pattern "kmedia-ffmpeg-runtime-$RUNTIME_VERSION-apple-xcframeworks.zip"
+          for component in ass ffmpeg; do
+            archive="kmedia-$component-runtime-$RUNTIME_VERSION-apple-xcframeworks.zip"
+            podspec="KMedia$(tr '[:lower:]' '[:upper:]' <<< "${component:0:1}")${component:1}Runtime.podspec"
+            expected="$(awk -v p="$archive" '$2 == p || $2 == "./" p {print $1}' "$runtime_download/SHA256SUMS")"
+            [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+            test "$expected" = "$(shasum -a 256 "$runtime_download/$archive" | awk '{print $1}')"
+            expected="$(awk -v p="$podspec" '$2 == p || $2 == "./" p {print $1}' "$runtime_download/SHA256SUMS")"
+            [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+            test "$expected" = "$(shasum -a 256 "$runtime_download/$podspec" | awk '{print $1}')"
+            if [ "$component" = ass ]; then destination="$ass_pod"; else destination="$ffmpeg_pod"; fi
+            ditto -x -k "$runtime_download/$archive" "$destination"
+            cp "$runtime_download/$podspec" "$destination/"
+          done
+
+          grep -F "spec.dependency 'KMediaFfmpegRuntime', '= $RUNTIME_VERSION'" \
+            "$mpv_pod/KMediaMpv.podspec"
+          grep -F "spec.dependency           'KMediaAssRuntime', '= $RUNTIME_VERSION'" \
+            "$ffmpeg_pod/KMediaFfmpegRuntime.podspec"
+          bash .github/scripts/verify_apple_mpv_payload.sh
 
       - name: Build macOS native dylibs
         run: bash mediaplayer/src/jvmMain/native/macos/build.sh
@@ -163,8 +228,20 @@ jobs:
         with:
           name: apple-ass-${{ github.sha }}
           path: |
-            mediaplayer-ass/build/generated/appleAssJvmResources/
             mediaplayer-ass/build/generated/appleAssIos/
+            mediaplayer-ass/build/kmediaAssRuntimeAppleOutputs/
+            mediaplayer-ass/build/kmediaAssRuntimePod/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload Apple MPV pod graph
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: apple-mpv-${{ github.sha }}
+          path: |
+            mediaplayer-mpv/build/kmediaMpvPod/
+            mediaplayer-mpv/build/kmediaFfmpegRuntimePod/
+            mediaplayer-mpv/build/kmediaAssRuntimePod/
           if-no-files-found: error
           retention-days: 1
 
@@ -284,30 +361,6 @@ jobs:
           cp "$root/target/${{ matrix.rust-target }}/release/libcomposemediaplayer_libdovi.so" \
             "$output/libcomposemediaplayer_dovi.so"
 
-      - name: Build bundled Linux libass payload
-        run: >-
-          bash mediaplayer-ass/native/desktop/build-linux.sh
-          linux-${{ matrix.arch }}
-          mediaplayer-ass/build/generated/desktopAssJvmResources
-
-      - name: Verify bundled Linux libass payload
-        run: |
-          set -euo pipefail
-          root="mediaplayer-ass/build/generated/desktopAssJvmResources/composemediaplayer/ass/native/linux-${{ matrix.arch }}"
-          test -f "$root/runtime.properties"
-          test -f "$root/libass.so.9"
-          test -f "$root/libkmediafribidi.so.0"
-          LD_LIBRARY_PATH="$root" python3 - "$root/libass.so.9" <<'PY'
-          import ctypes
-          import sys
-          libass = ctypes.CDLL(sys.argv[1])
-          libass.ass_library_version.restype = ctypes.c_int
-          version = libass.ass_library_version()
-          if version < 0x01705000:
-              raise SystemExit(f"unexpected bundled libass version: 0x{version:08x}")
-          print(f"bundled libass version: 0x{version:08x}")
-          PY
-
       - name: Upload Linux library
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -320,13 +373,5 @@ jobs:
         with:
           name: libdovi-jvm-linux-${{ matrix.arch }}-${{ github.sha }}
           path: build/libdoviJvmResources/
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload Linux JVM libass payload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: desktop-ass-linux-${{ matrix.arch }}-${{ github.sha }}
-          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
           if-no-files-found: error
           retention-days: 1

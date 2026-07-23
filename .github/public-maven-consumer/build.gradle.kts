@@ -31,8 +31,10 @@ val androidBackends = configurations.create("androidBackends") {
 dependencies {
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-mpv-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-kmediabridge-jvm:$testedVersion")
+    add(desktopBackends.name, "io.github.shusek:composemediaplayer-ass-jvm:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-mpv-android:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-kmediabridge-android:$testedVersion")
+    add(androidBackends.name, "io.github.shusek:composemediaplayer-ass-android:$testedVersion")
 }
 
 fun Configuration.kmediaComponents(): Set<String> =
@@ -52,19 +54,36 @@ tasks.register("verifyPublicBackends") {
 
         check("io.github.shusek:composemediaplayer-mpv-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-kmediabridge-jvm:$testedVersion" in desktopComponents)
+        check("io.github.shusek:composemediaplayer-ass-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-mpv-android:$testedVersion" in androidComponents)
         check("io.github.shusek:composemediaplayer-kmediabridge-android:$testedVersion" in androidComponents)
+        check("io.github.shusek:composemediaplayer-ass-android:$testedVersion" in androidComponents)
 
         val desktopRuntime = desktopComponents.matching("kmedia-ffmpeg-runtime-desktop")
         val androidRuntime = androidComponents.matching("kmedia-ffmpeg-runtime-android")
+        val desktopAssRuntime = desktopComponents.matching("kmedia-ass-runtime-desktop")
+        val androidAssRuntime = androidComponents.matching("kmedia-ass-runtime-android")
         check(desktopRuntime.size == 1) {
             "Expected exactly one shared desktop FFmpeg runtime, got $desktopRuntime"
         }
         check(androidRuntime.size == 1) {
             "Expected exactly one shared Android FFmpeg runtime, got $androidRuntime"
         }
+        check(desktopAssRuntime.size == 1) {
+            "Expected exactly one shared desktop ASS runtime, got $desktopAssRuntime"
+        }
+        check(androidAssRuntime.size == 1) {
+            "Expected exactly one shared Android ASS runtime, got $androidAssRuntime"
+        }
         check(desktopRuntime.single().substringAfterLast(':') == androidRuntime.single().substringAfterLast(':')) {
             "Desktop and Android resolved different shared runtime versions: $desktopRuntime vs $androidRuntime"
+        }
+        check(
+            desktopAssRuntime.single().substringAfterLast(':') ==
+                androidAssRuntime.single().substringAfterLast(':'),
+        ) {
+            "Desktop and Android resolved different ASS runtime versions: " +
+                "$desktopAssRuntime vs $androidAssRuntime"
         }
 
         check(desktopComponents.matching("kmedia-mpv-runtime-desktop").size == 1)
@@ -81,7 +100,7 @@ tasks.register("verifyPublicBackends") {
         androidComponents.forEach(::println)
         println(
             "Resolved ${desktopFiles.size} desktop runtime files and the Android module graph " +
-                "with one shared FFmpeg runtime per platform."
+                "with one shared FFmpeg and one shared ASS runtime per platform."
         )
     }
 }

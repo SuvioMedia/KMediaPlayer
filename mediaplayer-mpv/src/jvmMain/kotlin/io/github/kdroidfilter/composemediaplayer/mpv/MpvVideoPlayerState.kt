@@ -556,7 +556,6 @@ internal fun mpvInitializationOptions(config: MpvRuntimeConfig): Map<String, Str
         put("load-scripts", "no")
         put("input-default-bindings", "no")
         put("input-vo-keyboard", "no")
-        put("osc", "no")
         put("hwdec", "no")
         put("keep-open", "yes")
         put("sub-ass-override", if (config.preserveAssStyles) "no" else "strip")
@@ -606,14 +605,16 @@ internal fun createDesktopMpvVideoPlayerState(config: MpvRuntimeConfig): MpvVide
                     ),
                 cause = failure,
             )
-        } catch (_: RuntimeException) {
+        } catch (failure: RuntimeException) {
             library.close()
             throw MpvBackendUnavailableException(
-                MpvBackendAvailability.Unavailable(
-                    reason = MpvBackendUnavailableReason.INITIALIZATION_FAILED,
-                    guidance =
-                        "The verified libmpv runtime could not initialize the software backend.",
-                ),
+                availability =
+                    MpvBackendAvailability.Unavailable(
+                        reason = MpvBackendUnavailableReason.INITIALIZATION_FAILED,
+                        guidance =
+                            "The verified libmpv runtime could not initialize the software backend.",
+                    ),
+                cause = failure,
             )
         }
     return try {

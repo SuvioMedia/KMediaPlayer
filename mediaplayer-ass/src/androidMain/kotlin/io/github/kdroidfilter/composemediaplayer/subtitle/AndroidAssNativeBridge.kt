@@ -1,12 +1,21 @@
 package io.github.kdroidfilter.composemediaplayer.subtitle
 
 import androidx.annotation.Keep
+import io.github.shusek.kmediaffmpeg.runtime.KMediaAssRuntime
+import io.github.shusek.kmediaffmpeg.runtime.RuntimeSource
 import java.nio.ByteBuffer
 
 /** Private JNI surface. All handles are owned by [AndroidAssNativeSession]. */
 @Keep
 internal object AndroidAssNativeBridge {
-    private val loadResult = runCatching { System.loadLibrary("kmediaass") }
+    private val loadResult =
+        runCatching {
+            val report = KMediaAssRuntime.initialize(RuntimeSource.bundled())
+            check(report.runtimeId() == REQUIRED_ASS_RUNTIME_ID) {
+                "composemediaplayer-ass targets another KMediaAssRuntime ID."
+            }
+            System.loadLibrary("kmediaass")
+        }
 
     val isAvailable: Boolean by lazy {
         loadResult.isSuccess &&
@@ -17,7 +26,7 @@ internal object AndroidAssNativeBridge {
 
     fun requireAvailable() {
         check(isAvailable) {
-            "KMediaPlayer requires its bundled libass 0.17.5 or newer Android backend."
+            "KMediaPlayer requires the shared libass 0.17.5 Android runtime."
         }
     }
 
@@ -107,4 +116,5 @@ internal object AndroidAssNativeBridge {
     }
 
     private const val MINIMUM_LIBASS_VERSION = 0x01705000
+    private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-36443523f0148567"
 }

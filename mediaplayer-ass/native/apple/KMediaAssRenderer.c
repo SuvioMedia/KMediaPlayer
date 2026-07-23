@@ -1,6 +1,7 @@
 #include "KMediaAssRenderer.h"
 
 #include "AssRgbaCompositor.h"
+#include "KMediaAssRuntime.h"
 
 #include <ass/ass.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -161,9 +162,14 @@ uint32_t kmedia_ass_library_version(void)
     return (uint32_t) ass_library_version();
 }
 
+const char *kmedia_ass_shared_runtime_id(void)
+{
+    return kmediaass_runtime_id();
+}
+
 KMediaAssRenderer *kmedia_ass_renderer_create(void)
 {
-    if (kmedia_ass_library_version() < REQUIRED_LIBASS_VERSION)
+    if (kmedia_ass_library_version() != REQUIRED_LIBASS_VERSION)
         return NULL;
 
     KMediaAssRenderer *renderer =

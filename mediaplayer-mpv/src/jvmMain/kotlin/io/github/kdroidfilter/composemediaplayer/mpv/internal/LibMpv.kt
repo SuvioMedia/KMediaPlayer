@@ -155,6 +155,7 @@ internal class LibMpvLibrary private constructor(
             )
         }
 
+        ensureNativeNumericLocale()
         val handle = createHandle.invokeWithArguments() as MemorySegment
         if (handle.address() == 0L) {
             throw MpvLoadFailure(MpvUnavailableReason.LOAD_FAILED, "libmpv could not create a player instance.")
@@ -162,7 +163,13 @@ internal class LibMpvLibrary private constructor(
 
         try {
             options.forEach { (name, value) ->
-                checkResult(handle, setOptionStringHandle, name, value)
+                checkResult(
+                    handle = handle,
+                    method = setOptionStringHandle,
+                    name = name,
+                    value = value,
+                    allowMissing = name == "load-scripts",
+                )
             }
             checkResult(initializeHandle.invokeWithArguments(handle) as Int)
             val renderContext = createSoftwareRenderContext(handle)
@@ -316,6 +323,7 @@ internal class LibMpvLibrary private constructor(
         method: MethodHandle,
         name: String,
         value: String,
+        allowMissing: Boolean = false,
     ) {
         Arena.ofConfined().use { callArena ->
             val result =
@@ -324,7 +332,10 @@ internal class LibMpvLibrary private constructor(
                     callArena.allocateFrom(name),
                     callArena.allocateFrom(value),
                 ) as Int
-            checkResult(result)
+            if (allowMissing && result == MPV_ERROR_OPTION_NOT_FOUND) return
+            if (result < 0) {
+                throw IllegalStateException("libmpv rejected '$name': ${errorMessage(result)}")
+            }
         }
     }
 
@@ -368,6 +379,7 @@ internal class LibMpvLibrary private constructor(
         private const val MPV_EVENT_FILE_LOADED = 8
         private const val MPV_EVENT_SEEK = 20
         private const val MPV_EVENT_PLAYBACK_RESTART = 21
+        private const val MPV_ERROR_OPTION_NOT_FOUND = -5
 
         private val RENDER_PARAM_LAYOUT =
             MemoryLayout.structLayout(
@@ -389,6 +401,7 @@ internal class LibMpvLibrary private constructor(
             )
         private const val EVENT_ID_OFFSET = 0L
         private const val EVENT_DATA_OFFSET = 16L
+        private val nativeLocaleLock = Any()
 
         fun open(source: MpvLibrarySource): LibMpvLibrary {
             val candidates = source.candidates()
@@ -439,6 +452,44 @@ internal class LibMpvLibrary private constructor(
                     "No compatible user-provided libmpv was found. Install or build libmpv separately, " +
                         "then pass an absolute path with MpvRuntimeSource.ExplicitPath.",
             )
+        }
+
+        private fun ensureNativeNumericLocale() {
+            synchronized(nativeLocaleLock) {
+                val linker = Linker.nativeLinker()
+                val setLocale =
+                    linker
+                        .defaultLookup()
+                        .find("setlocale")
+                        .orElseThrow {
+                            MpvLoadFailure(
+                                MpvUnavailableReason.LOAD_FAILED,
+                                "The platform C runtime does not expose setlocale required by libmpv.",
+                            )
+                        }
+                val handle =
+                    linker.downcallHandle(
+                        setLocale,
+                        FunctionDescriptor.of(
+                            ValueLayout.ADDRESS,
+                            ValueLayout.JAVA_INT,
+                            ValueLayout.ADDRESS,
+                        ),
+                    )
+                Arena.ofConfined().use { callArena ->
+                    val result =
+                        handle.invokeWithArguments(
+                            nativeNumericLocaleCategory(System.getProperty("os.name", "")),
+                            callArena.allocateFrom("C"),
+                        ) as MemorySegment
+                    if (result.address() == 0L) {
+                        throw MpvLoadFailure(
+                            MpvUnavailableReason.LOAD_FAILED,
+                            "The platform C runtime rejected the numeric locale required by libmpv.",
+                        )
+                    }
+                }
+            }
         }
 
         private fun MpvLibrarySource.candidates(): List<MpvLibrarySource> =
@@ -519,6 +570,21 @@ internal class LibMpvLibrary private constructor(
                 else -> error("Unsupported native integer carrier: ${layout.carrier().name}")
             }
         }
+    }
+}
+
+internal fun nativeNumericLocaleCategory(osName: String): Int {
+    val normalized = osName.lowercase(Locale.ROOT)
+    return when {
+        normalized.contains("linux") -> 1
+        normalized.contains("mac") ||
+            normalized.contains("darwin") ||
+            normalized.contains("win") -> 4
+        else ->
+            throw MpvLoadFailure(
+                MpvUnavailableReason.UNSUPPORTED_PLATFORM,
+                "The platform C numeric-locale category is unsupported.",
+            )
     }
 }
 

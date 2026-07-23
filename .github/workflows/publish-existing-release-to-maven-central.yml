@@ -81,11 +81,6 @@ jobs:
             pom="$pages_base/$artifact_id/$version/$artifact_id-$version.pom"
             curl --fail --silent --show-error --location --head "$pom" >/dev/null
           done
-          ass_lgpl_materials="$pages_base/composemediaplayer-ass/$version/composemediaplayer-ass-$version-apple-lgpl-materials.zip"
-          curl --fail --silent --show-error --location --head "$ass_lgpl_materials" >/dev/null
-          desktop_ass_lgpl_materials="$pages_base/composemediaplayer-ass/$version/composemediaplayer-ass-$version-desktop-lgpl-materials.zip"
-          curl --fail --silent --show-error --location --head "$desktop_ass_lgpl_materials" >/dev/null
-
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$local_sha" >> "$GITHUB_OUTPUT"
 
@@ -134,18 +129,17 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ steps.release_run.outputs.run_id }}
-          path: mediaplayer-ass/build/generated/
+          path: mediaplayer-ass/build/
           pattern: apple-ass-${{ steps.release_ref.outputs.sha }}
 
-      - name: Download the verified Windows and Linux ASS payloads
+      - name: Download the verified Apple MPV pod graph
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ steps.release_run.outputs.run_id }}
-          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
-          pattern: desktop-ass-*-${{ steps.release_ref.outputs.sha }}
-          merge-multiple: true
+          path: mediaplayer-mpv/build/
+          pattern: apple-mpv-${{ steps.release_ref.outputs.sha }}
 
       - name: Verify the recovered native payload
         shell: bash
@@ -181,6 +175,7 @@ jobs:
           test ! -e mediaplayer-dolbyvision/src/jvmMain/resources/composemediaplayer/dolbyvision/native/darwin-x86-64
 
           bash .github/scripts/verify_apple_ass_payload.sh
+          bash .github/scripts/verify_apple_mpv_payload.sh
 
       - name: Set up JDK 25
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5

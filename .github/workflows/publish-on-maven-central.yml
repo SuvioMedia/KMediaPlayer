@@ -118,15 +118,14 @@ jobs:
       - name: Download verified Apple ASS payloads
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          path: mediaplayer-ass/build/generated/
+          path: mediaplayer-ass/build/
           pattern: apple-ass-${{ github.sha }}
 
-      - name: Download verified Windows and Linux ASS payloads
+      - name: Download verified Apple MPV pod graph
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
-          pattern: desktop-ass-*-${{ github.sha }}
-          merge-multiple: true
+          path: mediaplayer-mpv/build/
+          pattern: apple-mpv-${{ github.sha }}
 
       - name: Verify complete native payload
         shell: bash
@@ -162,6 +161,7 @@ jobs:
           test ! -e mediaplayer-dolbyvision/src/jvmMain/resources/composemediaplayer/dolbyvision/native/darwin-x86-64
 
           bash .github/scripts/verify_apple_ass_payload.sh
+          bash .github/scripts/verify_apple_mpv_payload.sh
 
       - name: Set up JDK 25
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
@@ -300,17 +300,6 @@ jobs:
             pom="$repository/io/github/shusek/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom"
             test -s "$pom" || { echo "Missing staged ASS coordinate: $artifact:$RELEASE_VERSION" >&2; exit 1; }
           done
-          ass_lgpl_materials="$repository/io/github/shusek/composemediaplayer-ass/$RELEASE_VERSION/composemediaplayer-ass-$RELEASE_VERSION-apple-lgpl-materials.zip"
-          test -s "$ass_lgpl_materials" || {
-            echo "Missing staged Apple ASS LGPL materials archive." >&2
-            exit 1
-          }
-          desktop_ass_lgpl_materials="$repository/io/github/shusek/composemediaplayer-ass/$RELEASE_VERSION/composemediaplayer-ass-$RELEASE_VERSION-desktop-lgpl-materials.zip"
-          test -s "$desktop_ass_lgpl_materials" || {
-            echo "Missing staged desktop ASS LGPL materials archive." >&2
-            exit 1
-          }
-
           dolby_vision_artifacts=(
             composemediaplayer-dolbyvision
             composemediaplayer-dolbyvision-android

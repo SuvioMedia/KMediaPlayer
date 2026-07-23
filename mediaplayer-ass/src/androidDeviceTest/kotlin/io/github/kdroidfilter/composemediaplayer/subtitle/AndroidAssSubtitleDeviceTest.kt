@@ -8,7 +8,7 @@ class AndroidAssSubtitleDeviceTest {
     @Test
     fun bundledLibassRendersARealRgbaFrame() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        assertTrue("The bundled libass 0.17.5 backend must load", AndroidAssNativeBridge.isAvailable)
+        assertTrue("The shared libass 0.17.5 backend must load", AndroidAssNativeBridge.isAvailable)
 
         AndroidAssNativeSession
             .external(context, ASS_CONTENT.encodeToByteArray())
