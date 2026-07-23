@@ -11,8 +11,8 @@ from pathlib import Path
 EXPECTED_BACKEND_DEPENDENCIES = {
     "composemediaplayer-mpv-android": ("kmedia-mpv-runtime-android", "0.3.0-rc.1"),
     "composemediaplayer-mpv-jvm": ("kmedia-mpv-runtime-desktop", "0.3.0-rc.1"),
-    "composemediaplayer-kmediabridge-android": ("kmedia-bridge-ffmpeg", "0.5.0-rc.1"),
-    "composemediaplayer-kmediabridge-jvm": ("kmedia-bridge-ffmpeg", "0.5.0-rc.1"),
+    "composemediaplayer-kmediabridge-android": ("kmedia-bridge-ffmpeg-android", "0.5.0-rc.1"),
+    "composemediaplayer-kmediabridge-jvm": ("kmedia-bridge-ffmpeg-jvm", "0.5.0-rc.1"),
 }
 
 

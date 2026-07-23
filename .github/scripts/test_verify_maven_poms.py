@@ -50,6 +50,20 @@ class VerifyMavenPomsTest(unittest.TestCase):
             )
             verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
 
+    def test_requires_platform_specific_kmediabridge_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+            pom = self._write_pom(repository, "composemediaplayer-kmediabridge-android", "3.0.0-rc.1")
+            with self.assertRaisesRegex(ValueError, "kmedia-bridge-ffmpeg-android"):
+                verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
+            pom.write_text(
+                pom.read_text().replace(
+                    "</project>",
+                    "<dependencies><dependency><groupId>io.github.shusek</groupId><artifactId>kmedia-bridge-ffmpeg-android</artifactId><version>0.5.0-rc.1</version></dependency></dependencies></project>",
+                ),
+            )
+            verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
+
     @staticmethod
     def _write_pom(repository: Path, artifact_id: str, version: str) -> Path:
         version_directory = repository / "io/github/shusek" / artifact_id / version
