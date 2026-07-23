@@ -66,6 +66,8 @@ internal class AndroidKMediaBridgeSelfTest(
                 else -> null
             }
         val mpvOnly = activity.intent.getBooleanExtra(EXTRA_MPV_ONLY, false)
+        val skipMpvSurfaceRecreation =
+            activity.intent.getBooleanExtra(EXTRA_MPV_SKIP_SURFACE_RECREATION, false)
         val mpvSurfaceView = subtitlePath?.let { SurfaceView(activity).also(activity::setContentView) }
         if ((activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
             Log.e(TAG, "KMB_SELF_TEST=REJECTED_NON_DEBUGGABLE")
@@ -85,6 +87,7 @@ internal class AndroidKMediaBridgeSelfTest(
                             mpvDecodeMode = mpvDecodeMode,
                             expectMpvSoftware = expectMpvSoftware,
                             runBridgeConcurrently = !mpvOnly,
+                            skipMpvSurfaceRecreation = skipMpvSurfaceRecreation,
                             mpvSurfaceView = mpvSurfaceView,
                         )
                     }
@@ -94,7 +97,9 @@ internal class AndroidKMediaBridgeSelfTest(
                     val summary =
                         "PASS init=${result.initializationFragments} " +
                             "media=${result.mediaFragments} bytes=${result.totalBytes} " +
-                            "mpv=${result.mpvVerified}"
+                            "mpv=${result.mpvVerified} audio=${result.mpvVerified} " +
+                            "seek=${result.mpvVerified} ass=${result.mpvVerified} " +
+                            "surface=${result.mpvSurfaceVerified}"
                     Log.i(
                         TAG,
                         "KMB_SELF_TEST=$summary",
@@ -129,6 +134,7 @@ internal class AndroidKMediaBridgeSelfTest(
         mpvDecodeMode: MpvAndroidDecodeMode,
         expectMpvSoftware: Boolean?,
         runBridgeConcurrently: Boolean,
+        skipMpvSurfaceRecreation: Boolean,
         mpvSurfaceView: SurfaceView?,
     ): Result {
         check(File(inputPath).isFile) { "Missing test input." }
@@ -142,6 +148,7 @@ internal class AndroidKMediaBridgeSelfTest(
                     subtitlePath = it,
                     decodeMode = mpvDecodeMode,
                     expectSoftwareDecode = expectMpvSoftware,
+                    skipSurfaceRecreation = skipMpvSurfaceRecreation,
                     surfaceView = checkNotNull(mpvSurfaceView),
                 )
             }
@@ -155,8 +162,11 @@ internal class AndroidKMediaBridgeSelfTest(
                     } else {
                         Result(0, 0, 0, mpvVerified = false)
                     }
-                mpvVerification?.await()
-                bridgeResult.copy(mpvVerified = mpv != null)
+                val surfaceVerified = mpvVerification?.await() ?: false
+                bridgeResult.copy(
+                    mpvVerified = mpv != null,
+                    mpvSurfaceVerified = surfaceVerified,
+                )
             }
         } finally {
             mpv?.close()
@@ -229,6 +239,7 @@ internal class AndroidKMediaBridgeSelfTest(
         val mediaFragments: Int,
         val totalBytes: Long,
         val mpvVerified: Boolean,
+        val mpvSurfaceVerified: Boolean = false,
     )
 
     private class ConcurrentMpvSession(
@@ -237,6 +248,7 @@ internal class AndroidKMediaBridgeSelfTest(
         private val subtitlePath: String,
         decodeMode: MpvAndroidDecodeMode,
         private val expectSoftwareDecode: Boolean?,
+        private val skipSurfaceRecreation: Boolean,
         surfaceView: SurfaceView,
     ) : AutoCloseable {
         private val activity = activity
@@ -245,11 +257,12 @@ internal class AndroidKMediaBridgeSelfTest(
 
         suspend fun start() {
             attachWhenReady()
+            player.setLoop(true)
             player.loadFile(inputPath)
             player.setPaused(false)
         }
 
-        suspend fun awaitVerified() {
+        suspend fun awaitVerified(): Boolean {
             Log.i(TAG, "KMB_SELF_TEST=MPV_WAIT_VIDEO")
             try {
                 withTimeout(MPV_VERIFICATION_TIMEOUT_MS) {
@@ -286,6 +299,42 @@ internal class AndroidKMediaBridgeSelfTest(
                         "idle=${snapshot.isIdleActive}",
                 )
             }
+            Log.i(TAG, "KMB_SELF_TEST=MPV_WAIT_AUDIO")
+            withTimeout(MPV_VERIFICATION_TIMEOUT_MS) {
+                while (true) {
+                    if (player.tracks().any { track -> track.type == MpvAndroidTrackInfo.Type.AUDIO }) {
+                        return@withTimeout
+                    }
+                    delay(MPV_POLL_INTERVAL_MS)
+                }
+            }
+            Log.i(TAG, "KMB_SELF_TEST=MPV_SEEK")
+            val seekTargetSeconds =
+                withTimeout(MPV_VERIFICATION_TIMEOUT_MS) {
+                    while (true) {
+                        val duration = player.playbackSnapshot().durationSeconds
+                        if (duration.isFinite() && duration > MINIMUM_SEEKABLE_DURATION_SECONDS) {
+                            return@withTimeout minOf(TARGET_SEEK_SECONDS, duration / 2.0)
+                        }
+                        delay(MPV_POLL_INTERVAL_MS)
+                    }
+                    error("Unreachable seek-duration state.")
+                }
+            player.seekTo(seekTargetSeconds)
+            withTimeout(MPV_VERIFICATION_TIMEOUT_MS) {
+                while (true) {
+                    val snapshot = player.playbackSnapshot()
+                    if (
+                        !snapshot.isSeeking &&
+                        snapshot.timePositionSeconds.isFinite() &&
+                        snapshot.timePositionSeconds >= seekTargetSeconds - SEEK_TOLERANCE_SECONDS
+                    ) {
+                        return@withTimeout
+                    }
+                    delay(MPV_POLL_INTERVAL_MS)
+                }
+            }
+            Log.i(TAG, "KMB_SELF_TEST=MPV_SEEK_VERIFIED")
             Log.i(TAG, "KMB_SELF_TEST=MPV_ADD_SUBTITLE")
             player.addSubtitle(subtitlePath, true)
             withTimeout(MPV_VERIFICATION_TIMEOUT_MS) {
@@ -298,11 +347,16 @@ internal class AndroidKMediaBridgeSelfTest(
                     delay(MPV_POLL_INTERVAL_MS)
                 }
             }
+            if (skipSurfaceRecreation) {
+                Log.i(TAG, "KMB_SELF_TEST=MPV_VERIFIED_WITHOUT_SURFACE_RECREATION")
+                return false
+            }
             Log.i(TAG, "KMB_SELF_TEST=MPV_RECREATE_SURFACE")
             val positionBeforeRecreate = player.playbackSnapshot().timePositionSeconds
             recreateSurface()
             awaitRenderedFrame(positionBeforeRecreate)
             Log.i(TAG, "KMB_SELF_TEST=MPV_VERIFIED")
+            return true
         }
 
         private suspend fun recreateSurface() {
@@ -405,6 +459,8 @@ internal class AndroidKMediaBridgeSelfTest(
         const val EXTRA_MPV_SOFTWARE_ONLY = "sample.app.extra.MPV_SELF_TEST_SOFTWARE_ONLY"
         const val EXTRA_EXPECT_MPV_SOFTWARE = "sample.app.extra.MPV_SELF_TEST_EXPECT_SOFTWARE"
         const val EXTRA_MPV_ONLY = "sample.app.extra.MPV_SELF_TEST_ONLY"
+        const val EXTRA_MPV_SKIP_SURFACE_RECREATION =
+            "sample.app.extra.MPV_SELF_TEST_SKIP_SURFACE_RECREATION"
         const val SELF_TEST_TIMEOUT_MS = 45_000L
         const val MPV_VERIFICATION_TIMEOUT_MS = 15_000L
         const val MPV_SURFACE_TIMEOUT_MS = 5_000L
@@ -413,6 +469,9 @@ internal class AndroidKMediaBridgeSelfTest(
         const val MINIMUM_FRAME_LUMA_RANGE = 8
         const val MINIMUM_POST_SURFACE_PLAYBACK_SECONDS = 0.25
         const val MINIMUM_DECODE_POLICY_SAMPLE_SECONDS = 0.5
+        const val MINIMUM_SEEKABLE_DURATION_SECONDS = 2.0
+        const val TARGET_SEEK_SECONDS = 2.0
+        const val SEEK_TOLERANCE_SECONDS = 0.25
         const val MAXIMUM_LOGGED_DETAIL_LENGTH = 320
         const val RESULT_FILE_NAME = "kmb-self-test-result.txt"
     }
