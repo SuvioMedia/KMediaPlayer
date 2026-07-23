@@ -129,6 +129,7 @@ jobs:
 
       - name: Download and verify the exact KMediaMpv Apple pod graph
         env:
+          GH_TOKEN: ${{ github.token }}
           MPV_VERSION: 0.3.0-rc.3
           RUNTIME_VERSION: 0.1.0-rc.3
         run: |

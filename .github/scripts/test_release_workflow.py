@@ -61,6 +61,13 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertIn("pattern: apple-mpv-", workflow)
             self.assertIn("verify_apple_mpv_payload.sh", workflow)
 
+    def test_all_apple_release_downloads_are_authenticated(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        workflow = (
+            repository_root / ".github/workflows/build-natives.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(2, workflow.count("GH_TOKEN: ${{ github.token }}"))
+
     def test_manual_public_maven_verifier_is_available(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         workflow = (
