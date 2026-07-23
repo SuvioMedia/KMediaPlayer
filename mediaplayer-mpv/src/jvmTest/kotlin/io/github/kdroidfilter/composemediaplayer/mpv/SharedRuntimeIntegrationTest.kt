@@ -279,11 +279,20 @@ private fun makeApplicationPrivate(directory: Path) {
                 LinkOption.NOFOLLOW_LINKS,
             ),
         ) { "The host filesystem cannot enforce an application-private font directory." }
+    val processUser =
+        ProcessHandle
+            .current()
+            .info()
+            .user()
+            .orElseThrow { IllegalStateException("The current process owner is unavailable.") }
+    val processOwner =
+        directory.fileSystem.userPrincipalLookupService.lookupPrincipalByName(processUser)
+    aclView.owner = processOwner
     val ownerOnly =
         AclEntry
             .newBuilder()
             .setType(AclEntryType.ALLOW)
-            .setPrincipal(aclView.owner)
+            .setPrincipal(processOwner)
             .setPermissions(EnumSet.allOf(AclEntryPermission::class.java))
             .build()
     aclView.setAcl(listOf(ownerOnly))

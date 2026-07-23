@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -45,6 +46,27 @@ class BackendDependencyBoundaryTest(unittest.TestCase):
         self.assertNotIn("kmedia-bridge-ffmpeg", source)
         self.assertNotIn("kmedia-ffmpeg-runtime", source)
         self.assertNotIn("kmedia-ass-runtime", source)
+
+    def test_mpv_client_version_is_pinned_consistently(self) -> None:
+        catalog = (ROOT / "gradle/libs.versions.toml").read_text()
+        match = re.search(r'^kmediaMpv = "([^"]+)"$', catalog, re.MULTILINE)
+        self.assertIsNotNone(match)
+        version = match.group(1)
+
+        self.assertIn(
+            f"spec.dependency 'KMediaMpv', '{version}'",
+            (ROOT / "mediaplayer-mpv/ComposeMediaPlayerMpv.podspec").read_text(),
+        )
+        self.assertIn(
+            f'KMEDIA_MPV_VERSION:-{version}',
+            (ROOT / ".github/scripts/verify_apple_mpv_payload.sh").read_text(),
+        )
+        self.assertIn(
+            f"MPV_VERSION: {version}",
+            (ROOT / ".github/workflows/build-natives.yml").read_text(),
+        )
+        pom_verifier = (ROOT / ".github/scripts/verify_maven_poms.py").read_text()
+        self.assertEqual(2, pom_verifier.count(f'"{version}"'))
 
     def test_apple_ass_tests_link_the_exact_shared_runtime_payload(self) -> None:
         source = (ROOT / "mediaplayer-ass/build.gradle.kts").read_text()
