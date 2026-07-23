@@ -38,6 +38,7 @@ typedef struct KMediaAssFrame {
 } KMediaAssFrame;
 
 KMEDIA_ASS_EXPORT uint32_t kmedia_ass_library_version(void);
+KMEDIA_ASS_EXPORT const char *kmedia_ass_shared_runtime_id(void);
 
 KMEDIA_ASS_EXPORT KMediaAssRenderer *kmedia_ass_renderer_create(void);
 

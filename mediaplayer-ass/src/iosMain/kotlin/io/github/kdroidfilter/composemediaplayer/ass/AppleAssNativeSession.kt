@@ -13,6 +13,7 @@ import io.github.kdroidfilter.composemediaplayer.ass.native.kmedia_ass_renderer_
 import io.github.kdroidfilter.composemediaplayer.ass.native.kmedia_ass_renderer_destroy
 import io.github.kdroidfilter.composemediaplayer.ass.native.kmedia_ass_renderer_render_rgba
 import io.github.kdroidfilter.composemediaplayer.ass.native.kmedia_ass_renderer_set_track
+import io.github.kdroidfilter.composemediaplayer.ass.native.kmedia_ass_shared_runtime_id
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
@@ -20,6 +21,7 @@ import kotlinx.cinterop.convert
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
+import kotlinx.cinterop.toKString
 import kotlinx.cinterop.usePinned
 import platform.CoreGraphics.CGImageRelease
 import platform.UIKit.UIImage
@@ -45,14 +47,14 @@ internal class AppleAssNativeSession private constructor(
                 )
             when (status) {
                 KMEDIA_ASS_RENDER_EMPTY -> return@memScoped null
-                KMEDIA_ASS_RENDER_ERROR -> error("The bundled libass renderer failed to render a frame.")
+                KMEDIA_ASS_RENDER_ERROR -> error("The shared libass renderer failed to render a frame.")
                 KMEDIA_ASS_RENDER_PIXELS -> Unit
-                else -> error("The bundled libass renderer returned an unknown frame status: $status")
+                else -> error("The shared libass renderer returned an unknown frame status: $status")
             }
 
             val imageRef =
                 checkNotNull(kmedia_ass_frame_copy_cg_image(frame.ptr)) {
-                    "The bundled libass renderer could not copy its rendered frame."
+                    "The shared libass renderer could not copy its rendered frame."
                 }
             try {
                 AppleAssRenderedFrame(
@@ -78,7 +80,10 @@ internal class AppleAssNativeSession private constructor(
     companion object {
         val isRuntimeAvailable: Boolean by lazy {
             runCatching {
-                check(kmedia_ass_library_version().toLong() >= REQUIRED_LIBASS_VERSION)
+                check(kmedia_ass_library_version().toLong() == REQUIRED_LIBASS_VERSION)
+                check(
+                    kmedia_ass_shared_runtime_id()?.toKString() == REQUIRED_ASS_RUNTIME_ID,
+                ) { "composemediaplayer-ass targets another KMediaAssRuntime ID." }
                 val renderer =
                     checkNotNull(kmedia_ass_renderer_create()) {
                         "Could not create an Apple libass renderer."
@@ -110,6 +115,7 @@ internal class AppleAssNativeSession private constructor(
         }
 
         private const val REQUIRED_LIBASS_VERSION = 0x01705000L
+        private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-36443523f0148567"
         private const val MAX_ASS_SCRIPT_BYTES = 64 * 1024 * 1024
     }
 }

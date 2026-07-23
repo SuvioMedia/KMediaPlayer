@@ -100,18 +100,11 @@ private sealed interface IosMpvRuntimeResult {
 }
 
 private fun resolveIosMpvRuntime(options: MpvPlaybackOptions): IosMpvRuntimeResult {
-    if (options.runtimeSource == MpvRuntimeSource.Bundled) {
-        return unavailable(
-            MpvBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING,
-            "The iOS adapter cannot extract native code from Maven. Embed a code-signed libmpv " +
-                "framework in the application and select MpvRuntimeSource.System or ExplicitPath.",
-        )
-    }
-
     val candidates =
         when (val source = options.runtimeSource) {
-            MpvRuntimeSource.Bundled -> emptyList()
-            MpvRuntimeSource.System ->
+            MpvRuntimeSource.Bundled,
+            MpvRuntimeSource.System,
+            ->
                 buildList<String?> {
                     add(null)
                     val frameworkRoot = NSBundle.mainBundle.privateFrameworksPath

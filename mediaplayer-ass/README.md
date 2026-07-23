@@ -1,8 +1,8 @@
 # Compose Media Player ASS
 
-Optional KMediaPlayer component for authored ASS/SSA subtitle presentation. The main
-`composemediaplayer` artifact keeps a lightweight dialogue parser and does not package Android
-libass libraries or the JASSUB browser runtime.
+Optional authored ASS/SSA rendering for KMediaPlayer. The public API remains
+`AssSubtitleExtension()`; the base `composemediaplayer` artifact contains no ASS
+runtime and no backend.
 
 ## Install
 
@@ -19,14 +19,9 @@ kotlin {
 }
 ```
 
-The dependency makes the platform implementation available. Rendering is activated explicitly by
-adding one stable extension instance to `VideoPlaybackOptions`:
+Register one stable extension instance:
 
 ```kotlin
-import androidx.compose.runtime.remember
-import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
-import io.github.kdroidfilter.composemediaplayer.ass.AssSubtitleExtension
-
 val playbackOptions = remember {
     VideoPlaybackOptions(
         extensions = listOf(AssSubtitleExtension()),
@@ -38,61 +33,89 @@ val playerState = rememberVideoPlayerState(
 )
 ```
 
-If an application already installs other pipeline extensions, keep them in the same list:
+Keep other optional extensions in the same list. Do not recreate the extension
+or `VideoPlaybackOptions` on every recomposition.
 
-```kotlin
-extensions = listOf(
-    AssSubtitleExtension(),
-    DolbyVisionExtension(),
-)
-```
+## Shared native runtime
 
-Do not construct a new extension or `VideoPlaybackOptions` on every recomposition. A top-level,
-owner-scoped or `remember`-created instance keeps the player backend and lifecycle stable.
+Android and desktop depend transitively on the exact matching
+`KMediaAssRuntime 0.1.0-rc.3`. That artifact owns the single process-wide
+libass 0.17.5, FreeType, FriBidi, and HarfBuzz stack.
+
+`composemediaplayer-ass` owns only renderer glue:
+
+- Android: one thin `libkmediaass.so` JNI bridge for `arm64-v8a` and
+  `armeabi-v7a`;
+- JVM: no native libraries; Java 25 FFM calls the loaded shared libass;
+- iOS: one thin renderer archive for ARM64 device and ARM64 simulator;
+- Wasm: the existing JASSUB 2.5.7 integration.
+
+MPV and KMediaBridge reach the same ASS runtime through
+`KMediaFfmpegRuntime`. Adding any combination of the three optional modules
+therefore resolves one text stack. A mismatched runtime ID is rejected before
+the renderer client loads.
 
 ## Platform behavior
 
-| Platform | Optional backend | Behavior with `AssSubtitleExtension()` |
-| :--- | :--- | :--- |
-| Android | libass 0.17.5 | Full ASS/SSA styles, positioning, effects, animation and karaoke for external tracks and raw Matroska tracks; supported embedded font attachments are passed to libass. The AAR contains `arm64-v8a` and `armeabi-v7a`. |
-| Browser Wasm | Bundled JASSUB 2.5.7 / libass Wasm | Full presentation for selected external ASS/SSA sources through a transparent canvas overlay on Movi and legacy playback. Embedded Movi ASS/SSA uses the engine's pluggable renderer with raw timed packets and bounded font attachments. Clear Movi uses JASSUB's manual canvas clock; video-backed playback uses `requestVideoFrameCallback`. |
-| macOS JVM | Bundled libass 0.17.5 | Full ASS/SSA rendering in the Apple Silicon Compose/Skia canvas path with CoreText, complex HarfBuzz shaping and embedded Matroska font attachments. Intel macOS is not published. |
-| Windows/Linux JVM | Bundled libass (Windows 0.17.4, Linux 0.17.5) | Full ASS/SSA rendering in writable BGRA frame paths, including styles, animation, karaoke and embedded Matroska fonts. The JAR carries x86_64 and ARM64 runtimes; users do not install libass. Windows uses DirectWrite and Linux uses the host's normal fontconfig configuration. Native HDR/color and native libVLC surfaces retain their platform subtitle route. |
-| iOS | Bundled libass 0.17.5 | Full authored rendering for external ASS/SSA tracks on iOS arm64 and the arm64 Simulator. The extension uses CoreText and a transparent UIKit overlay; no x86 iOS target is built. Embedded Matroska ASS extraction is not yet exposed by AVFoundation, so this route is external-track only. |
+| Platform | Behavior |
+| :--- | :--- |
+| Android | Full ASS/SSA styles, positioning, animation, karaoke, and supported embedded fonts. Media3 owns playback; the extension rasterizes subtitles and presents a transparent GLES overlay. API 23+ runtime, ARM64/ARMv7 only. |
+| JVM desktop | Full rendering through the shared libass runtime and writable BGRA frames. macOS ARM64, Linux x86_64/ARM64, and Windows x86_64 are published. Launch Java 25 with `--enable-native-access=ALL-UNNAMED`. |
+| iOS | Full external ASS/SSA rendering in a transparent UIKit overlay while AVPlayer keeps video decoding. ARM64 device/simulator only. The generated `ComposeMediaPlayerAss` pod depends on the exact `KMediaAssRuntime` pod. |
+| Browser Wasm | JASSUB 2.5.7 renders selected external or raw Movi ASS/SSA through a transparent canvas. |
 
-Without the optional artifact, or without registering the extension, ASS/SSA remains selectable but
-is rendered through the core/platform fallback without a full authored-style guarantee. SRT and VTT
-never require this component.
+Without the optional artifact, or without registering the extension, ASS/SSA
+uses the core/platform fallback without a full authored-style guarantee. SRT
+and VTT do not require this module.
 
-## Android notes
+## Android details
 
-Media3 continues to own playback and demuxing. The extension intercepts the raw Matroska ASS/SSA
-route before Media3 flattens it, rasterizes with libass on the CPU and presents the result in a
-transparent GLES overlay. GLES is only the presentation layer; the libass renderer is independent
-of that uploader.
+The route supports external `.ass`/`.ssa`, raw embedded Matroska ASS/SSA,
+supported font attachments, seeking, subtitle offsets, resize, and crop-to-fill
+geometry. Script styles own presentation; Compose subtitle text/background
+settings apply only to the fallback.
 
-The Android route supports external `.ass`/`.ssa`, raw embedded Matroska ASS/SSA, supported font
-attachments, seeking, subtitle offsets, resize and crop-to-fill geometry. ASS script styles control
-the result, so `subtitleTextStyle` and `subtitleBackgroundColor` apply only to the Compose fallback.
+A custom `AndroidMediaSourceProvider` returning a complete `MediaSource` must
+preserve the player's subtitle parser and extractor setup, otherwise it can
+flatten ASS packets before the optional renderer receives them.
 
-A custom `AndroidMediaSourceProvider` returning a complete `MediaSource` must preserve the player's
-subtitle parser and extractor setup. Otherwise it can flatten ASS packets before the optional
-renderer receives them. Side-loaded Media3 SSA and HLS SSA keep Media3's standard path.
+The adapter AAR intentionally contains no libass, FriBidi, FreeType, HarfBuzz,
+source bundle, or LGPL notice copied from the runtime. Those files and
+obligations are carried once by `kmedia-ass-runtime-android`.
 
-The Android AAR includes the native notices, corresponding source and LGPL replacement material
-under `META-INF/kmediaplayer/android-ass`.
+## Desktop details
 
-## Browser Wasm notes
+`KMediaAssRuntime.initialize(RuntimeSource.bundled())` extracts and verifies
+the platform payload once, then `composemediaplayer-ass` resolves libass symbols
+through FFM. The extension status reports a controlled failure and leaves the
+existing subtitle fallback active if the runtime is unavailable.
 
-The module owns the pinned JASSUB 2.5.7 npm dependency. JASSUB resolves its default worker, normal and
-SIMD Wasm modules, and fallback font through module-relative URLs, so consumers do not copy those
-assets manually. Browser settings are immutable and scoped to the installed extension:
+There is no Homebrew/system-libass recovery path and no
+`composemediaplayer.ass.libraryPath` override. Applications that need a
+replaceable build select a complete compatible runtime directory through
+`RuntimeSource.externalDirectory` before any native client is initialized.
+
+Native Windows HDR, Linux Wayland color, and `LIBVLC_NATIVE` surfaces that do
+not expose a writable CPU frame keep their platform subtitle renderer.
+
+## iOS details
+
+The checked renderer code calls libass and the `KMediaAssRuntime` identity
+probe dynamically; neither libass nor FriBidi is merged into the client
+archive. Release verification rejects private text libraries, Intel slices,
+and a missing runtime-ID reference.
+
+Embedded Matroska ASS extraction is not exposed by the AVFoundation route, so
+iOS currently supports external ASS/SSA tracks. Playback, pause, seek,
+subtitle offset, and surface resize remain synchronized with the overlay.
+
+## Browser Wasm details
+
+The module owns the pinned JASSUB npm dependency. Standard Kotlin/Wasm bundles
+use module-relative worker, Wasm, and fallback-font URLs. Applications may
+override them:
 
 ```kotlin
-import io.github.kdroidfilter.composemediaplayer.AssFontQueryMode
-import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
-import io.github.kdroidfilter.composemediaplayer.ass.AssSubtitleExtension
-
 val assExtension =
     AssSubtitleExtension(
         config =
@@ -109,111 +132,22 @@ val assExtension =
     )
 ```
 
-The defaults work with the standard Kotlin/Wasm browser bundle. Custom URLs may be relative to the
-application base URL or absolute; cross-origin video, subtitle, worker, Wasm and font resources need
-appropriate CORS headers. The browser requires Worker, WebAssembly, `OffscreenCanvas`,
-`canvas.transferControlToOffscreen()`, ResizeObserver and JASSUB's remaining runtime primitives.
-Video-backed playback uses `requestVideoFrameCallback()` and JASSUB's included polyfill; clear Movi
-playback uses canvas-only manual rendering.
-Extension availability reports a missing primitive before the renderer is selected. Constructor,
-worker, source and resize failures keep the Compose dialogue fallback active.
-
-`AssFontQueryMode.LOCAL` opts into browser font discovery where supported.
-`AssFontQueryMode.LOCAL_AND_REMOTE` additionally enables JASSUB's remote font lookup, including its
-network and privacy implications; the default is `DISABLED`. Android, iOS and desktop ignore these
-browser-only settings.
-
-For the multithreaded JASSUB path, serve the application document with:
+Cross-origin resources need suitable CORS headers. The multithreaded path also
+needs:
 
 ```text
 Cross-Origin-Embedder-Policy: require-corp
 Cross-Origin-Opener-Policy: same-origin
 ```
 
-Without these headers JASSUB automatically uses its single-threaded fallback. These headers can
-restrict cross-origin embeds and resources, so the application deployment must opt in deliberately.
+Without those headers JASSUB uses its single-threaded fallback.
+`AssFontQueryMode.LOCAL_AND_REMOTE` has additional network/privacy implications;
+the default remains `DISABLED`.
 
-The overlay follows the visible video geometry for `Fit`, `Crop`, `FillBounds`, `FillWidth` and
-`FillHeight`; projected video keeps subtitles as a flat screen-space overlay. Subtitle offsets are
-applied live, including while paused. Movi converts raw Matroska timing into a streaming JASSUB
-track without exporting a second subtitle file; seek clears queued events before fresh packets
-arrive. Font attachments in TTF, OTF, TTC, WOFF and WOFF2 formats are added automatically, up to
-16 MiB per font, 32 MiB total and 64 files.
+## Licensing boundary
 
-## macOS JVM notes
-
-The main player does not discover or load libass by itself. Add this artifact and register
-`AssSubtitleExtension()`. The artifact carries its own architecture-specific renderer and the
-separately replaceable `libkmediafribidi.dylib`; Homebrew, MacPorts and a system `libass` are not
-used. This also keeps VLC and libass from competing for ownership of the same subtitle frame.
-
-Availability is reported through `VideoPlaybackOptions.extensionStatuses`. If the library cannot be
-loaded, the extension contributes no ASS formats and the player retains its dialogue fallback.
-
-## Windows and Linux JVM notes
-
-Windows and Linux use the stable Java 25 Foreign Function API. The JVM artifact bundles libass and
-its private runtime files for x86_64 and ARM64, verifies every extracted file against its packaged
-SHA-256 manifest, and loads the payload matching the running JVM. Application users do not install
-libass or copy DLL/SO files. Launch with native access enabled:
-
-```text
---enable-native-access=ALL-UNNAMED
-```
-
-Linux intentionally uses the desktop's normal fontconfig library and configuration so it sees the
-same installed fonts as the rest of the application. Windows carries all DLL dependencies and
-loads them from one private extracted directory.
-
-An advanced deployment can override the bundled runtime with an exact compatible libass file or a
-directory containing one. The override must be set before the extension is first queried:
-
-```text
--Dcomposemediaplayer.ass.libraryPath=/opt/my-app/lib/libass.so.9
-KMEDIA_ASS_LIBRARY_PATH=C:\my-app\lib\libass-9.dll
-```
-
-If an override is unavailable or incompatible, the loader tries the bundled runtime and finally a
-compatible system library as a recovery path. External `.ass` and `.ssa` tracks work on writable
-Compose/Skia video-frame paths. Embedded Matroska ASS/SSA tracks exposed by the libVLC canvas
-backend are extracted together with supported font attachments. Native Windows HDR, Linux Wayland
-color and `LIBVLC_NATIVE` surfaces do not expose a writable CPU frame, so they keep their
-platform/native subtitle renderer. Any extraction, load or render failure leaves the existing
-Compose or libVLC fallback active.
-
-## iOS notes
-
-The iOS implementation is published only for `iosArm64` and `iosSimulatorArm64`. Rendering is
-hardware-independent subtitle rasterization: AVPlayer keeps its normal hardware video decoder while
-libass generates only the transparent subtitle overlay. The overlay follows play, pause, seek,
-subtitle offset and surface resize; while its source is loading or if initialization fails, the core
-dialogue fallback remains visible.
-
-Applications must add this artifact to `iosMain` and register the same `AssSubtitleExtension()`
-instance in `VideoPlaybackOptions`. The sample project does both.
-
-## Native licenses and distribution
-
-libass itself is ISC licensed. Native payloads also contain permissively licensed FreeType,
-HarfBuzz and, where enabled, libunibreak. FriBidi is LGPL-2.1-or-later and is deliberately kept
-replaceable:
-
-- macOS uses replaceable `libkmediafribidi.dylib` through `@loader_path`;
-- Windows ships FriBidi as one of the sibling runtime DLLs;
-- Linux uses `libkmediafribidi.so.0` through the libass `$ORIGIN` runpath;
-- iOS links the distinct `libkmediafribidi.a` archive next to the renderer archive.
-
-The exact FriBidi source, notices, reproducible builds and replacement instructions are in
-[`native/apple`](native/apple) and [`native/desktop`](native/desktop). A distributor of a final
-statically linked iOS application must also meet the LGPL relinking obligations described in
-[`LGPL-RELINK.md`](native/apple/LGPL-RELINK.md). If that does not fit the application's
-distribution model, omit `AssSubtitleExtension()` from the iOS source set; the base fallback remains
-available.
-
-Published root artifacts also provide the exact source and instructions in platform-specific ZIP
-classifiers:
-
-```text
-io.github.shusek:composemediaplayer-ass:<version>:apple-lgpl-materials@zip
-io.github.shusek:composemediaplayer-ass:<version>:desktop-lgpl-materials@zip
-```
+The adapter keeps KMediaPlayer's existing license. It is not relicensed merely
+because it dynamically calls the separately published runtime.
+`KMediaAssRuntime` carries its own LGPL/permissive notices, corresponding
+source, SBOM, hashes, and replacement instructions. Web JASSUB and all other
+third-party components retain their upstream licenses.

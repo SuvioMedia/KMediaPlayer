@@ -30,6 +30,44 @@ class ReleaseWorkflowTest(unittest.TestCase):
             verification_position = workflow.index(verifier)
             self.assertGreater(verification_position, publish_position)
 
+    def test_all_apple_ass_consumers_restore_the_complete_build_tree(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        build_test = (
+            repository_root / ".github/workflows/build-test.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(2, build_test.count("path: mediaplayer-ass/build/"))
+        self.assertNotIn("path: mediaplayer-ass/build/generated/", build_test)
+
+    def test_all_apple_mpv_consumers_restore_the_exact_pod_graph(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        build_test = (
+            repository_root / ".github/workflows/build-test.yml"
+        ).read_text(encoding="utf-8")
+        build_natives = (
+            repository_root / ".github/workflows/build-natives.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(2, build_test.count("path: mediaplayer-mpv/build/"))
+        for pod in (
+            "kmediaMpvPod",
+            "kmediaFfmpegRuntimePod",
+            "kmediaAssRuntimePod",
+        ):
+            self.assertIn(f"mediaplayer-mpv/build/{pod}/", build_natives)
+        for relative_path in (
+            ".github/workflows/publish-on-maven-central.yml",
+            ".github/workflows/publish-existing-release-to-maven-central.yml",
+        ):
+            workflow = (repository_root / relative_path).read_text(encoding="utf-8")
+            self.assertIn("pattern: apple-mpv-", workflow)
+            self.assertIn("verify_apple_mpv_payload.sh", workflow)
+
+    def test_all_apple_release_downloads_are_authenticated(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        workflow = (
+            repository_root / ".github/workflows/build-natives.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(2, workflow.count("GH_TOKEN: ${{ github.token }}"))
+
     def test_manual_public_maven_verifier_is_available(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         workflow = (
@@ -51,6 +89,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn("composemediaplayer-kmediabridge-android", build)
         self.assertIn("kmedia-ffmpeg-runtime-desktop", build)
         self.assertIn("kmedia-ffmpeg-runtime-android", build)
+        self.assertIn("kmedia-ass-runtime-desktop", build)
+        self.assertIn("kmedia-ass-runtime-android", build)
 
 
 if __name__ == "__main__":

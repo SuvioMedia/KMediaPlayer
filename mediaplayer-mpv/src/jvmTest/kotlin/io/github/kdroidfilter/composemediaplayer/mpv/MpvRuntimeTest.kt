@@ -5,6 +5,8 @@ import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableReason
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
 import io.github.kdroidfilter.composemediaplayer.inspectMpvBackend
+import io.github.kdroidfilter.composemediaplayer.mpv.internal.MpvLoadFailure
+import io.github.kdroidfilter.composemediaplayer.mpv.internal.nativeNumericLocaleCategory
 import io.github.shusek.kmediampv.runtime.desktop.MpvRuntimeException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -39,9 +41,20 @@ class MpvRuntimeTest {
         assertTrue(isBundledMpvDesktopSupported("Linux", "aarch64"))
         assertTrue(isBundledMpvDesktopSupported("Mac OS X", "arm64"))
 
-        assertFalse(isBundledMpvDesktopSupported("Windows 11", "amd64"))
+        assertTrue(isBundledMpvDesktopSupported("Windows 11", "amd64"))
         assertFalse(isBundledMpvDesktopSupported("Mac OS X", "x86_64"))
         assertFalse(isBundledMpvDesktopSupported("Linux", "x86"))
+    }
+
+    @Test
+    fun mapsTheNativeNumericLocaleCategoryForEverySupportedDesktopOs() {
+        assertEquals(1, nativeNumericLocaleCategory("Linux"))
+        assertEquals(4, nativeNumericLocaleCategory("Mac OS X"))
+        assertEquals(4, nativeNumericLocaleCategory("Darwin"))
+        assertEquals(4, nativeNumericLocaleCategory("Windows 11"))
+        assertFailsWith<MpvLoadFailure> {
+            nativeNumericLocaleCategory("FreeBSD")
+        }
     }
 
     @Test
@@ -68,8 +81,8 @@ class MpvRuntimeTest {
     }
 
     @Test
-    fun windowsIsAValidExternalRuntimeTargetWithoutPretendingItIsBundled() {
-        assertFalse(isBundledMpvDesktopSupported("Windows 11", "amd64"))
+    fun windowsX64SupportsBundledAndExplicitRuntimes() {
+        assertTrue(isBundledMpvDesktopSupported("Windows 11", "amd64"))
         assertTrue(isMpvDesktopPlatformSupported("Windows 11", "amd64"))
 
         val missingLibrary =

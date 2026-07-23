@@ -20,7 +20,7 @@ actual class AssSubtitleExtension actual constructor(
                 VideoPipelineExtensionAvailability.Available
             } else {
                 VideoPipelineExtensionAvailability.unavailable(
-                    "The bundled iOS libass runtime could not be initialized.",
+                    "The shared iOS libass runtime could not be initialized.",
                 )
             }
     actual override val supportedSubtitleFormats: Set<SubtitleFormat> =

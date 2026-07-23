@@ -161,7 +161,7 @@ internal class AndroidAssNativeSession private constructor(
         ): AndroidAssNativeSession {
             AndroidAssNativeBridge.requireAvailable()
             val nativeHandle = AndroidAssNativeBridge.nativeCreate()
-            check(nativeHandle != CLOSED_HANDLE) { "Cannot initialize the bundled libass renderer." }
+            check(nativeHandle != CLOSED_HANDLE) { "Cannot initialize the shared libass renderer." }
             var closeOnFailure = true
             try {
                 fonts.forEach { font ->

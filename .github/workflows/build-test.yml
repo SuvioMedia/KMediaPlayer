@@ -52,19 +52,6 @@ jobs:
           pattern: libdovi-jvm-*-${{ github.sha }}
           merge-multiple: true
 
-      - name: Download bundled Apple ASS payloads
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          path: mediaplayer-ass/build/generated/
-          pattern: apple-ass-${{ github.sha }}
-
-      - name: Download bundled Windows and Linux ASS payloads
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
-          pattern: desktop-ass-*-${{ github.sha }}
-          merge-multiple: true
-
       - name: Set up JDK 25
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
@@ -93,7 +80,8 @@ jobs:
           :mediaplayer-dolbyvision:jvmTest :mediaplayer-dolbyvision:verifyJvmMacArmNativeMatrix
           :mediaplayer-kmediabridge:jvmTest
           :mediaplayer-mpv:jvmTest
-          --project-prop composeMediaPlayer.skipNativeBuild=true --no-daemon --continue
+          --project-prop composeMediaPlayer.skipNativeBuild=true
+          --refresh-dependencies --no-daemon --continue
 
       - name: Upload JVM test reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -155,7 +143,8 @@ jobs:
           :mediaplayer-dolbyvision:verifyAndroidArmNativeMatrix
           :mediaplayer-kmediabridge:testAndroidHostTest
           :mediaplayer-mpv:compileAndroidMain :mediaplayer-mpv:testAndroidHostTest
-          :androidApp:verifyAndroidArmNativeMatrix --no-daemon --continue
+          :androidApp:verifyAndroidArmNativeMatrix
+          --refresh-dependencies --no-daemon --continue
 
       - name: Upload Android test reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -191,8 +180,14 @@ jobs:
       - name: Download bundled Apple ASS payloads
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          path: mediaplayer-ass/build/generated/
+          path: mediaplayer-ass/build/
           pattern: apple-ass-${{ github.sha }}
+
+      - name: Download bundled Apple MPV pod graph
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: mediaplayer-mpv/build/
+          pattern: apple-mpv-${{ github.sha }}
 
       - name: Verify Xcode 26.3 and iOS 26 SDK
         shell: bash
@@ -243,7 +238,7 @@ jobs:
           :sample:composeApp:linkDebugFrameworkIosArm64
           :sample:composeApp:linkDebugFrameworkIosSimulatorArm64
           -PcomposeMediaPlayer.skipAssAppleNativeBuild=true
-          --no-daemon --continue
+          --refresh-dependencies --no-daemon --continue
 
       - name: Upload iOS test results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -450,19 +445,6 @@ jobs:
           pattern: libdovi-jvm-*-${{ github.sha }}
           merge-multiple: true
 
-      - name: Download bundled Apple ASS payloads
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          path: mediaplayer-ass/build/generated/
-          pattern: apple-ass-${{ github.sha }}
-
-      - name: Download bundled Windows and Linux ASS payloads
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          path: mediaplayer-ass/build/generated/desktopAssJvmResources/
-          pattern: desktop-ass-*-${{ github.sha }}
-          merge-multiple: true
-
       - name: Set up JDK 25
         uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
@@ -477,7 +459,7 @@ jobs:
           :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion=0.0.0-consumer.${{ github.sha }}
           -PcomposeMediaPlayer.skipNativeBuild=true
-          --no-configuration-cache --no-daemon --continue
+          --refresh-dependencies --no-configuration-cache --no-daemon --continue
 
       - name: Verify Maven Central POM metadata
         run: >-
@@ -490,7 +472,7 @@ jobs:
           ./gradlew consumerSmokeTest
           -PpublicationVersion=0.0.0-consumer.${{ github.sha }}
           -PcomposeMediaPlayer.skipNativeBuild=true
-          --no-configuration-cache --no-daemon --continue
+          --refresh-dependencies --no-configuration-cache --no-daemon --continue
 
   quality:
     runs-on: ubuntu-24.04
@@ -545,8 +527,14 @@ jobs:
       - name: Download bundled Apple ASS payloads
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          path: mediaplayer-ass/build/generated/
+          path: mediaplayer-ass/build/
           pattern: apple-ass-${{ github.sha }}
+
+      - name: Download bundled Apple MPV pod graph
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: mediaplayer-mpv/build/
+          pattern: apple-mpv-${{ github.sha }}
 
       - name: Verify Xcode 26.3 and iOS 26 SDK
         shell: bash
@@ -586,7 +574,7 @@ jobs:
           -PcomposeMediaPlayer.skipNativeBuild=true
           -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false
-          --no-daemon --continue
+          --refresh-dependencies --no-daemon --continue
 
   verification-complete:
     if: always()

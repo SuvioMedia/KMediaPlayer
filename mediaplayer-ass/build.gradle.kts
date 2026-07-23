@@ -4,18 +4,13 @@ import dev.detekt.gradle.Detekt
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
-import org.gradle.api.publish.maven.MavenPublication
-import org.gradle.api.tasks.Copy
-import org.gradle.api.tasks.Delete
 import org.gradle.api.tasks.bundling.Jar
-import org.gradle.api.tasks.bundling.Zip
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import java.io.ByteArrayInputStream
-import java.nio.file.Path
 import java.security.MessageDigest
-import java.util.Properties
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
@@ -26,6 +21,7 @@ plugins {
     alias(libs.plugins.compose)
     alias(libs.plugins.vannitktech.maven.publish)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.kotlinCocoapods)
     alias(libs.plugins.detekt)
 }
 
@@ -53,11 +49,19 @@ val projectVersion =
             ?.removePrefix("v")
         ?: "dev"
 val projectGroup = "io.github.shusek"
+val assRuntimeVersion = "0.1.0-rc.3"
 val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
 val appleNativeDirectory = layout.projectDirectory.dir("native/apple")
-val desktopNativeDirectory = layout.projectDirectory.dir("native/desktop")
-val generatedAppleJvmResources = layout.buildDirectory.dir("generated/appleAssJvmResources")
-val generatedDesktopJvmResources = layout.buildDirectory.dir("generated/desktopAssJvmResources")
+val assRuntimeAppleOutputs =
+    providers
+        .gradleProperty("kmediaAssRuntimeAppleOutputs")
+        .map(rootProject::file)
+        .orElse(layout.buildDirectory.dir("kmediaAssRuntimeAppleOutputs").map { it.asFile })
+val assRuntimePodDirectory =
+    providers
+        .gradleProperty("kmediaAssRuntimePodDirectory")
+        .map(rootProject::file)
+        .orElse(layout.buildDirectory.dir("kmediaAssRuntimePod").map { it.asFile })
 val iosArm64AppleNative = layout.buildDirectory.dir("generated/appleAssIos/ios-arm64")
 val iosSimulatorArm64AppleNative =
     layout.buildDirectory.dir("generated/appleAssIos/ios-simulator-arm64")
@@ -69,74 +73,31 @@ val skipAppleNativeBuild =
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
 val canBuildAppleNative = Os.isFamily(Os.FAMILY_MAC) && !skipAppleNativeBuild
-val skipDesktopNativeBuild =
-    providers
-        .gradleProperty("composeMediaPlayer.skipAssDesktopNativeBuild")
-        .orElse(providers.gradleProperty("composeMediaPlayer.skipNativeBuild"))
-        .orElse(providers.environmentVariable("COMPOSE_MEDIA_PLAYER_SKIP_NATIVE_BUILD"))
-        .map { it.equals("true", ignoreCase = true) }
-        .getOrElse(false)
-val canBuildWindowsDesktopNative = Os.isFamily(Os.FAMILY_WINDOWS) && !skipDesktopNativeBuild
-val linuxDesktopArchitecture =
-    when (System.getProperty("os.arch", "").lowercase()) {
-        "amd64", "x86_64", "x86-64", "x64" -> "x86-64"
-        "aarch64", "arm64" -> "aarch64"
-        else -> null
-    }
-val canBuildLinuxDesktopNative =
-    Os.isFamily(Os.FAMILY_UNIX) &&
-        !Os.isFamily(Os.FAMILY_MAC) &&
-        linuxDesktopArchitecture != null &&
-        !skipDesktopNativeBuild
-val cleanUnsupportedAppleAssOutputs =
-    tasks.register<Delete>("cleanUnsupportedAppleAssOutputs") {
-        delete(
-            generatedAppleJvmResources.map {
-                it.dir("composemediaplayer/ass/native/darwin-x86-64")
-            },
-        )
-    }
 
 fun registerAppleAssBuild(
     taskName: String,
     target: String,
     outputDirectory: Provider<Directory>,
 ) = tasks.register<Exec>(taskName) {
-    description = "Builds the pinned bundled ASS runtime for $target."
+    description = "Builds the thin ASS renderer client for $target."
     group = "build"
     enabled = canBuildAppleNative
-    dependsOn(cleanUnsupportedAppleAssOutputs)
     workingDir(layout.projectDirectory)
     commandLine(
         "bash",
         appleNativeDirectory.file("build.sh").asFile.absolutePath,
         target,
         outputDirectory.get().asFile.absolutePath,
+        assRuntimeAppleOutputs.get().resolve(target).absolutePath,
     )
     inputs.file(appleNativeDirectory.file("build.sh"))
     inputs.file(appleNativeDirectory.file("KMediaAssRenderer.c"))
-    inputs.file(appleNativeDirectory.file("AppleAssJni.c"))
     inputs.file(appleNativeDirectory.file("include/KMediaAssRenderer.h"))
-    inputs.file(appleNativeDirectory.file("macos.exports"))
     inputs.dir(layout.projectDirectory.dir("native/common"))
-    inputs.file(
-        layout.projectDirectory.file(
-            "src/androidMain/native/ass/corresponding-source/fribidi-1.0.16-source.tar.xz",
-        ),
-    )
+    inputs.dir(assRuntimeAppleOutputs.map { it.resolve(target) })
     outputs.dir(outputDirectory)
 }
 
-val macosArm64AppleAssOutput =
-    generatedAppleJvmResources.map {
-        it.dir("composemediaplayer/ass/native/darwin-aarch64")
-    }
-val buildMacosArm64AppleAss =
-    registerAppleAssBuild(
-        taskName = "buildMacosArm64AppleAss",
-        target = "macos-arm64",
-        outputDirectory = macosArm64AppleAssOutput,
-    )
 val buildIosArm64AppleAss =
     registerAppleAssBuild(
         taskName = "buildIosArm64AppleAss",
@@ -149,252 +110,31 @@ val buildIosSimulatorArm64AppleAss =
         target = "ios-simulator-arm64",
         outputDirectory = iosSimulatorArm64AppleNative,
     )
-val packageAppleAssLegalResources =
-    tasks.register<Copy>("packageAppleAssLegalResources") {
-        description = "Packages Apple ASS notices, exact FriBidi source and relink instructions."
-        group = "build"
-        val legalRoot =
-            generatedAppleJvmResources.map {
-                it.dir("META-INF/kmediaplayer/apple-ass")
-            }
-        into(legalRoot)
-        from(appleNativeDirectory.file("NOTICE.md"))
-        from(appleNativeDirectory.file("BUILD.md")) {
-            into("corresponding-source")
-        }
-        from(appleNativeDirectory.file("LGPL-RELINK.md")) {
-            into("corresponding-source")
-        }
-        from(appleNativeDirectory.file("build.sh")) {
-            into("corresponding-source")
-        }
-        from(
-            layout.projectDirectory.file(
-                "src/androidMain/native/ass/corresponding-source/fribidi-1.0.16-source.tar.xz",
-            ),
-        ) {
-            into("corresponding-source")
-        }
-        from(
-            layout.projectDirectory.dir(
-                "src/androidMain/resources/META-INF/kmediaplayer/android-ass/LICENSES",
-            ),
-        ) {
-            include(
-                "freetype-FTL.txt",
-                "freetype-license-selection.txt",
-                "fribidi-LGPL-2.1-or-later.txt",
-                "harfbuzz.txt",
-                "libass-ISC.txt",
-                "libunibreak-zlib.txt",
-            )
-            into("LICENSES")
-        }
-    }
-val appleAssLgplMaterials =
-    tasks.register<Zip>("appleAssLgplMaterials") {
-        description = "Packages the Apple FriBidi source, notices and relinking material."
-        group = "distribution"
-        archiveClassifier.set("apple-lgpl-materials")
-        isReproducibleFileOrder = true
-        isPreserveFileTimestamps = false
-
-        from(appleNativeDirectory.file("NOTICE.md"))
-        from(appleNativeDirectory.file("BUILD.md")) {
-            into("corresponding-source")
-        }
-        from(appleNativeDirectory.file("LGPL-RELINK.md")) {
-            into("corresponding-source")
-        }
-        from(appleNativeDirectory.file("build.sh")) {
-            into("corresponding-source")
-        }
-        from(
-            layout.projectDirectory.file(
-                "src/androidMain/native/ass/corresponding-source/fribidi-1.0.16-source.tar.xz",
-            ),
-        ) {
-            into("corresponding-source")
-        }
-        from(
-            layout.projectDirectory.dir(
-                "src/androidMain/resources/META-INF/kmediaplayer/android-ass/LICENSES",
-            ),
-        ) {
-            include(
-                "freetype-FTL.txt",
-                "freetype-license-selection.txt",
-                "fribidi-LGPL-2.1-or-later.txt",
-                "harfbuzz.txt",
-                "libass-ISC.txt",
-                "libunibreak-zlib.txt",
-            )
-            into("LICENSES")
-        }
-    }
-
-val windowsDesktopAssOutputs =
-    listOf("windows-x86-64", "windows-aarch64").map { platform ->
-        generatedDesktopJvmResources.map {
-            it.dir("composemediaplayer/ass/native/$platform")
-        }
-    }
-val buildWindowsDesktopAss =
-    tasks.register<Exec>("buildWindowsDesktopAss") {
-        description = "Builds bundled x86_64 and ARM64 Windows libass runtimes."
-        group = "build"
-        enabled = canBuildWindowsDesktopNative
-        workingDir(layout.projectDirectory)
-        commandLine(
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            desktopNativeDirectory.file("build-windows.ps1").asFile.absolutePath,
-            "-OutputRoot",
-            generatedDesktopJvmResources.get().asFile.absolutePath,
-        )
-        inputs.file(desktopNativeDirectory.file("build-windows.ps1"))
-        inputs.dir(desktopNativeDirectory.dir("vcpkg-fribidi-port"))
-        windowsDesktopAssOutputs.forEach(outputs::dir)
-    }
-val linuxDesktopAssOutput =
-    generatedDesktopJvmResources.map {
-        it.dir(
-            "composemediaplayer/ass/native/" +
-                "linux-${linuxDesktopArchitecture ?: "unsupported"}",
-        )
-    }
-val buildLinuxDesktopAss =
-    tasks.register<Exec>("buildLinuxDesktopAss") {
-        description = "Builds the bundled libass runtime for this Linux host architecture."
-        group = "build"
-        enabled = canBuildLinuxDesktopNative
-        workingDir(layout.projectDirectory)
-        commandLine(
-            "bash",
-            desktopNativeDirectory.file("build-linux.sh").asFile.absolutePath,
-            "linux-${linuxDesktopArchitecture ?: "unsupported"}",
-            generatedDesktopJvmResources.get().asFile.absolutePath,
-        )
-        inputs.file(desktopNativeDirectory.file("build-linux.sh"))
-        inputs.file(
-            layout.projectDirectory.file(
-                "src/androidMain/native/ass/corresponding-source/fribidi-1.0.16-source.tar.xz",
-            ),
-        )
-        outputs.dir(linuxDesktopAssOutput)
-    }
-val packageDesktopAssLegalResources =
-    tasks.register<Copy>("packageDesktopAssLegalResources") {
-        description = "Packages desktop ASS notices, FriBidi source and replacement instructions."
-        group = "build"
-        val legalRoot =
-            generatedDesktopJvmResources.map {
-                it.dir("META-INF/kmediaplayer/desktop-ass")
-            }
-        into(legalRoot)
-        from(desktopNativeDirectory.file("NOTICE.md"))
-        from(desktopNativeDirectory.file("BUILD.md")) {
-            into("corresponding-source")
-        }
-        from(desktopNativeDirectory.file("LGPL-RELINK.md")) {
-            into("corresponding-source")
-        }
-        from(desktopNativeDirectory.file("build-windows.ps1")) {
-            into("corresponding-source")
-        }
-        from(desktopNativeDirectory.file("build-linux.sh")) {
-            into("corresponding-source")
-        }
-        from(desktopNativeDirectory.dir("vcpkg-fribidi-port")) {
-            into("corresponding-source/vcpkg-fribidi-port")
-        }
-        from(
-            layout.projectDirectory.file(
-                "src/androidMain/native/ass/corresponding-source/fribidi-1.0.16-source.tar.xz",
-            ),
-        ) {
-            into("corresponding-source")
-        }
-        from(
-            layout.projectDirectory.dir(
-                "src/androidMain/resources/META-INF/kmediaplayer/android-ass/LICENSES",
-            ),
-        ) {
-            include(
-                "freetype-FTL.txt",
-                "freetype-license-selection.txt",
-                "fribidi-LGPL-2.1-or-later.txt",
-                "harfbuzz.txt",
-                "libass-ISC.txt",
-                "libunibreak-zlib.txt",
-            )
-            into("LICENSES")
-        }
-    }
-val desktopAssLgplMaterials =
-    tasks.register<Zip>("desktopAssLgplMaterials") {
-        description = "Packages desktop FriBidi source, notices and replacement material."
-        group = "distribution"
-        dependsOn(packageDesktopAssLegalResources)
-        archiveClassifier.set("desktop-lgpl-materials")
-        isReproducibleFileOrder = true
-        isPreserveFileTimestamps = false
-
-        from(desktopNativeDirectory.file("NOTICE.md"))
-        from(desktopNativeDirectory.file("BUILD.md")) {
-            into("corresponding-source")
-        }
-        from(desktopNativeDirectory.file("LGPL-RELINK.md")) {
-            into("corresponding-source")
-        }
-        from(desktopNativeDirectory.file("build-windows.ps1")) {
-            into("corresponding-source")
-        }
-        from(desktopNativeDirectory.file("build-linux.sh")) {
-            into("corresponding-source")
-        }
-        from(desktopNativeDirectory.dir("vcpkg-fribidi-port")) {
-            into("corresponding-source/vcpkg-fribidi-port")
-        }
-        from(
-            layout.projectDirectory.file(
-                "src/androidMain/native/ass/corresponding-source/fribidi-1.0.16-source.tar.xz",
-            ),
-        ) {
-            into("corresponding-source")
-        }
-        from(
-            layout.projectDirectory.dir(
-                "src/androidMain/resources/META-INF/kmediaplayer/android-ass/LICENSES",
-            ),
-        ) {
-            include(
-                "freetype-FTL.txt",
-                "freetype-license-selection.txt",
-                "fribidi-LGPL-2.1-or-later.txt",
-                "harfbuzz.txt",
-                "libass-ISC.txt",
-                "libunibreak-zlib.txt",
-            )
-            into("LICENSES")
-        }
-        from(
-            generatedDesktopJvmResources.map {
-                it.dir("META-INF/kmediaplayer/desktop-ass/LICENSES/vcpkg")
-            },
-        ) {
-            into("LICENSES/vcpkg")
-        }
-    }
-
 group = projectGroup
 version = projectVersion
 
 kotlin {
     jvmToolchain(25)
+
+    cocoapods {
+        version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
+        summary = "Optional ASS/SSA renderer for Compose Media Player"
+        homepage = "https://github.com/Shusek/KMediaPlayer"
+        name = "ComposeMediaPlayerAss"
+        ios.deploymentTarget = "16.2"
+        pod(
+            name = "KMediaAssRuntime",
+            version = assRuntimeVersion,
+            path = assRuntimePodDirectory.get(),
+            linkOnly = true,
+        )
+
+        framework {
+            baseName = "ComposeMediaPlayerAss"
+            isStatic = false
+            export(project(":mediaplayer-extension-api"))
+        }
+    }
 
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
@@ -432,13 +172,35 @@ kotlin {
     }
 
     listOf(
-        Triple(iosArm64(), iosArm64AppleNative, buildIosArm64AppleAss),
-        Triple(
-            iosSimulatorArm64(),
-            iosSimulatorArm64AppleNative,
-            buildIosSimulatorArm64AppleAss,
-        ),
-    ).forEach { (target, nativeOutput, _) ->
+        iosArm64() to
+            Triple(
+                iosArm64AppleNative,
+                buildIosArm64AppleAss,
+                "ios-arm64",
+            ),
+        iosSimulatorArm64() to
+            Triple(
+                iosSimulatorArm64AppleNative,
+                buildIosSimulatorArm64AppleAss,
+                "ios-simulator-arm64",
+            ),
+    ).forEach { (target, configuration) ->
+        val (nativeOutput, _, runtimeTarget) = configuration
+        val runtimeFrameworkDirectory =
+            assRuntimeAppleOutputs
+                .get()
+                .resolve(runtimeTarget)
+                .resolve("Frameworks")
+                .absolutePath
+
+        target.binaries.all {
+            linkerOpts("-F$runtimeFrameworkDirectory")
+        }
+        target.binaries.getTest(NativeBuildType.DEBUG).linkerOpts(
+            "-rpath",
+            runtimeFrameworkDirectory,
+        )
+
         target.compilations.getByName("main") {
             cinterops.create("appleAss") {
                 defFile(project.file("src/nativeInterop/cinterop/appleAss.def"))
@@ -459,6 +221,9 @@ kotlin {
             implementation(kotlin("test"))
         }
         androidMain.dependencies {
+            api("io.github.shusek:kmedia-ass-runtime-android:$assRuntimeVersion") {
+                version { strictly(assRuntimeVersion) }
+            }
             implementation(libs.compose.ui)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.androidx.core)
@@ -483,9 +248,11 @@ kotlin {
             implementation(kotlin("test"))
         }
         jvmMain {
-            resources.srcDir(generatedAppleJvmResources)
-            resources.srcDir(generatedDesktopJvmResources)
-            resources.exclude("composemediaplayer/ass/native/darwin-x86-64/**")
+            dependencies {
+                api("io.github.shusek:kmedia-ass-runtime-desktop:$assRuntimeVersion") {
+                    version { strictly(assRuntimeVersion) }
+                }
+            }
         }
         iosMain.dependencies {
             implementation(libs.compose.runtime)
@@ -510,16 +277,6 @@ kotlin {
     }
 }
 
-tasks.named("jvmProcessResources") {
-    dependsOn(
-        cleanUnsupportedAppleAssOutputs,
-        buildMacosArm64AppleAss,
-        buildWindowsDesktopAss,
-        buildLinuxDesktopAss,
-        packageAppleAssLegalResources,
-        packageDesktopAssLegalResources,
-    )
-}
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
@@ -527,7 +284,7 @@ tasks.withType<Test>().configureEach {
 val verifyJvmMacArmNativeMatrix =
     tasks.register("verifyJvmMacArmNativeMatrix") {
         group = "verification"
-        description = "Verifies that the ASS JVM JAR publishes macOS arm64 only."
+        description = "Verifies that composemediaplayer-ass does not embed a private macOS ASS stack."
 
         val jvmJar = tasks.named<Jar>("jvmJar")
         dependsOn(jvmJar)
@@ -536,24 +293,17 @@ val verifyJvmMacArmNativeMatrix =
 
         doLast {
             ZipFile(inputs.files.singleFile).use { archive ->
-                val armPrefix = "composemediaplayer/ass/native/darwin-aarch64/"
-                check(archive.getEntry("${armPrefix}libcomposemediaplayer_ass.dylib") != null) {
-                    "The ASS JVM JAR is missing its macOS arm64 renderer."
-                }
-                check(archive.getEntry("${armPrefix}libkmediafribidi.dylib") != null) {
-                    "The ASS JVM JAR is missing its replaceable macOS arm64 FriBidi library."
-                }
-                val intelEntries =
+                val nativeEntries =
                     archive
                         .entries()
                         .asSequence()
                         .filter { entry ->
                             !entry.isDirectory &&
-                                entry.name.startsWith("composemediaplayer/ass/native/darwin-x86-64/")
+                                entry.name.startsWith("composemediaplayer/ass/native/")
                         }.map { it.name }
                         .toList()
-                check(intelEntries.isEmpty()) {
-                    "The ASS JVM JAR contains unsupported Intel macOS payloads: $intelEntries"
+                check(nativeEntries.isEmpty()) {
+                    "The ASS JVM JAR embeds a private native text stack: $nativeEntries"
                 }
             }
         }
@@ -562,7 +312,7 @@ val verifyJvmMacArmNativeMatrix =
 val verifyJvmDesktopNativeMatrix =
     tasks.register("verifyJvmDesktopNativeMatrix") {
         group = "verification"
-        description = "Verifies bundled Windows/Linux libass payloads and their SHA-256 manifests."
+        description = "Verifies that the JVM adapter delegates its native text stack."
 
         val jvmJar = tasks.named<Jar>("jvmJar")
         dependsOn(jvmJar)
@@ -570,122 +320,23 @@ val verifyJvmDesktopNativeMatrix =
         inputs.file(archiveFile)
 
         doLast {
-            fun java.io.InputStream.sha256(): String {
-                val digest = MessageDigest.getInstance("SHA-256")
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val count = read(buffer)
-                    if (count < 0) break
-                    digest.update(buffer, 0, count)
-                }
-                return digest.digest().joinToString("") { byte ->
-                    "%02x".format(byte.toInt() and 0xff)
-                }
-            }
-
-            val expectedPlatforms =
-                setOf(
-                    "windows-x86-64",
-                    "windows-aarch64",
-                    "linux-x86-64",
-                    "linux-aarch64",
-                )
-            val resourceRoot = "composemediaplayer/ass/native/"
             ZipFile(inputs.files.singleFile).use { archive ->
-                val actualPlatforms =
+                val forbidden =
                     archive
                         .entries()
                         .asSequence()
                         .filter { entry ->
                             !entry.isDirectory &&
-                                entry.name.startsWith(resourceRoot) &&
                                 (
-                                    entry.name.removePrefix(resourceRoot).startsWith("windows-") ||
-                                        entry.name.removePrefix(resourceRoot).startsWith("linux-")
+                                    entry.name.startsWith("composemediaplayer/ass/native/") ||
+                                        entry.name.endsWith(".dll") ||
+                                        entry.name.endsWith(".dylib") ||
+                                        entry.name.endsWith(".so")
                                 )
-                        }.map { entry ->
-                            entry.name.removePrefix(resourceRoot).substringBefore('/')
-                        }.toSet()
-                check(actualPlatforms == expectedPlatforms) {
-                    "Unexpected desktop ASS native matrix: expected=$expectedPlatforms, actual=$actualPlatforms"
-                }
-
-                expectedPlatforms.forEach { platform ->
-                    val prefix = "$resourceRoot$platform/"
-                    val manifestEntry =
-                        checkNotNull(archive.getEntry("${prefix}runtime.properties")) {
-                            "The ASS JVM JAR is missing $platform/runtime.properties."
-                        }
-                    val properties =
-                        Properties().apply {
-                            archive.getInputStream(manifestEntry).use(::load)
-                        }
-                    val count =
-                        properties.getProperty("file.count")?.toIntOrNull()
-                            ?: error("The $platform ASS manifest has an invalid file.count.")
-                    check(count in 1..64) {
-                        "The $platform ASS manifest has an unsafe file count: $count."
-                    }
-                    val mainLibrary =
-                        checkNotNull(properties.getProperty("mainLibrary")) {
-                            "The $platform ASS manifest has no mainLibrary."
-                        }
-                    val fileNames =
-                        (0 until count).map { index ->
-                            val name =
-                                checkNotNull(properties.getProperty("file.$index.name")) {
-                                    "The $platform ASS manifest is missing file.$index.name."
-                                }
-                            check(name == Path.of(name).fileName.toString()) {
-                                "The $platform ASS manifest contains an unsafe file name: $name"
-                            }
-                            val expectedDigest =
-                                checkNotNull(properties.getProperty("file.$index.sha256")) {
-                                    "The $platform ASS manifest is missing the digest for $name."
-                                }
-                            check(Regex("[0-9a-f]{64}").matches(expectedDigest)) {
-                                "The $platform ASS manifest has an invalid digest for $name."
-                            }
-                            val entry =
-                                checkNotNull(archive.getEntry("$prefix$name")) {
-                                    "The ASS JVM JAR is missing $platform/$name."
-                                }
-                            val actualDigest = archive.getInputStream(entry).use { it.sha256() }
-                            check(actualDigest == expectedDigest) {
-                                "SHA-256 mismatch for bundled ASS runtime $platform/$name."
-                            }
-                            name
-                        }
-                    check(fileNames.distinct().size == fileNames.size && mainLibrary in fileNames) {
-                        "The $platform ASS manifest has duplicates or omits its main library."
-                    }
-                    if (platform.startsWith("linux-")) {
-                        check(
-                            fileNames ==
-                                listOf(
-                                    "libass.so.9",
-                                    "libkmediafribidi.so.0",
-                                ),
-                        ) {
-                            "Unexpected Linux ASS payload for $platform: $fileNames"
-                        }
-                    } else {
-                        check(mainLibrary.endsWith(".dll") && fileNames.all { it.endsWith(".dll") }) {
-                            "Unexpected Windows ASS payload for $platform: $fileNames"
-                        }
-                    }
-                }
-
-                listOf(
-                    "META-INF/kmediaplayer/desktop-ass/NOTICE.md",
-                    "META-INF/kmediaplayer/desktop-ass/corresponding-source/BUILD.md",
-                    "META-INF/kmediaplayer/desktop-ass/corresponding-source/LGPL-RELINK.md",
-                    "META-INF/kmediaplayer/desktop-ass/corresponding-source/" +
-                        "fribidi-1.0.16-source.tar.xz",
-                ).forEach { resource ->
-                    check(archive.getEntry(resource) != null) {
-                        "The ASS JVM JAR is missing desktop legal resource $resource."
-                    }
+                        }.map { it.name }
+                        .toList()
+                check(forbidden.isEmpty()) {
+                    "The JVM adapter must receive libass transitively from kmedia-ass-runtime-desktop: $forbidden"
                 }
             }
         }
@@ -775,16 +426,13 @@ val verifyCoreAndroidAarHasNoAssPayload =
 val verifyAndroidAssAar =
     tasks.register("verifyAndroidAssAar") {
         group = "verification"
-        description = "Verifies the optional Android libass matrix, notices, source and consumer rules."
+        description = "Verifies the thin Android ASS bridge and delegated shared runtime."
 
         dependsOn(tasks.named("bundleAndroidMainAar"), verifyCoreAndroidAarHasNoAssPayload)
         val aar = layout.buildDirectory.file("outputs/aar/${project.name}.aar")
         val checksums = layout.projectDirectory.file("src/androidMain/native/ass/CHECKSUMS.sha256")
-        val legalResources =
-            layout.projectDirectory.dir("src/androidMain/resources/META-INF/kmediaplayer/android-ass")
         inputs.file(aar)
         inputs.file(checksums)
-        inputs.dir(legalResources)
 
         doLast {
             fun java.io.InputStream.sha256(): String {
@@ -797,8 +445,6 @@ val verifyAndroidAssAar =
                 }
                 return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
             }
-
-            fun java.io.File.sha256(): String = inputStream().buffered().use { input -> input.sha256() }
 
             val expected =
                 buildMap {
@@ -819,13 +465,11 @@ val verifyAndroidAssAar =
             val androidAbis = setOf("arm64-v8a", "armeabi-v7a")
             val expectedNative =
                 expected.filterKeys { path -> path.substringBefore('/') in androidAbis && path.endsWith(".so") }
-            check(expectedNative.size == androidAbis.size * 3) {
-                "Expected three Android ASS libraries for every ABI."
+            check(expectedNative.size == androidAbis.size) {
+                "Expected one thin Android ASS bridge for every ABI."
             }
-            val sourcePath = "corresponding-source/fribidi-1.0.16-source.tar.xz"
-            check(expected.keys == expectedNative.keys + sourcePath) {
-                "The Android ASS checksum manifest must contain exactly the native matrix and FriBidi source; " +
-                    "actual=${expected.keys}"
+            check(expected.keys == expectedNative.keys) {
+                "The Android ASS checksum manifest must contain only the thin JNI bridge matrix."
             }
 
             ZipFile(aar.get().asFile).use { archive ->
@@ -840,13 +484,9 @@ val verifyAndroidAssAar =
                     "Unexpected Android ASS native matrix: expected=${expectedNative.keys}, actual=$actualNative"
                 }
                 check(
-                    actualNative.none { path ->
-                        path.endsWith("/libass.so") ||
-                            path.endsWith("/libfribidi.so") ||
-                            path.endsWith("/libc++_shared.so")
-                    },
+                    actualNative.all { path -> path.endsWith("/libkmediaass.so") },
                 ) {
-                    "The Android ASS artifact must not expose generic libass/FriBidi or libc++ SONAMEs."
+                    "The Android ASS artifact must contain no private libass, FriBidi, or libc++ runtime."
                 }
                 expectedNative.forEach { (path, expectedHash) ->
                     val entry = checkNotNull(archive.getEntry("jni/$path")) { "Missing jni/$path" }
@@ -861,56 +501,26 @@ val verifyAndroidAssAar =
                 check("AndroidAssNativeBridge" in proguard && "native <methods>" in proguard) {
                     "The Android ASS AAR does not keep its registered JNI bridge."
                 }
-
-                val resourcePrefix = "META-INF/kmediaplayer/android-ass/"
-                val expectedClassResources =
-                    legalResources.asFile
-                        .walkTopDown()
-                        .filter { it.isFile }
-                        .associate { resource ->
-                            val relativePath =
-                                resource
-                                    .relativeTo(legalResources.asFile)
-                                    .invariantSeparatorsPath
-                            "$resourcePrefix$relativePath" to resource.sha256()
-                        }
-                check(expectedClassResources.isNotEmpty()) {
-                    "The Android ASS legal-resource directory is empty."
-                }
-
-                val actualClassResources = mutableMapOf<String, String>()
                 val classesEntry = checkNotNull(archive.getEntry("classes.jar")) { "AAR has no classes.jar" }
                 val classesBytes = archive.getInputStream(classesEntry).use { input -> input.readBytes() }
+                val forbiddenLegalResources = mutableListOf<String>()
                 ZipInputStream(ByteArrayInputStream(classesBytes)).use { jar ->
                     while (true) {
                         val entry = jar.nextEntry ?: break
-                        if (!entry.isDirectory && entry.name.startsWith(resourcePrefix)) {
-                            val previous = actualClassResources.put(entry.name, jar.sha256())
-                            check(previous == null) { "Duplicate Android ASS class resource: ${entry.name}" }
+                        if (
+                            !entry.isDirectory &&
+                            entry.name.startsWith("META-INF/kmediaplayer/android-ass/")
+                        ) {
+                            forbiddenLegalResources += entry.name
                         }
                     }
                 }
-                check(actualClassResources.keys == expectedClassResources.keys) {
-                    "Unexpected Android ASS legal-resource set: " +
-                        "missing=${expectedClassResources.keys - actualClassResources.keys}, " +
-                        "unexpected=${actualClassResources.keys - expectedClassResources.keys}"
-                }
-                expectedClassResources.forEach { (path, expectedHash) ->
-                    check(actualClassResources[path] == expectedHash) {
-                        "SHA-256 mismatch for Android ASS class resource $path"
-                    }
-                }
-
-                val packagedChecksums = "${resourcePrefix}CHECKSUMS.sha256"
-                check(actualClassResources[packagedChecksums] == checksums.asFile.sha256()) {
-                    "The AAR's packaged checksum manifest differs from the native release manifest."
-                }
-                val sourceResource = "$resourcePrefix$sourcePath"
-                check(actualClassResources[sourceResource] == checkNotNull(expected[sourcePath])) {
-                    "The AAR's FriBidi corresponding-source archive does not match its checksum."
+                check(forbiddenLegalResources.isEmpty()) {
+                    "The thin adapter still embeds legal/source material owned by the shared runtime: " +
+                        forbiddenLegalResources
                 }
             }
-            logger.lifecycle("Verified the optional ARM64/ARMv7 Android libass AAR and corresponding source.")
+            logger.lifecycle("Verified the ARM64/ARMv7 thin ASS bridge AAR.")
         }
     }
 
@@ -929,20 +539,6 @@ tasks
 val consumerSmokeRepository = rootProject.layout.buildDirectory.dir("consumer-repository")
 
 publishing {
-    publications
-        .withType<MavenPublication>()
-        .matching { publication -> publication.name == "kotlinMultiplatform" }
-        .configureEach {
-            artifact(appleAssLgplMaterials) {
-                classifier = "apple-lgpl-materials"
-                extension = "zip"
-            }
-            artifact(desktopAssLgplMaterials) {
-                classifier = "desktop-lgpl-materials"
-                extension = "zip"
-            }
-        }
-
     repositories {
         maven {
             name = "consumerSmoke"
@@ -980,31 +576,6 @@ mavenPublishing {
             license {
                 name.set("Internal Use Notice and Limited License")
                 url.set("https://github.com/Shusek/KMediaPlayer/blob/master/LICENSE")
-                distribution.set("repo")
-            }
-            license {
-                name.set("Bundled FriBidi component: LGPL-2.1-or-later")
-                url.set("https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html")
-                distribution.set("repo")
-            }
-            license {
-                name.set("Bundled libass component: ISC License")
-                url.set("https://github.com/libass/libass/blob/master/COPYING")
-                distribution.set("repo")
-            }
-            license {
-                name.set("Bundled FreeType component: FreeType License")
-                url.set("https://freetype.org/license.html")
-                distribution.set("repo")
-            }
-            license {
-                name.set("Bundled HarfBuzz component: Old MIT License")
-                url.set("https://github.com/harfbuzz/harfbuzz/blob/main/COPYING")
-                distribution.set("repo")
-            }
-            license {
-                name.set("Bundled libunibreak component: zlib License")
-                url.set("https://github.com/adah1972/libunibreak/blob/master/LICENCE")
                 distribution.set("repo")
             }
         }

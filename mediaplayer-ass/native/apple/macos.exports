@@ -1,9 +1,0 @@
-_JNI_OnLoad
-_kmedia_ass_frame_copy_cg_image
-_kmedia_ass_library_version
-_kmedia_ass_renderer_add_font
-_kmedia_ass_renderer_blend_bgra
-_kmedia_ass_renderer_create
-_kmedia_ass_renderer_destroy
-_kmedia_ass_renderer_render_rgba
-_kmedia_ass_renderer_set_track

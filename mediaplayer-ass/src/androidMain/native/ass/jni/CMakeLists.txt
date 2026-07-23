@@ -43,13 +43,13 @@ endif()
 set(LIBASS_INCLUDE_DIR "" CACHE PATH
     "Directory containing ass/ass.h from the Android libass build")
 set(LIBASS_SHARED_LIBRARY "" CACHE FILEPATH
-    "Path to the ABI-specific Android libkmediaasscore.so")
+    "Path to the ABI-specific Android libkmediaffmpeg_ass.so")
 
 if(NOT LIBASS_INCLUDE_DIR)
     find_path(LIBASS_INCLUDE_DIR ass/ass.h)
 endif()
 if(NOT LIBASS_SHARED_LIBRARY)
-    find_library(LIBASS_SHARED_LIBRARY NAMES kmediaasscore)
+    find_library(LIBASS_SHARED_LIBRARY NAMES kmediaffmpeg_ass)
 endif()
 if(NOT EXISTS "${LIBASS_INCLUDE_DIR}/ass/ass.h")
     message(FATAL_ERROR "Set LIBASS_INCLUDE_DIR to a directory containing ass/ass.h")
@@ -58,9 +58,9 @@ if(NOT EXISTS "${LIBASS_SHARED_LIBRARY}")
     message(FATAL_ERROR "Set LIBASS_SHARED_LIBRARY to the ABI-specific libass.so")
 endif()
 get_filename_component(LIBASS_LIBRARY_NAME "${LIBASS_SHARED_LIBRARY}" NAME)
-if(NOT LIBASS_LIBRARY_NAME STREQUAL "libkmediaasscore.so")
+if(NOT LIBASS_LIBRARY_NAME STREQUAL "libkmediaffmpeg_ass.so")
     message(FATAL_ERROR
-        "LIBASS_SHARED_LIBRARY must be libkmediaasscore.so; generic/static libass is intentionally unsupported")
+        "LIBASS_SHARED_LIBRARY must be libkmediaffmpeg_ass.so from KMediaAssRuntime")
 endif()
 
 add_library(kmedia_libass SHARED IMPORTED)

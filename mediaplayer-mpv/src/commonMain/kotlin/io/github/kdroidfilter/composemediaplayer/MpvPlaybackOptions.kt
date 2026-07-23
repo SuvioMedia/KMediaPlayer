@@ -125,8 +125,8 @@ expect fun inspectMpvBackend(options: MpvPlaybackOptions = MpvPlaybackOptions())
 /**
  * Creates an opt-in KMediaMpv-backed state.
  *
- * Bundled targets receive KMediaMpv transitively. Windows and iOS require the
- * application-supplied runtime selected in [MpvPlaybackOptions.runtimeSource].
+ * Android and desktop targets receive KMediaMpv transitively. On iOS the
+ * KMediaMpv CocoaPod supplies the code-signed client frameworks.
  */
 expect fun createMpvVideoPlayerState(options: MpvPlaybackOptions = MpvPlaybackOptions()): VideoPlayerState
 

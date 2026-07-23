@@ -8,10 +8,18 @@ import kotlin.test.assertTrue
 
 class IosMpvRuntimeTest {
     @Test
-    fun bundledModeExplainsTheIosFrameworkBoundary() {
-        val unavailable = assertIs<MpvBackendAvailability.Unavailable>(inspectMpvBackend())
+    fun bundledModeProbesTheExactCocoaPodsRuntimeWithoutDownloadingCode() {
+        val availability = inspectMpvBackend()
 
-        assertEquals(MpvBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING, unavailable.reason)
+        if (availability is MpvBackendAvailability.Unavailable) {
+            assertTrue(
+                availability.reason in
+                    setOf(
+                        MpvBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING,
+                        MpvBackendUnavailableReason.INVALID_RUNTIME,
+                    ),
+            )
+        }
     }
 
     @Test

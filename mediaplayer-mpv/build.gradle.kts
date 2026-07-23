@@ -17,6 +17,7 @@ plugins {
     alias(libs.plugins.compose)
     alias(libs.plugins.vannitktech.maven.publish)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.kotlinCocoapods)
 }
 
 val projectVersion =
@@ -24,6 +25,7 @@ val projectVersion =
         ?: "dev"
 val projectGroup = "io.github.shusek"
 val kmediaMpvVersion = libs.versions.kmediaMpv.get()
+val kmediaFfmpegRuntimeVersion = "0.1.0-rc.3"
 val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
 val releaseSigningEnabled =
     providers
@@ -32,6 +34,21 @@ val releaseSigningEnabled =
         .getOrElse(false)
 val nativeJvmTestResources =
     providers.gradleProperty("composeMediaPlayerMpvTestNativeResources")
+val kmediaMpvPodDirectory =
+    providers
+        .gradleProperty("kmediaMpvPodDirectory")
+        .map(rootProject::file)
+        .orElse(layout.buildDirectory.dir("kmediaMpvPod").map { it.asFile })
+val kmediaFfmpegRuntimePodDirectory =
+    providers
+        .gradleProperty("kmediaFfmpegRuntimePodDirectory")
+        .map(rootProject::file)
+        .orElse(layout.buildDirectory.dir("kmediaFfmpegRuntimePod").map { it.asFile })
+val kmediaMpvAssRuntimePodDirectory =
+    providers
+        .gradleProperty("kmediaMpvAssRuntimePodDirectory")
+        .map(rootProject::file)
+        .orElse(layout.buildDirectory.dir("kmediaAssRuntimePod").map { it.asFile })
 val appleMpvNativeDirectory = layout.projectDirectory.dir("native/apple")
 val iosArm64MpvBridge = layout.buildDirectory.dir("generated/appleMpvBridge/ios-arm64")
 val iosSimulatorArm64MpvBridge =
@@ -84,6 +101,38 @@ version = projectVersion
 
 kotlin {
     jvmToolchain(25)
+
+    cocoapods {
+        version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
+        summary = "Optional MPV backend for Compose Media Player"
+        homepage = "https://github.com/Shusek/KMediaPlayer"
+        name = "ComposeMediaPlayerMpv"
+        ios.deploymentTarget = "16.2"
+        pod(
+            name = "KMediaAssRuntime",
+            version = kmediaFfmpegRuntimeVersion,
+            path = kmediaMpvAssRuntimePodDirectory.get(),
+            linkOnly = true,
+        )
+        pod(
+            name = "KMediaFfmpegRuntime",
+            version = kmediaFfmpegRuntimeVersion,
+            path = kmediaFfmpegRuntimePodDirectory.get(),
+            linkOnly = true,
+        )
+        pod(
+            name = "KMediaMpv",
+            version = kmediaMpvVersion,
+            path = kmediaMpvPodDirectory.get(),
+            linkOnly = true,
+        )
+
+        framework {
+            baseName = "ComposeMediaPlayerMpv"
+            isStatic = false
+            export(project(":mediaplayer-core"))
+        }
+    }
 
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
@@ -148,6 +197,8 @@ kotlin {
             }
         }
         jvmTest.dependencies {
+            implementation(project(":mediaplayer-kmediabridge"))
+            implementation(compose.desktop.currentOs)
             implementation(kotlin("test-junit"))
         }
         iosMain.dependencies {
@@ -165,6 +216,9 @@ nativeJvmTestResources.orNull?.let { resourcesDirectory ->
     tasks.named<ProcessResources>("jvmTestProcessResources") {
         from(resourcesDirectory)
     }
+}
+tasks.named<ProcessResources>("jvmTestProcessResources") {
+    from(rootProject.file("mediaplayer-kmediabridge/src/jvmTest/resources"))
 }
 
 tasks.matching { it.name.startsWith("link") && it.name.endsWith("IosArm64") }.configureEach {
@@ -224,6 +278,11 @@ tasks.named("check") {
 
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+tasks.named<Test>("jvmTest") {
+    // Each load-order test needs a fresh process because the shared runtime is
+    // intentionally process-global and rejects replacement after initialization.
+    forkEvery = 1
 }
 
 val consumerSmokeRepository = rootProject.layout.buildDirectory.dir("consumer-repository")

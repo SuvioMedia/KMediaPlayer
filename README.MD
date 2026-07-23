@@ -111,7 +111,7 @@ Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlaye
 
 > § Wasm loads the exact `@shusek/movi-player@0.3.5-kmp.2` headless engine from a versioned CDN URL at runtime. MoviPlayer and its media Wasm are not bundled in KMediaPlayer artifacts. The fork preserves upstream attribution and ships notices, corresponding source, build recipes and relinking instructions for its LGPL FFmpeg/Wasm payload. Container support still depends on the codecs and browser primitives available at runtime. `WebPlaybackEngine.LEGACY` uses native HTML video only and rejects recognized HLS, DASH and MSS manifests; it does not contain an independent adaptive-streaming fallback.
 
-> † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC, or the explicitly installed `composemediaplayer-kmediabridge` extension when the platform backend cannot demux the source directly. The default player contains no KMediaBridge or FFmpeg dependency. The optional bridge dynamically loads privately named LGPL FFmpeg libraries in-process—there is no `ffmpeg`/`ffprobe` executable or system installation. It remuxes compatible local video/audio into bounded-memory CMAF/HLS without re-encoding; the macOS runtime can also tone-map explicit HDR10/HDR10+/HLG to limited-range BT.709 for `FORCE_SDR` and burn embedded text subtitles for confirmed SDR input. Strictly validated HEVC Main 10 HDR10/HDR10+/HLG remains tagged as an HDR sample-copy route under HDR-preserving policies; the platform color pipeline still has to confirm the decoder, surface and display before reporting HDR output. Unsupported conversion requests fail closed or use an explicitly available VLC fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
+> † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC, or the explicitly installed `composemediaplayer-kmediabridge` extension when the platform backend cannot demux the source directly. The default player contains no KMediaBridge or FFmpeg dependency. The optional bridge uses the process-wide `KMediaFfmpegRuntime`, shared with the MPV adapter; there is no `ffmpeg`/`ffprobe` executable or system installation. Its exact runtime dependency also supplies the single shared libass, FreeType, FriBidi and HarfBuzz stack. The bridge remuxes compatible local video/audio into bounded-memory CMAF/HLS without re-encoding; the macOS runtime can also tone-map explicit HDR10/HDR10+/HLG to limited-range BT.709 for `FORCE_SDR` and burn embedded text subtitles for confirmed SDR input. Strictly validated HEVC Main 10 HDR10/HDR10+/HLG remains tagged as an HDR sample-copy route under HDR-preserving policies; the platform color pipeline still has to confirm the decoder, surface and display before reporting HDR output. Unsupported conversion requests fail closed or use an explicitly available VLC fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
 > HDR recognition is not treated as proof of HDR output. In particular, a libVLC native child view on Windows or Linux is not a confirmed HDR route. `AUTO` uses a verified SDR tone-map when the native HDR requirements are unavailable, while `REQUIRE_HDR` returns a typed color-pipeline error. See [HDR pipeline and platform status](docs/hdr-pipeline.md).
 
@@ -274,11 +274,11 @@ discontinuity timestamp mapping, and a non-independent seek restarts only from a
 - **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `3.0.x` line.
 - **Android:** the library is built and verified for `arm64-v8a` and `armeabi-v7a` with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Android x86/x86_64 is unsupported. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`; HDR still depends on the device and active display.
 - **Android MPV adapter:** `composemediaplayer-mpv` uses `minSdk = 28` and publishes ARM runtimes only.
-- **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. iOS applications must embed
-  a code-signed libmpv framework and select `MpvRuntimeSource.System` or `ExplicitPath`; native
-  code cannot be extracted from a Maven artifact into an iOS process at runtime.
-- **Windows MPV adapter:** supports application-supplied 64-bit libmpv on Java 25. The current
-  KMediaMpv desktop artifact does not bundle a Windows DLL.
+- **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. Its generated CocoaPod has an
+  exact dependency on the code-signed KMediaMpv client pod, which in turn pins the shared runtime;
+  native code is embedded by the application build and is never extracted at playback time.
+- **Windows MPV adapter:** the verified KMediaMpv desktop artifact supplies its 64-bit client DLLs
+  transitively on Java 25. Windows ARM64 is unsupported.
 - **iOS:** iOS 16.2 or newer is required. Published targets are `iosArm64` and `iosSimulatorArm64` only; Intel simulators are unsupported. An Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
 - **macOS JVM:** Apple Silicon and macOS 14 or newer are required by the native AVFoundation/Metal bridge.
 - **Windows JVM:** Windows 10 1809 (build 17763) or newer is required; confirmed HDR additionally requires an active Advanced Color output and the packaged P010/D3D11 presenter.
@@ -367,17 +367,8 @@ val playerState = rememberVideoPlayerState(backend)
 ```
 
 The default runtime source is the verified KMediaMpv bundle. Keep that default
-on Android, Linux, and Apple Silicon macOS. On Windows, install or ship a
-compatible 64-bit libmpv next to the application and select the platform loader:
-
-```kotlin
-val options = MpvPlaybackOptions(
-    runtimeSource = MpvRuntimeSource.System,
-)
-```
-
-If the DLL is not discoverable through the Windows loader, pass its absolute
-path explicitly:
+on Android, Linux, Apple Silicon macOS, and Windows x86_64. An application may
+still override it with an absolute, application-supplied libmpv path:
 
 ```kotlin
 val options = MpvPlaybackOptions(
@@ -387,24 +378,22 @@ val options = MpvPlaybackOptions(
 )
 ```
 
-On iOS, embed and code-sign a dynamic libmpv framework in the application. A
-linked framework can be resolved with `System`; the adapter also recognizes
-`KMediaMpv.framework/KMediaMpv`, `MPV.framework/MPV`, and
-`libmpv.framework/libmpv` under the app's `Frameworks` directory. Alternatively,
-pass the framework binary path from `NSBundle` using `ExplicitPath`. iOS rejects
-paths outside the signed application bundle.
+On iOS, use the generated `ComposeMediaPlayerMpv` pod so CocoaPods embeds and
+code-signs the exact `KMediaMpv`, `KMediaFfmpegRuntime`, and `KMediaAssRuntime`
+framework graph. The default `Bundled` source resolves that graph. An
+application-supplied framework can still be selected with `System` or an
+`ExplicitPath` inside the signed application bundle.
 
 `inspectMpvBackend()` reports a missing runtime, unsupported target, or rejected
 native payload without falling back silently. `rememberVideoPlayerState()`
 continues to select the normal platform backend.
 
 The verified bundled runtime supports Android API 28+ on `arm64-v8a` and
-`armeabi-v7a`, Linux on x86_64 and ARM64, and macOS on ARM64. Application-supplied
-runtime mode additionally supports Windows x86_64 and iOS device/simulator
-ARM64. Android x86, Android x86_64, macOS x86_64, Intel iOS simulators, and
-Windows ARM64 are not supported. The bundled runtime has networking disabled,
-so use local media and subtitle files. Desktop applications run on Java 25 with
-`--enable-native-access=ALL-UNNAMED`.
+`armeabi-v7a`, Linux on x86_64 and ARM64, macOS on ARM64, and Windows x86_64.
+The exact iOS pod supports ARM64 device/simulator. Android x86, Android x86_64,
+macOS x86_64, Intel iOS simulators, and Windows ARM64 are not supported. The
+bundled runtime has networking disabled, so use local media and subtitle files.
+Desktop applications run on Java 25 with `--enable-native-access=ALL-UNNAMED`.
 
 The core, default player, and adapter code remain under this repository's own
 license. The separately
@@ -997,11 +986,11 @@ if (playerState.isLoading) {
 
 ### Using Subtitles
 
-Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. The core also parses ASS/SSA timing and dialogue text, but authored styles, positioning and effects require the optional `composemediaplayer-ass` artifact plus `AssSubtitleExtension()`. That extension uses bundled libass on Android, Apple, Windows and Linux targets, and JASSUB/libass on browser Wasm. Windows and Linux users do not install libass separately. Other native routes keep the plain-dialogue fallback unless their playback backend supplies styled subtitle rendering. On desktop JVM, the libVLC MKV/WebM backends can expose and select embedded subtitle tracks. For the optional HLS container fallback, the macOS KMediaBridge runtime can burn selected embedded text tracks into controlled BT.709 SDR; remux-only platform runtimes use the optional VLC fallback when it is available.
+Compose Media Player supports adding subtitles from both URLs and local files. SRT and VTT subtitles are rendered using Compose, providing a uniform appearance across all platforms. The core also parses ASS/SSA timing and dialogue text, but authored styles, positioning and effects require the optional `composemediaplayer-ass` artifact plus `AssSubtitleExtension()`. On Android, Apple, Windows and Linux that adapter uses the separately published, process-wide `KMediaAssRuntime`; the MPV and KMediaBridge adapters reach the same text stack transitively through `KMediaFfmpegRuntime`. Browser Wasm keeps its JASSUB/libass integration. Windows and Linux users do not install libass separately. Other native routes keep the plain-dialogue fallback unless their playback backend supplies styled subtitle rendering. On desktop JVM, the libVLC MKV/WebM backends can expose and select embedded subtitle tracks. For the optional HLS container fallback, the macOS KMediaBridge runtime can burn selected embedded text tracks into controlled BT.709 SDR; remux-only platform runtimes use the optional VLC fallback when it is available.
 
 #### 🎯 Supported Formats
 
-The player supports SRT, VTT, ASS and SSA subtitle formats with automatic format detection. With `composemediaplayer-ass` installed and activated, Android, browser Wasm, Apple targets, and Windows/Linux JVM use the libass-backed routes described below. The optional JVM artifact already contains the Windows/Linux runtime. Without it, the core keeps its lightweight ASS/SSA dialogue fallback. A platform-specific backend, such as a native libVLC surface, may independently provide styled rendering.
+The player supports SRT, VTT, ASS and SSA subtitle formats with automatic format detection. With `composemediaplayer-ass` installed and activated, Android, browser Wasm, Apple targets, and Windows/Linux JVM use the libass-backed routes described below. Android and JVM resolve the exact shared runtime transitively; Apple uses the matching `KMediaAssRuntime` pod. Without the optional adapter, the core keeps its lightweight ASS/SSA dialogue fallback. A platform-specific backend, such as a native libVLC surface, may independently provide styled rendering.
 
 #### 🎯 Adding Subtitles from URL or Local File
 
@@ -1026,7 +1015,7 @@ when (val result = playerState.selectSubtitleTrack(track)) {
 
 #### Android ASS/SSA subtitles with libass
 
-The Android variant of the optional `composemediaplayer-ass` artifact includes libass 0.17.5 and its native runtime for `arm64-v8a` and `armeabi-v7a`; Intel Android ABIs are not published. Applications do not need another Maven repository. Add `AssSubtitleExtension()` to `VideoPlaybackOptions.extensions` to activate it. Media3 still owns playback and demuxing. The extension intercepts only the raw Matroska ASS/SSA packet format and renders it into a transparent screen-space overlay, while other Media3 subtitle formats keep their normal path.
+The Android variant of the optional `composemediaplayer-ass` artifact contains one thin renderer bridge for `arm64-v8a` and `armeabi-v7a`; Intel Android ABIs are not published. Its exact transitive dependency supplies `KMediaAssRuntime` 0.1.0-rc.3 with libass 0.17.5, FreeType, FriBidi and HarfBuzz. Applications do not need another Maven repository or a manual `runtimeOnly` dependency. Add `AssSubtitleExtension()` to `VideoPlaybackOptions.extensions` to activate it. Media3 still owns playback and demuxing. The extension intercepts only the raw Matroska ASS/SSA packet format and renders it into a transparent screen-space overlay, while other Media3 subtitle formats keep their normal path.
 
 The libass route supports:
 
@@ -1037,39 +1026,36 @@ The libass route supports:
 
 ASS script styles control this overlay, so `subtitleTextStyle` and `subtitleBackgroundColor` apply to the Compose subtitle renderer rather than restyling libass output. A custom `AndroidMediaSourceProvider` that returns a fully constructed `MediaSource` must preserve KMediaPlayer's subtitle parser/extractor setup; otherwise that custom source can flatten ASS into ordinary Media3 cues before the libass renderer sees it. Side-loaded SSA supplied directly to Media3 and HLS SSA retain Media3's fallback path.
 
-The native libraries, Android notices and LGPL replacement material live in the optional artifact,
-not in `composemediaplayer`.
+The thin renderer bridge lives in the optional adapter. Native text libraries,
+their notices, corresponding source and LGPL replacement material live once in
+`kmedia-ass-runtime-android`, not in `composemediaplayer-ass` or the base player.
 
 #### Windows and Linux ASS/SSA subtitles with libass
 
-On a 64-bit JVM, the optional component extracts and loads its packaged libass runtime through
-Java's Foreign Function API. The JAR includes x86_64 and ARM64 payloads for both systems (libass
-0.17.4 on Windows and 0.17.5 on Linux), with SHA-256 verification before native loading. Windows
-uses DirectWrite font discovery; Linux uses the desktop's normal fontconfig configuration. External
-ASS/SSA files are composited into writable BGRA video frames. Embedded Matroska ASS/SSA tracks
-exposed by the libVLC canvas backend use the built-in extractor and pass container font attachments
-to libass.
+On a 64-bit JVM, the optional component initializes the exact
+`kmedia-ass-runtime-desktop` dependency and resolves libass through Java's
+Foreign Function API. The adapter JAR itself contains no native libraries. The
+runtime publishes libass 0.17.5 for macOS ARM64, Linux x86_64/ARM64 and Windows
+x86_64, with SHA-256 verification before native loading. Windows uses
+DirectWrite font discovery; Linux uses the desktop's normal fontconfig
+configuration. External ASS/SSA files are composited into writable BGRA video
+frames. Embedded Matroska ASS/SSA tracks exposed by the libVLC canvas backend
+use the built-in extractor and pass container font attachments to libass.
 
-Users do not install libass or copy its native files. Register `AssSubtitleExtension()` and launch
-the application with native access enabled:
+Users do not install libass or copy its native files. Register
+`AssSubtitleExtension()` and launch the application with native access enabled:
 
 ```text
 --enable-native-access=ALL-UNNAMED
 ```
 
-An advanced deployment can override the packaged runtime by setting either the JVM property or
-environment variable to a compatible library file (or a directory containing it):
-
-```text
--Dcomposemediaplayer.ass.libraryPath=/opt/my-app/lib/libass.so.9
-KMEDIA_ASS_LIBRARY_PATH=C:\my-app\lib\libass-9.dll
-```
-
-The override must be set before the extension is first queried. If it cannot be loaded, the
-packaged runtime is used; a compatible system library is only the last recovery path. If loading,
-track extraction, or rendering fails, the player keeps its Compose or libVLC subtitle fallback.
-Native HDR/color and `LIBVLC_NATIVE` surfaces retain their platform subtitle path because they do
-not expose a writable CPU video frame.
+There is no system-libass fallback or single-library override. An advanced
+deployment can initialize one complete, compatible replacement directory with
+`KMediaAssRuntime.initialize(RuntimeSource.externalDirectory(...))` before any
+native client loads. A second runtime ID is rejected process-wide. If loading,
+track extraction, or rendering fails, the player keeps its Compose or libVLC
+subtitle fallback. Native HDR/color and `LIBVLC_NATIVE` surfaces retain their
+platform subtitle path because they do not expose a writable CPU video frame.
 
 #### Browser ASS/SSA subtitles with JASSUB/libass
 
