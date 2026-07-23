@@ -85,7 +85,7 @@ jobs:
           set -euo pipefail
           download="$RUNNER_TEMP/kmedia-ass-download"
           targets="$GITHUB_WORKSPACE/mediaplayer-ass/build/kmediaAssRuntimeAppleOutputs"
-          mkdir "$download" "$targets"
+          mkdir -p "$download" "$targets"
           gh release download "v$ASS_RUNTIME_VERSION" \
             --repo Shusek/KMediaFfmpegRuntime \
             --dir "$download" \
@@ -138,7 +138,7 @@ jobs:
           mpv_pod="$GITHUB_WORKSPACE/mediaplayer-mpv/build/kmediaMpvPod"
           ffmpeg_pod="$GITHUB_WORKSPACE/mediaplayer-mpv/build/kmediaFfmpegRuntimePod"
           ass_pod="$GITHUB_WORKSPACE/mediaplayer-mpv/build/kmediaAssRuntimePod"
-          mkdir "$mpv_download" "$runtime_download" "$mpv_pod" "$ffmpeg_pod" "$ass_pod"
+          mkdir -p "$mpv_download" "$runtime_download" "$mpv_pod" "$ffmpeg_pod" "$ass_pod"
 
           gh release download "v$MPV_VERSION" \
             --repo Shusek/KMediaMpv \
