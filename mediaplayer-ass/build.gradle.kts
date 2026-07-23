@@ -1032,13 +1032,15 @@ val validateReleaseVersion =
         doLast {
             val releaseVersion = inputs.properties.getValue("releaseVersion") as String
             val releaseGroup = inputs.properties.getValue("releaseGroup") as String
-            val stableSemver =
+            val semver =
                 Regex(
                     "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
+                        "(?:-(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)" +
+                        "(?:\\.(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*))*)?" +
                         "(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
                 )
-            check(stableSemver.matches(releaseVersion)) {
-                "ASS companion release version '$releaseVersion' must be stable major.minor.patch SemVer."
+            check(semver.matches(releaseVersion)) {
+                "ASS companion release version '$releaseVersion' must be immutable SemVer."
             }
             check(releaseVersion.substringBefore('.').toInt() >= 2) {
                 "The ASS companion belongs to KMediaPlayer 2.x and cannot be published as $releaseVersion."
