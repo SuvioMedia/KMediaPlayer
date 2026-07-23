@@ -207,7 +207,7 @@ class MoviPlaybackAdapterTest {
                 "license-value",
                 "https://license.example.test/widevine",
                 "license-value",
-                "host",
+                "",
                 "0",
             ).joinToString("|"),
             readFakeMoviConfiguration(player),
@@ -242,7 +242,7 @@ class MoviPlaybackAdapterTest {
                     "M|matroska%2Cwebm|12.5|2400000|Two%20languages",
                     "A|1|English|en|2|48000|128000|true|true",
                     "A|2|Polski|pl|2|48000|128000|false|false",
-                    "S|3|English%20CC|en|true|ass|text|blob%3Aembedded-ass|ass",
+                    "S|3|English%20CC|en|true|s_text%2Fass|text",
                     "V|-1|av1|1920|1080|24|2100000|yuv420p10le|bt2020|smpte2084|bt2020nc|tv|true|true",
                     "V|7|av1|1920|1080|24|2100000|yuv420p10le|bt2020|smpte2084|bt2020nc|tv|true|false",
                     "C|0|5|Intro|pl|true|chapter-1",
@@ -258,7 +258,7 @@ class MoviPlaybackAdapterTest {
             assertEquals(listOf("en", "pl"), state.availableAudioTracks.map(AudioTrack::language))
             assertEquals("${MOVI_AUDIO_TRACK_ID_PREFIX}1", state.currentAudioTrack?.id)
             assertEquals(1, state.availableSubtitleTracks.count(SubtitleTrack::isEmbedded))
-            assertEquals("blob:embedded-ass", state.currentSubtitleTrack?.src)
+            assertEquals("${MOVI_SUBTITLE_TRACK_ID_PREFIX}3", state.currentSubtitleTrack?.src)
             assertEquals(SubtitleFormat.ASS, state.currentSubtitleTrack?.format)
             assertEquals(2, state.chapters.size)
             assertEquals("pl", state.chapters.first().language)
@@ -383,27 +383,42 @@ class MoviPlaybackAdapterTest {
 
     @Test
     @OptIn(ExperimentalWasmJsInterop::class)
-    fun embeddedTextExportCreatesBlobAndPublishesFontsToMoviCanvas() =
+    fun embeddedSubtitleSelectionUsesMoviContractWithoutExportingABlob() =
         runTest {
             val player = createTransactionalTrackPlayer()
-            val canvas = document.createElement("canvas") as HTMLCanvasElement
             val selected = CompletableDeferred<Pair<String, String?>>()
-            try {
-                selectMoviSubtitleTrack(
-                    player = player,
-                    canvas = canvas,
-                    trackId = 3,
-                ) { status, message -> selected.complete(status to message) }
+            selectMoviSubtitleTrack(
+                player = player,
+                trackId = 3,
+            ) { status, message -> selected.complete(status to message) }
 
-                assertEquals("success" to null, selected.await())
-                assertEquals(
-                    listOf("3", "ass", "true", "1", "true").joinToString("|"),
-                    readTransactionalMoviSubtitleExport(player, canvas),
-                )
-            } finally {
-                releaseTransactionalMoviSubtitleExports(player)
-            }
+            assertEquals("success" to null, selected.await())
+            assertEquals("3", readTransactionalMoviActiveSubtitle(player))
         }
+
+    @Test
+    @OptIn(ExperimentalWasmJsInterop::class)
+    fun pluggableSubtitleRendererIsMountedOnTheMoviOverlayWithInitialDelay() {
+        val canvas = createMountedMoviCanvas()
+        val player = createSubtitleSurfacePlayer()
+        val renderer = createSubtitleSurfaceRenderer()
+        try {
+            attachMoviSubtitleSurface(
+                player = player,
+                canvas = canvas,
+                renderer = renderer,
+                subtitleDelaySeconds = 1.25,
+            )
+
+            assertEquals(
+                "true|true|1.25|1.25",
+                readSubtitleSurfaceState(player, renderer),
+            )
+        } finally {
+            releaseSubtitleSurface(player)
+            canvas.parentElement?.remove()
+        }
+    }
 
     @Test
     @OptIn(ExperimentalWasmJsInterop::class)
@@ -411,6 +426,7 @@ class MoviPlaybackAdapterTest {
         runTest {
             val module = createFakeMoviModule()
             val state = createVideoPlayerState() as DefaultVideoPlayerState
+            val canvas = createMountedMoviCanvas()
             var session: MoviPlaybackSession? = null
             try {
                 state.openUri("https://media.example.test/movie.mkv", InitialPlayerState.PAUSE)
@@ -418,7 +434,7 @@ class MoviPlaybackAdapterTest {
                     MoviPlaybackSession(
                         playerState = state,
                         mediaSessionId = state.mediaSessionId,
-                        canvas = document.createElement("canvas") as HTMLCanvasElement,
+                        canvas = canvas,
                         onNativeVideoElement = {},
                         onVideoRatio = {},
                         moduleLoader = { module },
@@ -444,6 +460,7 @@ class MoviPlaybackAdapterTest {
             } finally {
                 session?.destroy()
                 state.dispose()
+                canvas.parentElement?.remove()
             }
         }
 
@@ -511,7 +528,7 @@ class MoviPlaybackAdapterTest {
         runTest {
             val module = createFakeMoviModule()
             val state = createVideoPlayerState() as DefaultVideoPlayerState
-            val canvas = document.createElement("canvas") as HTMLCanvasElement
+            val canvas = createMountedMoviCanvas()
             val firstSessionId: Long
             val firstSession: MoviPlaybackSession
             try {
@@ -592,6 +609,7 @@ class MoviPlaybackAdapterTest {
                 }
             } finally {
                 state.dispose()
+                canvas.parentElement?.remove()
             }
         }
 
@@ -787,6 +805,28 @@ private fun createFakeMoviModule(): JsAny =
                 setVRProjection() {}
                 resizeCanvas() {}
                 getHLSVideoElement() { return null; }
+                setSubtitleOverlay(overlay) {
+                    this.subtitleOverlay = overlay;
+                }
+                setSubtitleRenderer(renderer) {
+                    this.subtitleRenderer = renderer;
+                    if (
+                        renderer &&
+                        this.subtitleOverlay &&
+                        typeof renderer.mount === "function"
+                    ) {
+                        renderer.mount(this.subtitleOverlay);
+                    }
+                }
+                setSubtitleDelay(seconds) {
+                    this.subtitleDelay = Number(seconds);
+                    if (
+                        this.subtitleRenderer &&
+                        typeof this.subtitleRenderer.setDelay === "function"
+                    ) {
+                        this.subtitleRenderer.setDelay(this.subtitleDelay);
+                    }
+                }
 
                 destroy() {
                     this.destroyCount += 1;
@@ -857,22 +897,6 @@ private fun createTransactionalTrackPlayer(): JsAny =
                     });
                 }
                 return Promise.resolve({ kind: request.kind, status: "not-supported" });
-            },
-            exportEmbeddedTextTrack: function(trackId) {
-                return Promise.resolve({
-                    trackId: trackId,
-                    format: "ass",
-                    content: "[Script Info]\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hej\n",
-                    attachments: [
-                        {
-                            name: "Example.ttf",
-                            mimeType: "font/ttf",
-                            kind: "font",
-                            data: new Uint8Array([0, 1, 2, 3])
-                        }
-                    ],
-                    warnings: []
-                });
             }
         })
         """,
@@ -885,42 +909,7 @@ private fun readTransactionalMoviActiveAudio(player: JsAny): String =
 
 @Suppress("UNUSED_PARAMETER")
 @OptIn(ExperimentalWasmJsInterop::class)
-private fun readTransactionalMoviSubtitleExport(
-    player: JsAny,
-    canvas: HTMLCanvasElement,
-): String =
-    js(
-        """
-        (function() {
-            const exported = player.__composeMediaPlayerSubtitleExports.get(3);
-            const fonts = canvas.__composeMediaPlayerMkvFontFiles || [];
-            return [
-                player.activeSubtitleId,
-                exported && exported.format,
-                !!(exported && typeof exported.url === "string" && exported.url.indexOf("blob:") === 0),
-                fonts.length,
-                fonts[0] instanceof File
-            ].join("|");
-        })()
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-@OptIn(ExperimentalWasmJsInterop::class)
-private fun releaseTransactionalMoviSubtitleExports(player: JsAny): Unit =
-    js(
-        """
-        {
-            const exports = player.__composeMediaPlayerSubtitleExports;
-            if (exports) {
-                exports.forEach(function(value) {
-                    if (value && value.url) URL.revokeObjectURL(value.url);
-                });
-                exports.clear();
-            }
-        }
-        """,
-    )
+private fun readTransactionalMoviActiveSubtitle(player: JsAny): String = js("String(player.activeSubtitleId)")
 
 @Suppress("UNUSED_PARAMETER")
 @OptIn(ExperimentalWasmJsInterop::class)
@@ -1016,3 +1005,87 @@ private fun fakeMoviDestroyCount(player: JsAny): Int = js("player.destroyCount")
 @Suppress("UNUSED_PARAMETER")
 @OptIn(ExperimentalWasmJsInterop::class)
 private fun readFakeMoviSubtitleSelections(player: JsAny): String = js("player.selectedSubtitleIds.join('|')")
+
+private fun createMountedMoviCanvas(): HTMLCanvasElement {
+    val container = document.createElement("div")
+    val canvas = document.createElement("canvas") as HTMLCanvasElement
+    container.appendChild(canvas)
+    document.body?.appendChild(container)
+    return canvas
+}
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun createSubtitleSurfacePlayer(): JsAny =
+    js(
+        """
+        ({
+            overlay: null,
+            renderer: null,
+            delay: 0,
+            setSubtitleOverlay: function(overlay) {
+                this.overlay = overlay;
+            },
+            setSubtitleRenderer: function(renderer) {
+                this.renderer = renderer;
+                if (renderer && typeof renderer.mount === "function") {
+                    renderer.mount(this.overlay);
+                }
+            },
+            setSubtitleDelay: function(seconds) {
+                this.delay = Number(seconds);
+                if (this.renderer && typeof this.renderer.setDelay === "function") {
+                    this.renderer.setDelay(this.delay);
+                }
+            }
+        })
+        """,
+    )
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun createSubtitleSurfaceRenderer(): JsAny =
+    js(
+        """
+        ({
+            mounted: null,
+            delay: 0,
+            mount: function(container) {
+                this.mounted = container;
+            },
+            setDelay: function(seconds) {
+                this.delay = Number(seconds);
+            }
+        })
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun readSubtitleSurfaceState(
+    player: JsAny,
+    renderer: JsAny,
+): String =
+    js(
+        """
+        [
+            String(Boolean(player.overlay && player.overlay.parentElement)),
+            String(renderer.mounted === player.overlay),
+            String(player.delay),
+            String(renderer.delay)
+        ].join("|")
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+@OptIn(ExperimentalWasmJsInterop::class)
+private fun releaseSubtitleSurface(player: JsAny): Unit =
+    js(
+        """
+        {
+            if (player.overlay && player.overlay.parentElement) {
+                player.overlay.remove();
+            }
+            player.overlay = null;
+            player.renderer = null;
+        }
+        """,
+    )

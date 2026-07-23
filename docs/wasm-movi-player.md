@@ -4,16 +4,18 @@
 
 The Wasm target imports the headless KMediaPlayer integration fork on demand from the exact,
 immutable jsDelivr URL
-`https://cdn.jsdelivr.net/gh/Shusek/movi-player@v0.3.5-kmp.1/cdn/engine.js`. The fork is based on
-upstream MoviPlayer 0.3.5 and adds stable host integration contracts while preserving the upstream
-Apache-2.0 license and attribution. KMediaPlayer does not use Movi's web component and does not
-vendor, patch, install, or bundle the package. The external module import promise is cached by URL
-for the page lifetime, while each media source receives a new `MoviPlaybackSession`.
+`https://cdn.jsdelivr.net/gh/Shusek/movi-player@v0.3.5-kmp.2/cdn/engine.js`. The fork is based on
+upstream's `feat/pluggable-subtitle-renderer` branch at commit
+`5a8e796e1c04b61b59412580b3a2bbb3ea6ba3ac` and adds stable host integration contracts while
+preserving the upstream Apache-2.0 license and attribution. KMediaPlayer does not use Movi's web
+component and does not vendor, patch, install, or bundle the package. The external module import
+promise is cached by URL for the page lifetime, while each media source receives a new
+`MoviPlaybackSession`.
 
 Applications can replace the URL before opening the first Movi source:
 
 ```kotlin
-WebMediaDependencyConfig.moviPlayerModuleUrl = "/vendor/movi-player-0.3.5-kmp.1/engine.js"
+WebMediaDependencyConfig.moviPlayerModuleUrl = "/vendor/movi-player-0.3.5-kmp.2/engine.js"
 ```
 
 The configured resource is executable code. It must be a public, compatible ES module at an
@@ -22,7 +24,7 @@ allow the selected origin.
 
 `DefaultVideoPlayerState`, Compose controls, overlays, fullscreen, external subtitles, events and
 diagnostics remain the application-facing API. `renderingInfo.backend` identifies the active route
-as either `@shusek/movi-player 0.3.5-kmp.1` or `HTML5 video (legacy)`.
+as either `@shusek/movi-player 0.3.5-kmp.2` or `HTML5 video (legacy)`.
 
 | Request | Effective Wasm route |
 |---|---|
@@ -65,10 +67,10 @@ surface and output color evidence remain unknown; an `isHDR` flag alone never co
 Embedded bitmap subtitles stay inside Movi. External SRT/VTT timing remains in KMediaPlayer's
 Compose overlay. When `AssSubtitleExtension()` is installed, external ASS/SSA uses JASSUB with both
 engines: clear Movi playback drives JASSUB's canvas-only mode from the Movi clock, and DRM uses the
-native video element. For an embedded ASS/SSA track, Movi exports the selected stream and bounded
-container font attachments through its host-rendering contract. KMediaPlayer turns those bytes into
-runtime Blob/File objects for JASSUB and revokes them when the session ends; it does not demux the
-source a second time.
+native video element. For embedded ASS/SSA, Movi mounts the extension through its pluggable
+subtitle-renderer contract, passes codec headers and bounded font attachments once, then forwards
+each raw Matroska packet with its PTS and duration. KMediaPlayer converts the packet to a complete
+ASS `Dialogue:` event in memory and feeds it to JASSUB; no Blob export or second demux pass exists.
 
 ## Verification matrix
 
@@ -78,7 +80,7 @@ The following checks are part of the repository:
 |---|---|
 | Routing, fail-closed DRM/color combinations, redaction and model mapping | Automated Wasm unit test |
 | Audio accept/reject semantics and rapid repeated switches | Automated Wasm unit test |
-| External or exported embedded ASS selection disables Movi text rendering; JASSUB receives the Movi clock, canvas dimensions and container fonts | Automated Wasm browser tests |
+| External or pluggable embedded ASS selection gives one renderer ownership; JASSUB receives raw packets, the Movi clock, canvas dimensions and bounded container fonts | Automated Wasm browser tests |
 | Real CDN module with a generated MKV containing `en` and `pl` Opus tracks, real switch, continued playback and seek | Blocking Chrome test |
 | Real CDN module with MP4, WebM, a browser Blob URL and a direct FileKit browser `File` | Blocking Chrome test |
 | Real CDN module with HLS and DASH served from deterministic local manifests and segments | Blocking Chrome test |
@@ -101,9 +103,9 @@ loads its demux/decoder Wasm and adaptive-engine chunks on demand for the select
 forced to `LEGACY` performs no Movi request.
 
 The production sample built from this change contains only the pinned URL and adapter code: no
-Movi, FFmpeg, dav1d or adaptive-engine chunk signature is present. At Brotli quality 11, the main
-JavaScript plus four emitted Wasm assets total 5,075,038 bytes, compared with 5,072,197 bytes at
-baseline commit `b78c3076`—an increase of 2,841 bytes.
+Movi, FFmpeg, dav1d or adaptive-engine payload is present. At Brotli quality 11, the main JavaScript
+plus four emitted Wasm assets total 5,081,983 bytes. That is 6,945 bytes above the recorded
+`0.3.5-kmp.1` adapter build and 9,786 bytes above baseline commit `b78c3076`.
 
 Chrome and Edge are release-blocking. Firefox and Safari run the same exact-CDN-module smoke class in
 dedicated `continue-on-error` jobs for the first integration release. Their reports are retained as
@@ -112,13 +114,13 @@ The browser can also be selected locally with
 `-PcomposeMediaPlayer.wasmTestBrowser=chrome|firefox|safari`. Canvas PiP and full Movi
 HDR/projection parity are explicitly non-blocking.
 
-Release verification on 2026-07-20 passed the complete Chrome suite with both `MOVI` and `LEGACY`;
-the `MOVI` run imported the external module from the configured CDN. The blocking Microsoft Edge
-job also passed the exact-CDN-module smoke suite. Firefox Headless passed four of five real-package
-scenarios, including MKV dual-audio switching and seek; only the combined adaptive test failed when
-the DASH route rejected H.264/AAC representations that the runner reported as unsupported. The
-hosted Safari runner did not capture Safari within Karma's retry budget, so it executed no playback
-tests and Safari remains unverified for this release.
+For the preceding `0.3.5-kmp.1` engine release, verification on 2026-07-20 passed the complete
+Chrome suite with both `MOVI` and `LEGACY`; the `MOVI` run imported the external module from the
+configured CDN. The blocking Microsoft Edge job also passed the exact-CDN-module smoke suite.
+Firefox Headless passed four of five real-package scenarios, including MKV dual-audio switching and
+seek; only the combined adaptive test failed when the DASH route rejected H.264/AAC representations
+that the runner reported as unsupported. The hosted Safari runner did not capture Safari within
+Karma's retry budget, so it executed no playback tests.
 
 ## Release and dependency policy
 

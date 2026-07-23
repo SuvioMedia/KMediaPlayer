@@ -110,7 +110,7 @@ internal class MoviPlaybackSession(
             val numericId = requestedTrack?.id?.removePrefix(MOVI_SUBTITLE_TRACK_ID_PREFIX)?.toIntOrNull()
             val selectionGeneration = ++subtitleSelectionGeneration
             val confirmEmbeddedTrack = requestedTrack?.isEmbedded == true
-            selectMoviSubtitleTrack(activePlayer, canvas, numericId) { status, message ->
+            selectMoviSubtitleTrack(activePlayer, numericId) { status, message ->
                 if (!isCurrent()) return@selectMoviSubtitleTrack
                 if (selectionGeneration != subtitleSelectionGeneration) return@selectMoviSubtitleTrack
                 when (status) {
@@ -185,6 +185,28 @@ internal class MoviPlaybackSession(
                             ?.browserRequestHeadersJsonObjectString()
                             .orEmpty(),
                 )
+            var createdSubtitleRenderer: JsAny? = null
+            for (extension in playerState.webSubtitlePipelineExtensions) {
+                try {
+                    createdSubtitleRenderer =
+                        extension.createMoviEmbeddedSubtitleRenderer(::reportError)
+                } catch (error: Throwable) {
+                    reportError(error.message ?: "The embedded subtitle renderer could not be created.")
+                }
+                if (createdSubtitleRenderer != null) break
+            }
+            try {
+                attachMoviSubtitleSurface(
+                    player = createdPlayer,
+                    canvas = canvas,
+                    renderer = createdSubtitleRenderer,
+                    subtitleDelaySeconds =
+                        -playerState.subtitleOffset.inWholeMilliseconds / MILLIS_PER_SECOND,
+                )
+            } catch (error: Throwable) {
+                destroyMoviPlayer(createdPlayer)
+                throw error
+            }
             if (destroyed || !isCurrent()) {
                 destroyMoviPlayer(createdPlayer)
                 return
@@ -251,6 +273,17 @@ internal class MoviPlaybackSession(
     fun applyProjection(projection: VideoProjectionSettings) {
         requestedProjection = projection
         currentPlayer()?.let { activePlayer -> applyProjectionToPlayer(activePlayer, projection) }
+    }
+
+    fun applySubtitleOffset(offset: kotlin.time.Duration) {
+        currentPlayer()?.let { activePlayer ->
+            // KMediaPlayer's positive offset advances cues; Movi follows the
+            // VLC convention where a positive delay presents them later.
+            setMoviSubtitleDelay(
+                player = activePlayer,
+                seconds = -offset.inWholeMilliseconds / MILLIS_PER_SECOND,
+            )
+        }
     }
 
     fun seekPending() {
@@ -565,22 +598,13 @@ internal fun parseMoviSnapshotRows(rows: String): MoviMediaSnapshot {
             "S" -> {
                 val numericId = columns.getOrNull(1)?.toIntOrNull() ?: return@forEach
                 val id = "$MOVI_SUBTITLE_TRACK_ID_PREFIX$numericId"
-                val exportedSource = columns.getOrNull(7).orEmpty().ifBlank { null }
                 subtitleTracks +=
                     SubtitleTrack(
                         id = id,
                         label = columns.getOrNull(2).orEmpty().ifBlank { "Subtitle ${subtitleTracks.size + 1}" },
                         language = columns.getOrNull(3).orEmpty(),
-                        src = exportedSource ?: id,
-                        format =
-                            exportedSource
-                                ?.let {
-                                    columns
-                                        .getOrNull(8)
-                                        .orEmpty()
-                                        .toMoviSubtitleFormat(columns.getOrNull(5))
-                                }
-                                ?: SubtitleFormat.AUTO,
+                        src = id,
+                        format = columns.getOrNull(5).orEmpty().toMoviSubtitleFormat(columns.getOrNull(5)),
                         isEmbedded = true,
                     )
                 if (columns.getOrNull(4).orEmpty().toMoviBoolean()) activeSubtitleTrackId = id
@@ -646,14 +670,14 @@ internal fun parseMoviSnapshotRows(rows: String): MoviMediaSnapshot {
 
 private fun String.toMoviSubtitleFormat(codec: String?): SubtitleFormat =
     when (lowercase()) {
-        "ass" -> SubtitleFormat.ASS
-        "ssa" -> SubtitleFormat.SSA
+        "ass", "s_text/ass" -> SubtitleFormat.ASS
+        "ssa", "s_text/ssa" -> SubtitleFormat.SSA
         "srt", "text" -> SubtitleFormat.SRT
         "webvtt", "vtt" -> SubtitleFormat.WEBVTT
         else ->
             when (codec.orEmpty().lowercase()) {
-                "ass" -> SubtitleFormat.ASS
-                "ssa" -> SubtitleFormat.SSA
+                "ass", "s_text/ass" -> SubtitleFormat.ASS
+                "ssa", "s_text/ssa" -> SubtitleFormat.SSA
                 "subrip", "srt" -> SubtitleFormat.SRT
                 "webvtt", "vtt" -> SubtitleFormat.WEBVTT
                 else -> SubtitleFormat.AUTO
@@ -899,8 +923,7 @@ internal fun createMoviPlayer(
                 decoder: "auto",
                 canvas: canvas,
                 headers: mediaHeaders,
-                logger: { level: 0 },
-                embeddedTextSubtitleRenderer: "host"
+                logger: { level: 0 }
             };
             if (drmEnabled) {
                 config.drm = true;
@@ -913,6 +936,55 @@ internal fun createMoviPlayer(
             }
             return new MoviPlayer(config);
         })()
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+internal fun attachMoviSubtitleSurface(
+    player: JsAny,
+    canvas: HTMLCanvasElement,
+    renderer: JsAny?,
+    subtitleDelaySeconds: Double,
+): Unit =
+    js(
+        """
+        {
+            // Record renderer ownership before validating the surface. If any
+            // required engine hook is absent, the caller destroys the player
+            // and this renderer through the same idempotent cleanup path.
+            player.__composeMediaPlayerSubtitleRenderer = renderer || null;
+            player.__composeMediaPlayerSubtitleOverlay = null;
+            const parent = canvas.parentElement;
+            if (!parent) {
+                throw new Error("Movi subtitle surface requires a mounted canvas.");
+            }
+            if (typeof player.setSubtitleOverlay !== "function") {
+                throw new Error(
+                    "The configured Movi engine does not expose setSubtitleOverlay()."
+                );
+            }
+            if (renderer && typeof player.setSubtitleRenderer !== "function") {
+                throw new Error(
+                    "The configured Movi engine does not expose setSubtitleRenderer()."
+                );
+            }
+            const overlay = document.createElement("div");
+            overlay.setAttribute("aria-hidden", "true");
+            overlay.style.position = "absolute";
+            overlay.style.inset = "0";
+            overlay.style.pointerEvents = "none";
+            overlay.style.overflow = "hidden";
+            overlay.style.zIndex = "2";
+            parent.appendChild(overlay);
+            player.__composeMediaPlayerSubtitleOverlay = overlay;
+            player.setSubtitleOverlay(overlay);
+            if (renderer) {
+                player.setSubtitleRenderer(renderer);
+            }
+            if (typeof player.setSubtitleDelay === "function") {
+                player.setSubtitleDelay(subtitleDelaySeconds);
+            }
+        }
         """,
     )
 
@@ -1042,9 +1114,6 @@ private fun readMoviSnapshotRows(player: JsAny): String =
 
             const subtitleTracks = player.getSubtitleTracks ? player.getSubtitleTracks() : [];
             (Array.isArray(subtitleTracks) ? subtitleTracks : []).forEach(function(track) {
-                const exported =
-                    player.__composeMediaPlayerSubtitleExports &&
-                    player.__composeMediaPlayerSubtitleExports.get(track.id);
                 rows.push(row([
                     "S",
                     track.id,
@@ -1052,9 +1121,7 @@ private fun readMoviSnapshotRows(player: JsAny): String =
                     track.language,
                     activeSubtitle && activeSubtitle.id === track.id,
                     track.codec,
-                    track.subtitleType,
-                    exported && exported.url,
-                    exported && exported.format
+                    track.subtitleType
                 ]));
             });
 
@@ -1250,17 +1317,15 @@ private fun selectLegacyMoviAudioTrack(
         """,
     )
 
-@Suppress("LongMethod", "UNUSED_PARAMETER")
+@Suppress("UNUSED_PARAMETER")
 internal fun selectMoviSubtitleTrack(
     player: JsAny,
-    canvas: HTMLCanvasElement,
     trackId: Int?,
     onResult: (String, String?) -> Unit,
 ): Unit =
     js(
         """
         {
-            player.__composeMediaPlayerSubtitleFontCarrier = canvas;
             const generation =
                 Number(player.__composeMediaPlayerSubtitleSelectionGeneration || 0) + 1;
             player.__composeMediaPlayerSubtitleSelectionGeneration = generation;
@@ -1268,126 +1333,19 @@ internal fun selectMoviSubtitleTrack(
                 return !player.__composeMediaPlayerDestroyed &&
                     player.__composeMediaPlayerSubtitleSelectionGeneration === generation;
             };
-            const updateFonts = function(fonts) {
-                canvas.__composeMediaPlayerMkvFontFiles = Array.isArray(fonts) ? fonts : [];
-                try {
-                    canvas.dispatchEvent(
-                        new CustomEvent("${MOVI_MKV_FONTS_CHANGED_EVENT}")
-                    );
-                } catch (_) {}
-            };
-            const finishSelectedTrack = function() {
-                if (!isCurrent()) {
-                    onResult("${MOVI_SELECTION_SUPERSEDED}", null);
-                    return;
-                }
-                if (trackId == null) {
-                    updateFonts([]);
-                    onResult("${MOVI_SELECTION_SUCCESS}", null);
-                    return;
-                }
-
-                const tracks = player.getSubtitleTracks ? player.getSubtitleTracks() : [];
-                const track = (Array.isArray(tracks) ? tracks : []).find(function(candidate) {
-                    return candidate && candidate.id === trackId;
-                });
-                if (
-                    !track ||
-                    track.subtitleType !== "text" ||
-                    typeof player.exportEmbeddedTextTrack !== "function"
-                ) {
-                    updateFonts([]);
-                    onResult("${MOVI_SELECTION_SUCCESS}", null);
-                    return;
-                }
-
-                if (!player.__composeMediaPlayerSubtitleExports) {
-                    player.__composeMediaPlayerSubtitleExports = new Map();
-                }
-                const cached = player.__composeMediaPlayerSubtitleExports.get(trackId);
-                if (cached) {
-                    updateFonts(cached.fonts);
-                    onResult("${MOVI_SELECTION_SUCCESS}", null);
-                    return;
-                }
-
-                Promise.resolve(player.exportEmbeddedTextTrack(trackId))
-                    .then(function(exported) {
-                        if (!isCurrent()) {
-                            onResult("${MOVI_SELECTION_SUPERSEDED}", null);
-                            return;
-                        }
-                        const format = String(exported && exported.format || "text").toLowerCase();
-                        const mime =
-                            format === "ass" || format === "ssa"
-                                ? "text/x-ssa"
-                                : format === "webvtt"
-                                    ? "text/vtt"
-                                    : "application/x-subrip";
-                        const url = URL.createObjectURL(
-                            new Blob([String(exported && exported.content || "")], {
-                                type: mime + ";charset=utf-8"
-                            })
-                        );
-                        const attachments =
-                            exported && Array.isArray(exported.attachments)
-                                ? exported.attachments
-                                : [];
-                        const fonts = attachments
-                            .filter(function(attachment) {
-                                return attachment && attachment.kind === "font" && attachment.data;
-                            })
-                            .map(function(attachment, index) {
-                                return new File(
-                                    [attachment.data],
-                                    String(attachment.name || ("embedded-font-" + index)),
-                                    {
-                                        type: String(
-                                            attachment.mimeType || "application/octet-stream"
-                                        )
-                                    }
-                                );
-                            });
-                        player.__composeMediaPlayerSubtitleExports.set(trackId, {
-                            url: url,
-                            format: format,
-                            fonts: fonts
-                        });
-                        updateFonts(fonts);
-                        onResult("${MOVI_SELECTION_SUCCESS}", null);
-                    })
-                    .catch(function(error) {
-                        if (!isCurrent()) {
-                            onResult("${MOVI_SELECTION_SUPERSEDED}", null);
-                            return;
-                        }
-                        updateFonts([]);
-                        const rollback =
-                            typeof player.selectTrack === "function"
-                                ? player.selectTrack({ kind: "subtitle", trackId: null })
-                                : player.selectSubtitleTrack(null);
-                        Promise.resolve(rollback).finally(function() {
-                            const message =
-                                error && error.message ? error.message : String(error);
-                            onResult(
-                                "${MOVI_SELECTION_FAILED}",
-                                String(
-                                    message ||
-                                    "Movi could not export the embedded subtitle track."
-                                )
-                            );
-                        });
-                    });
-            };
             const selection =
                 typeof player.selectTrack === "function"
                     ? player.selectTrack({ kind: "subtitle", trackId: trackId })
                     : player.selectSubtitleTrack(trackId);
             Promise.resolve(selection)
                 .then(function(outcome) {
+                    if (!isCurrent()) {
+                        onResult("${MOVI_SELECTION_SUPERSEDED}", null);
+                        return;
+                    }
                     if (typeof player.selectTrack !== "function") {
                         if (outcome === true) {
-                            finishSelectedTrack();
+                            onResult("${MOVI_SELECTION_SUCCESS}", null);
                         } else {
                             onResult(
                                 "${MOVI_SELECTION_FAILED}",
@@ -1402,7 +1360,7 @@ internal fun selectMoviSubtitleTrack(
                         status === "unchanged" ||
                         status === "disabled"
                     ) {
-                        finishSelectedTrack();
+                        onResult("${MOVI_SELECTION_SUCCESS}", null);
                     } else if (status === "superseded") {
                         onResult("${MOVI_SELECTION_SUPERSEDED}", null);
                     } else {
@@ -1414,6 +1372,10 @@ internal fun selectMoviSubtitleTrack(
                     }
                 })
                 .catch(function(error) {
+                    if (!isCurrent()) {
+                        onResult("${MOVI_SELECTION_SUPERSEDED}", null);
+                        return;
+                    }
                     const message = error && error.message ? error.message : String(error);
                     onResult(
                         "${MOVI_SELECTION_FAILED}",
@@ -1469,6 +1431,21 @@ private fun setMoviVrProjection(
             if (typeof player.setVR360 === "function") player.setVR360(enabled);
             if (enabled && typeof player.setVRProjection === "function") {
                 player.setVRProjection(half, fisheye, stereoSbs, false);
+            }
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+private fun setMoviSubtitleDelay(
+    player: JsAny,
+    seconds: Double,
+): Unit =
+    js(
+        """
+        {
+            if (typeof player.setSubtitleDelay === "function") {
+                player.setSubtitleDelay(seconds);
             }
         }
         """,
@@ -1540,26 +1517,31 @@ private fun destroyMoviPlayer(player: JsAny): Unit =
             player.__composeMediaPlayerDestroyed = true;
             player.__composeMediaPlayerSubtitleSelectionGeneration =
                 Number(player.__composeMediaPlayerSubtitleSelectionGeneration || 0) + 1;
-            const subtitleExports = player.__composeMediaPlayerSubtitleExports;
-            if (subtitleExports && typeof subtitleExports.forEach === "function") {
-                subtitleExports.forEach(function(exported) {
-                    if (exported && exported.url) {
-                        try { URL.revokeObjectURL(exported.url); } catch (_) {}
-                    }
-                });
-                subtitleExports.clear();
-            }
-            player.__composeMediaPlayerSubtitleExports = null;
-            const fontCarrier = player.__composeMediaPlayerSubtitleFontCarrier;
-            if (fontCarrier) {
-                fontCarrier.__composeMediaPlayerMkvFontFiles = [];
+            const subtitleRenderer = player.__composeMediaPlayerSubtitleRenderer;
+            try {
+                if (typeof player.setSubtitleRenderer === "function") {
+                    player.setSubtitleRenderer(null);
+                }
+            } catch (_) {}
+            if (subtitleRenderer && typeof subtitleRenderer.destroy === "function") {
                 try {
-                    fontCarrier.dispatchEvent(
-                        new CustomEvent("${MOVI_MKV_FONTS_CHANGED_EVENT}")
-                    );
+                    const result = subtitleRenderer.destroy();
+                    if (result && typeof result.catch === "function") {
+                        result.catch(function() {});
+                    }
                 } catch (_) {}
             }
-            player.__composeMediaPlayerSubtitleFontCarrier = null;
+            player.__composeMediaPlayerSubtitleRenderer = null;
+            try {
+                if (typeof player.setSubtitleOverlay === "function") {
+                    player.setSubtitleOverlay(null);
+                }
+            } catch (_) {}
+            const subtitleOverlay = player.__composeMediaPlayerSubtitleOverlay;
+            if (subtitleOverlay && subtitleOverlay.parentElement) {
+                try { subtitleOverlay.remove(); } catch (_) {}
+            }
+            player.__composeMediaPlayerSubtitleOverlay = null;
             const subscriptions = player.__composeMediaPlayerSubscriptions || [];
             subscriptions.forEach(function(dispose) {
                 try { dispose(); } catch (_) {}
@@ -1586,4 +1568,3 @@ private const val MILLIS_PER_SECOND = 1000.0
 private const val MOVI_SELECTION_SUCCESS = "success"
 private const val MOVI_SELECTION_SUPERSEDED = "superseded"
 private const val MOVI_SELECTION_FAILED = "failed"
-private const val MOVI_MKV_FONTS_CHANGED_EVENT = "composemediaplayer:mkv-fonts-changed"

@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.js.ExperimentalWasmJsInterop::class)
+
 package io.github.kdroidfilter.composemediaplayer.ass
 
 import androidx.compose.runtime.Composable
@@ -12,6 +14,7 @@ import io.github.kdroidfilter.composemediaplayer.WebSubtitlePipelineExtension
 import io.github.kdroidfilter.composemediaplayer.assSubtitleRendererUnavailableReason
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
+import kotlin.js.JsAny
 
 actual class AssSubtitleExtension actual constructor(
     config: AssSubtitleRendererConfig,
@@ -30,6 +33,12 @@ actual class AssSubtitleExtension actual constructor(
         }
     actual override val supportedSubtitleFormats: Set<SubtitleFormat> =
         setOf(SubtitleFormat.ASS, SubtitleFormat.SSA)
+
+    override fun createMoviEmbeddedSubtitleRenderer(onError: (String) -> Unit): JsAny? =
+        createMoviAssSubtitleRenderer(
+            config = rendererConfig,
+            onError = onError,
+        )
 
     @Composable
     override fun SubtitleOverlay(

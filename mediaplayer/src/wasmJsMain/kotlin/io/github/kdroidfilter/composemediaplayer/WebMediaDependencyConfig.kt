@@ -15,7 +15,7 @@ object WebMediaDependencyConfig {
      * contain credentials.
      */
     var moviPlayerModuleUrl: String =
-        "https://cdn.jsdelivr.net/gh/Shusek/movi-player@v0.3.5-kmp.1/cdn/engine.js"
+        "https://cdn.jsdelivr.net/gh/Shusek/movi-player@v0.3.5-kmp.2/cdn/engine.js"
 
     /**
      * Browser bundle used for legacy embedded MKV subtitle extraction.

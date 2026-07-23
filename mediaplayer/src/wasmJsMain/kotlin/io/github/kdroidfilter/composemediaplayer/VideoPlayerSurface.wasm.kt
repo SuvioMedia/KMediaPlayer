@@ -210,7 +210,10 @@ private fun MoviWebVideoPlayerSurface(
 
     val surfaceMediaSessionId = playerState.mediaSessionId
     val subtitleTrack = playerState.currentSubtitleTrack
-    val subtitleExtension = playerState.activeWebSubtitleExtension(subtitleTrack)
+    val subtitleExtension =
+        playerState
+            .activeWebSubtitleExtension(subtitleTrack)
+            .takeIf { subtitleTrack?.isEmbedded != true }
     val scope = rememberCoroutineScope()
     var styledSubtitleActive by
         remember(surfaceMediaSessionId, subtitleTrack?.id, subtitleExtension?.id) {
@@ -293,14 +296,11 @@ private fun MoviWebVideoPlayerSurface(
         }
     }
 
-    LaunchedEffect(session, playerState.seekRequestId) {
-        session?.seekPending()
-    }
-    LaunchedEffect(session, playerState.projection, usesSdrProjectionCanvas) {
-        session?.applyProjection(
-            if (usesSdrProjectionCanvas) VideoProjectionSettings() else playerState.projection,
-        )
-    }
+    ApplyMoviSessionEffects(
+        session = session,
+        playerState = playerState,
+        usesSdrProjectionCanvas = usesSdrProjectionCanvas,
+    )
     SideEffect {
         session?.applyContentScale(contentScale)
         canvasElement?.applyMoviCanvasContentScale(contentScale)
@@ -356,6 +356,25 @@ private fun MoviWebVideoPlayerSurface(
                 onActiveChanged = { active -> styledSubtitleActive = active },
             )
         }
+    }
+}
+
+@Composable
+private fun ApplyMoviSessionEffects(
+    session: MoviPlaybackSession?,
+    playerState: DefaultVideoPlayerState,
+    usesSdrProjectionCanvas: Boolean,
+) {
+    LaunchedEffect(session, playerState.seekRequestId) {
+        session?.seekPending()
+    }
+    LaunchedEffect(session, playerState.subtitleOffset) {
+        session?.applySubtitleOffset(playerState.subtitleOffset)
+    }
+    LaunchedEffect(session, playerState.projection, usesSdrProjectionCanvas) {
+        session?.applyProjection(
+            if (usesSdrProjectionCanvas) VideoProjectionSettings() else playerState.projection,
+        )
     }
 }
 
