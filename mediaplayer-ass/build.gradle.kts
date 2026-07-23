@@ -8,6 +8,7 @@ import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import java.util.zip.ZipFile
@@ -171,13 +172,35 @@ kotlin {
     }
 
     listOf(
-        Triple(iosArm64(), iosArm64AppleNative, buildIosArm64AppleAss),
-        Triple(
-            iosSimulatorArm64(),
-            iosSimulatorArm64AppleNative,
-            buildIosSimulatorArm64AppleAss,
-        ),
-    ).forEach { (target, nativeOutput, _) ->
+        iosArm64() to
+            Triple(
+                iosArm64AppleNative,
+                buildIosArm64AppleAss,
+                "ios-arm64",
+            ),
+        iosSimulatorArm64() to
+            Triple(
+                iosSimulatorArm64AppleNative,
+                buildIosSimulatorArm64AppleAss,
+                "ios-simulator-arm64",
+            ),
+    ).forEach { (target, configuration) ->
+        val (nativeOutput, _, runtimeTarget) = configuration
+        val runtimeFrameworkDirectory =
+            assRuntimeAppleOutputs
+                .get()
+                .resolve(runtimeTarget)
+                .resolve("Frameworks")
+                .absolutePath
+
+        target.binaries.all {
+            linkerOpts("-F$runtimeFrameworkDirectory")
+        }
+        target.binaries.getTest(NativeBuildType.DEBUG).linkerOpts(
+            "-rpath",
+            runtimeFrameworkDirectory,
+        )
+
         target.compilations.getByName("main") {
             cinterops.create("appleAss") {
                 defFile(project.file("src/nativeInterop/cinterop/appleAss.def"))

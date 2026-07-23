@@ -46,6 +46,14 @@ class BackendDependencyBoundaryTest(unittest.TestCase):
         self.assertNotIn("kmedia-ffmpeg-runtime", source)
         self.assertNotIn("kmedia-ass-runtime", source)
 
+    def test_apple_ass_tests_link_the_exact_shared_runtime_payload(self) -> None:
+        source = (ROOT / "mediaplayer-ass/build.gradle.kts").read_text()
+        self.assertIn('.resolve("Frameworks")', source)
+        self.assertIn("target.binaries.all", source)
+        self.assertIn('linkerOpts("-F$runtimeFrameworkDirectory")', source)
+        self.assertIn("getTest(NativeBuildType.DEBUG).linkerOpts", source)
+        self.assertIn('"-rpath"', source)
+
 
 if __name__ == "__main__":
     unittest.main()
