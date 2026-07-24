@@ -4,9 +4,10 @@
 
 The Wasm target imports the headless KMediaPlayer integration fork on demand from the exact,
 immutable jsDelivr URL
-`https://cdn.jsdelivr.net/gh/Shusek/movi-player@v0.3.5-kmp.2/cdn/engine.js`. The fork is based on
-upstream's `feat/pluggable-subtitle-renderer` branch at commit
-`5a8e796e1c04b61b59412580b3a2bbb3ea6ba3ac` and adds stable host integration contracts while
+`https://cdn.jsdelivr.net/gh/Shusek/movi-player@v0.3.5-kmp.3/cdn/engine.js`. The fork is based on
+upstream's `develop` branch at commit
+`dfa30c95f59a8aa118b507639cff6ddb049878b8`, which includes the pluggable subtitle renderer merged
+in commit `9ae8e31d90f94861af3fb18a62484756b8e27a85`. It adds stable host integration contracts while
 preserving the upstream Apache-2.0 license and attribution. KMediaPlayer does not use Movi's web
 component and does not vendor, patch, install, or bundle the package. The external module import
 promise is cached by URL for the page lifetime, while each media source receives a new
@@ -15,7 +16,7 @@ promise is cached by URL for the page lifetime, while each media source receives
 Applications can replace the URL before opening the first Movi source:
 
 ```kotlin
-WebMediaDependencyConfig.moviPlayerModuleUrl = "/vendor/movi-player-0.3.5-kmp.2/engine.js"
+WebMediaDependencyConfig.moviPlayerModuleUrl = "/vendor/movi-player-0.3.5-kmp.3/engine.js"
 ```
 
 The configured resource is executable code. It must be a public, compatible ES module at an
@@ -24,7 +25,7 @@ allow the selected origin.
 
 `DefaultVideoPlayerState`, Compose controls, overlays, fullscreen, external subtitles, events and
 diagnostics remain the application-facing API. `renderingInfo.backend` identifies the active route
-as either `@shusek/movi-player 0.3.5-kmp.2` or `HTML5 video (legacy)`.
+as either `@shusek/movi-player 0.3.5-kmp.3` or `HTML5 video (legacy)`.
 
 | Request | Effective Wasm route |
 |---|---|
