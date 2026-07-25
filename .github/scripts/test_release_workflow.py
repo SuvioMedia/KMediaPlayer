@@ -3,6 +3,33 @@ from pathlib import Path
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
+    def test_automatic_builds_run_only_for_release_tags(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        build_test = (
+            repository_root / ".github/workflows/build-test.yml"
+        ).read_text(encoding="utf-8")
+        release = (
+            repository_root / ".github/workflows/publish-on-maven-central.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("on:\n  workflow_call:\n", build_test)
+        self.assertNotIn("\n  push:", build_test)
+        self.assertNotIn("\n  pull_request:", build_test)
+        self.assertIn("on:\n  push:\n    tags:\n      - 'v*'\n", release)
+        self.assertNotIn("\n    branches:", release)
+
+        for relative_path in (
+            ".github/workflows/build-documentation-and-sample.yml",
+            ".github/workflows/check-kotlin-js-npm-dependencies.yml",
+            ".github/workflows/publish-existing-tag-to-maven-central.yml",
+            ".github/workflows/verify-maven-central.yml",
+        ):
+            workflow = (repository_root / relative_path).read_text(encoding="utf-8")
+            self.assertIn("on:\n  workflow_dispatch:\n", workflow)
+            self.assertNotIn("\n  push:", workflow)
+            self.assertNotIn("\n  pull_request:", workflow)
+            self.assertNotIn("\n  schedule:", workflow)
+
     def test_shared_runtime_consumer_installs_android_native_toolchains(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         workflow = (

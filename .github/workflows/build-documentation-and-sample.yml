@@ -1,9 +1,6 @@
 name: Build Dokka Docs and Compose Example
 
 on:
-  push:
-    branches:
-      - master
   workflow_dispatch:
 
 permissions:
