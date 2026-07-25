@@ -77,13 +77,13 @@ class VerifyMavenPomsTest(unittest.TestCase):
   <version>{version}</version>
   <name>Test publication</name>
   <description>Test publication metadata.</description>
-  <url>https://github.com/Shusek/KMediaPlayer</url>
+  <url>https://github.com/SuvioMedia/KMediaPlayer</url>
   <developers><developer><id>Shusek</id><name>Shusek</name></developer></developers>
   <licenses><license><name>Test</name><url>https://example.test/license</url><distribution>repo</distribution></license></licenses>
   <scm>
-    <connection>scm:git:https://github.com/Shusek/KMediaPlayer.git</connection>
-    <developerConnection>scm:git:ssh://git@github.com/Shusek/KMediaPlayer.git</developerConnection>
-    <url>https://github.com/Shusek/KMediaPlayer</url>
+    <connection>scm:git:https://github.com/SuvioMedia/KMediaPlayer.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/SuvioMedia/KMediaPlayer.git</developerConnection>
+    <url>https://github.com/SuvioMedia/KMediaPlayer</url>
   </scm>
 </project>
 """,

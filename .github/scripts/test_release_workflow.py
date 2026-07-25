@@ -3,6 +3,33 @@ from pathlib import Path
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
+    def test_automatic_builds_run_only_for_release_tags(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        build_test = (
+            repository_root / ".github/workflows/build-test.yml"
+        ).read_text(encoding="utf-8")
+        release = (
+            repository_root / ".github/workflows/publish-on-maven-central.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("on:\n  workflow_call:\n", build_test)
+        self.assertNotIn("\n  push:", build_test)
+        self.assertNotIn("\n  pull_request:", build_test)
+        self.assertIn("on:\n  push:\n    tags:\n      - 'v*'\n", release)
+        self.assertNotIn("\n    branches:", release)
+
+        for relative_path in (
+            ".github/workflows/build-documentation-and-sample.yml",
+            ".github/workflows/check-kotlin-js-npm-dependencies.yml",
+            ".github/workflows/publish-existing-tag-to-maven-central.yml",
+            ".github/workflows/verify-maven-central.yml",
+        ):
+            workflow = (repository_root / relative_path).read_text(encoding="utf-8")
+            self.assertIn("on:\n  workflow_dispatch:\n", workflow)
+            self.assertNotIn("\n  push:", workflow)
+            self.assertNotIn("\n  pull_request:", workflow)
+            self.assertNotIn("\n  schedule:", workflow)
+
     def test_shared_runtime_consumer_installs_android_native_toolchains(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         workflow = (
@@ -18,12 +45,12 @@ class ReleaseWorkflowTest(unittest.TestCase):
             consumer_job,
         )
 
-    def test_release_workflows_wait_for_public_maven_central(self) -> None:
+    def test_release_workflows_wait_for_maven_central(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
-        verifier = ".github/scripts/verify_public_maven_release.sh"
+        verifier = ".github/scripts/verify_maven_central_release.sh"
         for relative_path in (
             ".github/workflows/publish-on-maven-central.yml",
-            ".github/workflows/publish-existing-release-to-maven-central.yml",
+            ".github/workflows/publish-existing-tag-to-maven-central.yml",
         ):
             workflow = (repository_root / relative_path).read_text(encoding="utf-8")
             publish_position = workflow.index("publishAndReleaseToMavenCentral")
@@ -55,7 +82,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertIn(f"mediaplayer-mpv/build/{pod}/", build_natives)
         for relative_path in (
             ".github/workflows/publish-on-maven-central.yml",
-            ".github/workflows/publish-existing-release-to-maven-central.yml",
+            ".github/workflows/publish-existing-tag-to-maven-central.yml",
         ):
             workflow = (repository_root / relative_path).read_text(encoding="utf-8")
             self.assertIn("pattern: apple-mpv-", workflow)
@@ -68,10 +95,10 @@ class ReleaseWorkflowTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertEqual(2, workflow.count("GH_TOKEN: ${{ github.token }}"))
 
-    def test_manual_public_maven_verifier_is_available(self) -> None:
+    def test_manual_maven_central_verifier_is_available(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         workflow = (
-            repository_root / ".github/workflows/verify-public-maven-central.yml"
+            repository_root / ".github/workflows/verify-maven-central.yml"
         ).read_text(encoding="utf-8")
         settings = (
             repository_root / ".github/public-maven-consumer/settings.gradle.kts"
@@ -81,7 +108,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("workflow_dispatch:", workflow)
-        self.assertIn("verify_public_maven_release.sh", workflow)
+        self.assertIn("verify_maven_central_release.sh", workflow)
         self.assertIn("mavenCentral()", settings)
         self.assertIn("composemediaplayer-mpv-jvm", build)
         self.assertIn("composemediaplayer-kmediabridge-jvm", build)
@@ -91,6 +118,32 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn("kmedia-ffmpeg-runtime-android", build)
         self.assertIn("kmedia-ass-runtime-desktop", build)
         self.assertIn("kmedia-ass-runtime-android", build)
+
+    def test_release_workflow_is_maven_central_only(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        release = (
+            repository_root / ".github/workflows/publish-on-maven-central.yml"
+        ).read_text(encoding="utf-8")
+        documentation = (
+            repository_root / ".github/workflows/build-documentation-and-sample.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("publishAllPublicationsToReleaseStagingRepository", release)
+        self.assertIn("publishAndReleaseToMavenCentral", release)
+        self.assertIn("Require Maven Central credentials", release)
+        for removed in (
+            "gh-pages",
+            "githubPagesMavenRepository",
+            "GithubPagesRepository",
+            "rebuild_maven_metadata.py",
+        ):
+            self.assertNotIn(removed, release)
+            self.assertNotIn(removed, documentation)
+
+        for build_file in repository_root.glob("*/build.gradle.kts"):
+            build = build_file.read_text(encoding="utf-8")
+            self.assertNotIn("githubPagesMavenRepository", build)
+            self.assertNotIn("GithubPagesRepository", build)
 
 
 if __name__ == "__main__":

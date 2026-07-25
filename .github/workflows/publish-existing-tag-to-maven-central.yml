@@ -1,10 +1,10 @@
-name: Publish Existing Release to Maven Central
+name: Publish Existing Tag to Maven Central
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable release tag, for example v2.0.0
+        description: Existing immutable version tag, for example v3.0.0
         required: true
         type: string
 
@@ -23,13 +23,13 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
-      - name: Checkout the immutable release tag
+      - name: Checkout the immutable version tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
 
-      - name: Validate the immutable release
+      - name: Validate the immutable version tag
         id: release_ref
         shell: bash
         env:
@@ -39,7 +39,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           if [[ "$RELEASE_TAG" != "v$version" || ! "$version" =~ $semver ]]; then
-            echo "Release tags must use immutable SemVer, for example v1.2.3." >&2
+            echo "Version tags must use immutable SemVer, for example v1.2.3." >&2
             exit 1
           fi
 
@@ -49,42 +49,13 @@ jobs:
               awk 'END { print $1 }'
           )"
           if [[ -z "$remote_sha" || "$local_sha" != "$remote_sha" ]]; then
-            echo "The checked-out commit does not match the remote release tag." >&2
+            echo "The checked-out commit does not match the remote version tag." >&2
             exit 1
           fi
-
-          pages_base="https://shusek.github.io/KMediaPlayer/maven/io/github/shusek"
-          expected_coordinates=(
-            composemediaplayer-core
-            composemediaplayer-extension-api
-            composemediaplayer-extension-api-android
-            composemediaplayer-extension-api-jvm
-            composemediaplayer
-            composemediaplayer-mpv
-            composemediaplayer-mpv-android
-            composemediaplayer-mpv-iosarm64
-            composemediaplayer-mpv-iossimulatorarm64
-            composemediaplayer-mpv-jvm
-            composemediaplayer-ass
-            composemediaplayer-ass-android
-            composemediaplayer-ass-iosarm64
-            composemediaplayer-ass-iossimulatorarm64
-            composemediaplayer-ass-jvm
-            composemediaplayer-dolbyvision
-            composemediaplayer-dolbyvision-android
-            composemediaplayer-dolbyvision-jvm
-            composemediaplayer-kmediabridge
-            composemediaplayer-kmediabridge-android
-            composemediaplayer-kmediabridge-jvm
-          )
-          for artifact_id in "${expected_coordinates[@]}"; do
-            pom="$pages_base/$artifact_id/$version/$artifact_id-$version.pom"
-            curl --fail --silent --show-error --location --head "$pom" >/dev/null
-          done
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$local_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Locate the successful release run
+      - name: Locate the successful tagged build
         id: release_run
         shell: bash
         env:
@@ -98,7 +69,7 @@ jobs:
               --jq "first(.workflow_runs[] | select(.head_sha == \"$RELEASE_SHA\")) | .id"
           )"
           if [[ -z "$run_id" ]]; then
-            echo "No successful verified release run exists for $RELEASE_SHA." >&2
+            echo "No successful verified tagged build exists for $RELEASE_SHA." >&2
             exit 1
           fi
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
@@ -233,7 +204,7 @@ jobs:
             exit 1
           fi
 
-      - name: Publish the verified release to Maven Central
+      - name: Publish the verified tag to Maven Central
         shell: bash
         run: >-
           ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
@@ -255,15 +226,15 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
 
-      - name: Checkout current public release verifier
+      - name: Checkout current Maven Central verifier
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
-          path: public-release-verifier
+          path: maven-central-verifier
           persist-credentials: false
 
-      - name: Wait for Maven Central and verify both public backends
+      - name: Wait for Maven Central publication
         shell: bash
         run: >-
-          public-release-verifier/.github/scripts/verify_public_maven_release.sh
+          maven-central-verifier/.github/scripts/verify_maven_central_release.sh
           "${{ steps.release_ref.outputs.version }}"

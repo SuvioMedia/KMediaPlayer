@@ -30,7 +30,7 @@ val projectVersion =
     providers.gradleProperty("publicationVersion").orNull
         ?: System.getenv("VERSION")
         ?: "dev"
-val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val kmediaBridgeVersion = libs.versions.kmediaBridge.get()
 val nativeJvmTestResources =
     providers.gradleProperty("composeMediaPlayerKMediaBridgeTestNativeResources")
@@ -121,9 +121,9 @@ publishing {
             name = "consumerSmoke"
             url = uri(consumerSmokeRepository)
         }
-        githubPagesMavenRepository?.let { repositoryPath ->
+        releaseStagingMavenRepository?.let { repositoryPath ->
             maven {
-                name = "githubPages"
+                name = "releaseStaging"
                 url = uri(repositoryPath)
             }
         }
@@ -140,7 +140,7 @@ mavenPublishing {
         name.set("Compose Media Player KMediaBridge")
         description.set("Optional Android and JVM source bridges for controlled playback through KMediaBridge.")
         inceptionYear.set("2026")
-        url.set("https://github.com/Shusek/KMediaPlayer")
+        url.set("https://github.com/SuvioMedia/KMediaPlayer")
         developers {
             developer {
                 id.set("Shusek")
@@ -150,14 +150,14 @@ mavenPublishing {
         licenses {
             license {
                 name.set("Repository license; the optional FFmpeg runtime is LGPL-2.1-or-later")
-                url.set("https://github.com/Shusek/KMediaPlayer/blob/master/LICENSE")
+                url.set("https://github.com/SuvioMedia/KMediaPlayer/blob/master/LICENSE")
                 distribution.set("repo")
             }
         }
         scm {
-            connection.set("scm:git:https://github.com/Shusek/KMediaPlayer.git")
-            developerConnection.set("scm:git:ssh://git@github.com/Shusek/KMediaPlayer.git")
-            url.set("https://github.com/Shusek/KMediaPlayer")
+            connection.set("scm:git:https://github.com/SuvioMedia/KMediaPlayer.git")
+            developerConnection.set("scm:git:ssh://git@github.com/SuvioMedia/KMediaPlayer.git")
+            url.set("https://github.com/SuvioMedia/KMediaPlayer")
         }
     }
     publishToMavenCentral()

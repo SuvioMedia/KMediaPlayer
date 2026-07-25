@@ -1,0 +1,78 @@
+name: Build Dokka Docs and Compose Example
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Keep only the newest documentation build without blocking tagged releases.
+concurrency:
+  group: "documentation-build"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Java (Temurin 25)
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: gradle
+
+      # Generate Dokka Documentation
+      - name: Generate Dokka Docs
+        run: |
+          ./gradlew \
+            :mediaplayer-core:dokkaGenerateHtml \
+            :mediaplayer-extension-api:dokkaGenerateHtml \
+            :mediaplayer:dokkaGenerateHtml \
+            :mediaplayer-mpv:dokkaGenerateHtml \
+            :mediaplayer-ass:dokkaGenerateHtml \
+            :mediaplayer-dolbyvision:dokkaGenerateHtml \
+            :mediaplayer-kmediabridge:dokkaGenerateHtml \
+            --no-daemon --continue
+
+      # Build the Kotlin/Compose Example
+      - name: Build Kotlin/Compose Example
+        run: |
+          ./gradlew :sample:composeApp:wasmJsBrowserDistribution
+
+      # Prepare a common structure for the private Actions artifact.
+      # Place the default-player docs at the root, optional module docs in
+      # dedicated paths, and the example in /sample.
+      - name: Prepare documentation artifact
+        run: |
+          set -euo pipefail
+          mkdir -p \
+            build/final/core \
+            build/final/extensions/api \
+            build/final/extensions/ass \
+            build/final/extensions/dolbyvision \
+            build/final/extensions/kmediabridge \
+            build/final/mpv \
+            build/final/sample
+
+          # Keep the default-player docs at the root of the artifact.
+          cp -r mediaplayer/build/dokka/html/* build/final
+          cp -r mediaplayer-core/build/dokka/html/* build/final/core
+          cp -r mediaplayer-extension-api/build/dokka/html/* build/final/extensions/api
+          cp -r mediaplayer-ass/build/dokka/html/* build/final/extensions/ass
+          cp -r mediaplayer-dolbyvision/build/dokka/html/* build/final/extensions/dolbyvision
+          cp -r mediaplayer-kmediabridge/build/dokka/html/* build/final/extensions/kmediabridge
+          cp -r mediaplayer-mpv/build/dokka/html/* build/final/mpv
+
+          cp -r sample/composeApp/build/dist/wasmJs/productionExecutable/* build/final/sample
+
+      - name: Upload documentation site artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: documentation-site
+          path: build/final
+          retention-days: 1

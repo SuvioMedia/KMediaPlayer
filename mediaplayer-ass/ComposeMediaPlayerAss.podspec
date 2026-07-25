@@ -1,7 +1,7 @@
 Pod::Spec.new do |spec|
     spec.name                     = 'ComposeMediaPlayerAss'
     spec.version                  = '0.0.1-dev'
-    spec.homepage                 = 'https://github.com/Shusek/KMediaPlayer'
+    spec.homepage                 = 'https://github.com/SuvioMedia/KMediaPlayer'
     spec.source                   = { :http=> ''}
     spec.authors                  = ''
     spec.license                  = ''

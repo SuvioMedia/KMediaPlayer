@@ -2,13 +2,9 @@
 
 <img src="/assets/banner.jpg" style="border-radius: 10px;"/>
 
-[![Maven](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fshusek.github.io%2FKMediaPlayer%2Fmaven%2Fio%2Fgithub%2Fshusek%2Fcomposemediaplayer%2Fmaven-metadata.xml&label=maven)](https://shusek.github.io/KMediaPlayer/maven/io/github/shusek/composemediaplayer/maven-metadata.xml)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.shusek/composemediaplayer)](https://central.sonatype.com/artifact/io.github.shusek/composemediaplayer)
 [![Kotlin](https://img.shields.io/badge/kotlin-multiplatform-blue.svg?logo=kotlin)](https://kotlinlang.org/docs/multiplatform.html)
-[![Platforms](https://img.shields.io/badge/platforms-Android%20|%20iOS%20|%20macOS%20JVM%20|%20Windows%20JVM%20|%20Linux%20JVM%20|%20Web-lightgrey.svg)](https://github.com/Shusek/KMediaPlayer)
-[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/Shusek/KMediaPlayer/issues)
-[![Documentation](https://img.shields.io/badge/docs-Dokka-blue.svg)](https://shusek.github.io/KMediaPlayer/)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Shusek/KMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/Shusek/KMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
-[![GitHub last commit](https://img.shields.io/github/last-commit/Shusek/KMediaPlayer)](https://github.com/Shusek/KMediaPlayer/commits/master)
+[![Platforms](https://img.shields.io/badge/platforms-Android%20|%20iOS%20|%20macOS%20JVM%20|%20Windows%20JVM%20|%20Linux%20JVM%20|%20Web-lightgrey.svg)](https://github.com/SuvioMedia/KMediaPlayer)
 
 **Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. Desktop playback bridges are packaged in the JVM artifact and communicate through **pure JNI** — no JNA and no Java media bindings. The optional Windows/Linux ASS renderer uses Java 25's Foreign Function API to load its packaged libass runtime. Linux additionally requires a compatible GStreamer 1.x runtime and plugins to be installed on the host. The library leverages:
 
@@ -20,11 +16,10 @@
 
 ## Project Status
 
-This repository is a personal fork maintained for my own projects and integration needs. Source code and tagged artifacts are published for transparency and reproducible internal deployments; publication is not an additional grant beyond the permissions in [LICENSE](LICENSE). This is not a supported public distribution, and releases may change without compatibility guarantees. JitPack builds are intentionally not provided because their generated coordinates and mutable commit builds are not part of the verified release pipeline. If you need a supported library for external use, use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
+This is a private, standalone SuvioMedia-maintained derivative used for internal projects and integrations. Immutable tagged artifacts are distributed only through Maven Central; GitHub Releases, GitHub Pages, and JitPack are not publication channels. Artifact availability is not an additional grant beyond the permissions in [LICENSE](LICENSE). If you need a supported public library, use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
 
 ## Table of Contents
 - [Project Status](#project-status)
-- [Live Demo](#-live-demo)
 - [Features](#-features)
 - [Supported Video Formats](#-supported-video-formats)
 - [Supported Codec Checks](#-supported-codec-checks)
@@ -64,10 +59,6 @@ This repository is a personal fork maintained for my own projects and integratio
   - [Example Usage](#example-usage)
   - [Basic Example](#-basic-example)
 - [Roadmap](#-roadmap)
-
-## 🚀 Live Demo
-
-Try the online demo here : [🎥 Live Demo](https://shusek.github.io/KMediaPlayer/sample/)
 
 ## ✨ Features
 
@@ -160,15 +151,14 @@ after an HDMI or monitor change before filtering a new source list.
 ## 🔧 Installation
 
 > [!IMPORTANT]
-> These coordinates reproduce the maintainer's tagged internal artifacts. Their availability does not change the permitted uses stated in [LICENSE](LICENSE). Every remote release uses an immutable SemVer tag, including RC tags; `dev` builds are local-only.
+> These coordinates reproduce the maintainer's tagged internal artifacts. Their availability does not change the permitted uses stated in [LICENSE](LICENSE). Every published artifact uses an immutable SemVer tag, including RC tags; `dev` builds are local-only.
 
-To add Compose Media Player to your project, add the GitHub Pages Maven repository in your `settings.gradle.kts` file:
+Compose Media Player is resolved directly from Maven Central:
 
 ```kotlin
 dependencyResolutionManagement {
     repositories {
         mavenCentral()
-        maven("https://shusek.github.io/KMediaPlayer/maven")
     }
 }
 ```
@@ -417,15 +407,15 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 | 3.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 2.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 1.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23 |
-| 0.9.0           | 2.3.20         | 1.10.3          | See release | See release |
-| 0.8.6           | 2.3.0          | 1.9.3           | See release | See release |
-| 0.8.3           | 2.2.20         | 1.9.0           | See release | See release |
-| 0.7.11          | 2.2.0          | 1.8.2           | See release | See release |
-| 0.7.10          | 2.1.21         | 1.8.2           | See release | See release |
+| 0.9.0           | 2.3.20         | 1.10.3          | Not recorded | Not recorded |
+| 0.8.6           | 2.3.0          | 1.9.3           | Not recorded | Not recorded |
+| 0.8.3           | 2.2.20         | 1.9.0           | Not recorded | Not recorded |
+| 0.7.11          | 2.2.0          | 1.8.2           | Not recorded | Not recorded |
+| 0.7.10          | 2.1.21         | 1.8.2           | Not recorded | Not recorded |
 
-The current build records the public Kotlin ABI in version control. `checkKotlinAbi`, the published-consumer smoke project, platform tests, and the Java 25 classfile check must all pass before the single release workflow publishes the same GAV and native payload to Maven Central and the GitHub Pages Maven mirror. To reproduce the isolated consumer check locally, first run `./gradlew publishConsumerSmokeArtifacts -PpublicationVersion=0.0.0-consumer.local -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache`, then run `./gradlew consumerSmokeTest -PpublicationVersion=0.0.0-consumer.local -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache` in a separate Gradle invocation. The split is intentional: the Maven fixtures must exist before Gradle resolves the consumer configurations.
+The current build records the public Kotlin ABI in version control. `checkKotlinAbi`, the published-consumer smoke project, platform tests, and the Java 25 classfile check must all pass before the release workflow publishes the GAV and native payload to Maven Central. To reproduce the isolated consumer check locally, first run `./gradlew publishConsumerSmokeArtifacts -PpublicationVersion=0.0.0-consumer.local -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache`, then run `./gradlew consumerSmokeTest -PpublicationVersion=0.0.0-consumer.local -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache` in a separate Gradle invocation. The split is intentional: the Maven fixtures must exist before Gradle resolves the consumer configurations.
 
-The release workflow verifies the complete GitHub Pages staging repository and uploads an immutable release-delta artifact before it performs the irreversible Maven Central release. The delta intentionally excludes mutable `maven-metadata.xml` files. If Maven Central succeeds but the final `gh-pages` push fails after its retries, overlay that delta on the latest Pages repository, run `python3 .github/scripts/rebuild_maven_metadata.py <pages-worktree>/maven`, and publish the resulting commit; do **not** run the Maven Central publication again for the same version.
+The release workflow first publishes every module into a runner-local staging repository and validates the complete coordinates and POM metadata. It then performs the irreversible Maven Central publication and waits for every expected artifact to become available. Do **not** rerun publication for a version already accepted by Maven Central.
 
 ## 🚀 Getting Started
 

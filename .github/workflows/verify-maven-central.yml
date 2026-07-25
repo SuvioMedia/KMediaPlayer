@@ -1,10 +1,10 @@
-name: Verify Public Maven Central Release
+name: Verify Maven Central Publication
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable release tag, for example v3.0.0-rc.5
+        description: Existing immutable version tag, for example v3.0.0-rc.5
         required: true
         type: string
 
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: public-maven-central-${{ inputs.tag }}
+  group: maven-central-verification-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
-  verify-public-release:
+  verify-maven-central:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate immutable release tag
+      - name: Validate immutable version tag
         id: release
         shell: bash
         env:
@@ -36,7 +36,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           if [[ "$RELEASE_TAG" != "v$version" || ! "$version" =~ $semver ]]; then
-            echo "Release tags must use immutable SemVer, for example v3.0.0-rc.5." >&2
+            echo "Version tags must use immutable SemVer, for example v3.0.0-rc.5." >&2
             exit 1
           fi
           local_sha="$(git rev-parse "$RELEASE_TAG^{commit}")"
@@ -45,7 +45,7 @@ jobs:
               awk 'END { print $1 }'
           )"
           if [[ -z "$remote_sha" || "$local_sha" != "$remote_sha" ]]; then
-            echo "The local release tag does not match the remote release tag." >&2
+            echo "The local version tag does not match the remote version tag." >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -57,6 +57,6 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Wait for Maven Central and verify both public backends
+      - name: Wait for Maven Central publication
         shell: bash
-        run: .github/scripts/verify_public_maven_release.sh "${{ steps.release.outputs.version }}"
+        run: .github/scripts/verify_maven_central_release.sh "${{ steps.release.outputs.version }}"
