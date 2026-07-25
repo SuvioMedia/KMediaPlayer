@@ -20,7 +20,7 @@ val projectVersion =
     providers.gradleProperty("publicationVersion").orNull
         ?: "dev"
 val projectGroup = "io.github.shusek"
-val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val releaseSigningEnabled =
     providers
         .gradleProperty("releaseSigningEnabled")
@@ -137,9 +137,9 @@ publishing {
             name = "consumerSmoke"
             url = uri(consumerSmokeRepository)
         }
-        githubPagesMavenRepository?.let { repositoryPath ->
+        releaseStagingMavenRepository?.let { repositoryPath ->
             maven {
-                name = "githubPages"
+                name = "releaseStaging"
                 url = uri(repositoryPath)
             }
         }
@@ -157,7 +157,7 @@ mavenPublishing {
         name.set("Compose Media Player Core")
         description.set("Backend-neutral state, capability, event, and rendering contracts for Compose Media Player.")
         inceptionYear.set("2025")
-        url.set("https://github.com/Shusek/KMediaPlayer")
+        url.set("https://github.com/SuvioMedia/KMediaPlayer")
 
         developers {
             developer {
@@ -168,14 +168,14 @@ mavenPublishing {
         licenses {
             license {
                 name.set("Internal Use Notice and Limited License")
-                url.set("https://github.com/Shusek/KMediaPlayer/blob/master/LICENSE")
+                url.set("https://github.com/SuvioMedia/KMediaPlayer/blob/master/LICENSE")
                 distribution.set("repo")
             }
         }
         scm {
-            connection.set("scm:git:https://github.com/Shusek/KMediaPlayer.git")
-            developerConnection.set("scm:git:ssh://git@github.com/Shusek/KMediaPlayer.git")
-            url.set("https://github.com/Shusek/KMediaPlayer")
+            connection.set("scm:git:https://github.com/SuvioMedia/KMediaPlayer.git")
+            developerConnection.set("scm:git:ssh://git@github.com/SuvioMedia/KMediaPlayer.git")
+            url.set("https://github.com/SuvioMedia/KMediaPlayer")
         }
     }
 
@@ -208,7 +208,7 @@ val validateReleaseVersion =
 tasks.configureEach {
     val publishesRemoteRelease =
         name.contains("MavenCentral", ignoreCase = true) ||
-            name.contains("GithubPages", ignoreCase = true) ||
+            name.contains("ReleaseStaging", ignoreCase = true) ||
             name == "publishAndReleaseToMavenCentral"
     if (publishesRemoteRelease) {
         dependsOn(validateReleaseVersion)

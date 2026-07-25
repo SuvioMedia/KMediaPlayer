@@ -50,7 +50,7 @@ val projectVersion =
         ?: "dev"
 val projectGroup = "io.github.shusek"
 val assRuntimeVersion = "0.1.0-rc.3"
-val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val appleNativeDirectory = layout.projectDirectory.dir("native/apple")
 val assRuntimeAppleOutputs =
     providers
@@ -119,7 +119,7 @@ kotlin {
     cocoapods {
         version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
         summary = "Optional ASS/SSA renderer for Compose Media Player"
-        homepage = "https://github.com/Shusek/KMediaPlayer"
+        homepage = "https://github.com/SuvioMedia/KMediaPlayer"
         name = "ComposeMediaPlayerAss"
         ios.deploymentTarget = "16.2"
         pod(
@@ -544,9 +544,9 @@ publishing {
             name = "consumerSmoke"
             url = uri(consumerSmokeRepository)
         }
-        githubPagesMavenRepository?.let { repositoryPath ->
+        releaseStagingMavenRepository?.let { repositoryPath ->
             maven {
-                name = "githubPages"
+                name = "releaseStaging"
                 url = uri(repositoryPath)
             }
         }
@@ -564,7 +564,7 @@ mavenPublishing {
         name.set("Compose Media Player ASS")
         description.set("Optional libass/JASSUB subtitle rendering for Compose Media Player.")
         inceptionYear.set("2026")
-        url.set("https://github.com/Shusek/KMediaPlayer")
+        url.set("https://github.com/SuvioMedia/KMediaPlayer")
 
         developers {
             developer {
@@ -575,14 +575,14 @@ mavenPublishing {
         licenses {
             license {
                 name.set("Internal Use Notice and Limited License")
-                url.set("https://github.com/Shusek/KMediaPlayer/blob/master/LICENSE")
+                url.set("https://github.com/SuvioMedia/KMediaPlayer/blob/master/LICENSE")
                 distribution.set("repo")
             }
         }
         scm {
-            connection.set("scm:git:https://github.com/Shusek/KMediaPlayer.git")
-            developerConnection.set("scm:git:ssh://git@github.com/Shusek/KMediaPlayer.git")
-            url.set("https://github.com/Shusek/KMediaPlayer")
+            connection.set("scm:git:https://github.com/SuvioMedia/KMediaPlayer.git")
+            developerConnection.set("scm:git:ssh://git@github.com/SuvioMedia/KMediaPlayer.git")
+            url.set("https://github.com/SuvioMedia/KMediaPlayer")
         }
     }
 
@@ -625,7 +625,7 @@ val validateReleaseVersion =
 tasks.configureEach {
     val targetsRemoteRepository =
         name.contains("MavenCentral", ignoreCase = true) ||
-            name.contains("GithubPages", ignoreCase = true)
+            name.contains("ReleaseStaging", ignoreCase = true)
     if (name.startsWith("publish", ignoreCase = true) && targetsRemoteRepository) {
         dependsOn(validateReleaseVersion, verifyAndroidAssAar, verifyJvmDesktopNativeMatrix)
     }

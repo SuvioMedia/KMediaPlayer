@@ -71,15 +71,15 @@ for ((attempt = 1; attempt <= max_attempts; attempt++)); do
     fi
   done < <(missing_artifacts)
   if (( ${#missing[@]} == 0 )); then
-    echo "All ${#artifacts[@]} KMediaPlayer $version POMs are public at $repository."
+    echo "All ${#artifacts[@]} KMediaPlayer $version POMs are available at $repository."
     break
   fi
   if (( attempt == max_attempts )); then
-    echo "Maven release $version did not become fully public after $attempt attempts." >&2
+    echo "Maven Central publication $version was incomplete after $attempt attempts." >&2
     printf 'Missing artifact: %s\n' "${missing[@]}" >&2
     exit 1
   fi
-  echo "Attempt $attempt/$max_attempts: waiting for ${#missing[@]} public POM(s)."
+  echo "Attempt $attempt/$max_attempts: waiting for ${#missing[@]} Maven Central POM(s)."
   sleep "$poll_seconds"
 done
 

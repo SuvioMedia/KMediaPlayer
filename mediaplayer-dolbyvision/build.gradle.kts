@@ -41,7 +41,7 @@ val projectVersion =
 
 group = "io.github.shusek"
 version = projectVersion
-val githubPagesMavenRepository = providers.gradleProperty("githubPagesMavenRepository").orNull
+val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 
 val generatedJvmNativeResources = layout.buildDirectory.dir("generated/libdoviJvmResources")
 val generatedWasmResources = layout.buildDirectory.dir("generated/libdoviWasmResources")
@@ -477,9 +477,9 @@ publishing {
             name = "consumerSmoke"
             url = uri(consumerSmokeRepository)
         }
-        githubPagesMavenRepository?.let { repositoryPath ->
+        releaseStagingMavenRepository?.let { repositoryPath ->
             maven {
-                name = "githubPages"
+                name = "releaseStaging"
                 url = uri(repositoryPath)
             }
         }
@@ -496,7 +496,7 @@ mavenPublishing {
         name.set("Compose Media Player Dolby Vision")
         description.set("Optional bounded Dolby Vision Profile 7 to 8.1 conversion bridge for Compose Media Player.")
         inceptionYear.set("2026")
-        url.set("https://github.com/Shusek/KMediaPlayer")
+        url.set("https://github.com/SuvioMedia/KMediaPlayer")
         developers {
             developer {
                 id.set("Shusek")
@@ -511,9 +511,9 @@ mavenPublishing {
             }
         }
         scm {
-            connection.set("scm:git:https://github.com/Shusek/KMediaPlayer.git")
-            developerConnection.set("scm:git:ssh://git@github.com/Shusek/KMediaPlayer.git")
-            url.set("https://github.com/Shusek/KMediaPlayer")
+            connection.set("scm:git:https://github.com/SuvioMedia/KMediaPlayer.git")
+            developerConnection.set("scm:git:ssh://git@github.com/SuvioMedia/KMediaPlayer.git")
+            url.set("https://github.com/SuvioMedia/KMediaPlayer")
         }
     }
     publishToMavenCentral()
@@ -554,7 +554,7 @@ val validateReleaseVersion =
 tasks.configureEach {
     val publishesRemoteRelease =
         name.contains("MavenCentral", ignoreCase = true) ||
-            name.contains("GithubPages", ignoreCase = true) ||
+            name.contains("ReleaseStaging", ignoreCase = true) ||
             name == "publishAndReleaseToMavenCentral"
     if (publishesRemoteRelease) dependsOn(validateReleaseVersion)
 }
