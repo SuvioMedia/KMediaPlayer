@@ -23,7 +23,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Browser smoke test for the exact external CDN module. The media fixture is a 0.6 s MKV containing VP9 video
+ * Browser smoke test for the directly linked Kotlin/Wasm player and packaged runtime. The media fixture is a 0.6 s MKV containing VP9 video
  * and two Opus tracks tagged `en` and `pl`; keeping it inline makes media playback independent of HTTP servers.
  */
 class MoviRealPackageBrowserTest {
@@ -145,8 +145,14 @@ class MoviRealPackageBrowserTest {
                     seekPollAttempt += 1
                 }
                 assertFalse(state.isSeeking, "Movi did not complete the seek.")
-                assertTrue(state.preciseCurrentTime >= 150.milliseconds)
-                assertTrue(state.duration >= 500.milliseconds)
+                assertTrue(
+                    state.preciseCurrentTime >= 150.milliseconds,
+                    "Movi seek position was ${state.preciseCurrentTime}; duration=${state.duration}; error=${state.error}.",
+                )
+                assertTrue(
+                    state.duration >= 500.milliseconds,
+                    "Movi duration was ${state.duration}; error=${state.error}.",
+                )
             } finally {
                 session.destroy()
                 session.destroy()
@@ -340,7 +346,7 @@ private data class MoviNetworkFixtureStats(
 )
 
 /*
- * Install before the first test imports the Movi CDN module. Shaka captures fetch when its module is
+ * Install before the first test initializes Movi. Shaka captures fetch when its module is
  * evaluated, so a per-test replacement would be too late once another real-module test had loaded Movi.
  */
 private val MOVI_NETWORK_FIXTURE: JsAny = installMoviNetworkFixtures()

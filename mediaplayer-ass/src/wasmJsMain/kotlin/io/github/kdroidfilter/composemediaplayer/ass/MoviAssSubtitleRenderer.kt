@@ -8,14 +8,22 @@ import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
 import io.github.kdroidfilter.composemediaplayer.assSubtitleRendererUnavailableReason
 import io.github.kdroidfilter.composemediaplayer.createJassubRenderer
 import io.github.kdroidfilter.composemediaplayer.hardenJassubLocalFontQuery
+import io.github.shusek.moviplayer.EmbeddedSubtitleRenderer
+import io.github.shusek.moviplayer.SubtitlePacket
+import io.github.shusek.moviplayer.SubtitleRendererConfiguration
+import kotlinx.coroutines.CompletableDeferred
+import org.khronos.webgl.Int8Array
+import org.khronos.webgl.toInt8Array
+import org.w3c.dom.HTMLElement
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.JsAny
 import kotlin.js.js
+import kotlin.time.Duration
 
 internal fun createMoviAssSubtitleRenderer(
     config: AssSubtitleRendererConfig,
     onError: (String) -> Unit,
-): JsAny? {
+): EmbeddedSubtitleRenderer? {
     val unavailableReason = assSubtitleRendererUnavailableReason(config.enabled)
     if (unavailableReason.isNotEmpty()) return null
 
@@ -36,19 +44,232 @@ internal fun createMoviAssSubtitleRenderer(
         addMoviJassubAvailableFont(settings, family, url)
     }
 
-    return createMoviAssSubtitleRendererAdapter(
-        settings = settings,
-        createRenderer = ::createJassubRenderer,
-        hardenRenderer = { instance ->
-            hardenJassubLocalFontQuery(
-                instance = instance,
-                enabled = config.fontQueryMode != AssFontQueryMode.DISABLED,
-                debug = config.debug,
-            )
-        },
+    return MoviAssSubtitleRenderer(
+        adapter =
+            createMoviAssSubtitleRendererAdapter(
+                settings = settings,
+                createRenderer = ::createJassubRenderer,
+                hardenRenderer = { instance ->
+                    hardenJassubLocalFontQuery(
+                        instance = instance,
+                        enabled = config.fontQueryMode != AssFontQueryMode.DISABLED,
+                        debug = config.debug,
+                    )
+                },
+                onError = onError,
+            ),
         onError = onError,
     )
 }
+
+private class MoviAssSubtitleRenderer(
+    private val adapter: JsAny,
+    private val onError: (String) -> Unit,
+) : EmbeddedSubtitleRenderer {
+    private var width: Int = 0
+    private var height: Int = 0
+    private var closed: Boolean = false
+
+    override suspend fun configure(
+        configuration: SubtitleRendererConfiguration,
+        overlay: HTMLElement,
+    ) {
+        check(!closed) { "The ASS subtitle renderer is closed." }
+        width = configuration.width
+        height = configuration.height
+        val deferred = CompletableDeferred<Unit>()
+        val fonts = createByteArrayList()
+        configuration.attachments.forEach { attachment ->
+            addByteArray(fonts, attachment.data.toInt8Array())
+        }
+        configureMoviAssAdapter(
+            adapter = adapter,
+            overlay = overlay,
+            codec = configuration.codec,
+            extradata = configuration.codecPrivate?.toInt8Array(),
+            fonts = fonts,
+            onComplete = { deferred.complete(Unit) },
+            onFailure = { message ->
+                onError(message)
+                deferred.completeExceptionally(IllegalStateException(message))
+            },
+        )
+        deferred.await()
+    }
+
+    override suspend fun pushPacket(packet: SubtitlePacket) {
+        if (closed) return
+        val deferred = CompletableDeferred<Unit>()
+        pushMoviAssPacket(
+            adapter = adapter,
+            data = packet.data.toInt8Array(),
+            timestamp = packet.presentationTime.inWholeMilliseconds / 1_000.0,
+            duration = packet.duration.inWholeMilliseconds / 1_000.0,
+            onComplete = { deferred.complete(Unit) },
+            onFailure = { message ->
+                onError(message)
+                deferred.completeExceptionally(IllegalStateException(message))
+            },
+        )
+        deferred.await()
+    }
+
+    override fun render(position: Duration) {
+        if (!closed) {
+            renderMoviAssAdapter(
+                adapter = adapter,
+                timestamp = position.inWholeMilliseconds / 1_000.0,
+                width = width,
+                height = height,
+            )
+        }
+    }
+
+    override fun setDelay(delay: Duration) {
+        if (!closed) {
+            setMoviAssDelay(adapter, delay.inWholeMilliseconds / 1_000.0)
+        }
+    }
+
+    override fun clear() {
+        if (!closed) clearMoviAssAdapter(adapter, onError)
+    }
+
+    override suspend fun close() {
+        if (closed) return
+        closed = true
+        val deferred = CompletableDeferred<Unit>()
+        destroyMoviAssAdapter(
+            adapter = adapter,
+            onComplete = { deferred.complete(Unit) },
+            onFailure = { message ->
+                onError(message)
+                deferred.complete(Unit)
+            },
+        )
+        deferred.await()
+    }
+}
+
+private fun createByteArrayList(): JsAny = js("[]")
+
+@Suppress("UNUSED_PARAMETER")
+private fun addByteArray(
+    list: JsAny,
+    value: Int8Array,
+): Unit = js("list.push(value)")
+
+@Suppress("UNUSED_PARAMETER", "LongParameterList")
+private fun configureMoviAssAdapter(
+    adapter: JsAny,
+    overlay: HTMLElement,
+    codec: String,
+    extradata: Int8Array?,
+    fonts: JsAny,
+    onComplete: () -> Unit,
+    onFailure: (String) -> Unit,
+): Unit =
+    js(
+        """
+        {
+            try {
+                adapter.mount(overlay);
+                const track = { codec: codec, codecString: codec, subtitleType: "text" };
+                Promise.resolve(adapter.configure(track, extradata || null, fonts))
+                    .then(function() { onComplete(); })
+                    .catch(function(error) {
+                        onFailure(String(error && error.message ? error.message : error));
+                    });
+            } catch (error) {
+                onFailure(String(error && error.message ? error.message : error));
+            }
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER", "LongParameterList")
+private fun pushMoviAssPacket(
+    adapter: JsAny,
+    data: Int8Array,
+    timestamp: Double,
+    duration: Double,
+    onComplete: () -> Unit,
+    onFailure: (String) -> Unit,
+): Unit =
+    js(
+        """
+        {
+            try {
+                Promise.resolve(adapter.pushPacket({
+                    data: data,
+                    timestamp: timestamp,
+                    duration: duration
+                }))
+                    .then(function() { onComplete(); })
+                    .catch(function(error) {
+                        onFailure(String(error && error.message ? error.message : error));
+                    });
+            } catch (error) {
+                onFailure(String(error && error.message ? error.message : error));
+            }
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+private fun renderMoviAssAdapter(
+    adapter: JsAny,
+    timestamp: Double,
+    width: Int,
+    height: Int,
+): Unit = js("adapter.render(timestamp, width, height)")
+
+@Suppress("UNUSED_PARAMETER")
+private fun setMoviAssDelay(
+    adapter: JsAny,
+    delay: Double,
+): Unit = js("adapter.setDelay(delay)")
+
+@Suppress("UNUSED_PARAMETER")
+private fun clearMoviAssAdapter(
+    adapter: JsAny,
+    onFailure: (String) -> Unit,
+): Unit =
+    js(
+        """
+        {
+            try {
+                Promise.resolve(adapter.clear()).catch(function(error) {
+                    onFailure(String(error && error.message ? error.message : error));
+                });
+            } catch (error) {
+                onFailure(String(error && error.message ? error.message : error));
+            }
+        }
+        """,
+    )
+
+@Suppress("UNUSED_PARAMETER")
+private fun destroyMoviAssAdapter(
+    adapter: JsAny,
+    onComplete: () -> Unit,
+    onFailure: (String) -> Unit,
+): Unit =
+    js(
+        """
+        {
+            try {
+                Promise.resolve(adapter.destroy())
+                    .then(function() { onComplete(); })
+                    .catch(function(error) {
+                        onFailure(String(error && error.message ? error.message : error));
+                    });
+            } catch (error) {
+                onFailure(String(error && error.message ? error.message : error));
+            }
+        }
+        """,
+    )
 
 private fun AssFontQueryMode.toJassubQueryFonts(): String =
     when (this) {
@@ -111,7 +332,7 @@ private fun addMoviJassubAvailableFont(
     )
 
 /**
- * Builds the JavaScript object implementing movi-player's SubtitleRenderer contract.
+ * Implements movi-player's typed Kotlin/Wasm subtitle renderer contract.
  *
  * Kept separate from [createMoviAssSubtitleRenderer] so Wasm tests can inject a
  * deterministic fake JASSUB constructor without starting a worker.

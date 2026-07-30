@@ -2,7 +2,18 @@
 
 import dev.detekt.gradle.Detekt
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.ArchiveOperations
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Delete
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
@@ -11,6 +22,38 @@ import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import java.io.DataInputStream
 import java.util.zip.ZipFile
+import javax.inject.Inject
+
+@CacheableTask
+abstract class UnpackMoviRuntimeAssets : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val archives: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @get:Inject
+    abstract val archiveOperations: ArchiveOperations
+
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+
+    @TaskAction
+    fun unpack() {
+        fileSystemOperations.sync {
+            from(archives.files.map(archiveOperations::zipTree)) {
+                include("movi-runtime/**")
+                into("files")
+            }
+            from(archives.files.map(archiveOperations::zipTree)) {
+                include("META-INF/**")
+                into("files/movi-runtime")
+            }
+            into(outputDirectory)
+        }
+    }
+}
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -70,6 +113,30 @@ val wasmTestPlaybackEngine =
         .orElse("movi")
         .map(String::lowercase)
         .get()
+
+val moviRuntimeAssets =
+    configurations.create("moviRuntimeAssets") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        description = "Pinned movi-player Emscripten runtime files."
+    }
+dependencies.add(
+    moviRuntimeAssets.name,
+    "io.github.shusek:movi-player-runtime-assets:${libs.versions.moviPlayer.get()}@zip",
+)
+val generatedMoviRuntimeResources = layout.buildDirectory.dir("generated/moviRuntimeResources")
+val unpackMoviRuntimeAssets =
+    tasks.register<UnpackMoviRuntimeAssets>("unpackMoviRuntimeAssets") {
+        archives.from(moviRuntimeAssets)
+        outputDirectory.set(generatedMoviRuntimeResources)
+    }
+
+compose.resources {
+    customDirectory(
+        sourceSetName = "wasmJsMain",
+        directoryProvider = unpackMoviRuntimeAssets.flatMap(UnpackMoviRuntimeAssets::outputDirectory),
+    )
+}
 
 require(wasmBrowserTestBrowser in setOf("chrome", "firefox", "safari")) {
     "composeMediaPlayer.wasmTestBrowser must be one of: chrome, firefox, safari."
@@ -244,9 +311,12 @@ kotlin {
             }
         }
 
-        wasmJsMain.dependencies {
-            implementation(libs.kotlinx.browser)
-            implementation(libs.compose.ui)
+        wasmJsMain {
+            dependencies {
+                implementation(libs.kotlinx.browser)
+                implementation(libs.compose.ui)
+                implementation(libs.movi.player)
+            }
         }
 
         wasmJsTest.dependencies {

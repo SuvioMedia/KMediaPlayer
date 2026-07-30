@@ -735,25 +735,27 @@ class VideoPlayerStateTest {
     }
 
     @Test
-    fun testExternalMediaDependenciesUsePinnedDefaultsAndCanBeOverridden() =
+    fun testMediaRuntimeDependenciesUseLocalDefaultsAndCanBeOverridden() =
         runTest {
-            assertTrue(WebMediaDependencyConfig.moviPlayerModuleUrl.contains("Shusek/movi-player@v0.3.5-kmp.3/"))
-            assertTrue(WebMediaDependencyConfig.moviPlayerModuleUrl.endsWith("/cdn/engine.js"))
+            assertEquals(
+                "composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime/",
+                WebMediaDependencyConfig.moviRuntimeAssetBaseUrl,
+            )
             assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.contains("@3.3.2/"))
             assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity.startsWith("sha384-"))
 
-            val previousMoviUrl = WebMediaDependencyConfig.moviPlayerModuleUrl
+            val previousMoviUrl = WebMediaDependencyConfig.moviRuntimeAssetBaseUrl
             val previousUrl = WebMediaDependencyConfig.matroskaSubtitlesScriptUrl
             try {
-                WebMediaDependencyConfig.moviPlayerModuleUrl = "https://cdn.example.test/movi-player.js"
+                WebMediaDependencyConfig.moviRuntimeAssetBaseUrl = "/vendor/movi-runtime/"
                 WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = ""
                 assertEquals(
-                    "https://cdn.example.test/movi-player.js",
-                    WebMediaDependencyConfig.moviPlayerModuleUrl,
+                    "/vendor/movi-runtime/",
+                    WebMediaDependencyConfig.moviRuntimeAssetBaseUrl,
                 )
                 assertFalse(ensureMatroskaSubtitlesModuleLoaded())
             } finally {
-                WebMediaDependencyConfig.moviPlayerModuleUrl = previousMoviUrl
+                WebMediaDependencyConfig.moviRuntimeAssetBaseUrl = previousMoviUrl
                 WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = previousUrl
             }
         }

@@ -68,8 +68,8 @@ enum class VideoProjectionDetectionMode {
  */
 enum class WebPlaybackEngine {
     /**
-     * Use the externally loaded Movi player for demuxing, decoding, adaptive streaming, audio-track selection,
-     * and DRM.
+     * Use the directly linked Kotlin/Wasm Movi player for demuxing, decoding, adaptive streaming,
+     * audio-track selection, and DRM.
      */
     MOVI,
 

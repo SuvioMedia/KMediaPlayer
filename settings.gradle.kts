@@ -21,6 +21,15 @@ plugins {
 
 rootProject.name = "Compose-Media-Player"
 
+providers.gradleProperty("moviPlayerProjectDir").orNull?.let { projectDirectory ->
+    includeBuild(projectDirectory) {
+        dependencySubstitution {
+            substitute(module("io.github.shusek:movi-player")).using(project(":player"))
+            substitute(module("io.github.shusek:movi-player-runtime-assets")).using(project(":runtime-assets"))
+        }
+    }
+}
+
 providers.gradleProperty("kmediaFfmpegRuntimeProjectDir").orNull?.let { projectDirectory ->
     includeBuild(projectDirectory) {
         dependencySubstitution {

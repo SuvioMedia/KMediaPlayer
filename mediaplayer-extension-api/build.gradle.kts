@@ -102,6 +102,9 @@ kotlin {
         iosTest.dependencies {
             implementation(kotlin("test"))
         }
+        wasmJsMain.dependencies {
+            api(libs.movi.player)
+        }
         wasmJsTest.dependencies {
             implementation(kotlin("test"))
         }

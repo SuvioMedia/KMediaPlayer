@@ -1257,9 +1257,9 @@ final object io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig 
     final var matroskaSubtitlesScriptUrl // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptUrl|{}matroskaSubtitlesScriptUrl[0]
         final fun <get-matroskaSubtitlesScriptUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.<get-matroskaSubtitlesScriptUrl>|<get-matroskaSubtitlesScriptUrl>(){}[0]
         final fun <set-matroskaSubtitlesScriptUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.<set-matroskaSubtitlesScriptUrl>|<set-matroskaSubtitlesScriptUrl>(kotlin.String){}[0]
-    final var moviPlayerModuleUrl // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviPlayerModuleUrl|{}moviPlayerModuleUrl[0]
-        final fun <get-moviPlayerModuleUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviPlayerModuleUrl.<get-moviPlayerModuleUrl>|<get-moviPlayerModuleUrl>(){}[0]
-        final fun <set-moviPlayerModuleUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviPlayerModuleUrl.<set-moviPlayerModuleUrl>|<set-moviPlayerModuleUrl>(kotlin.String){}[0]
+    final var moviRuntimeAssetBaseUrl // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviRuntimeAssetBaseUrl|{}moviRuntimeAssetBaseUrl[0]
+        final fun <get-moviRuntimeAssetBaseUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviRuntimeAssetBaseUrl.<get-moviRuntimeAssetBaseUrl>|<get-moviRuntimeAssetBaseUrl>(){}[0]
+        final fun <set-moviRuntimeAssetBaseUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviRuntimeAssetBaseUrl.<set-moviRuntimeAssetBaseUrl>|<set-moviRuntimeAssetBaseUrl>(kotlin.String){}[0]
 }
 
 // Targets: [wasmJs]

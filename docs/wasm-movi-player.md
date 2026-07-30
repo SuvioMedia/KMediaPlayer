@@ -1,139 +1,149 @@
-# Wasm MoviPlayer integration
+# Kotlin/Wasm Movi integration
 
-## Runtime contract
+KMediaPlayer's default Wasm engine is the Kotlin/Wasm-only
+[`Shusek/movi-player`](https://github.com/Shusek/movi-player) fork. Version `0.4.0-alpha.1` is linked
+as a typed KLIB:
 
-The Wasm target imports the headless KMediaPlayer integration fork on demand from the exact,
-immutable jsDelivr URL
-`https://cdn.jsdelivr.net/gh/Shusek/movi-player@v0.3.5-kmp.3/cdn/engine.js`. The fork is based on
-upstream's `develop` branch at commit
-`dfa30c95f59a8aa118b507639cff6ddb049878b8`, which includes the pluggable subtitle renderer merged
-in commit `9ae8e31d90f94861af3fb18a62484756b8e27a85`. It adds stable host integration contracts while
-preserving the upstream Apache-2.0 license and attribution. KMediaPlayer does not use Movi's web
-component and does not vendor, patch, install, or bundle the package. The external module import
-promise is cached by URL for the page lifetime, while each media source receives a new
-`MoviPlaybackSession`.
-
-Applications can replace the URL before opening the first Movi source:
-
-```kotlin
-WebMediaDependencyConfig.moviPlayerModuleUrl = "/vendor/movi-player-0.3.5-kmp.3/engine.js"
+```text
+io.github.shusek:movi-player:0.4.0-alpha.1
 ```
 
-The configured resource is executable code. It must be a public, compatible ES module at an
-immutable URL without credentials. Cross-origin deployments must permit module CORS, and CSP must
-allow the selected origin.
+There is no Kotlin/JS target, npm player dependency, dynamic `engine.js` import, `JsAny` player
+facade, or compatibility layer for the earlier JavaScript API.
 
-`DefaultVideoPlayerState`, Compose controls, overlays, fullscreen, external subtitles, events and
-diagnostics remain the application-facing API. `renderingInfo.backend` identifies the active route
-as either `@shusek/movi-player 0.3.5-kmp.3` or `HTML5 video (legacy)`.
+## Dependency and runtime layout
+
+The integration has two matching Maven dependencies:
+
+| Artifact | Consumer role |
+|---|---|
+| `io.github.shusek:movi-player` | Compiled Kotlin/Wasm API and implementation |
+| `io.github.shusek:movi-player-runtime-assets` | ZIP with the Emscripten `movi.js` and `movi.wasm` payload |
+
+`mediaplayer` unpacks only the ZIP's `movi-runtime/` directory into a generated Compose resources
+directory. Compose publishes that directory transitively and copies it into browser distributions.
+The default runtime base URL is therefore:
+
+```kotlin
+WebMediaDependencyConfig.moviRuntimeAssetBaseUrl =
+    "composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime/"
+```
+
+An application may copy the same immutable files to another public path and replace the base URL
+before opening the first Movi source:
+
+```kotlin
+WebMediaDependencyConfig.moviRuntimeAssetBaseUrl = "/vendor/movi-runtime/"
+```
+
+The KLIB and runtime ZIP versions must stay identical. The runtime location must not contain
+credentials.
+
+## Local composite development
+
+The KMediaPlayer settings file can substitute both Maven artifacts from a movi-player checkout:
+
+```shell
+./gradlew :mediaplayer:wasmJsBrowserTest \
+  -PmoviPlayerProjectDir=/absolute/path/to/movi-player
+```
+
+This is the required workflow while changing both repositories before the alpha artifacts are
+published. A normal consumer resolves the immutable Maven coordinates and does not need the
+property.
+
+## Typed adapter boundary
+
+`MoviPlaybackSession.web.kt` constructs `MoviPlayer` directly and maps:
+
+- URL and browser `File` sources to `MediaSource`;
+- media headers and DRM license headers to separate typed maps;
+- player state, position, duration, buffered ranges, tracks, chapters, metadata, surfaces,
+  diagnostics, and errors to KMediaPlayer models;
+- KMediaPlayer track IDs to `TrackSelectionRequest` and confirms the returned
+  `TrackSelectionOutcome`;
+- Compose lifecycle disposal to idempotent `MoviPlayer.close()`.
+
+No untyped player method lookup crosses this boundary. Error text is redacted before it reaches
+application diagnostics, and request values are not logged.
+
+Passing `null` to audio selection restores the source's initial/default track. Adaptive video track
+`-1` remains KMediaPlayer's automatic-quality mode.
+
+## Playback routing
 
 | Request | Effective Wasm route |
 |---|---|
-| MP4, WebM, MKV, AVI, MPEG-TS, HLS, DASH or MSS with default options | Movi canvas |
-| DRM adaptive source | Movi/Shaka native video |
-| `WebPlaybackEngine.LEGACY` with a non-adaptive source | Native HTML video |
-| `WebPlaybackEngine.LEGACY` with a recognized HLS, DASH or MSS manifest | Rejected with `SourceError` |
-| Non-adaptive clear source with `REQUIRE_HDR`, `FORCE_SDR`, or non-`AUTO` Dolby Vision | Legacy |
-| Adaptive clear source with a strict color policy | Rejected with `ColorPipelineError` |
+| MP4 or WebM with default options | Browser media element managed by Movi |
+| MKV, MKA, AVI, MPEG-TS, M2TS, MTS, Blob, or matching browser `File` | FFmpeg demuxer plus WebCodecs/Canvas/Web Audio |
+| HLS | hls.js, with native HLS fallback where available |
+| DASH | dash.js |
+| Smooth Streaming (MSS) | Shaka |
+| Adaptive DRM | Shaka/EME native video |
+| `WebPlaybackEngine.LEGACY` with a non-adaptive source | KMediaPlayer native HTML video |
+| `WebPlaybackEngine.LEGACY` with a recognized adaptive manifest | Rejected with `SourceError` |
+| Clear source requiring a strict unsupported color route | Legacy or a typed color-pipeline rejection |
 | DRM plus strict color, projection, or non-default texture crop | Rejected with `DrmError` |
 
-A Movi error is terminal for that session. It never causes an automatic legacy retry. KMediaPlayer
-does not ship `hls.js`, dash.js, Shaka Player, or another adaptive-streaming implementation for the
-legacy route; HLS, DASH and MSS are delegated exclusively to the externally loaded Movi module.
+There is no automatic fallback from Movi after a Movi session error. Browser/container support still
+depends on the codecs and WebCodecs/media primitives available at runtime.
 
-## Adapter boundaries
+Movi may report source color metadata, but KMediaPlayer keeps decoder, surface, and output dynamic
+range `UNKNOWN` until the browser can provide stronger evidence. An `isHDR` source flag alone never
+confirms HDR output.
 
-All JavaScript values and Movi API calls are confined to `MoviPlaybackSession.web.kt`. The adapter:
+## Subtitle ownership
 
-- accepts a URL or the browser `File` retained by FileKit;
-- materializes `blob:` and `data:` sources as browser `File` objects before constructing Movi,
-  avoiding Movi 0.3.5's HTTP-source path for non-HTTP URLs;
-- forwards `openUri()` headers only as media headers;
-- forwards `WebDrmConfiguration.licenseRequestHeaders` only as license headers;
-- supplies a silent structured logger and exposes only redacted, typed adapter errors;
-- maps playback state, time, duration, seek state, buffered ranges, tracks, chapters, metadata and
-  errors to KMediaPlayer models;
-- maps Movi's numeric track ids to source-scoped stable string ids;
-- commits an audio selection and emits `TrackChanged` only after Movi returns `true`;
-- destroys the player idempotently and rejects callbacks from an obsolete `mediaSessionId`.
+External SRT/VTT remains in KMediaPlayer's Compose overlay. The optional `AssSubtitleExtension`
+implements movi-player's typed `EmbeddedSubtitleRenderer` interface:
 
-Passing `null` to audio selection restores the track that was active/default when the session
-loaded. It does not mute audio. Adaptive video track `-1` is KMediaPlayer's automatic quality mode.
+- Movi supplies the codec header, canvas dimensions, and bounded font attachments once;
+- raw timed ASS/SSA packets are forwarded as `SubtitlePacket`;
+- the existing JASSUB renderer receives those packets and follows Movi's clock;
+- no Blob export, JavaScript callback object, or second media demux pass is used.
 
-Movi renders clear content to its canvas. DRM attaches `getHLSVideoElement()` to the Compose-owned
-container and hides the canvas. For SDR projection, KMediaPlayer samples the hidden Movi canvas
-through the existing WebGL projection renderer. Movi source color metadata is exposed, but decoder,
-surface and output color evidence remain unknown; an `isHDR` flag alone never confirms HDR output.
+Embedded bitmap subtitles remain owned by the Movi pipeline.
 
-Embedded bitmap subtitles stay inside Movi. External SRT/VTT timing remains in KMediaPlayer's
-Compose overlay. When `AssSubtitleExtension()` is installed, external ASS/SSA uses JASSUB with both
-engines: clear Movi playback drives JASSUB's canvas-only mode from the Movi clock, and DRM uses the
-native video element. For embedded ASS/SSA, Movi mounts the extension through its pluggable
-subtitle-renderer contract, passes codec headers and bounded font attachments once, then forwards
-each raw Matroska packet with its PTS and duration. KMediaPlayer converts the packet to a complete
-ASS `Dialogue:` event in memory and feeds it to JASSUB; no Blob export or second demux pass exists.
+## Verification
 
-## Verification matrix
+The browser test suite covers typed adapter state mapping, seek behavior, source and header
+handling, track selection, errors, redaction, subtitle ownership, packaged runtime loading, MKV
+dual-audio switching, continued playback after switching, MP4, WebM, browser `File`, Blob, HLS,
+DASH, HTTP Range, and servers that ignore Range. MSS routing is covered by adapter tests; its
+network playback remains dependent on a compatible manifest and browser codecs.
 
-The following checks are part of the repository:
+Run the release-blocking Chrome checks with:
 
-| Check | Gate |
-|---|---|
-| Routing, fail-closed DRM/color combinations, redaction and model mapping | Automated Wasm unit test |
-| Audio accept/reject semantics and rapid repeated switches | Automated Wasm unit test |
-| External or pluggable embedded ASS selection gives one renderer ownership; JASSUB receives raw packets, the Movi clock, canvas dimensions and bounded container fonts | Automated Wasm browser tests |
-| Real CDN module with a generated MKV containing `en` and `pl` Opus tracks, real switch, continued playback and seek | Blocking Chrome test |
-| Real CDN module with MP4, WebM, a browser Blob URL and a direct FileKit browser `File` | Blocking Chrome test |
-| Real CDN module with HLS and DASH served from deterministic local manifests and segments | Blocking Chrome test |
-| HTTP Range, a server that ignores Range, and custom media headers | Blocking Chrome test |
-| Same real-package smoke test with Microsoft Edge as the Karma Chromium binary | Blocking CI job |
-| Same real-package smoke test with Firefox Headless | Non-blocking CI job; result artifact retained |
-| Same real-package smoke test with Safari | Non-blocking CI job; result artifact retained |
-| Full `mediaplayer:wasmJsBrowserTest` repeated with `-PcomposeMediaPlayer.wasmTestPlaybackEngine=legacy` | Blocking Chrome job |
+```shell
+./gradlew :mediaplayer:wasmJsBrowserTest \
+  -PmoviPlayerProjectDir=/absolute/path/to/movi-player
 
-Before a release, a Shaka/EME DRM smoke test must also be recorded using credentials supplied
-outside the repository and CI. No license URL, header, token, response, or derived identifier may
-enter source control, CI output, diagnostics, or saved test artifacts.
+./gradlew :mediaplayer-ass:wasmJsBrowserTest \
+  -PmoviPlayerProjectDir=/absolute/path/to/movi-player
 
-### Production sample size
+./gradlew :sample:composeApp:wasmJsBrowserDistribution \
+  -PmoviPlayerProjectDir=/absolute/path/to/movi-player
+```
 
-The production KMediaPlayer build must contain no MoviPlayer, FFmpeg, or dav1d payload and no
-generated Movi chunk. Its only Movi payload is the small adapter and the external versioned URL.
-The external `engine.js` entrypoint is fetched only after a Movi source is opened; the fork then
-loads its demux/decoder Wasm and adaptive-engine chunks on demand for the selected route. A session
-forced to `LEGACY` performs no Movi request.
+The distribution check must contain both:
 
-The production sample built from this change contains only the pinned URL and adapter code: no
-Movi, FFmpeg, dav1d or adaptive-engine payload is present. At Brotli quality 11, the main JavaScript
-plus four emitted Wasm assets total 5,081,983 bytes. That is 6,945 bytes above the recorded
-`0.3.5-kmp.1` adapter build and 9,786 bytes above baseline commit `b78c3076`.
+```text
+composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime/movi.js
+composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime/movi.wasm
+composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime/META-INF/NOTICE
+composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime/META-INF/LGPL_RELINKING.md
+```
 
-Chrome and Edge are release-blocking. Firefox and Safari run the same exact-CDN-module smoke class in
-dedicated `continue-on-error` jobs for the first integration release. Their reports are retained as
-CI artifacts so observed failures and browser limitations are visible without blocking publication.
-The browser can also be selected locally with
-`-PcomposeMediaPlayer.wasmTestBrowser=chrome|firefox|safari`. Canvas PiP and full Movi
-HDR/projection parity are explicitly non-blocking.
+Chrome and Edge are release-blocking for the initial Kotlin/Wasm integration. Firefox and Safari
+remain best-effort until their required browser primitives and the same test matrix are stable.
 
-For the preceding `0.3.5-kmp.1` engine release, verification on 2026-07-20 passed the complete
-Chrome suite with both `MOVI` and `LEGACY`; the `MOVI` run imported the external module from the
-configured CDN. The blocking Microsoft Edge job also passed the exact-CDN-module smoke suite.
-Firefox Headless passed four of five real-package scenarios, including MKV dual-audio switching and
-seek; only the combined adaptive test failed when the DASH route rejected H.264/AAC representations
-that the runner reported as unsupported. The hosted Safari runner did not capture Safari within
-Karma's retry budget, so it executed no playback tests.
+## Release order
 
-## Release and dependency policy
+1. Test and publish `movi-player` and `movi-player-runtime-assets` `0.4.0-alpha.1`.
+2. Confirm both immutable artifacts are available from the release repository.
+3. Test KMediaPlayer without the composite-build property.
+4. Publish KMediaPlayer with the pinned coordinate.
 
-KMediaPlayer publishes only its adapter. MoviPlayer, FFmpeg and dav1d are not npm dependencies and
-are absent from the Maven artifacts, sample bundle and KMediaPlayer hosting. The default points at
-an exact release of the maintained integration fork rather than either repository's mutable
-`main` branch; there is no vendoring, `patch-package`, Git dependency or binary mirror.
-
-The fork release contains its own `NOTICE`, full third-party license texts, pinned corresponding
-source/build recipes and `LGPL_RELINKING.md`. Its versioned CDN directory, Git tag, source snapshot
-and attached npm-compatible tarball are produced from the same gated build. Publication is blocked
-if those materials or the reproducible distribution checks fail.
-
-Anyone replacing the default with a self-hosted module is responsible for the security, licensing,
-notices and corresponding-source obligations of the bytes served from that URL.
+The movi-player runtime archive carries its own `NOTICE`, corresponding-source/build information,
+and `LGPL_RELINKING.md`; consumers redistributing the native payload must retain the applicable
+materials.

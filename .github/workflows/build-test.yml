@@ -337,7 +337,7 @@ jobs:
             }
           }
 
-      - name: Smoke-test the real Movi CDN module in Microsoft Edge
+      - name: Smoke-test the linked Movi KLIB and packaged runtime in Microsoft Edge
         shell: pwsh
         run: |
           $edgePath = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
@@ -373,7 +373,7 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Smoke-test the real Movi CDN module in Firefox
+      - name: Smoke-test the linked Movi KLIB and packaged runtime in Firefox
         run: >-
           ./gradlew :mediaplayer:wasmJsBrowserTest
           --tests '*MoviRealPackageBrowserTest*'
@@ -404,7 +404,7 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Smoke-test the real Movi CDN module in Safari
+      - name: Smoke-test the linked Movi KLIB and packaged runtime in Safari
         run: >-
           ./gradlew :mediaplayer:wasmJsBrowserTest
           --tests '*MoviRealPackageBrowserTest*'

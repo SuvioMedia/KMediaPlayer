@@ -8,6 +8,12 @@ const fixtureSourcePath = path.resolve(
     "../../../../mediaplayer/src/wasmJsTest/kotlin/io/github/kdroidfilter/composemediaplayer/MoviRealPackageFixtures.kt"
 );
 const fixtureSource = fs.readFileSync(fixtureSourcePath, "utf8");
+const moviRuntimeUrl =
+    "/composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime";
+const moviRuntimeDirectory = path.resolve(
+    config.basePath,
+    "kotlin/composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime"
+);
 
 function readKotlinStringConstant(name) {
     const marker = `internal const val ${name} =`;
@@ -22,6 +28,14 @@ function readKotlinStringConstant(name) {
 }
 
 const moviFixtureRoutes = {
+    [`${moviRuntimeUrl}/movi.js`]: {
+        body: fs.readFileSync(path.resolve(moviRuntimeDirectory, "movi.js")),
+        contentType: "text/javascript"
+    },
+    [`${moviRuntimeUrl}/movi.wasm`]: {
+        body: fs.readFileSync(path.resolve(moviRuntimeDirectory, "movi.wasm")),
+        contentType: "application/wasm"
+    },
     "/__kmp_movi__/hls/index.m3u8": {
         body: Buffer.from(readKotlinStringConstant("MOVI_HLS_MANIFEST_BASE64"), "base64"),
         contentType: "application/vnd.apple.mpegurl"

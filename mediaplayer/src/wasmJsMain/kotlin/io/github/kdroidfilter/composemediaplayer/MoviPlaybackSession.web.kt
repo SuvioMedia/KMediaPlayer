@@ -1,19 +1,42 @@
-@file:OptIn(ExperimentalWasmJsInterop::class)
+@file:OptIn(kotlin.js.ExperimentalWasmJsInterop::class)
 @file:Suppress("MagicNumber", "TooManyFunctions")
 
 package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.ui.layout.ContentScale
+import io.github.shusek.moviplayer.FitMode
+import io.github.shusek.moviplayer.MediaInfo
+import io.github.shusek.moviplayer.MediaSource
+import io.github.shusek.moviplayer.MoviError
+import io.github.shusek.moviplayer.MoviErrorCategory
+import io.github.shusek.moviplayer.MoviPlayer
+import io.github.shusek.moviplayer.MoviPlayerConfig
+import io.github.shusek.moviplayer.MoviPlayerState
+import io.github.shusek.moviplayer.MoviRuntimeConfig
+import io.github.shusek.moviplayer.PlayerSurface
+import io.github.shusek.moviplayer.RenderingDiagnostics
+import io.github.shusek.moviplayer.TrackSelectionRequest
+import io.github.shusek.moviplayer.TrackSelectionStatus
+import io.github.shusek.moviplayer.redactSensitiveText
+import io.github.vinceglb.filekit.BrowserFile
 import io.github.vinceglb.filekit.PlatformFile
 import io.github.vinceglb.filekit.WebFile
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLCanvasElement
 import org.w3c.dom.HTMLVideoElement
-import kotlin.js.ExperimentalWasmJsInterop
-import kotlin.js.JsAny
+import org.w3c.files.File
 import kotlin.js.js
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import io.github.shusek.moviplayer.BufferedRange as MoviBufferedRange
+import io.github.shusek.moviplayer.PlaybackEvent as MoviPlaybackEvent
 
 internal const val MOVI_AUDIO_TRACK_ID_PREFIX = "movi:audio:"
 internal const val MOVI_SUBTITLE_TRACK_ID_PREFIX = "movi:subtitle:"
@@ -60,9 +83,10 @@ internal data class MoviRenderingDiagnosticsSnapshot(
 )
 
 /**
- * Internal facade around `movi-player/player`.
+ * Direct Kotlin/Wasm adapter around movi-player.
  *
- * All JavaScript values stay in this file. The state and public API only see KMediaPlayer models.
+ * No JavaScript module loading or untyped player calls live here: media models,
+ * state and events cross the boundary as Kotlin types.
  */
 internal class MoviPlaybackSession(
     private val playerState: DefaultVideoPlayerState,
@@ -70,79 +94,86 @@ internal class MoviPlaybackSession(
     private val canvas: HTMLCanvasElement,
     private val onNativeVideoElement: (HTMLVideoElement?) -> Unit,
     private val onVideoRatio: (Float?) -> Unit,
-    private val moduleLoader: suspend () -> JsAny = ::loadMoviPlayerModule,
 ) {
-    private var player: JsAny? = null
-    private var destroyed = false
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var player: MoviPlayer? = null
+    private var destroyed: Boolean = false
     private var defaultAudioTrackId: String? = null
-    private var audioSelectionGeneration = 0
-    private var subtitleSelectionGeneration = 0
-    private var lastDurationSeconds = 0.0
+    private var audioSelectionGeneration: Int = 0
+    private var subtitleSelectionGeneration: Int = 0
     private var requestedContentScale: ContentScale = ContentScale.Fit
     private var requestedProjection: VideoProjectionSettings = VideoProjectionSettings()
 
     private val playbackCallback: (Boolean) -> Unit = { shouldPlay ->
         currentPlayer()?.let { activePlayer ->
             if (shouldPlay) {
-                playMovi(activePlayer) { message -> reportError(message) }
+                scope.launch {
+                    runCatching { activePlayer.play() }
+                        .onFailure(::reportError)
+                }
             } else {
-                pauseMovi(activePlayer)
+                activePlayer.pause()
             }
         }
     }
     private val volumeCallback: (Float) -> Unit = { value ->
-        currentPlayer()?.let { activePlayer -> setMoviVolume(activePlayer, value) }
+        currentPlayer()?.setVolume(value)
     }
     private val speedCallback: (Float) -> Unit = { value ->
-        currentPlayer()?.let { activePlayer -> setMoviPlaybackRate(activePlayer, value) }
+        currentPlayer()?.setPlaybackRate(value)
     }
     private val resetCallback: () -> Unit = {
         currentPlayer()?.let { activePlayer ->
-            pauseMovi(activePlayer)
-            seekMovi(activePlayer, 0.0) { message -> reportError(message) }
+            activePlayer.pause()
+            scope.launch {
+                runCatching { activePlayer.seek(Duration.ZERO) }
+                    .onFailure(::reportError)
+            }
         }
     }
-    private val audioSelectionCallback: (AudioTrack?) -> TrackSelectionResult = { requestedTrack ->
-        selectAudioTrack(requestedTrack)
-    }
+    private val audioSelectionCallback: (AudioTrack?) -> TrackSelectionResult = ::selectAudioTrack
     private val subtitleCallback: (SubtitleTrack?) -> Unit = { requestedTrack ->
-        currentPlayer()?.let { activePlayer ->
-            val numericId = requestedTrack?.id?.removePrefix(MOVI_SUBTITLE_TRACK_ID_PREFIX)?.toIntOrNull()
+        val activePlayer = currentPlayer()
+        if (activePlayer != null) {
+            val requestedId = requestedTrack?.id?.removePrefix(MOVI_SUBTITLE_TRACK_ID_PREFIX)?.toIntOrNull()
             val selectionGeneration = ++subtitleSelectionGeneration
-            val confirmEmbeddedTrack = requestedTrack?.isEmbedded == true
-            selectMoviSubtitleTrack(activePlayer, numericId) { status, message ->
-                if (!isCurrent()) return@selectMoviSubtitleTrack
-                if (selectionGeneration != subtitleSelectionGeneration) return@selectMoviSubtitleTrack
-                when (status) {
-                    MOVI_SELECTION_SUCCESS ->
-                        synchronizeSnapshot(
-                            confirmedTrackKind = TrackKind.SUBTITLE.takeIf { confirmEmbeddedTrack },
-                        )
-                    MOVI_SELECTION_SUPERSEDED -> Unit
-                    else -> {
-                        synchronizeSnapshot()
-                        reportError(message ?: "Movi rejected the subtitle track change.")
+            scope.launch {
+                val result =
+                    runCatching {
+                        activePlayer.selectTrack(TrackSelectionRequest.Subtitle(requestedId))
+                    }.getOrElse { error ->
+                        if (isCurrent() && selectionGeneration == subtitleSelectionGeneration) reportError(error)
+                        return@launch
                     }
+                if (!isCurrent() || selectionGeneration != subtitleSelectionGeneration) return@launch
+                if (result.status.isApplied()) {
+                    synchronizeSnapshot(confirmedTrackKind = TrackKind.SUBTITLE)
+                } else if (result.status != TrackSelectionStatus.SUPERSEDED) {
+                    synchronizeSnapshot()
+                    reportError(result.error ?: IllegalStateException("Movi rejected the subtitle track change."))
                 }
             }
         }
     }
     private val qualityCallback: (String?) -> Unit = { variantId ->
+        val numericId = variantId?.removePrefix(MOVI_VIDEO_TRACK_ID_PREFIX)?.toIntOrNull()
         currentPlayer()?.let { activePlayer ->
-            val numericId = variantId?.removePrefix(MOVI_VIDEO_TRACK_ID_PREFIX)?.toIntOrNull() ?: MOVI_AUTO_TRACK_ID
-            if (selectMoviVideoTrack(activePlayer, numericId)) {
-                synchronizeSnapshot()
+            scope.launch {
+                runCatching {
+                    activePlayer.selectTrack(TrackSelectionRequest.Video(numericId))
+                }.onSuccess { result ->
+                    if (result.status.isApplied()) synchronizeSnapshot()
+                }.onFailure(::reportError)
             }
         }
     }
-    private val currentTimeProvider: () -> kotlin.time.Duration = {
-        currentPlayer()?.let(::getMoviCurrentTime)?.seconds ?: kotlin.time.Duration.ZERO
+    private val currentTimeProvider: () -> Duration = {
+        currentPlayer()?.position?.value ?: Duration.ZERO
     }
-    private val durationProvider: () -> kotlin.time.Duration = {
-        currentPlayer()?.let(::getMoviDuration)?.seconds ?: kotlin.time.Duration.ZERO
+    private val durationProvider: () -> Duration = {
+        currentPlayer()?.duration?.value ?: Duration.ZERO
     }
 
-    @Suppress("CyclomaticComplexMethod", "TooGenericExceptionCaught")
     suspend fun load(
         sourceUri: String,
         sourceFile: PlatformFile?,
@@ -150,10 +181,7 @@ internal class MoviPlaybackSession(
         drmConfiguration: WebDrmConfiguration?,
     ) {
         if (destroyed || !isCurrent()) return
-        if (
-            drmConfiguration != null &&
-            (sourceFile != null || sourceUri.isInlineBrowserMediaUri())
-        ) {
+        if (drmConfiguration != null && (sourceFile != null || sourceUri.isInlineBrowserMediaUri())) {
             playerState.onMoviError(
                 VideoPlayerError.DrmError("DRM playback requires an adaptive URL source on WebAssembly."),
             )
@@ -161,136 +189,93 @@ internal class MoviPlaybackSession(
         }
 
         try {
-            val module = moduleLoader()
-            if (destroyed || !isCurrent()) return
-            val browserFile =
-                sourceFile?.browserFileOrNull()
-                    ?: sourceUri
-                        .takeIf(String::isInlineBrowserMediaUri)
-                        ?.let { inlineUri -> loadInlineBrowserFile(inlineUri) }
-            if (destroyed || !isCurrent()) return
-
             val createdPlayer =
-                createMoviPlayer(
-                    module = module,
-                    canvas = canvas,
-                    sourceUri = sourceUri,
-                    browserFile = browserFile,
-                    mediaHeadersJson = mediaHeaders.browserRequestHeadersJsonObjectString(),
-                    drmEnabled = drmConfiguration != null,
-                    licenseUrl = drmConfiguration?.licenseUrl,
-                    licenseHeadersJson =
-                        drmConfiguration
-                            ?.licenseRequestHeaders
-                            ?.browserRequestHeadersJsonObjectString()
-                            .orEmpty(),
+                MoviPlayer(
+                    MoviPlayerConfig(
+                        canvas = canvas,
+                        runtime =
+                            MoviRuntimeConfig(
+                                assetBaseUrl = WebMediaDependencyConfig.moviRuntimeAssetBaseUrl,
+                            ),
+                    ),
                 )
-            var createdSubtitleRenderer: JsAny? = null
-            for (extension in playerState.webSubtitlePipelineExtensions) {
-                try {
-                    createdSubtitleRenderer =
+            player = createdPlayer
+            bindStateCallbacks()
+            bindPlayerEvents(createdPlayer)
+            playerState.webSubtitlePipelineExtensions
+                .asSequence()
+                .mapNotNull { extension ->
+                    runCatching {
                         extension.createMoviEmbeddedSubtitleRenderer(::reportError)
-                } catch (error: Throwable) {
-                    reportError(error.message ?: "The embedded subtitle renderer could not be created.")
-                }
-                if (createdSubtitleRenderer != null) break
-            }
-            try {
-                attachMoviSubtitleSurface(
-                    player = createdPlayer,
-                    canvas = canvas,
-                    renderer = createdSubtitleRenderer,
-                    subtitleDelaySeconds =
-                        -playerState.subtitleOffset.inWholeMilliseconds / MILLIS_PER_SECOND,
-                )
-            } catch (error: Throwable) {
-                destroyMoviPlayer(createdPlayer)
-                throw error
-            }
-            if (destroyed || !isCurrent()) {
-                destroyMoviPlayer(createdPlayer)
+                    }.onFailure(::reportError).getOrNull()
+                }.firstOrNull()
+                ?.let(createdPlayer::setEmbeddedSubtitleRenderer)
+            createdPlayer.setSubtitleDelay(-playerState.subtitleOffset)
+            createdPlayer.setVolume(playerState.volume)
+            createdPlayer.setPlaybackRate(playerState.playbackSpeed)
+            createdPlayer.setFitMode(requestedContentScale.toMoviFitMode())
+
+            createdPlayer.load(
+                source =
+                    when {
+                        drmConfiguration != null ->
+                            MediaSource.Drm(
+                                mediaUrl = sourceUri,
+                                licenseUrl = drmConfiguration.licenseUrl,
+                                mediaHeaders = mediaHeaders,
+                                licenseHeaders = drmConfiguration.licenseRequestHeaders,
+                            )
+                        sourceFile?.browserFileOrNull() != null ->
+                            MediaSource.BrowserFile(requireNotNull(sourceFile.browserFileOrNull()))
+                        else -> MediaSource.Url(sourceUri, mediaHeaders)
+                    },
+            )
+            if (!isCurrent()) {
+                createdPlayer.close()
                 return
             }
 
-            player = createdPlayer
-            bindStateCallbacks()
-            bindMoviPlayerEvents(
-                player = createdPlayer,
-                onStateChanged = ::handleStateChanged,
-                onTimeChanged = ::handleTimeChanged,
-                onDurationChanged = ::handleDurationChanged,
-                onTracksChanged = { synchronizeSnapshot() },
-                onError = ::reportError,
-                onSeeking = {
-                    if (isCurrent()) playerState.onWebSeeking()
-                },
-                onSeeked = {
-                    if (isCurrent()) {
-                        synchronizeTime(forceUpdate = true)
-                        playerState.onWebSeeked()
-                    }
-                },
-                onBufferChanged = { rows ->
-                    if (isCurrent()) playerState.updateBufferedRanges(rows)
-                },
-                onEnded = ::handleEnded,
-            )
-            observeMoviCanvas(createdPlayer, canvas)
-            awaitMoviLoad(createdPlayer)
-            if (destroyed || !isCurrent()) return
-
-            setMoviVolume(createdPlayer, playerState.volume)
-            setMoviPlaybackRate(createdPlayer, playerState.playbackSpeed)
-            applyContentScaleToPlayer(createdPlayer, requestedContentScale)
-            applyProjectionToPlayer(createdPlayer, requestedProjection)
             synchronizeSnapshot()
+            synchronizeSurface()
             synchronizeTime(forceUpdate = true)
-            playerState.updateBufferedRanges(readMoviBufferedRows(createdPlayer))
+            playerState.updateBufferedRanges(createdPlayer.bufferedRanges.value.toKMediaRanges())
             playerState.onWebPlaybackReady()
-            playerState.onWebSourceLoaded(getMoviDuration(createdPlayer).seconds)
-            attachNativeDrmElement(createdPlayer, drmConfiguration != null)
-
-            playerState.consumePendingSeekTime(getMoviDuration(createdPlayer).seconds)?.let { target ->
-                seek(target.inWholeMilliseconds / MILLIS_PER_SECOND)
+            playerState.onWebSourceLoaded(createdPlayer.duration.value)
+            playerState.consumePendingSeekTime(createdPlayer.duration.value)?.let { target ->
+                createdPlayer.seek(target)
             }
-            if (playerState.isPlaying) {
-                playMovi(createdPlayer) { message -> reportError(message) }
-            }
+            if (playerState.isPlaying) createdPlayer.play()
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (error: Exception) {
-            if (isCurrent()) {
-                reportError(error.message ?: "Movi player initialization failed.")
-            }
+        } catch (error: Throwable) {
+            if (isCurrent()) reportError(error)
         }
     }
 
     fun applyContentScale(contentScale: ContentScale) {
         requestedContentScale = contentScale
-        currentPlayer()?.let { activePlayer -> applyContentScaleToPlayer(activePlayer, contentScale) }
+        currentPlayer()?.setFitMode(contentScale.toMoviFitMode())
     }
 
     fun applyProjection(projection: VideoProjectionSettings) {
         requestedProjection = projection
-        currentPlayer()?.let { activePlayer -> applyProjectionToPlayer(activePlayer, projection) }
     }
 
-    fun applySubtitleOffset(offset: kotlin.time.Duration) {
-        currentPlayer()?.let { activePlayer ->
-            // KMediaPlayer's positive offset advances cues; Movi follows the
-            // VLC convention where a positive delay presents them later.
-            setMoviSubtitleDelay(
-                player = activePlayer,
-                seconds = -offset.inWholeMilliseconds / MILLIS_PER_SECOND,
-            )
-        }
+    fun applySubtitleOffset(offset: Duration) {
+        currentPlayer()?.setSubtitleDelay(-offset)
     }
 
     fun seekPending() {
         val activePlayer = currentPlayer() ?: return
-        val duration = getMoviDuration(activePlayer).seconds
-        playerState.consumePendingSeekTime(duration)?.let { target ->
-            seek(target.inWholeMilliseconds / MILLIS_PER_SECOND)
+        playerState.consumePendingSeekTime(activePlayer.duration.value)?.let { target ->
+            playerState.onWebSeeking()
+            scope.launch {
+                runCatching { activePlayer.seek(target) }
+                    .onFailure { error ->
+                        playerState.onWebSeeked()
+                        reportError(error)
+                    }
+            }
         }
     }
 
@@ -301,8 +286,47 @@ internal class MoviPlaybackSession(
         subtitleSelectionGeneration += 1
         unbindStateCallbacks()
         onNativeVideoElement(null)
-        player?.let(::destroyMoviPlayer)
+        player?.close()
         player = null
+        scope.cancel()
+    }
+
+    private fun bindPlayerEvents(activePlayer: MoviPlayer) {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            activePlayer.events.collect { event ->
+                if (!isCurrent()) return@collect
+                when (event) {
+                    is MoviPlaybackEvent.StateChanged -> handleStateChanged(event.state)
+                    is MoviPlaybackEvent.TimeChanged ->
+                        playerState.onTimeUpdate(
+                            event.position,
+                            activePlayer.duration.value,
+                        )
+                    is MoviPlaybackEvent.DurationChanged -> synchronizeTime(forceUpdate = true)
+                    is MoviPlaybackEvent.TracksChanged -> synchronizeSnapshot()
+                    is MoviPlaybackEvent.BufferChanged ->
+                        playerState.updateBufferedRanges(event.ranges.toKMediaRanges())
+                    is MoviPlaybackEvent.TrackChanged -> synchronizeSnapshot()
+                    MoviPlaybackEvent.Seeking -> playerState.onWebSeeking()
+                    MoviPlaybackEvent.Seeked -> {
+                        synchronizeTime(forceUpdate = true)
+                        playerState.onWebSeeked()
+                    }
+                    MoviPlaybackEvent.Ended -> handleEnded()
+                    is MoviPlaybackEvent.Failed -> reportError(event.error)
+                }
+            }
+        }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            activePlayer.surface.collect {
+                if (isCurrent()) synchronizeSurface()
+            }
+        }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            activePlayer.diagnostics.collect {
+                if (isCurrent() && activePlayer.mediaInfo.value != null) synchronizeSnapshot()
+            }
+        }
     }
 
     private fun bindStateCallbacks() {
@@ -341,128 +365,44 @@ internal class MoviPlaybackSession(
 
     private fun selectAudioTrack(requestedTrack: AudioTrack?): TrackSelectionResult {
         val activePlayer = currentPlayer() ?: return TrackSelectionResult.Failed("Movi is not ready.")
-        val targetId =
-            requestedTrack?.id
-                ?: defaultAudioTrackId
-                ?: return TrackSelectionResult.Failed("No default Movi audio track is available.")
-        val numericId =
-            targetId
-                .removePrefix(MOVI_AUDIO_TRACK_ID_PREFIX)
-                .toIntOrNull()
-                ?: return TrackSelectionResult.Failed("The Movi audio track id is invalid.")
-        if (!hasMoviTransactionalTrackSelection(activePlayer)) {
-            if (!selectLegacyMoviAudioTrack(activePlayer, numericId)) {
-                return TrackSelectionResult.Failed("Movi rejected the audio track change.")
-            }
-            synchronizeSnapshot(confirmedTrackKind = TrackKind.AUDIO)
-            return requestedTrack?.let { TrackSelectionResult.Selected(it.id) } ?: TrackSelectionResult.Auto
-        }
+        val targetId = requestedTrack?.id ?: defaultAudioTrackId
+        val numericId = targetId?.removePrefix(MOVI_AUDIO_TRACK_ID_PREFIX)?.toIntOrNull()
         val selectionGeneration = ++audioSelectionGeneration
-        selectMoviAudioTrack(
-            player = activePlayer,
-            trackId = numericId,
-            automatic = requestedTrack == null,
-        ) { status, message ->
-            if (!isCurrent() || selectionGeneration != audioSelectionGeneration) return@selectMoviAudioTrack
-            when (status) {
-                MOVI_SELECTION_SUCCESS ->
-                    synchronizeSnapshot(confirmedTrackKind = TrackKind.AUDIO)
-                MOVI_SELECTION_SUPERSEDED -> Unit
-                else -> {
-                    synchronizeSnapshot()
-                    reportError(message ?: "Movi rejected the audio track change.")
+        scope.launch {
+            val result =
+                runCatching {
+                    activePlayer.selectTrack(TrackSelectionRequest.Audio(numericId))
+                }.getOrElse { error ->
+                    if (isCurrent() && selectionGeneration == audioSelectionGeneration) reportError(error)
+                    return@launch
                 }
+            if (!isCurrent() || selectionGeneration != audioSelectionGeneration) return@launch
+            if (result.status.isApplied()) {
+                synchronizeSnapshot(confirmedTrackKind = TrackKind.AUDIO)
+            } else if (result.status != TrackSelectionStatus.SUPERSEDED) {
+                synchronizeSnapshot()
+                reportError(result.error ?: IllegalStateException("Movi rejected the audio track change."))
             }
         }
         return requestedTrack?.let { TrackSelectionResult.Selected(it.id) } ?: TrackSelectionResult.Auto
     }
 
-    private fun applyContentScaleToPlayer(
-        activePlayer: JsAny,
-        contentScale: ContentScale,
-    ) {
-        setMoviFitMode(
-            activePlayer,
-            when (contentScale) {
-                ContentScale.Crop -> "cover"
-                ContentScale.FillBounds -> "fill"
-                else -> "contain"
-            },
-        )
-    }
-
-    private fun applyProjectionToPlayer(
-        activePlayer: JsAny,
-        projection: VideoProjectionSettings,
-    ) {
-        val normalized = projection.normalized()
-        val enabled = normalized.requiresProjectionRenderer
-        setMoviVrProjection(
-            player = activePlayer,
-            enabled = enabled,
-            half = normalized.projectionType == VideoProjectionType.Equirect180,
-            fisheye =
-                normalized.projectionType == VideoProjectionType.Fisheye180 ||
-                    normalized.projectionType == VideoProjectionType.Fisheye190 ||
-                    normalized.projectionType == VideoProjectionType.Fisheye200 ||
-                    normalized.projectionType == VideoProjectionType.Fisheye220,
-            stereoSbs = normalized.stereoLayout == VideoStereoLayout.SideBySide,
-        )
-    }
-
-    private fun seek(seconds: Double) {
-        currentPlayer()?.let { activePlayer ->
-            seekMovi(activePlayer, seconds.coerceAtLeast(0.0)) { message -> reportError(message) }
-        }
-    }
-
-    private fun handleStateChanged(state: String) {
-        if (!isCurrent()) return
-        when (state) {
-            "loading", "buffering" -> playerState.onWebWaiting()
-            "seeking" -> playerState.onWebSeeking()
-            "ready", "playing", "paused" -> playerState.onWebPlaybackReady()
-            "ended" -> Unit
-            "error" -> Unit
-        }
-        playerState.onMoviPlaybackState(state)
-    }
-
-    private fun handleTimeChanged(seconds: Double) {
-        if (!isCurrent()) return
-        val safeSeconds = seconds.takeIf { it.isFinite() && it >= 0.0 } ?: return
-        val duration =
-            currentPlayer()
-                ?.let(::getMoviDuration)
-                ?.takeIf { it.isFinite() && it >= 0.0 }
-                ?: lastDurationSeconds
-        lastDurationSeconds = duration
-        playerState.onTimeUpdate(safeSeconds.seconds, duration.seconds)
-    }
-
-    private fun handleDurationChanged(seconds: Double) {
-        if (!isCurrent() || !seconds.isFinite() || seconds < 0.0) return
-        lastDurationSeconds = seconds
-        synchronizeTime(forceUpdate = true)
-    }
-
-    private fun synchronizeTime(forceUpdate: Boolean) {
-        val activePlayer = currentPlayer() ?: return
-        val current = getMoviCurrentTime(activePlayer).takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
-        val duration = getMoviDuration(activePlayer).takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
-        lastDurationSeconds = duration
-        playerState.onTimeUpdate(current.seconds, duration.seconds, forceUpdate)
-    }
-
     private fun synchronizeSnapshot(confirmedTrackKind: TrackKind? = null) {
         val activePlayer = currentPlayer() ?: return
+        val info = activePlayer.mediaInfo.value ?: return
         val previousTrackId =
             when (confirmedTrackKind) {
                 TrackKind.AUDIO -> playerState.currentAudioTrack?.id
                 TrackKind.SUBTITLE -> playerState.currentSubtitleTrack?.id
                 TrackKind.HLS_QUALITY, null -> null
             }
-        val snapshot = parseMoviSnapshotRows(readMoviSnapshotRows(activePlayer))
+        val snapshot =
+            info.toKMediaSnapshot(
+                diagnostics = activePlayer.diagnostics.value,
+                activeAudioTrackId = activePlayer.activeAudioTrack.value?.id,
+                activeSubtitleTrackId = activePlayer.activeSubtitleTrack.value?.id,
+                activeVideoTrackId = activePlayer.activeVideoTrack.value?.id,
+            )
         defaultAudioTrackId =
             defaultAudioTrackId
                 ?.takeIf { savedId -> snapshot.audioTracks.any { it.id == savedId } }
@@ -495,66 +435,197 @@ internal class MoviPlaybackSession(
         }
     }
 
-    private fun attachNativeDrmElement(
-        activePlayer: JsAny,
-        drmEnabled: Boolean,
-    ) {
-        if (!drmEnabled) {
-            onNativeVideoElement(null)
-            return
-        }
-
-        val nativeVideo = getMoviNativeVideoElement(activePlayer)
-        if (nativeVideo == null) {
-            playerState.onMoviError(
-                VideoPlayerError.DrmError("Movi/Shaka did not provide a DRM video surface."),
-            )
-            return
-        }
+    private fun synchronizeSurface() {
+        val activePlayer = currentPlayer() ?: return
+        val nativeVideo = (activePlayer.surface.value as? PlayerSurface.NativeVideo)?.element
         onNativeVideoElement(nativeVideo)
+    }
+
+    private fun synchronizeTime(forceUpdate: Boolean) {
+        val activePlayer = currentPlayer() ?: return
+        playerState.onTimeUpdate(
+            currentTime = activePlayer.position.value,
+            duration = activePlayer.duration.value,
+            forceUpdate = forceUpdate,
+        )
+    }
+
+    private fun handleStateChanged(state: MoviPlayerState) {
+        when (state) {
+            MoviPlayerState.LOADING, MoviPlayerState.BUFFERING -> playerState.onWebWaiting()
+            MoviPlayerState.SEEKING -> playerState.onWebSeeking()
+            MoviPlayerState.READY, MoviPlayerState.PLAYING, MoviPlayerState.PAUSED ->
+                playerState.onWebPlaybackReady()
+            MoviPlayerState.IDLE,
+            MoviPlayerState.ENDED,
+            MoviPlayerState.ERROR,
+            MoviPlayerState.CLOSED,
+            -> Unit
+        }
+        playerState.onMoviPlaybackState(state.name.lowercase())
     }
 
     private fun handleEnded() {
         if (!isCurrent()) return
+        val activePlayer = currentPlayer() ?: return
         if (playerState.loop) {
-            val activePlayer = currentPlayer() ?: return
-            seekMovi(activePlayer, 0.0) { message -> reportError(message) }
-            playMovi(activePlayer) { message -> reportError(message) }
+            scope.launch {
+                runCatching {
+                    activePlayer.seek(Duration.ZERO)
+                    activePlayer.play()
+                }.onFailure(::reportError)
+            }
             playerState.sliderPos = 0f
             playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                PlaybackEvent.PlaybackRestarted(
-                    mediaSessionId = sessionId,
-                    sampledAtMs = sampledAtMs,
-                )
+                PlaybackEvent.PlaybackRestarted(mediaSessionId = sessionId, sampledAtMs = sampledAtMs)
             }
             playerState.onRestart?.invoke()
         } else {
             playerState.onMoviPlaybackState("ended")
             playerState.emitPlaybackEvent { sessionId, sampledAtMs ->
-                PlaybackEvent.PlaybackEnded(
-                    mediaSessionId = sessionId,
-                    sampledAtMs = sampledAtMs,
-                )
+                PlaybackEvent.PlaybackEnded(mediaSessionId = sessionId, sampledAtMs = sampledAtMs)
             }
             playerState.onPlaybackEnded?.invoke()
         }
     }
 
+    private fun reportError(error: Throwable) {
+        val moviError = error as? MoviError
+        reportError(
+            rawMessage = moviError?.message ?: error.message ?: "Movi player initialization failed.",
+            category = moviError?.category,
+        )
+    }
+
     private fun reportError(rawMessage: String) {
+        reportError(rawMessage, null)
+    }
+
+    private fun reportError(
+        rawMessage: String,
+        category: MoviErrorCategory?,
+    ) {
         if (!isCurrent()) return
         val message =
             redactMoviError(
-                message = rawMessage,
+                message = redactSensitiveText(rawMessage),
                 drmConfiguration = playerState.playbackOptions.webDrmConfiguration,
                 mediaRequestHeaders = playerState.requestHeaders,
             )
-        playerState.onMoviError(classifyMoviError(message, playerState.playbackOptions.webDrmConfiguration != null))
+        playerState.onMoviError(
+            classifyMoviError(
+                message = message,
+                category = category,
+                isDrm = playerState.playbackOptions.webDrmConfiguration != null,
+            ),
+        )
     }
 
-    private fun currentPlayer(): JsAny? = player?.takeIf { isCurrent() }
+    private fun currentPlayer(): MoviPlayer? = player?.takeIf { isCurrent() }
 
     private fun isCurrent(): Boolean = !destroyed && playerState.isCurrentMediaSession(mediaSessionId)
 }
+
+private fun MediaInfo.toKMediaSnapshot(
+    diagnostics: RenderingDiagnostics,
+    activeAudioTrackId: Int?,
+    activeSubtitleTrackId: Int?,
+    activeVideoTrackId: Int?,
+): MoviMediaSnapshot =
+    MoviMediaSnapshot(
+        formatName = formatName,
+        durationSeconds = duration.inWholeMilliseconds / 1_000.0,
+        bitrate = bitRate,
+        title = metadata["title"],
+        audioTracks =
+            audioTracks.mapIndexed { index, track ->
+                AudioTrack(
+                    id = "$MOVI_AUDIO_TRACK_ID_PREFIX${track.id}",
+                    label = track.label ?: "Audio ${index + 1}",
+                    language = track.language.orEmpty(),
+                    channels = track.channels.takeIf { it > 0 },
+                    sampleRate = track.sampleRate.takeIf { it > 0 },
+                    bitrate = track.bitRate?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt(),
+                    isDefault = track.isDefault,
+                )
+            },
+        activeAudioTrackId = activeAudioTrackId?.let { "$MOVI_AUDIO_TRACK_ID_PREFIX$it" },
+        subtitleTracks =
+            subtitleTracks.mapIndexed { index, track ->
+                SubtitleTrack(
+                    id = "$MOVI_SUBTITLE_TRACK_ID_PREFIX${track.id}",
+                    label = track.label ?: "Subtitle ${index + 1}",
+                    language = track.language.orEmpty(),
+                    src = "$MOVI_SUBTITLE_TRACK_ID_PREFIX${track.id}",
+                    format = track.codec.toMoviSubtitleFormat(track.codec),
+                    isEmbedded = true,
+                )
+            },
+        activeSubtitleTrackId = activeSubtitleTrackId?.let { "$MOVI_SUBTITLE_TRACK_ID_PREFIX$it" },
+        videoTracks =
+            videoTracks.map { track ->
+                MoviVideoTrackSnapshot(
+                    id = track.id,
+                    codec = track.codecString ?: track.codec,
+                    width = track.width.takeIf { it > 0 },
+                    height = track.height.takeIf { it > 0 },
+                    frameRate = track.frameRate.takeIf { it > 0.0 }?.toFloat(),
+                    bitrate = track.bitRate?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt(),
+                    pixelFormat = track.pixelFormat,
+                    colorPrimaries = track.colorPrimaries,
+                    colorTransfer = track.colorTransfer,
+                    colorMatrix = track.colorMatrix,
+                    colorRange = track.colorRange,
+                    isHdr = track.isHdr,
+                    isActive = activeVideoTrackId == track.id,
+                )
+            },
+        chapters =
+            chapters.map { chapter ->
+                MediaChapter(
+                    start = chapter.start,
+                    end = chapter.end.takeIf { it > chapter.start },
+                    title = chapter.title,
+                    language = chapter.language,
+                    isHidden = chapter.isHidden,
+                )
+            },
+        diagnostics =
+            MoviRenderingDiagnosticsSnapshot(
+                backend = diagnostics.backend.name.lowercase(),
+                decoder = diagnostics.decoder,
+                renderer = diagnostics.renderer,
+                container = diagnostics.container ?: formatName,
+            ),
+    )
+
+private fun List<MoviBufferedRange>.toKMediaRanges(): List<BufferedRange> =
+    map { range -> BufferedRange(start = range.start, end = range.end) }
+
+private fun ContentScale.toMoviFitMode(): FitMode =
+    when (this) {
+        ContentScale.Crop -> FitMode.COVER
+        ContentScale.FillBounds -> FitMode.FILL
+        else -> FitMode.CONTAIN
+    }
+
+private fun TrackSelectionStatus.isApplied(): Boolean =
+    this == TrackSelectionStatus.SELECTED ||
+        this == TrackSelectionStatus.UNCHANGED ||
+        this == TrackSelectionStatus.AUTO ||
+        this == TrackSelectionStatus.DISABLED
+
+private fun PlatformFile.browserFileOrNull(): File? =
+    when (val source = webFile) {
+        is WebFile.FileWrapper -> browserFileAsDomFile(source.file)
+        is WebFile.DirectoryWrapper -> null
+    }
+
+@Suppress("UNUSED_PARAMETER")
+private fun browserFileAsDomFile(file: BrowserFile): File = js("file")
+
+private fun String.isInlineBrowserMediaUri(): Boolean =
+    startsWith("blob:", ignoreCase = true) || startsWith("data:", ignoreCase = true)
 
 @Suppress("CyclomaticComplexMethod")
 internal fun parseMoviSnapshotRows(rows: String): MoviMediaSnapshot {
@@ -609,7 +680,7 @@ internal fun parseMoviSnapshotRows(rows: String): MoviMediaSnapshot {
                     )
                 if (columns.getOrNull(4).orEmpty().toMoviBoolean()) activeSubtitleTrackId = id
             }
-            "V" -> {
+            "V" ->
                 videoTracks +=
                     MoviVideoTrackSnapshot(
                         id = columns.getOrNull(1)?.toIntOrNull() ?: return@forEach,
@@ -626,7 +697,6 @@ internal fun parseMoviSnapshotRows(rows: String): MoviMediaSnapshot {
                         isHdr = columns.getOrNull(12).orEmpty().toMoviBoolean(),
                         isActive = columns.getOrNull(13).orEmpty().toMoviBoolean(),
                     )
-            }
             "C" -> {
                 val start =
                     columns.getOrNull(1)?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }
@@ -641,7 +711,7 @@ internal fun parseMoviSnapshotRows(rows: String): MoviMediaSnapshot {
                         isHidden = columns.getOrNull(5).orEmpty().toMoviBoolean(),
                     )
             }
-            "D" -> {
+            "D" ->
                 diagnostics =
                     MoviRenderingDiagnosticsSnapshot(
                         backend = columns.getOrNull(1).orEmpty().ifBlank { null },
@@ -649,7 +719,6 @@ internal fun parseMoviSnapshotRows(rows: String): MoviMediaSnapshot {
                         renderer = columns.getOrNull(3).orEmpty().ifBlank { null },
                         container = columns.getOrNull(4).orEmpty().ifBlank { null },
                     )
-            }
         }
     }
 
@@ -672,7 +741,7 @@ private fun String.toMoviSubtitleFormat(codec: String?): SubtitleFormat =
     when (lowercase()) {
         "ass", "s_text/ass" -> SubtitleFormat.ASS
         "ssa", "s_text/ssa" -> SubtitleFormat.SSA
-        "srt", "text" -> SubtitleFormat.SRT
+        "srt", "text", "subrip" -> SubtitleFormat.SRT
         "webvtt", "vtt" -> SubtitleFormat.WEBVTT
         else ->
             when (codec.orEmpty().lowercase()) {
@@ -691,16 +760,11 @@ internal fun MoviVideoTrackSnapshot.toVideoColorInfo(): VideoColorInfo {
     val normalizedTransfer = colorTransfer.orEmpty().lowercase()
     val transfer =
         when {
-            normalizedTransfer.contains("2084") || normalizedTransfer == "pq" ->
-                VideoColorTransfer.PQ
-            normalizedTransfer.contains("hlg") || normalizedTransfer.contains("arib") ->
-                VideoColorTransfer.HLG
-            normalizedTransfer.contains("srgb") ->
-                VideoColorTransfer.SRGB
-            normalizedTransfer.isNotBlank() ->
-                VideoColorTransfer.SDR
-            else ->
-                VideoColorTransfer.UNKNOWN
+            normalizedTransfer.contains("2084") || normalizedTransfer == "pq" -> VideoColorTransfer.PQ
+            normalizedTransfer.contains("hlg") || normalizedTransfer.contains("arib") -> VideoColorTransfer.HLG
+            normalizedTransfer.contains("srgb") -> VideoColorTransfer.SRGB
+            normalizedTransfer.isNotBlank() -> VideoColorTransfer.SDR
+            else -> VideoColorTransfer.UNKNOWN
         }
     val dynamicRange =
         when (transfer) {
@@ -729,8 +793,7 @@ internal fun MoviVideoTrackSnapshot.toVideoColorInfo(): VideoColorInfo {
             },
         range =
             when {
-                colorRange.equals("full", ignoreCase = true) ||
-                    colorRange == "2" -> VideoColorRange.FULL
+                colorRange.equals("full", ignoreCase = true) || colorRange == "2" -> VideoColorRange.FULL
                 colorRange.equals("limited", ignoreCase = true) ||
                     colorRange.equals("tv", ignoreCase = true) ||
                     colorRange == "1" -> VideoColorRange.LIMITED
@@ -751,18 +814,27 @@ private fun String.extractMoviBitDepth(): Int? =
 
 private fun classifyMoviError(
     message: String,
+    category: MoviErrorCategory?,
     isDrm: Boolean,
 ): VideoPlayerError {
-    if (isDrm) return VideoPlayerError.DrmError(message)
-    val normalized = message.lowercase()
-    return when {
-        "codec" in normalized || "decode" in normalized || "decoder" in normalized ->
-            VideoPlayerError.CodecError(message)
-        "network" in normalized || "fetch" in normalized || "http" in normalized || "range" in normalized ->
-            VideoPlayerError.NetworkError(message)
-        "source" in normalized || "demux" in normalized || "format" in normalized ->
-            VideoPlayerError.SourceError(message)
-        else -> VideoPlayerError.UnknownError(message)
+    if (isDrm || category == MoviErrorCategory.DRM) return VideoPlayerError.DrmError(message)
+    return when (category) {
+        MoviErrorCategory.NETWORK -> VideoPlayerError.NetworkError(message)
+        MoviErrorCategory.FORMAT, MoviErrorCategory.SOURCE -> VideoPlayerError.SourceError(message)
+        MoviErrorCategory.DECODER, MoviErrorCategory.RENDERER -> VideoPlayerError.CodecError(message)
+        MoviErrorCategory.DRM -> VideoPlayerError.DrmError(message)
+        MoviErrorCategory.STATE, MoviErrorCategory.INTERNAL, null -> {
+            val normalized = message.lowercase()
+            when {
+                "codec" in normalized || "decode" in normalized || "decoder" in normalized ->
+                    VideoPlayerError.CodecError(message)
+                "network" in normalized || "fetch" in normalized || "http" in normalized || "range" in normalized ->
+                    VideoPlayerError.NetworkError(message)
+                "source" in normalized || "demux" in normalized || "format" in normalized ->
+                    VideoPlayerError.SourceError(message)
+                else -> VideoPlayerError.UnknownError(message)
+            }
+        }
     }
 }
 
@@ -772,799 +844,13 @@ internal fun redactMoviError(
     mediaRequestHeaders: Map<String, String> = emptyMap(),
 ): String {
     if (drmConfiguration != null) {
-        // Upstream/browser errors can serialize or otherwise transform request data. Returning a
-        // fixed message is the only way to guarantee that runtime-only DRM values never reach
-        // application diagnostics or logs.
         return "DRM playback failed in Movi/Shaka; license details were redacted."
     }
     if (mediaRequestHeaders.isNotEmpty()) {
         return "Movi playback failed; media request details were redacted."
     }
-
-    return message
+    return redactSensitiveText(message)
 }
-
-private fun PlatformFile.browserFileOrNull(): JsAny? =
-    when (val source = webFile) {
-        is WebFile.FileWrapper -> source.file
-        is WebFile.DirectoryWrapper -> null
-    }
-
-private fun String.isInlineBrowserMediaUri(): Boolean =
-    startsWith("blob:", ignoreCase = true) || startsWith("data:", ignoreCase = true)
-
-private suspend fun loadInlineBrowserFile(uri: String): JsAny {
-    val deferred = CompletableDeferred<JsAny>()
-    fetchInlineBrowserFile(
-        uri = uri,
-        onLoaded = { file -> deferred.complete(file) },
-        onError = { message -> deferred.completeExceptionally(IllegalStateException(message)) },
-    )
-    return deferred.await()
-}
-
-@Suppress("UNUSED_PARAMETER")
-private fun fetchInlineBrowserFile(
-    uri: String,
-    onLoaded: (JsAny) -> Unit,
-    onError: (String) -> Unit,
-): Unit =
-    js(
-        """
-        {
-            fetch(uri)
-                .then(function(response) {
-                    if (!response.ok) {
-                        throw new Error("Inline media fetch failed with HTTP " + response.status + ".");
-                    }
-                    return response.blob();
-                })
-                .then(function(blob) {
-                    onLoaded(new File([blob], "inline-media", {
-                        type: blob.type || "application/octet-stream"
-                    }));
-                })
-                .catch(function(error) {
-                    const message = error && error.message ? error.message : String(error);
-                    onError(String(message || "Unable to read the inline browser media source."));
-                });
-        }
-        """,
-    )
-
-private suspend fun loadMoviPlayerModule(): JsAny {
-    val moduleUrl = WebMediaDependencyConfig.moviPlayerModuleUrl.trim()
-    require(moduleUrl.isNotEmpty()) {
-        "WebMediaDependencyConfig.moviPlayerModuleUrl must identify a MoviPlayer ES module."
-    }
-    val deferred = CompletableDeferred<JsAny>()
-    importMoviPlayerModule(
-        moduleUrl = moduleUrl,
-        onLoaded = { module -> deferred.complete(module) },
-        onError = { message -> deferred.completeExceptionally(IllegalStateException(message)) },
-    )
-    return deferred.await()
-}
-
-private suspend fun awaitMoviLoad(player: JsAny) {
-    val deferred = CompletableDeferred<Unit>()
-    loadMovi(
-        player = player,
-        onLoaded = { deferred.complete(Unit) },
-        onError = { message -> deferred.completeExceptionally(IllegalStateException(message)) },
-    )
-    deferred.await()
-}
-
-@Suppress("UNUSED_PARAMETER")
-private fun importMoviPlayerModule(
-    moduleUrl: String,
-    onLoaded: (JsAny) -> Unit,
-    onError: (String) -> Unit,
-): Unit =
-    js(
-        """
-        {
-            const url = String(moduleUrl);
-            if (!globalThis.__composeMediaPlayerMoviModulePromises) {
-                globalThis.__composeMediaPlayerMoviModulePromises = new Map();
-            }
-            if (!globalThis.__composeMediaPlayerMoviModulePromises.has(url)) {
-                globalThis.__composeMediaPlayerMoviModulePromises.set(
-                    url,
-                    import(/* webpackIgnore: true */ url)
-                );
-            }
-            globalThis.__composeMediaPlayerMoviModulePromises.get(url)
-                .then(function(module) { onLoaded(module); })
-                .catch(function(error) {
-                    const message = error && error.message ? error.message : String(error);
-                    onError(String(message || "Unable to import the external MoviPlayer module."));
-                });
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-internal fun createMoviPlayer(
-    module: JsAny,
-    canvas: HTMLCanvasElement,
-    sourceUri: String,
-    browserFile: JsAny?,
-    mediaHeadersJson: String,
-    drmEnabled: Boolean,
-    licenseUrl: String?,
-    licenseHeadersJson: String,
-): JsAny =
-    js(
-        """
-        (function() {
-            const MoviPlayer =
-                module && (module.MoviPlayer || (module.default && module.default.MoviPlayer) || module.default);
-            if (typeof MoviPlayer !== "function") {
-                throw new Error("movi-player/player does not export MoviPlayer.");
-            }
-            // Keep the dependency logger silent even if another bundle changed its process-wide
-            // log level. Upstream error payloads can contain request URLs or headers; KMediaPlayer
-            // exposes only the redacted, typed error emitted through the adapter below.
-            if (typeof MoviPlayer.setLogLevel === "function") {
-                MoviPlayer.setLogLevel(0);
-            }
-            const parseHeaders = function(value) {
-                try { return JSON.parse(value || "{}") || {}; } catch (_) { return {}; }
-            };
-            const mediaHeaders = parseHeaders(mediaHeadersJson);
-            const source = browserFile
-                ? { type: "file", file: browserFile }
-                : { type: "url", url: sourceUri, headers: mediaHeaders };
-            const config = {
-                source: source,
-                renderer: "canvas",
-                decoder: "auto",
-                canvas: canvas,
-                headers: mediaHeaders,
-                logger: { level: 0 }
-            };
-            if (drmEnabled) {
-                config.drm = true;
-                config.licenseUrl = licenseUrl;
-                config.licenseHeaders = parseHeaders(licenseHeadersJson);
-                config.drmConfig = {
-                    licenseUrl: licenseUrl,
-                    licenseHeaders: parseHeaders(licenseHeadersJson)
-                };
-            }
-            return new MoviPlayer(config);
-        })()
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-internal fun attachMoviSubtitleSurface(
-    player: JsAny,
-    canvas: HTMLCanvasElement,
-    renderer: JsAny?,
-    subtitleDelaySeconds: Double,
-): Unit =
-    js(
-        """
-        {
-            // Record renderer ownership before validating the surface. If any
-            // required engine hook is absent, the caller destroys the player
-            // and this renderer through the same idempotent cleanup path.
-            player.__composeMediaPlayerSubtitleRenderer = renderer || null;
-            player.__composeMediaPlayerSubtitleOverlay = null;
-            const parent = canvas.parentElement;
-            if (!parent) {
-                throw new Error("Movi subtitle surface requires a mounted canvas.");
-            }
-            if (typeof player.setSubtitleOverlay !== "function") {
-                throw new Error(
-                    "The configured Movi engine does not expose setSubtitleOverlay()."
-                );
-            }
-            if (renderer && typeof player.setSubtitleRenderer !== "function") {
-                throw new Error(
-                    "The configured Movi engine does not expose setSubtitleRenderer()."
-                );
-            }
-            const overlay = document.createElement("div");
-            overlay.setAttribute("aria-hidden", "true");
-            overlay.style.position = "absolute";
-            overlay.style.inset = "0";
-            overlay.style.pointerEvents = "none";
-            overlay.style.overflow = "hidden";
-            overlay.style.zIndex = "2";
-            parent.appendChild(overlay);
-            player.__composeMediaPlayerSubtitleOverlay = overlay;
-            player.setSubtitleOverlay(overlay);
-            if (renderer) {
-                player.setSubtitleRenderer(renderer);
-            }
-            if (typeof player.setSubtitleDelay === "function") {
-                player.setSubtitleDelay(subtitleDelaySeconds);
-            }
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun loadMovi(
-    player: JsAny,
-    onLoaded: () -> Unit,
-    onError: (String) -> Unit,
-): Unit =
-    js(
-        """
-        {
-            Promise.resolve(player.load())
-                .then(function() { onLoaded(); })
-                .catch(function(error) {
-                    const message = error && error.message ? error.message : String(error);
-                    onError(String(message || "Movi failed to load the source."));
-                });
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER", "LongParameterList")
-internal fun bindMoviPlayerEvents(
-    player: JsAny,
-    onStateChanged: (String) -> Unit,
-    onTimeChanged: (Double) -> Unit,
-    onDurationChanged: (Double) -> Unit,
-    onTracksChanged: () -> Unit,
-    onError: (String) -> Unit,
-    onSeeking: () -> Unit,
-    onSeeked: () -> Unit,
-    onBufferChanged: (String) -> Unit,
-    onEnded: () -> Unit,
-): Unit =
-    js(
-        """
-        {
-            const subscriptions = [];
-            const listen = function(event, callback) {
-                const dispose = player.on(event, callback);
-                if (typeof dispose === "function") subscriptions.push(dispose);
-            };
-            const bufferRows = function(ranges) {
-                return (Array.isArray(ranges) ? ranges : []).map(function(range) {
-                    return String(Number(range && range.start || 0)) + "|" +
-                        String(Number(range && range.end || 0));
-                }).join("\n");
-            };
-            listen("stateChange", function(value) { onStateChanged(String(value || "")); });
-            listen("timeUpdate", function(value) { onTimeChanged(Number(value || 0)); });
-            listen("durationChange", function(value) { onDurationChanged(Number(value || 0)); });
-            listen("tracksChange", function() { onTracksChanged(); });
-            listen("error", function(error) {
-                const message = error && error.message ? error.message : String(error);
-                onError(String(message || "Movi playback failed."));
-            });
-            listen("seeking", function() { onSeeking(); });
-            listen("seeked", function() { onSeeked(); });
-            listen("bufferUpdate", function(ranges) { onBufferChanged(bufferRows(ranges)); });
-            listen("ended", function() { onEnded(); });
-            player.__composeMediaPlayerSubscriptions = subscriptions;
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun readMoviSnapshotRows(player: JsAny): String =
-    js(
-        """
-        (function() {
-            const encode = function(value) { return encodeURIComponent(value == null ? "" : String(value)); };
-            const row = function(values) { return values.map(encode).join("|"); };
-            const rows = [];
-            let info = null;
-            try { info = player.getMediaInfo ? player.getMediaInfo() : null; } catch (_) {}
-            const metadata = info && info.metadata ? info.metadata : {};
-            rows.push(row([
-                "M",
-                info && info.formatName,
-                info && info.duration,
-                info && info.bitRate,
-                metadata.title || metadata.TITLE || metadata.name
-            ]));
-
-            const manager = player.trackManager;
-            const confirmedAudioTrackId =
-                Number.isFinite(player.__composeMediaPlayerConfirmedAudioTrackId)
-                    ? player.__composeMediaPlayerConfirmedAudioTrackId
-                    : null;
-            const activeAudio = player.getActiveAudioTrack
-                ? player.getActiveAudioTrack()
-                : manager && manager.getActiveAudioTrack
-                    ? manager.getActiveAudioTrack()
-                    : null;
-            const activeSubtitle = player.getActiveSubtitleTrack
-                ? player.getActiveSubtitleTrack()
-                : manager && manager.getActiveSubtitleTrack
-                    ? manager.getActiveSubtitleTrack()
-                    : null;
-            const activeVideo = player.getActiveVideoTrack
-                ? player.getActiveVideoTrack()
-                : manager && manager.getActiveVideoTrack
-                    ? manager.getActiveVideoTrack()
-                    : null;
-
-            const audioTracks = player.getAudioTracks ? player.getAudioTracks() : [];
-            (Array.isArray(audioTracks) ? audioTracks : []).forEach(function(track, index) {
-                rows.push(row([
-                    "A",
-                    track.id,
-                    track.label,
-                    track.language,
-                    track.channels,
-                    track.sampleRate,
-                    track.bitRate,
-                    confirmedAudioTrackId != null
-                        ? confirmedAudioTrackId === track.id
-                        : activeAudio
-                            ? activeAudio.id === track.id
-                            : index === 0,
-                    confirmedAudioTrackId != null
-                        ? confirmedAudioTrackId === track.id
-                        : activeAudio && activeAudio.id === track.id
-                ]));
-            });
-
-            const subtitleTracks = player.getSubtitleTracks ? player.getSubtitleTracks() : [];
-            (Array.isArray(subtitleTracks) ? subtitleTracks : []).forEach(function(track) {
-                rows.push(row([
-                    "S",
-                    track.id,
-                    track.label,
-                    track.language,
-                    activeSubtitle && activeSubtitle.id === track.id,
-                    track.codec,
-                    track.subtitleType
-                ]));
-            });
-
-            const videoTracks = player.getVideoTracks ? player.getVideoTracks() : [];
-            (Array.isArray(videoTracks) ? videoTracks : []).forEach(function(track, index) {
-                rows.push(row([
-                    "V",
-                    track.id,
-                    track.codecString || track.codec,
-                    track.width,
-                    track.height,
-                    track.frameRate,
-                    track.bitRate,
-                    track.pixelFormat,
-                    track.colorPrimaries,
-                    track.colorTransfer,
-                    track.colorSpace,
-                    track.colorRange,
-                    track.isHDR,
-                    activeVideo ? activeVideo.id === track.id : index === 0
-                ]));
-            });
-
-            let chapters = [];
-            try { chapters = player.getChapters ? player.getChapters() : []; } catch (_) {}
-            (Array.isArray(chapters) ? chapters : []).forEach(function(chapter) {
-                rows.push(row([
-                    "C",
-                    chapter.start,
-                    chapter.end,
-                    chapter.title,
-                    chapter.language,
-                    chapter.isHidden,
-                    chapter.id
-                ]));
-            });
-            let diagnostics = null;
-            try {
-                diagnostics = player.getRenderingDiagnostics
-                    ? player.getRenderingDiagnostics()
-                    : null;
-            } catch (_) {}
-            rows.push(row([
-                "D",
-                diagnostics && diagnostics.backend,
-                diagnostics && diagnostics.decoder,
-                diagnostics && diagnostics.renderer,
-                diagnostics && diagnostics.container
-            ]));
-            return rows.join("\n");
-        })()
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun readMoviBufferedRows(player: JsAny): String =
-    js(
-        """
-        (function() {
-            let ranges = [];
-            try { ranges = player.getCachedTimeRanges ? player.getCachedTimeRanges() : []; } catch (_) {}
-            if (!Array.isArray(ranges) || ranges.length === 0) {
-                let start = 0;
-                let end = 0;
-                try { start = Number(player.getBufferStartTime ? player.getBufferStartTime() : 0); } catch (_) {}
-                try { end = Number(player.getBufferEndTime ? player.getBufferEndTime() : 0); } catch (_) {}
-                ranges = end > start ? [{ start: start, end: end }] : [];
-            }
-            return ranges.map(function(range) {
-                return String(Number(range && range.start || 0)) + "|" +
-                    String(Number(range && range.end || 0));
-            }).join("\n");
-        })()
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun playMovi(
-    player: JsAny,
-    onError: (String) -> Unit,
-): Unit =
-    js(
-        """
-        {
-            Promise.resolve(player.play()).catch(function(error) {
-                const message = error && error.message ? error.message : String(error);
-                onError(String(message || "Movi could not start playback."));
-            });
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun pauseMovi(player: JsAny): Unit = js("player.pause()")
-
-@Suppress("UNUSED_PARAMETER")
-private fun seekMovi(
-    player: JsAny,
-    seconds: Double,
-    onError: (String) -> Unit,
-): Unit =
-    js(
-        """
-        {
-            Promise.resolve(player.seek(seconds)).catch(function(error) {
-                const message = error && error.message ? error.message : String(error);
-                onError(String(message || "Movi seek failed."));
-            });
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-internal fun selectMoviAudioTrack(
-    player: JsAny,
-    trackId: Int,
-    automatic: Boolean,
-    onResult: (String, String?) -> Unit,
-): Unit =
-    js(
-        """
-        {
-            const success = function(outcome) {
-                const status = outcome && outcome.status ? String(outcome.status) : "";
-                if (
-                    status === "selected" ||
-                    status === "unchanged" ||
-                    status === "auto"
-                ) {
-                    const activeTrack = outcome && outcome.activeTrack;
-                    if (activeTrack && Number.isFinite(activeTrack.id)) {
-                        player.__composeMediaPlayerConfirmedAudioTrackId = activeTrack.id;
-                    }
-                    onResult("${MOVI_SELECTION_SUCCESS}", null);
-                    return;
-                }
-                if (status === "superseded") {
-                    onResult("${MOVI_SELECTION_SUPERSEDED}", null);
-                    return;
-                }
-                const error = outcome && outcome.error;
-                const message = error && error.message
-                    ? error.message
-                    : "Movi rejected the audio track change.";
-                onResult("${MOVI_SELECTION_FAILED}", String(message));
-            };
-            if (typeof player.selectTrack === "function") {
-                Promise.resolve(player.selectTrack({
-                    kind: "audio",
-                    trackId: automatic ? null : trackId
-                })).then(success).catch(function(error) {
-                    const message = error && error.message ? error.message : String(error);
-                    onResult(
-                        "${MOVI_SELECTION_FAILED}",
-                        String(message || "Movi rejected the audio track change.")
-                    );
-                });
-            } else {
-                try {
-                    if (player.selectAudioTrack(trackId)) {
-                        player.__composeMediaPlayerConfirmedAudioTrackId = trackId;
-                        onResult("${MOVI_SELECTION_SUCCESS}", null);
-                    } else {
-                        onResult("${MOVI_SELECTION_FAILED}", null);
-                    }
-                } catch (error) {
-                    const message = error && error.message ? error.message : String(error);
-                    onResult(
-                        "${MOVI_SELECTION_FAILED}",
-                        String(message || "Movi rejected the audio track change.")
-                    );
-                }
-            }
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun hasMoviTransactionalTrackSelection(player: JsAny): Boolean = js("typeof player.selectTrack === 'function'")
-
-@Suppress("UNUSED_PARAMETER")
-private fun selectLegacyMoviAudioTrack(
-    player: JsAny,
-    trackId: Int,
-): Boolean =
-    js(
-        """
-        (function() {
-            const selected = !!player.selectAudioTrack(trackId);
-            if (selected) player.__composeMediaPlayerConfirmedAudioTrackId = trackId;
-            return selected;
-        })()
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-internal fun selectMoviSubtitleTrack(
-    player: JsAny,
-    trackId: Int?,
-    onResult: (String, String?) -> Unit,
-): Unit =
-    js(
-        """
-        {
-            const generation =
-                Number(player.__composeMediaPlayerSubtitleSelectionGeneration || 0) + 1;
-            player.__composeMediaPlayerSubtitleSelectionGeneration = generation;
-            const isCurrent = function() {
-                return !player.__composeMediaPlayerDestroyed &&
-                    player.__composeMediaPlayerSubtitleSelectionGeneration === generation;
-            };
-            const selection =
-                typeof player.selectTrack === "function"
-                    ? player.selectTrack({ kind: "subtitle", trackId: trackId })
-                    : player.selectSubtitleTrack(trackId);
-            Promise.resolve(selection)
-                .then(function(outcome) {
-                    if (!isCurrent()) {
-                        onResult("${MOVI_SELECTION_SUPERSEDED}", null);
-                        return;
-                    }
-                    if (typeof player.selectTrack !== "function") {
-                        if (outcome === true) {
-                            onResult("${MOVI_SELECTION_SUCCESS}", null);
-                        } else {
-                            onResult(
-                                "${MOVI_SELECTION_FAILED}",
-                                "Movi rejected the subtitle track change."
-                            );
-                        }
-                        return;
-                    }
-                    const status = outcome && outcome.status ? String(outcome.status) : "";
-                    if (
-                        status === "selected" ||
-                        status === "unchanged" ||
-                        status === "disabled"
-                    ) {
-                        onResult("${MOVI_SELECTION_SUCCESS}", null);
-                    } else if (status === "superseded") {
-                        onResult("${MOVI_SELECTION_SUPERSEDED}", null);
-                    } else {
-                        const error = outcome && outcome.error;
-                        const message = error && error.message
-                            ? error.message
-                            : "Movi rejected the subtitle track change.";
-                        onResult("${MOVI_SELECTION_FAILED}", String(message));
-                    }
-                })
-                .catch(function(error) {
-                    if (!isCurrent()) {
-                        onResult("${MOVI_SELECTION_SUPERSEDED}", null);
-                        return;
-                    }
-                    const message = error && error.message ? error.message : String(error);
-                    onResult(
-                        "${MOVI_SELECTION_FAILED}",
-                        String(message || "Movi rejected the subtitle track change.")
-                    );
-                });
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun selectMoviVideoTrack(
-    player: JsAny,
-    trackId: Int,
-): Boolean =
-    js(
-        """
-        !!(player.trackManager &&
-            typeof player.trackManager.selectVideoTrack === "function" &&
-            player.trackManager.selectVideoTrack(trackId))
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun setMoviVolume(
-    player: JsAny,
-    value: Float,
-): Unit = js("player.setVolume(value)")
-
-@Suppress("UNUSED_PARAMETER")
-private fun setMoviPlaybackRate(
-    player: JsAny,
-    value: Float,
-): Unit = js("player.setPlaybackRate(value)")
-
-@Suppress("UNUSED_PARAMETER")
-private fun setMoviFitMode(
-    player: JsAny,
-    mode: String,
-): Unit = js("player.setFitMode(mode)")
-
-@Suppress("UNUSED_PARAMETER")
-private fun setMoviVrProjection(
-    player: JsAny,
-    enabled: Boolean,
-    half: Boolean,
-    fisheye: Boolean,
-    stereoSbs: Boolean,
-): Unit =
-    js(
-        """
-        {
-            if (typeof player.setVR360 === "function") player.setVR360(enabled);
-            if (enabled && typeof player.setVRProjection === "function") {
-                player.setVRProjection(half, fisheye, stereoSbs, false);
-            }
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun setMoviSubtitleDelay(
-    player: JsAny,
-    seconds: Double,
-): Unit =
-    js(
-        """
-        {
-            if (typeof player.setSubtitleDelay === "function") {
-                player.setSubtitleDelay(seconds);
-            }
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun getMoviCurrentTime(player: JsAny): Double = js("Number(player.getCurrentTime() || 0)")
-
-@Suppress("UNUSED_PARAMETER")
-private fun getMoviDuration(player: JsAny): Double = js("Number(player.getDuration() || 0)")
-
-@Suppress("UNUSED_PARAMETER")
-private fun getMoviNativeVideoElement(player: JsAny): HTMLVideoElement? =
-    js(
-        """
-        (function() {
-            try {
-                const surface = player.getSurface ? player.getSurface() : null;
-                if (surface && surface.kind === "video") return surface.element || null;
-            } catch (_) {}
-            return player.getHLSVideoElement ? player.getHLSVideoElement() : null;
-        })()
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun observeMoviCanvas(
-    player: JsAny,
-    canvas: HTMLCanvasElement,
-): Unit =
-    js(
-        """
-        {
-            const resize = function() {
-                const rect = canvas.getBoundingClientRect();
-                const ratio = globalThis.devicePixelRatio || 1;
-                const width = Math.max(1, Math.round(rect.width * ratio));
-                const height = Math.max(1, Math.round(rect.height * ratio));
-                if (canvas.width === width && canvas.height === height) return;
-                try { player.resizeCanvas(width, height); } catch (_) {}
-            };
-            resize();
-            if (typeof ResizeObserver === "function") {
-                let pendingFrame = 0;
-                const observer = new ResizeObserver(function() {
-                    if (pendingFrame) return;
-                    pendingFrame = requestAnimationFrame(function() {
-                        pendingFrame = 0;
-                        resize();
-                    });
-                });
-                observer.observe(canvas);
-                player.__composeMediaPlayerResizeObserver = observer;
-                player.__composeMediaPlayerResizeFrame = function() {
-                    if (pendingFrame) cancelAnimationFrame(pendingFrame);
-                    pendingFrame = 0;
-                };
-            }
-        }
-        """,
-    )
-
-@Suppress("UNUSED_PARAMETER")
-private fun destroyMoviPlayer(player: JsAny): Unit =
-    js(
-        """
-        {
-            if (player.__composeMediaPlayerDestroyed) return;
-            player.__composeMediaPlayerDestroyed = true;
-            player.__composeMediaPlayerSubtitleSelectionGeneration =
-                Number(player.__composeMediaPlayerSubtitleSelectionGeneration || 0) + 1;
-            const subtitleRenderer = player.__composeMediaPlayerSubtitleRenderer;
-            try {
-                if (typeof player.setSubtitleRenderer === "function") {
-                    player.setSubtitleRenderer(null);
-                }
-            } catch (_) {}
-            if (subtitleRenderer && typeof subtitleRenderer.destroy === "function") {
-                try {
-                    const result = subtitleRenderer.destroy();
-                    if (result && typeof result.catch === "function") {
-                        result.catch(function() {});
-                    }
-                } catch (_) {}
-            }
-            player.__composeMediaPlayerSubtitleRenderer = null;
-            try {
-                if (typeof player.setSubtitleOverlay === "function") {
-                    player.setSubtitleOverlay(null);
-                }
-            } catch (_) {}
-            const subtitleOverlay = player.__composeMediaPlayerSubtitleOverlay;
-            if (subtitleOverlay && subtitleOverlay.parentElement) {
-                try { subtitleOverlay.remove(); } catch (_) {}
-            }
-            player.__composeMediaPlayerSubtitleOverlay = null;
-            const subscriptions = player.__composeMediaPlayerSubscriptions || [];
-            subscriptions.forEach(function(dispose) {
-                try { dispose(); } catch (_) {}
-            });
-            player.__composeMediaPlayerSubscriptions = [];
-            if (player.__composeMediaPlayerResizeObserver) {
-                try { player.__composeMediaPlayerResizeObserver.disconnect(); } catch (_) {}
-                player.__composeMediaPlayerResizeObserver = null;
-            }
-            if (player.__composeMediaPlayerResizeFrame) {
-                try { player.__composeMediaPlayerResizeFrame(); } catch (_) {}
-                player.__composeMediaPlayerResizeFrame = null;
-            }
-            try { player.destroy(); } catch (_) {}
-        }
-        """,
-    )
 
 @Suppress("UNUSED_PARAMETER")
 private fun decodeMoviColumn(value: String): String = js("decodeURIComponent(value)")
-
-private const val MOVI_AUTO_TRACK_ID = -1
-private const val MILLIS_PER_SECOND = 1000.0
-private const val MOVI_SELECTION_SUCCESS = "success"
-private const val MOVI_SELECTION_SUPERSEDED = "superseded"
-private const val MOVI_SELECTION_FAILED = "failed"

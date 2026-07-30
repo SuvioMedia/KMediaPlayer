@@ -5,22 +5,17 @@ package io.github.kdroidfilter.composemediaplayer
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import io.github.shusek.moviplayer.EmbeddedSubtitleRenderer
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
-import kotlin.js.JsAny
 
 /** Browser hook implemented by optional styled-subtitle companion artifacts. */
 public interface WebSubtitlePipelineExtension : SubtitlePipelineExtension {
     /**
-     * Optional low-level renderer consumed directly by Movi's pluggable embedded-subtitle
-     * pipeline. The returned JavaScript object must implement Movi's `SubtitleRenderer`
-     * contract. Returning null leaves the track on Movi's built-in subtitle renderer.
-     *
-     * The value is intentionally opaque outside the Wasm adapter: applications keep using
-     * [SubtitlePipelineExtension] and [VideoPlayerState], while optional renderer artifacts
-     * can integrate without making the core player depend on their JavaScript runtime.
+     * Optional typed renderer consumed directly by Movi's embedded-subtitle pipeline.
+     * Returning null leaves the track on Movi's built-in subtitle renderer.
      */
-    public fun createMoviEmbeddedSubtitleRenderer(onError: (String) -> Unit): JsAny? = null
+    public fun createMoviEmbeddedSubtitleRenderer(onError: (String) -> Unit): EmbeddedSubtitleRenderer? = null
 
     @Composable
     public fun SubtitleOverlay(
