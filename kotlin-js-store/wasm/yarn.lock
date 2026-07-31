@@ -52,6 +52,11 @@ bcp-47-match@^2.0.3:
   resolved "https://registry.yarnpkg.com/bcp-47-match/-/bcp-47-match-2.0.3.tgz#603226f6e5d3914a581408be33b28a53144b09d0"
   integrity sha512-JtTezzbAibu8G0R9op9zb3vcWZd9JF6M0xOYGPn0fNCd7wOpRB1mU2mH9T8gaBGbAAyIIVgB2G7xG0GP98zMAQ==
 
+ci-info@^3.2.0:
+  version "3.9.0"
+  resolved "https://registry.yarnpkg.com/ci-info/-/ci-info-3.9.0.tgz#4279a62028a7b1f262f3473fc9605f5e218c59b4"
+  integrity sha512-NIxF55hv4nSqQswkAeiOi1r83xy8JldOFDTWiug55KBu9Jnblncd2U6ViHmYgHf01TPZS77NJBhBMKdWj9HQMQ==
+
 codem-isoboxer@0.3.10:
   version "0.3.10"
   resolved "https://registry.yarnpkg.com/codem-isoboxer/-/codem-isoboxer-0.3.10.tgz#75182f8b1754163dfdbfd9bc975d7c7994d99e47"
@@ -109,6 +114,13 @@ imsc@^1.1.5:
   dependencies:
     sax "1.2.1"
 
+is-ci@^3.0.1:
+  version "3.0.1"
+  resolved "https://registry.yarnpkg.com/is-ci/-/is-ci-3.0.1.tgz#db6ecbed1bd659c43dac0f45661e7674103d1867"
+  integrity sha512-ZYvCgrefwqoQ6yTyYUbQu64HsITZ3NfKX1lzaEYdkTDcfKzzCI/wthRRYKkdjHKFVgNiXKAKm65Zo1pk2as/QQ==
+  dependencies:
+    ci-info "^3.2.0"
+
 jassub@2.5.7:
   version "2.5.7"
   resolved "https://registry.yarnpkg.com/jassub/-/jassub-2.5.7.tgz#01418b282f1fefeb570a86eb7735d9879e4b1a05"
@@ -118,6 +130,14 @@ jassub@2.5.7:
     lfa-ponyfill "^1.1.0"
     rvfc-polyfill "^1.0.8"
     throughput "^1.0.2"
+
+karma-webkit-launcher@2.6.0:
+  version "2.6.0"
+  resolved "https://registry.yarnpkg.com/karma-webkit-launcher/-/karma-webkit-launcher-2.6.0.tgz#2e3ba096b69139e608d9ce6e89816a17f358b700"
+  integrity sha512-IDURopxJ1SbuqnvPaE+lP2qiP2Ie7I+ojwJRBpr0tfGwObsaVdjMkUkmZ1BcXUtYRt5ogs9cyCH2Wb9sNv0BbQ==
+  dependencies:
+    is-ci "^3.0.1"
+    uuid "^10.0.0"
 
 lfa-ponyfill@^1.1.0:
   version "1.1.0"
@@ -143,6 +163,18 @@ path-browserify@^1.0.1:
   resolved "https://registry.yarnpkg.com/path-browserify/-/path-browserify-1.0.1.tgz#d98454a9c3753d5790860f16f68867b9e46be1fd"
   integrity sha512-b7uo2UCUOYZcnF/3ID0lulOJi/bafxa1xPe7ZPsammBSpjSWQkjNxlt635YGS2MiR9GjvuXCtz2emr3jbsz98g==
 
+playwright-core@1.62.1:
+  version "1.62.1"
+  resolved "https://registry.yarnpkg.com/playwright-core/-/playwright-core-1.62.1.tgz#120f67a19181bfd183c60fa903c0d99330b56785"
+  integrity sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==
+
+playwright-webkit@1.62.1:
+  version "1.62.1"
+  resolved "https://registry.yarnpkg.com/playwright-webkit/-/playwright-webkit-1.62.1.tgz#85ac07d8d338c1e4cee1d314ce4b9ef3570a3aa8"
+  integrity sha512-n547PR8+rK2xADEuLIo2uaLZOgcX6iQ3Gj8gIICjqLszuiOz47NumXLXdblT4aXs3NkK5OWlL+Qr2CMrb99igA==
+  dependencies:
+    playwright-core "1.62.1"
+
 rvfc-polyfill@^1.0.8:
   version "1.0.8"
   resolved "https://registry.yarnpkg.com/rvfc-polyfill/-/rvfc-polyfill-1.0.8.tgz#4361448d19991a97985ca7e9a1d4ec6a0df7ef2d"
@@ -164,3 +196,8 @@ throughput@^1.0.2:
   version "1.0.2"
   resolved "https://registry.yarnpkg.com/throughput/-/throughput-1.0.2.tgz#f235dfd227831e464c19ab426bc76c21062c550a"
   integrity sha512-jvK1ZXuhsggjb3qYQjMiU/AVYYiTeqT5thWvYR2yuy2LGM84P5MSSyAinwHahGsdBYKR9m9HncVR/3f3nFKkxg==
+
+uuid@^10.0.0:
+  version "10.0.0"
+  resolved "https://registry.yarnpkg.com/uuid/-/uuid-10.0.0.tgz#5a95aa454e6e002725c79055fd42aaba30ca6294"
+  integrity sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==
