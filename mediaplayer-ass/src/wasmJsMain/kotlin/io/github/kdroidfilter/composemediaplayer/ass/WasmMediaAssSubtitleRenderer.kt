@@ -5,12 +5,12 @@ package io.github.kdroidfilter.composemediaplayer.ass
 
 import io.github.kdroidfilter.composemediaplayer.AssFontQueryMode
 import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
+import io.github.kdroidfilter.composemediaplayer.WebEmbeddedSubtitleRenderer
+import io.github.kdroidfilter.composemediaplayer.WebSubtitlePacket
+import io.github.kdroidfilter.composemediaplayer.WebSubtitleRendererConfiguration
 import io.github.kdroidfilter.composemediaplayer.assSubtitleRendererUnavailableReason
 import io.github.kdroidfilter.composemediaplayer.createJassubRenderer
 import io.github.kdroidfilter.composemediaplayer.hardenJassubLocalFontQuery
-import io.github.shusek.moviplayer.EmbeddedSubtitleRenderer
-import io.github.shusek.moviplayer.SubtitlePacket
-import io.github.shusek.moviplayer.SubtitleRendererConfiguration
 import kotlinx.coroutines.CompletableDeferred
 import org.khronos.webgl.Int8Array
 import org.khronos.webgl.toInt8Array
@@ -20,15 +20,17 @@ import kotlin.js.JsAny
 import kotlin.js.js
 import kotlin.time.Duration
 
-internal fun createMoviAssSubtitleRenderer(
+private const val MILLISECONDS_PER_SECOND = 1_000.0
+
+internal fun createWasmMediaAssSubtitleRenderer(
     config: AssSubtitleRendererConfig,
     onError: (String) -> Unit,
-): EmbeddedSubtitleRenderer? {
+): WebEmbeddedSubtitleRenderer? {
     val unavailableReason = assSubtitleRendererUnavailableReason(config.enabled)
     if (unavailableReason.isNotEmpty()) return null
 
     val settings =
-        createMoviJassubSettings(
+        createWasmMediaJassubSettings(
             workerUrl = config.workerUrl,
             wasmUrl = config.wasmUrl,
             modernWasmUrl = config.modernWasmUrl,
@@ -38,15 +40,15 @@ internal fun createMoviAssSubtitleRenderer(
             debug = config.debug,
         )
     config.preloadFontUrls.forEach { url ->
-        addMoviJassubPreloadFont(settings, url)
+        addWasmMediaJassubPreloadFont(settings, url)
     }
     config.availableFontUrls.forEach { (family, url) ->
-        addMoviJassubAvailableFont(settings, family, url)
+        addWasmMediaJassubAvailableFont(settings, family, url)
     }
 
-    return MoviAssSubtitleRenderer(
+    return WasmMediaAssSubtitleRenderer(
         adapter =
-            createMoviAssSubtitleRendererAdapter(
+            createWasmMediaAssSubtitleRendererAdapter(
                 settings = settings,
                 createRenderer = ::createJassubRenderer,
                 hardenRenderer = { instance ->
@@ -62,16 +64,16 @@ internal fun createMoviAssSubtitleRenderer(
     )
 }
 
-private class MoviAssSubtitleRenderer(
+private class WasmMediaAssSubtitleRenderer(
     private val adapter: JsAny,
     private val onError: (String) -> Unit,
-) : EmbeddedSubtitleRenderer {
+) : WebEmbeddedSubtitleRenderer {
     private var width: Int = 0
     private var height: Int = 0
     private var closed: Boolean = false
 
     override suspend fun configure(
-        configuration: SubtitleRendererConfiguration,
+        configuration: WebSubtitleRendererConfiguration,
         overlay: HTMLElement,
     ) {
         check(!closed) { "The ASS subtitle renderer is closed." }
@@ -82,7 +84,7 @@ private class MoviAssSubtitleRenderer(
         configuration.attachments.forEach { attachment ->
             addByteArray(fonts, attachment.data.toInt8Array())
         }
-        configureMoviAssAdapter(
+        configureWasmMediaAssAdapter(
             adapter = adapter,
             overlay = overlay,
             codec = configuration.codec,
@@ -97,14 +99,14 @@ private class MoviAssSubtitleRenderer(
         deferred.await()
     }
 
-    override suspend fun pushPacket(packet: SubtitlePacket) {
+    override suspend fun pushPacket(packet: WebSubtitlePacket) {
         if (closed) return
         val deferred = CompletableDeferred<Unit>()
-        pushMoviAssPacket(
+        pushWasmMediaAssPacket(
             adapter = adapter,
             data = packet.data.toInt8Array(),
-            timestamp = packet.presentationTime.inWholeMilliseconds / 1_000.0,
-            duration = packet.duration.inWholeMilliseconds / 1_000.0,
+            timestamp = packet.presentationTime.inWholeMilliseconds / MILLISECONDS_PER_SECOND,
+            duration = packet.duration.inWholeMilliseconds / MILLISECONDS_PER_SECOND,
             onComplete = { deferred.complete(Unit) },
             onFailure = { message ->
                 onError(message)
@@ -116,9 +118,9 @@ private class MoviAssSubtitleRenderer(
 
     override fun render(position: Duration) {
         if (!closed) {
-            renderMoviAssAdapter(
+            renderWasmMediaAssAdapter(
                 adapter = adapter,
-                timestamp = position.inWholeMilliseconds / 1_000.0,
+                timestamp = position.inWholeMilliseconds / MILLISECONDS_PER_SECOND,
                 width = width,
                 height = height,
             )
@@ -127,19 +129,19 @@ private class MoviAssSubtitleRenderer(
 
     override fun setDelay(delay: Duration) {
         if (!closed) {
-            setMoviAssDelay(adapter, delay.inWholeMilliseconds / 1_000.0)
+            setWasmMediaAssDelay(adapter, delay.inWholeMilliseconds / MILLISECONDS_PER_SECOND)
         }
     }
 
     override fun clear() {
-        if (!closed) clearMoviAssAdapter(adapter, onError)
+        if (!closed) clearWasmMediaAssAdapter(adapter, onError)
     }
 
     override suspend fun close() {
         if (closed) return
         closed = true
         val deferred = CompletableDeferred<Unit>()
-        destroyMoviAssAdapter(
+        destroyWasmMediaAssAdapter(
             adapter = adapter,
             onComplete = { deferred.complete(Unit) },
             onFailure = { message ->
@@ -160,7 +162,7 @@ private fun addByteArray(
 ): Unit = js("list.push(value)")
 
 @Suppress("UNUSED_PARAMETER", "LongParameterList")
-private fun configureMoviAssAdapter(
+private fun configureWasmMediaAssAdapter(
     adapter: JsAny,
     overlay: HTMLElement,
     codec: String,
@@ -188,7 +190,7 @@ private fun configureMoviAssAdapter(
     )
 
 @Suppress("UNUSED_PARAMETER", "LongParameterList")
-private fun pushMoviAssPacket(
+private fun pushWasmMediaAssPacket(
     adapter: JsAny,
     data: Int8Array,
     timestamp: Double,
@@ -217,7 +219,7 @@ private fun pushMoviAssPacket(
     )
 
 @Suppress("UNUSED_PARAMETER")
-private fun renderMoviAssAdapter(
+private fun renderWasmMediaAssAdapter(
     adapter: JsAny,
     timestamp: Double,
     width: Int,
@@ -225,13 +227,13 @@ private fun renderMoviAssAdapter(
 ): Unit = js("adapter.render(timestamp, width, height)")
 
 @Suppress("UNUSED_PARAMETER")
-private fun setMoviAssDelay(
+private fun setWasmMediaAssDelay(
     adapter: JsAny,
     delay: Double,
 ): Unit = js("adapter.setDelay(delay)")
 
 @Suppress("UNUSED_PARAMETER")
-private fun clearMoviAssAdapter(
+private fun clearWasmMediaAssAdapter(
     adapter: JsAny,
     onFailure: (String) -> Unit,
 ): Unit =
@@ -250,7 +252,7 @@ private fun clearMoviAssAdapter(
     )
 
 @Suppress("UNUSED_PARAMETER")
-private fun destroyMoviAssAdapter(
+private fun destroyWasmMediaAssAdapter(
     adapter: JsAny,
     onComplete: () -> Unit,
     onFailure: (String) -> Unit,
@@ -279,7 +281,7 @@ private fun AssFontQueryMode.toJassubQueryFonts(): String =
     }
 
 @Suppress("UNUSED_PARAMETER")
-private fun createMoviJassubSettings(
+private fun createWasmMediaJassubSettings(
     workerUrl: String?,
     wasmUrl: String?,
     modernWasmUrl: String?,
@@ -305,7 +307,7 @@ private fun createMoviJassubSettings(
     )
 
 @Suppress("UNUSED_PARAMETER")
-private fun addMoviJassubPreloadFont(
+private fun addWasmMediaJassubPreloadFont(
     settings: JsAny,
     fontUrl: String,
 ): Unit =
@@ -318,7 +320,7 @@ private fun addMoviJassubPreloadFont(
     )
 
 @Suppress("UNUSED_PARAMETER")
-private fun addMoviJassubAvailableFont(
+private fun addWasmMediaJassubAvailableFont(
     settings: JsAny,
     fontFamily: String,
     fontUrl: String,
@@ -332,13 +334,13 @@ private fun addMoviJassubAvailableFont(
     )
 
 /**
- * Implements movi-player's typed Kotlin/Wasm subtitle renderer contract.
+ * Implements kmedia-wasm-engine's typed Kotlin/Wasm subtitle renderer contract.
  *
- * Kept separate from [createMoviAssSubtitleRenderer] so Wasm tests can inject a
+ * Kept separate from [createWasmMediaAssSubtitleRenderer] so Wasm tests can inject a
  * deterministic fake JASSUB constructor without starting a worker.
  */
 @Suppress("UNUSED_PARAMETER")
-internal fun createMoviAssSubtitleRendererAdapter(
+internal fun createWasmMediaAssSubtitleRendererAdapter(
     settings: JsAny,
     createRenderer: (JsAny) -> JsAny,
     hardenRenderer: (JsAny) -> Unit,
@@ -465,7 +467,7 @@ internal fun createMoviAssSubtitleRendererAdapter(
 
             function createCanvas() {
                 if (!state.container) {
-                    throw new Error("Movi did not mount the embedded subtitle renderer.");
+                    throw new Error("WasmMedia did not mount the embedded subtitle renderer.");
                 }
                 const canvas = document.createElement("canvas");
                 canvas.setAttribute("aria-hidden", "true");

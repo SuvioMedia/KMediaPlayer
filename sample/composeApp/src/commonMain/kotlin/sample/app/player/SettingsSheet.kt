@@ -268,6 +268,38 @@ internal fun SettingsSheet(
                     }
                 }
             }
+
+            val diagnostics = playerState.diagnostics
+            if (
+                diagnostics.renderedVideoFrames != null ||
+                diagnostics.droppedVideoFrames != null ||
+                diagnostics.audioBufferAheadMs != null ||
+                diagnostics.audioUnderruns != null
+            ) {
+                HorizontalDivider()
+                Section("Playback health") {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        diagnostics.renderedVideoFrames?.let {
+                            InfoRow("Presented frames", it.toString())
+                        }
+                        diagnostics.droppedVideoFrames?.let {
+                            InfoRow("Dropped frames", it.toString())
+                        }
+                        diagnostics.maximumAvSyncOffsetMs?.let {
+                            InfoRow("Maximum A/V drift", "${it.toInt()} ms")
+                        }
+                        diagnostics.audioBufferAheadMs?.let {
+                            InfoRow("Scheduled audio", "${it.toInt()} ms")
+                        }
+                        diagnostics.audioUnderruns?.let {
+                            InfoRow("Audio underruns", it.toString())
+                        }
+                        diagnostics.audioTimestampCorrections?.let {
+                            InfoRow("PCM timestamp fixes", it.toString())
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -295,7 +327,10 @@ private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            "$label · ${if (checked) "On" else "Off"}",
+            style = MaterialTheme.typography.bodyLarge,
+        )
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

@@ -5,12 +5,11 @@ import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionType
-import io.github.kdroidfilter.composemediaplayer.WebPlaybackEngine
 import io.github.kdroidfilter.composemediaplayer.ass.AssSubtitleExtension
 import kotlinx.browser.document
 import org.w3c.dom.HTMLElement
 import sample.app.App
-import sample.app.createMoviDualOpusMkvBlobUrl
+import sample.app.createKMediaWasmDualOpusMkvBlobUrl
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.js
 
@@ -21,17 +20,9 @@ private fun queryParameter(name: String): String? =
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
     val requestedVideoUrl = queryParameter("video")?.takeIf { it.isNotBlank() }
-    val webPlaybackEngine =
-        sequenceOf(queryParameter("webEngine"), queryParameter("engine"))
-            .filterNotNull()
-            .firstOrNull()
-            ?.let { requested ->
-                WebPlaybackEngine.entries.firstOrNull { it.name.equals(requested, ignoreCase = true) }
-            } ?: WebPlaybackEngine.MOVI
-    val usesBundledMoviDemo = requestedVideoUrl == null && webPlaybackEngine == WebPlaybackEngine.MOVI
     val initialVideoUrl =
         requestedVideoUrl
-            ?: createMoviDualOpusMkvBlobUrl().takeIf { usesBundledMoviDemo }
+            ?: createKMediaWasmDualOpusMkvBlobUrl()
     val initialProjection =
         queryParameter("projection")
             ?.let { requested ->
@@ -50,22 +41,16 @@ fun main() {
                     ?.uppercase()
                     ?.let { runCatching { DolbyVisionPolicy.valueOf(it) }.getOrNull() }
                     ?: DolbyVisionPolicy.AUTO,
-            webPlaybackEngine = webPlaybackEngine,
-            extensions =
-                if (webPlaybackEngine == WebPlaybackEngine.LEGACY) {
-                    listOf(AssSubtitleExtension())
-                } else {
-                    emptyList()
-                },
+            extensions = listOf(AssSubtitleExtension()),
             projection = initialProjection,
         )
     ComposeViewport {
         hideLoader()
         App(
             initialVideoUrl = initialVideoUrl,
-            demoSubtitleEnabled = initialVideoUrl == null && webPlaybackEngine == WebPlaybackEngine.LEGACY,
+            demoSubtitleEnabled = false,
             initialMuted = queryParameter("muted")?.toBooleanStrictOrNull() ?: false,
-            initialLoop = usesBundledMoviDemo,
+            initialLoop = queryParameter("loop")?.toBooleanStrictOrNull() ?: false,
             playbackOptions = playbackOptions,
             initialProjection = initialProjection,
         )

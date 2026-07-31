@@ -3,13 +3,17 @@
 
 package io.github.kdroidfilter.composemediaplayer
 
+import io.github.shusek.kmedia.engine.wasm.PlayerSurface
 import io.github.vinceglb.filekit.BrowserFile
 import io.github.vinceglb.filekit.PlatformFile
 import io.github.vinceglb.filekit.WebFile
 import kotlinx.browser.document
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
-import org.w3c.dom.HTMLCanvasElement
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 import kotlin.js.JsAny
 import kotlin.js.js
@@ -18,35 +22,36 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Browser smoke test for the directly linked Kotlin/Wasm player and packaged runtime. The media fixture is a 0.6 s MKV containing VP9 video
- * and two Opus tracks tagged `en` and `pl`; keeping it inline makes media playback independent of HTTP servers.
+ * Browser smoke test for the directly linked Kotlin/Wasm player and packaged runtime.
+ * The media fixture is a 0.6 s MKV containing VP9 video and two Opus tracks tagged
+ * `en` and `pl`; keeping it inline makes media playback independent of HTTP servers.
  */
-class MoviRealPackageBrowserTest {
+class WasmEngineRealPackageBrowserTest {
     @Test
-    fun realMoviLoadsMp4AndWebM() =
+    fun realWasmEngineLoadsMp4AndWebM() =
         runTest(timeout = 45.seconds) {
             val state = createVideoPlayerState() as DefaultVideoPlayerState
-            val canvas = document.createElement("canvas") as HTMLCanvasElement
-            document.body?.appendChild(canvas)
-            var session: MoviPlaybackSession? = null
+            val surfaceHost = WasmEngineTestSurfaceHost()
+            var session: WasmEnginePlaybackSession? = null
             try {
                 listOf(
-                    MOVI_SMOKE_MP4_DATA_URI to "mp4",
-                    MOVI_SMOKE_WEBM_DATA_URI to "webm",
+                    WASM_ENGINE_SMOKE_MP4_DATA_URI to "mp4",
+                    WASM_ENGINE_SMOKE_WEBM_DATA_URI to "webm",
                 ).forEach { (dataUri, expectedFormat) ->
                     session?.destroy()
                     state.openUri(dataUri, InitialPlayerState.PAUSE)
                     val createdSession =
-                        MoviPlaybackSession(
+                        WasmEnginePlaybackSession(
                             playerState = state,
                             mediaSessionId = state.mediaSessionId,
-                            canvas = canvas,
-                            onNativeVideoElement = {},
+                            onSurface = surfaceHost::mount,
                             onVideoRatio = {},
                         )
                     session = createdSession
@@ -57,7 +62,7 @@ class MoviRealPackageBrowserTest {
                         drmConfiguration = null,
                     )
 
-                    assertEquals(null, state.error, "Movi $expectedFormat load error: ${state.error}")
+                    assertEquals(null, state.error, "WasmEngine $expectedFormat load error: ${state.error}")
                     assertContains(
                         state.metadata.mimeType
                             .orEmpty()
@@ -70,26 +75,24 @@ class MoviRealPackageBrowserTest {
             } finally {
                 session?.destroy()
                 state.dispose()
-                canvas.parentElement?.removeChild(canvas)
+                surfaceHost.close()
             }
         }
 
     @Test
-    fun realMoviLoadsMkvSwitchesAudioAndSeeks() =
+    fun realWasmEngineLoadsMkvSwitchesAudioAndSeeks() =
         runTest(timeout = 45.seconds) {
             val state = createVideoPlayerState() as DefaultVideoPlayerState
-            val canvas = document.createElement("canvas") as HTMLCanvasElement
-            document.body?.appendChild(canvas)
+            val surfaceHost = WasmEngineTestSurfaceHost()
             val sourceFile =
                 PlatformFile(
                     WebFile.FileWrapper(createDualOpusBrowserFile(DUAL_OPUS_MKV_DATA_URI)),
                 )
             val session =
-                MoviPlaybackSession(
+                WasmEnginePlaybackSession(
                     playerState = state,
                     mediaSessionId = 1L,
-                    canvas = canvas,
-                    onNativeVideoElement = {},
+                    onSurface = surfaceHost::mount,
                     onVideoRatio = {},
                 )
             try {
@@ -101,7 +104,7 @@ class MoviRealPackageBrowserTest {
                     drmConfiguration = null,
                 )
 
-                assertEquals(null, state.error, "Movi load error: ${state.error}")
+                assertEquals(null, state.error, "WasmEngine load error: ${state.error}")
                 assertEquals(listOf("en", "pl"), state.availableAudioTracks.map(AudioTrack::language))
                 val polish = state.availableAudioTracks.single { it.language == "pl" }
                 assertIs<TrackSelectionResult.Selected>(state.selectAudioTrack(polish))
@@ -117,7 +120,7 @@ class MoviRealPackageBrowserTest {
                 assertEquals(
                     polish.id,
                     state.currentAudioTrack?.id,
-                    "Movi audio selection was not confirmed; error=${state.error}",
+                    "WasmEngine audio selection was not confirmed; error=${state.error}",
                 )
 
                 state.play()
@@ -131,10 +134,13 @@ class MoviRealPackageBrowserTest {
                     playbackPollAttempt += 1
                 }
                 state.pause()
-                assertEquals(null, state.error, "Movi playback error after the audio switch: ${state.error}")
+                assertEquals(null, state.error, "WasmEngine playback error after the audio switch: ${state.error}")
                 assertTrue(
                     state.preciseCurrentTime >= MINIMUM_PLAYBACK_PROGRESS,
-                    "Playback did not continue after selecting the Polish audio track.",
+                    "Playback did not continue after selecting the Polish audio track; " +
+                        "position=${state.preciseCurrentTime}, playing=${state.isPlaying}, " +
+                        "track=${state.currentAudioTrack}, error=${state.error}, " +
+                        "diagnostics=${state.diagnostics}.",
                 )
 
                 state.seekTo(200.milliseconds)
@@ -144,36 +150,35 @@ class MoviRealPackageBrowserTest {
                     awaitBrowserDelay(SEEK_POLL_INTERVAL_MS)
                     seekPollAttempt += 1
                 }
-                assertFalse(state.isSeeking, "Movi did not complete the seek.")
+                assertFalse(state.isSeeking, "WasmEngine did not complete the seek.")
                 assertTrue(
                     state.preciseCurrentTime >= 150.milliseconds,
-                    "Movi seek position was ${state.preciseCurrentTime}; duration=${state.duration}; error=${state.error}.",
+                    "WasmEngine seek position was ${state.preciseCurrentTime}; " +
+                        "duration=${state.duration}; error=${state.error}.",
                 )
                 assertTrue(
                     state.duration >= 500.milliseconds,
-                    "Movi duration was ${state.duration}; error=${state.error}.",
+                    "WasmEngine duration was ${state.duration}; error=${state.error}.",
                 )
             } finally {
                 session.destroy()
                 session.destroy()
                 state.dispose()
-                canvas.parentElement?.removeChild(canvas)
+                surfaceHost.close()
             }
         }
 
     @Test
-    fun realMoviLoadsBrowserBlobUrl() =
+    fun realWasmEngineLoadsBrowserBlobUrl() =
         runTest(timeout = 45.seconds) {
             val state = createVideoPlayerState() as DefaultVideoPlayerState
-            val canvas = document.createElement("canvas") as HTMLCanvasElement
-            document.body?.appendChild(canvas)
+            val surfaceHost = WasmEngineTestSurfaceHost()
             val blobUrl = createBrowserObjectUrl(createDualOpusBrowserFile(DUAL_OPUS_MKV_DATA_URI))
             val session =
-                MoviPlaybackSession(
+                WasmEnginePlaybackSession(
                     playerState = state,
                     mediaSessionId = 1L,
-                    canvas = canvas,
-                    onNativeVideoElement = {},
+                    onSurface = surfaceHost::mount,
                     onVideoRatio = {},
                 )
             try {
@@ -185,29 +190,77 @@ class MoviRealPackageBrowserTest {
                     drmConfiguration = null,
                 )
 
-                assertEquals(null, state.error, "Movi Blob load error: ${state.error}")
+                assertEquals(null, state.error, "WasmEngine Blob load error: ${state.error}")
                 assertEquals(listOf("en", "pl"), state.availableAudioTracks.map(AudioTrack::language))
                 assertTrue(state.duration >= 500.milliseconds)
             } finally {
                 session.destroy()
                 state.dispose()
-                canvas.parentElement?.removeChild(canvas)
+                surfaceHost.close()
                 revokeBrowserObjectUrl(blobUrl)
             }
         }
 
     @Test
-    fun realMoviLoadsHttpRangeNoRangeAndCustomMediaHeaders() =
+    fun realWasmEngineExposesTypedAdvancedControlsWithoutChangingTheMainPlaybackState() =
         runTest(timeout = 45.seconds) {
-            val networkFixture = MOVI_NETWORK_FIXTURE
+            val state =
+                createVideoPlayerState(
+                    playbackOptions =
+                        VideoPlaybackOptions(
+                            webDecoderPreference = WebDecoderPreference.SOFTWARE,
+                        ),
+                ) as DefaultVideoPlayerState
+            val surfaceHost = WasmEngineTestSurfaceHost()
+            val session =
+                WasmEnginePlaybackSession(
+                    playerState = state,
+                    mediaSessionId = 1L,
+                    onSurface = surfaceHost::mount,
+                    onVideoRatio = {},
+                )
+            try {
+                state.openSource(
+                    MediaSourceSpec(WASM_ENGINE_SMOKE_MP4_DATA_URI, "video/mp4"),
+                    InitialPlayerState.PAUSE,
+                )
+                session.load(
+                    sourceUri = requireNotNull(state.sourceUri),
+                    sourceMimeType = state.sourceMimeType,
+                    sourceFile = null,
+                    mediaHeaders = emptyMap(),
+                    drmConfiguration = null,
+                )
+
+                val controls = assertNotNull(state.webMediaAdvancedControls)
+                assertTrue(controls === session)
+                assertNotNull(controls.surface)
+                assertNotNull(controls.renderingDiagnostics)
+                controls.setStableVolume(true)
+                controls.setAudioOnly(true)
+                controls.setAudioOnly(false)
+                assertTrue(controls.prefetchSubtitleCues().isEmpty())
+                assertEquals(null, state.error)
+            } finally {
+                session.destroy()
+                assertNull(state.webMediaAdvancedControls)
+                state.dispose()
+                surfaceHost.close()
+            }
+        }
+
+    @Test
+    fun realWasmEngineLoadsHttpRangeNoRangeAndCustomMediaHeaders() =
+        runTest(timeout = 45.seconds) {
+            val networkFixture = WASM_ENGINE_NETWORK_FIXTURE
             val state = createVideoPlayerState() as DefaultVideoPlayerState
-            val canvas = document.createElement("canvas") as HTMLCanvasElement
-            document.body?.appendChild(canvas)
-            var session: MoviPlaybackSession? = null
+            val surfaceHost = WasmEngineTestSurfaceHost()
+            var session: WasmEnginePlaybackSession? = null
             try {
                 listOf(
-                    MOVI_RANGE_FIXTURE_URL to mapOf(MOVI_MEDIA_HEADER_NAME to MOVI_MEDIA_HEADER_VALUE),
-                    MOVI_NO_RANGE_FIXTURE_URL to emptyMap(),
+                    WASM_ENGINE_RANGE_FIXTURE_URL to
+                        mapOf(WASM_ENGINE_MEDIA_HEADER_NAME to WASM_ENGINE_MEDIA_HEADER_VALUE),
+                    WASM_ENGINE_NO_RANGE_FIXTURE_URL to emptyMap(),
                 ).forEach { (sourceUrl, mediaHeaders) ->
                     session?.destroy()
                     state.openUri(
@@ -216,11 +269,10 @@ class MoviRealPackageBrowserTest {
                         requestHeaders = mediaHeaders,
                     )
                     val createdSession =
-                        MoviPlaybackSession(
+                        WasmEnginePlaybackSession(
                             playerState = state,
                             mediaSessionId = state.mediaSessionId,
-                            canvas = canvas,
-                            onNativeVideoElement = {},
+                            onSurface = surfaceHost::mount,
                             onVideoRatio = {},
                         )
                     session = createdSession
@@ -231,75 +283,126 @@ class MoviRealPackageBrowserTest {
                         drmConfiguration = null,
                     )
 
-                    assertEquals(null, state.error, "Movi HTTP load error for $sourceUrl: ${state.error}")
+                    assertEquals(null, state.error, "WasmEngine HTTP load error for $sourceUrl: ${state.error}")
                     assertEquals(listOf("en", "pl"), state.availableAudioTracks.map(AudioTrack::language))
                 }
 
-                val stats = readMoviNetworkFixtureStats(networkFixture)
+                val stats = readWasmEngineNetworkFixtureStats(networkFixture)
                 assertTrue(stats.mediaHeaderSeen)
                 assertTrue(stats.rangePartialResponses > 0)
                 assertTrue(stats.noRangeIgnoredRequests > 0)
             } finally {
                 session?.destroy()
                 state.dispose()
-                canvas.parentElement?.removeChild(canvas)
+                surfaceHost.close()
             }
         }
 
     @Test
-    fun realMoviLoadsHlsAndDash() =
+    fun realWasmEngineLoadsHlsAndDash() =
         runTest(timeout = 90.seconds) {
             val state = createVideoPlayerState() as DefaultVideoPlayerState
-            val canvas = document.createElement("canvas") as HTMLCanvasElement
-            document.body?.appendChild(canvas)
-            var session: MoviPlaybackSession? = null
+            val surfaceHost = WasmEngineTestSurfaceHost()
+            var session: WasmEnginePlaybackSession? = null
             try {
                 val adaptiveSources =
                     buildList {
-                        add(moviKarmaFixtureUrl("/__kmp_movi__/hls/index.m3u8"))
+                        add(
+                            wasmEngineKarmaFixtureUrl("/__kmp_kmedia_wasm__/hls/index.m3u8") to
+                                "application/vnd.apple.mpegurl",
+                        )
                         val capabilityProbe = document.createElement("video") as HTMLVideoElement
                         val supportsDashFixture =
                             capabilityProbe.canPlayType("video/mp4; codecs=\"avc1.42c00a\"").toString().isNotEmpty() &&
                                 capabilityProbe.canPlayType("audio/mp4; codecs=\"mp4a.40.2\"").toString().isNotEmpty()
                         if (supportsDashFixture) {
-                            add(moviKarmaFixtureUrl("/__kmp_movi__/dash/manifest.mpd"))
+                            add(
+                                wasmEngineKarmaFixtureUrl("/__kmp_kmedia_wasm__/dash/manifest.mpd") to
+                                    "application/dash+xml",
+                            )
                         }
                     }
-                adaptiveSources.forEach { sourceUrl ->
+                adaptiveSources.forEach { (sourceUrl, sourceMimeType) ->
                     session?.destroy()
-                    state.openUri(sourceUrl, InitialPlayerState.PAUSE)
+                    state.openSource(
+                        MediaSourceSpec(sourceUrl, sourceMimeType),
+                        InitialPlayerState.PAUSE,
+                    )
                     val createdSession =
-                        MoviPlaybackSession(
+                        WasmEnginePlaybackSession(
                             playerState = state,
                             mediaSessionId = state.mediaSessionId,
-                            canvas = canvas,
-                            onNativeVideoElement = {},
+                            onSurface = surfaceHost::mount,
                             onVideoRatio = {},
                         )
                     session = createdSession
-                    createdSession.load(
-                        sourceUri = requireNotNull(state.sourceUri),
-                        sourceFile = null,
-                        mediaHeaders = emptyMap(),
-                        drmConfiguration = null,
-                    )
+                    val loadResult =
+                        runCatching {
+                            withContext(Dispatchers.Default.limitedParallelism(1)) {
+                                withTimeout(ADAPTIVE_LOAD_TIMEOUT) {
+                                    createdSession.load(
+                                        sourceUri = requireNotNull(state.sourceUri),
+                                        sourceMimeType = state.sourceMimeType,
+                                        sourceFile = null,
+                                        mediaHeaders = emptyMap(),
+                                        drmConfiguration = null,
+                                    )
+                                }
+                            }
+                        }
 
-                    assertEquals(null, state.error, "Movi adaptive load error for $sourceUrl: ${state.error}")
+                    assertTrue(
+                        loadResult.isSuccess,
+                        "WasmEngine adaptive load timed out for $sourceUrl; " +
+                            "error=${state.error}; diagnostics=${state.diagnostics}; " +
+                            "requests=${readWasmEngineNetworkFixtureStats(
+                                WASM_ENGINE_NETWORK_FIXTURE,
+                            ).adaptiveRequests}.",
+                    )
+                    assertEquals(null, state.error, "WasmEngine adaptive load error for $sourceUrl: ${state.error}")
                     assertTrue(
                         state.duration >= 500.milliseconds,
-                        "Movi adaptive duration for $sourceUrl was ${state.duration}.",
+                        "WasmEngine adaptive duration for $sourceUrl was ${state.duration}.",
                     )
                     assertTrue(
                         state.availableHlsQualities.isNotEmpty(),
-                        "Movi exposed no adaptive video qualities for $sourceUrl.",
+                        "WasmEngine exposed no adaptive video qualities for $sourceUrl.",
                     )
                 }
             } finally {
                 session?.destroy()
                 state.dispose()
-                canvas.parentElement?.removeChild(canvas)
+                surfaceHost.close()
             }
         }
+}
+
+private class WasmEngineTestSurfaceHost {
+    private val container =
+        (document.createElement("div") as HTMLElement).also { document.body?.appendChild(it) }
+
+    fun mount(surface: PlayerSurface?) {
+        clear()
+        when (surface) {
+            is PlayerSurface.Canvas -> {
+                container.appendChild(surface.element)
+                surface.mediaElement?.let { container.appendChild(it) }
+            }
+            is PlayerSurface.NativeVideo -> container.appendChild(surface.element)
+            null -> Unit
+        }
+    }
+
+    fun close() {
+        clear()
+        container.remove()
+    }
+
+    private fun clear() {
+        while (container.firstChild != null) {
+            container.removeChild(container.firstChild ?: break)
+        }
+    }
 }
 
 @Suppress("UNUSED_PARAMETER")
@@ -325,7 +428,7 @@ private fun createBrowserObjectUrl(file: BrowserFile): String = js("URL.createOb
 private fun revokeBrowserObjectUrl(url: String): Unit = js("URL.revokeObjectURL(url)")
 
 @Suppress("UNUSED_PARAMETER")
-private fun moviKarmaFixtureUrl(path: String): String = js("globalThis.location.origin + path")
+private fun wasmEngineKarmaFixtureUrl(path: String): String = js("globalThis.location.origin + path")
 
 private suspend fun awaitBrowserDelay(milliseconds: Int) {
     val deferred = CompletableDeferred<Unit>()
@@ -339,44 +442,29 @@ private fun scheduleBrowserTimeout(
     onElapsed: () -> Unit,
 ): Unit = js("globalThis.setTimeout(onElapsed, milliseconds)")
 
-private data class MoviNetworkFixtureStats(
+private data class WasmEngineNetworkFixtureStats(
     val mediaHeaderSeen: Boolean,
     val rangePartialResponses: Int,
     val noRangeIgnoredRequests: Int,
+    val adaptiveRequests: String,
 )
 
 /*
- * Install before the first test initializes Movi. Shaka captures fetch when its module is
- * evaluated, so a per-test replacement would be too late once another real-module test had loaded Movi.
+ * Install before the first test initializes WasmEngine. Shaka captures fetch when its module is
+ * evaluated, so a per-test replacement would be too late once another real-module test had loaded WasmEngine.
  */
-private val MOVI_NETWORK_FIXTURE: JsAny = installMoviNetworkFixtures()
+private val WASM_ENGINE_NETWORK_FIXTURE: JsAny = installWasmEngineNetworkFixtures()
 
-private fun installMoviNetworkFixtures(): JsAny =
-    installMoviNetworkFixtures(
+private fun installWasmEngineNetworkFixtures(): JsAny =
+    installWasmEngineNetworkFixtures(
         mkvBase64 = DUAL_OPUS_MKV_DATA_URI.substringAfter(','),
-        hlsManifestBase64 = MOVI_HLS_MANIFEST_BASE64,
-        hlsSegmentBase64 = MOVI_HLS_SEGMENT_BASE64,
-        dashManifestBase64 = MOVI_DASH_MANIFEST_BASE64,
-        dashVideoInitBase64 = MOVI_DASH_VIDEO_INIT_BASE64,
-        dashAudioInitBase64 = MOVI_DASH_AUDIO_INIT_BASE64,
-        dashVideoChunkBase64 = MOVI_DASH_VIDEO_CHUNK_BASE64,
-        dashAudioChunkOneBase64 = MOVI_DASH_AUDIO_CHUNK_ONE_BASE64,
-        dashAudioChunkTwoBase64 = MOVI_DASH_AUDIO_CHUNK_TWO_BASE64,
-        mediaHeaderName = MOVI_MEDIA_HEADER_NAME,
-        mediaHeaderValue = MOVI_MEDIA_HEADER_VALUE,
+        mediaHeaderName = WASM_ENGINE_MEDIA_HEADER_NAME,
+        mediaHeaderValue = WASM_ENGINE_MEDIA_HEADER_VALUE,
     )
 
-@Suppress("LongMethod", "LongParameterList", "UNUSED_PARAMETER")
-private fun installMoviNetworkFixtures(
+@Suppress("LongMethod", "UNUSED_PARAMETER")
+private fun installWasmEngineNetworkFixtures(
     mkvBase64: String,
-    hlsManifestBase64: String,
-    hlsSegmentBase64: String,
-    dashManifestBase64: String,
-    dashVideoInitBase64: String,
-    dashAudioInitBase64: String,
-    dashVideoChunkBase64: String,
-    dashAudioChunkOneBase64: String,
-    dashAudioChunkTwoBase64: String,
     mediaHeaderName: String,
     mediaHeaderValue: String,
 ): JsAny =
@@ -392,55 +480,15 @@ private fun installMoviNetworkFixtures(
                 return bytes;
             };
             const routes = {
-                "/__kmp_movi__/range/movie.mkv": {
+                "/__kmp_kmedia_wasm__/range/media.mkv": {
                     bytes: decode(mkvBase64),
                     contentType: "video/x-matroska",
                     supportsRange: true
                 },
-                "/__kmp_movi__/no-range/movie.mkv": {
+                "/__kmp_kmedia_wasm__/no-range/media.mkv": {
                     bytes: decode(mkvBase64),
                     contentType: "video/x-matroska",
                     supportsRange: false
-                },
-                "/__kmp_movi__/hls/index.m3u8": {
-                    bytes: decode(hlsManifestBase64),
-                    contentType: "application/vnd.apple.mpegurl",
-                    supportsRange: true
-                },
-                "/__kmp_movi__/hls/segment00.ts": {
-                    bytes: decode(hlsSegmentBase64),
-                    contentType: "video/mp2t",
-                    supportsRange: true
-                },
-                "/__kmp_movi__/dash/manifest.mpd": {
-                    bytes: decode(dashManifestBase64),
-                    contentType: "application/dash+xml",
-                    supportsRange: true
-                },
-                "/__kmp_movi__/dash/init-stream0.m4s": {
-                    bytes: decode(dashVideoInitBase64),
-                    contentType: "video/mp4",
-                    supportsRange: true
-                },
-                "/__kmp_movi__/dash/init-stream1.m4s": {
-                    bytes: decode(dashAudioInitBase64),
-                    contentType: "audio/mp4",
-                    supportsRange: true
-                },
-                "/__kmp_movi__/dash/chunk-stream0-00001.m4s": {
-                    bytes: decode(dashVideoChunkBase64),
-                    contentType: "video/mp4",
-                    supportsRange: true
-                },
-                "/__kmp_movi__/dash/chunk-stream1-00001.m4s": {
-                    bytes: decode(dashAudioChunkOneBase64),
-                    contentType: "audio/mp4",
-                    supportsRange: true
-                },
-                "/__kmp_movi__/dash/chunk-stream1-00002.m4s": {
-                    bytes: decode(dashAudioChunkTwoBase64),
-                    contentType: "audio/mp4",
-                    supportsRange: true
                 }
             };
             const originalFetch = globalThis.fetch;
@@ -448,6 +496,7 @@ private fun installMoviNetworkFixtures(
                 requests: Object.create(null),
                 partialResponses: Object.create(null),
                 ignoredRangeRequests: Object.create(null),
+                adaptiveRequests: Object.create(null),
                 mediaHeaderSeen: false,
                 wrapper: null,
                 originalFetch: originalFetch
@@ -464,7 +513,7 @@ private fun installMoviNetworkFixtures(
 
                 stats.requests[parsedUrl.pathname] = (stats.requests[parsedUrl.pathname] || 0) + 1;
                 if (
-                    parsedUrl.pathname === "/__kmp_movi__/range/movie.mkv" &&
+                    parsedUrl.pathname === "/__kmp_kmedia_wasm__/range/media.mkv" &&
                     headers.get(mediaHeaderName) === mediaHeaderValue
                 ) {
                     stats.mediaHeaderSeen = true;
@@ -540,7 +589,30 @@ private fun installMoviNetworkFixtures(
                     return originalFetch(input, init);
                 }
                 const route = routes[parsedUrl.pathname];
-                if (!route) return originalFetch(input, init);
+                if (!route) {
+                    if (
+                        parsedUrl.pathname.startsWith("/__kmp_kmedia_wasm__/hls/") ||
+                        parsedUrl.pathname.startsWith("/__kmp_kmedia_wasm__/dash/")
+                    ) {
+                        const row = stats.adaptiveRequests[parsedUrl.pathname] || {
+                            count: 0,
+                            status: "pending"
+                        };
+                        row.count += 1;
+                        stats.adaptiveRequests[parsedUrl.pathname] = row;
+                        return Promise.resolve(originalFetch(input, init)).then(
+                            function(response) {
+                                row.status = String(response.status);
+                                return response;
+                            },
+                            function(error) {
+                                row.status = "failed";
+                                throw error;
+                            }
+                        );
+                    }
+                    return originalFetch(input, init);
+                }
 
                 const headers = new Headers(
                     input && typeof input === "object" && input.headers ? input.headers : undefined
@@ -570,25 +642,30 @@ private fun installMoviNetworkFixtures(
     )
 
 @Suppress("UNUSED_PARAMETER")
-private fun readMoviNetworkFixtureStats(fixture: JsAny): MoviNetworkFixtureStats {
+private fun readWasmEngineNetworkFixtureStats(fixture: JsAny): WasmEngineNetworkFixtureStats {
     val fields: List<String> =
-        readMoviNetworkFixtureStatsRow(fixture)
+        readWasmEngineNetworkFixtureStatsRow(fixture)
             .split('|')
-    return MoviNetworkFixtureStats(
+    return WasmEngineNetworkFixtureStats(
         mediaHeaderSeen = fields.getOrNull(0) == "1",
         rangePartialResponses = fields.getOrNull(1)?.toIntOrNull() ?: 0,
         noRangeIgnoredRequests = fields.getOrNull(2)?.toIntOrNull() ?: 0,
+        adaptiveRequests = fields.getOrNull(3).orEmpty(),
     )
 }
 
 @Suppress("UNUSED_PARAMETER")
-private fun readMoviNetworkFixtureStatsRow(fixture: JsAny): String =
+private fun readWasmEngineNetworkFixtureStatsRow(fixture: JsAny): String =
     js(
         """
         [
             fixture.mediaHeaderSeen ? "1" : "0",
-            fixture.partialResponses["/__kmp_movi__/range/movie.mkv"] || 0,
-            fixture.ignoredRangeRequests["/__kmp_movi__/no-range/movie.mkv"] || 0
+            fixture.partialResponses["/__kmp_kmedia_wasm__/range/media.mkv"] || 0,
+            fixture.ignoredRangeRequests["/__kmp_kmedia_wasm__/no-range/media.mkv"] || 0,
+            Object.keys(fixture.adaptiveRequests || {}).sort().map(function(path) {
+                const row = fixture.adaptiveRequests[path];
+                return path + ":" + row.count + ":" + row.status;
+            }).join(",")
         ].join("|")
         """,
     )
@@ -599,12 +676,16 @@ private const val PLAYBACK_POLL_ATTEMPTS = 200
 private const val PLAYBACK_POLL_INTERVAL_MS = 25
 private const val AUDIO_SWITCH_POLL_ATTEMPTS = 200
 private const val AUDIO_SWITCH_POLL_INTERVAL_MS = 25
+private val ADAPTIVE_LOAD_TIMEOUT = 30.seconds
 private val MINIMUM_PLAYBACK_PROGRESS = 50.milliseconds
-private const val MOVI_FIXTURE_ORIGIN = "https://kmp-movi-fixture.invalid"
-private const val MOVI_RANGE_FIXTURE_URL = "$MOVI_FIXTURE_ORIGIN/__kmp_movi__/range/movie.mkv"
-private const val MOVI_NO_RANGE_FIXTURE_URL = "$MOVI_FIXTURE_ORIGIN/__kmp_movi__/no-range/movie.mkv"
-private const val MOVI_MEDIA_HEADER_NAME = "X-KMP-Media"
-private const val MOVI_MEDIA_HEADER_VALUE = "fixture-header-value"
+private const val WASM_ENGINE_FIXTURE_ORIGIN = "https://kmp-wasm-engine-fixture.invalid"
+private const val WASM_ENGINE_FIXTURE_PATH = "/__kmp_kmedia_wasm__"
+private const val WASM_ENGINE_RANGE_FIXTURE_URL =
+    "$WASM_ENGINE_FIXTURE_ORIGIN$WASM_ENGINE_FIXTURE_PATH/range/media.mkv"
+private const val WASM_ENGINE_NO_RANGE_FIXTURE_URL =
+    "$WASM_ENGINE_FIXTURE_ORIGIN$WASM_ENGINE_FIXTURE_PATH/no-range/media.mkv"
+private const val WASM_ENGINE_MEDIA_HEADER_NAME = "X-KMP-Media"
+private const val WASM_ENGINE_MEDIA_HEADER_VALUE = "fixture-header-value"
 
 private const val DUAL_OPUS_MKV_DATA_URI =
     "data:video/x-matroska;base64," +

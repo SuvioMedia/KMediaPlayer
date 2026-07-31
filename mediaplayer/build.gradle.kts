@@ -25,7 +25,7 @@ import java.util.zip.ZipFile
 import javax.inject.Inject
 
 @CacheableTask
-abstract class UnpackMoviRuntimeAssets : DefaultTask() {
+abstract class UnpackKMediaWasmRuntimeAssets : DefaultTask() {
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val archives: ConfigurableFileCollection
@@ -43,12 +43,12 @@ abstract class UnpackMoviRuntimeAssets : DefaultTask() {
     fun unpack() {
         fileSystemOperations.sync {
             from(archives.files.map(archiveOperations::zipTree)) {
-                include("movi-runtime/**")
+                include("kmedia-wasm-runtime/**")
                 into("files")
             }
             from(archives.files.map(archiveOperations::zipTree)) {
                 include("META-INF/**")
-                into("files/movi-runtime")
+                into("files/kmedia-wasm-runtime")
             }
             into(outputDirectory)
         }
@@ -107,44 +107,34 @@ val wasmBrowserTestBrowser =
         .orElse("chrome")
         .map(String::lowercase)
         .get()
-val wasmTestPlaybackEngine =
-    providers
-        .gradleProperty("composeMediaPlayer.wasmTestPlaybackEngine")
-        .orElse("movi")
-        .map(String::lowercase)
-        .get()
-
-val moviRuntimeAssets =
-    configurations.create("moviRuntimeAssets") {
+val kmediaWasmRuntimeAssets =
+    configurations.create("kmediaWasmRuntimeAssets") {
         isCanBeConsumed = false
         isCanBeResolved = true
-        description = "Pinned movi-player Emscripten runtime files."
+        description = "Pinned KMedia Wasm engine runtime files."
     }
 dependencies.add(
-    moviRuntimeAssets.name,
-    "io.github.shusek:movi-player-runtime-assets:${libs.versions.moviPlayer.get()}@zip",
+    kmediaWasmRuntimeAssets.name,
+    "io.github.shusek:kmedia-wasm-engine-runtime-assets:${libs.versions.kmediaWasmEngine.get()}@zip",
 )
-val generatedMoviRuntimeResources = layout.buildDirectory.dir("generated/moviRuntimeResources")
-val unpackMoviRuntimeAssets =
-    tasks.register<UnpackMoviRuntimeAssets>("unpackMoviRuntimeAssets") {
-        archives.from(moviRuntimeAssets)
-        outputDirectory.set(generatedMoviRuntimeResources)
+val generatedKMediaWasmRuntimeResources = layout.buildDirectory.dir("generated/kmediaWasmRuntimeResources")
+val unpackKMediaWasmRuntimeAssets =
+    tasks.register<UnpackKMediaWasmRuntimeAssets>("unpackKMediaWasmRuntimeAssets") {
+        archives.from(kmediaWasmRuntimeAssets)
+        outputDirectory.set(generatedKMediaWasmRuntimeResources)
     }
 
 compose.resources {
     customDirectory(
         sourceSetName = "wasmJsMain",
-        directoryProvider = unpackMoviRuntimeAssets.flatMap(UnpackMoviRuntimeAssets::outputDirectory),
+        directoryProvider =
+            unpackKMediaWasmRuntimeAssets.flatMap(UnpackKMediaWasmRuntimeAssets::outputDirectory),
     )
 }
 
 require(wasmBrowserTestBrowser in setOf("chrome", "firefox", "safari")) {
     "composeMediaPlayer.wasmTestBrowser must be one of: chrome, firefox, safari."
 }
-require(wasmTestPlaybackEngine in setOf("movi", "legacy")) {
-    "composeMediaPlayer.wasmTestPlaybackEngine must be one of: movi, legacy."
-}
-
 group = projectGroup
 version = projectVersion
 
@@ -189,8 +179,6 @@ kotlin {
     wasmJs {
         browser {
             testTask {
-                inputs.property("composeMediaPlayer.wasmTestPlaybackEngine", wasmTestPlaybackEngine)
-                environment("KMP_WASM_TEST_PLAYBACK_ENGINE", wasmTestPlaybackEngine)
                 useKarma {
                     when (wasmBrowserTestBrowser) {
                         "chrome" -> useChromeHeadless()
@@ -315,7 +303,7 @@ kotlin {
             dependencies {
                 implementation(libs.kotlinx.browser)
                 implementation(libs.compose.ui)
-                implementation(libs.movi.player)
+                implementation(libs.kmedia.wasm.engine)
             }
         }
 

@@ -10,9 +10,9 @@ import io.github.kdroidfilter.composemediaplayer.AssSubtitleRendererConfig
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.VideoPipelineExtensionAvailability
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.WebEmbeddedSubtitleRenderer
 import io.github.kdroidfilter.composemediaplayer.WebSubtitlePipelineExtension
 import io.github.kdroidfilter.composemediaplayer.assSubtitleRendererUnavailableReason
-import io.github.shusek.moviplayer.EmbeddedSubtitleRenderer
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 
@@ -34,8 +34,8 @@ actual class AssSubtitleExtension actual constructor(
     actual override val supportedSubtitleFormats: Set<SubtitleFormat> =
         setOf(SubtitleFormat.ASS, SubtitleFormat.SSA)
 
-    override fun createMoviEmbeddedSubtitleRenderer(onError: (String) -> Unit): EmbeddedSubtitleRenderer? =
-        createMoviAssSubtitleRenderer(
+    override fun createWasmMediaEmbeddedSubtitleRenderer(onError: (String) -> Unit): WebEmbeddedSubtitleRenderer? =
+        createWasmMediaAssSubtitleRenderer(
             config = rendererConfig,
             onError = onError,
         )

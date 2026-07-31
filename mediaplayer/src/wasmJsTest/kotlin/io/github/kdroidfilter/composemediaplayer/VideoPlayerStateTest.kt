@@ -11,7 +11,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import org.w3c.dom.events.Event
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.js
 import kotlin.test.Test
@@ -30,9 +29,8 @@ import kotlin.time.Duration.Companion.seconds
 @OptIn(ExperimentalCoroutinesApi::class)
 class VideoPlayerStateTest {
     private fun createVideoPlayerState(): VideoPlayerState =
-        io.github.kdroidfilter.composemediaplayer.createVideoPlayerState(
-            playbackOptions = VideoPlaybackOptions(webPlaybackEngine = configuredWebTestPlaybackEngine()),
-        )
+        io.github.kdroidfilter.composemediaplayer
+            .createVideoPlayerState()
 
     /**
      * Test the creation of VideoPlayerState
@@ -48,18 +46,7 @@ class VideoPlayerStateTest {
         assertEquals(0f, playerState.sliderPos)
         assertEquals(1f, playerState.volume)
         assertEquals(1f, playerState.playbackSpeed)
-        assertEquals(
-            configuredWebTestPlaybackEngine(),
-            (playerState as DefaultVideoPlayerState).playbackOptions.webPlaybackEngine,
-        )
-        assertEquals(
-            if (configuredWebTestPlaybackEngine() == WebPlaybackEngine.LEGACY) {
-                LEGACY_RENDERING_BACKEND
-            } else {
-                MOVI_RENDERING_BACKEND
-            },
-            playerState.renderingInfo.backend,
-        )
+        assertEquals(WASM_ENGINE_RENDERING_BACKEND, playerState.renderingInfo.backend)
         assertFalse(playerState.loop)
         assertEquals("00:00", playerState.positionText)
         assertEquals("00:00", playerState.durationText)
@@ -702,25 +689,14 @@ class VideoPlayerStateTest {
     @Test
     fun testWebCapabilitiesClassifySources() {
         val playerState = createVideoPlayerState()
-        val adaptiveStreamingSupported = configuredWebTestPlaybackEngine() == WebPlaybackEngine.MOVI
 
         assertFalse(playerState.canPlaySource(""))
         assertTrue(playerState.canPlaySource("blob:https://example.test/video"))
         assertTrue(playerState.canPlaySource("data:video/mp4;base64,AAA"))
-        assertEquals(
-            adaptiveStreamingSupported,
-            playerState.canPlaySource("https://example.test/playlist.m3u8"),
-        )
-        assertEquals(
-            adaptiveStreamingSupported,
-            playerState.canPlaySource("https://example.test/manifest.mpd"),
-        )
-        assertEquals(
-            adaptiveStreamingSupported,
-            playerState.canPlaySource("https://example.test/channel.ism/Manifest"),
-        )
-        assertEquals(
-            adaptiveStreamingSupported,
+        assertTrue(playerState.canPlaySource("https://example.test/playlist.m3u8"))
+        assertTrue(playerState.canPlaySource("https://example.test/manifest.mpd"))
+        assertTrue(playerState.canPlaySource("https://example.test/channel.ism/Manifest"))
+        assertTrue(
             playerState.canPlaySource(
                 uri = "https://example.test/opaque-stream",
                 mimeType = "application/dash+xml",
@@ -738,105 +714,21 @@ class VideoPlayerStateTest {
     fun testMediaRuntimeDependenciesUseLocalDefaultsAndCanBeOverridden() =
         runTest {
             assertEquals(
-                "composeResources/io.github.shusek.mediaplayer.generated.resources/files/movi-runtime/",
-                WebMediaDependencyConfig.moviRuntimeAssetBaseUrl,
+                "composeResources/io.github.shusek.mediaplayer.generated.resources/files/kmedia-wasm-runtime/",
+                WebMediaDependencyConfig.kmediaWasmRuntimeAssetBaseUrl,
             )
-            assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.contains("@3.3.2/"))
-            assertTrue(WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity.startsWith("sha384-"))
 
-            val previousMoviUrl = WebMediaDependencyConfig.moviRuntimeAssetBaseUrl
-            val previousUrl = WebMediaDependencyConfig.matroskaSubtitlesScriptUrl
+            val previousWasmEngineUrl = WebMediaDependencyConfig.kmediaWasmRuntimeAssetBaseUrl
             try {
-                WebMediaDependencyConfig.moviRuntimeAssetBaseUrl = "/vendor/movi-runtime/"
-                WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = ""
+                WebMediaDependencyConfig.kmediaWasmRuntimeAssetBaseUrl = "/vendor/kmedia-wasm-runtime/"
                 assertEquals(
-                    "/vendor/movi-runtime/",
-                    WebMediaDependencyConfig.moviRuntimeAssetBaseUrl,
-                )
-                assertFalse(ensureMatroskaSubtitlesModuleLoaded())
-            } finally {
-                WebMediaDependencyConfig.moviRuntimeAssetBaseUrl = previousMoviUrl
-                WebMediaDependencyConfig.matroskaSubtitlesScriptUrl = previousUrl
-            }
-        }
-
-    @Test
-    fun testVideoElementCleanupDetachesManagedListenersAndSource() {
-        val video = createVideoElement()
-        var eventCalls = 0
-        video.addManagedEventListener("play") { eventCalls += 1 }
-        video.setAttribute("src", "https://example.test/video.mp4")
-
-        video.cleanupWebVideoElement()
-        video.dispatchEvent(Event("play"))
-
-        assertEquals(0, eventCalls)
-        assertFalse(video.hasAttribute("src"))
-    }
-
-    @Test
-    fun testVideoCallbacksIgnorePreviousSessionWhenSameUriIsReopened() =
-        runTest {
-            val playerState = createVideoPlayerState() as DefaultVideoPlayerState
-            val previousVideo = createVideoElement(useCors = false)
-            val currentVideo = createVideoElement(useCors = false)
-            val events = collectEvents(playerState)
-            val uri = "https://example.test/video.mp4"
-
-            try {
-                playerState.openUri(uri)
-                previousVideo.src = uri
-                previousVideo.markMediaSession(playerState.mediaSessionId, uri)
-                setupVideoElement(
-                    video = previousVideo,
-                    playerState = playerState,
-                    scope = this,
-                    useCors = false,
-                )
-                events.clear()
-
-                playerState.openUri(uri)
-                val reopenedSessionId = playerState.mediaSessionId
-                previousVideo.markMediaSession(reopenedSessionId, uri)
-                previousVideo.dispatchEvent(Event("waiting"))
-                runCurrent()
-
-                assertTrue(events.none { it is PlaybackEvent.Stalled })
-
-                currentVideo.src = uri
-                currentVideo.markMediaSession(reopenedSessionId, uri)
-                setupVideoElement(
-                    video = currentVideo,
-                    playerState = playerState,
-                    scope = this,
-                    useCors = false,
-                )
-                currentVideo.dispatchEvent(Event("waiting"))
-                runCurrent()
-
-                assertEquals(
-                    listOf(reopenedSessionId),
-                    events.filterIsInstance<PlaybackEvent.Stalled>().map(PlaybackEvent::mediaSessionId),
+                    "/vendor/kmedia-wasm-runtime/",
+                    WebMediaDependencyConfig.kmediaWasmRuntimeAssetBaseUrl,
                 )
             } finally {
-                previousVideo.cleanupWebVideoElement()
-                currentVideo.cleanupWebVideoElement()
-                playerState.dispose()
+                WebMediaDependencyConfig.kmediaWasmRuntimeAssetBaseUrl = previousWasmEngineUrl
             }
         }
-
-    @Test
-    fun testVideoElementCorsModeFollowsSourceAttempt() {
-        val video = createVideoElement(useCors = true)
-
-        assertEquals("anonymous", video.getAttribute("crossorigin"))
-
-        video.configureCrossOrigin(useCors = true, useCredentials = true)
-        assertEquals("use-credentials", video.getAttribute("crossorigin"))
-
-        video.configureCrossOrigin(useCors = false, useCredentials = false)
-        assertFalse(video.hasAttribute("crossorigin"))
-    }
 
     private fun TestScope.collectEvents(state: VideoPlayerState): MutableList<PlaybackEvent> {
         val events = mutableListOf<PlaybackEvent>()
@@ -848,18 +740,6 @@ class VideoPlayerStateTest {
         return events
     }
 }
-
-@Suppress("UNUSED_PARAMETER")
-private fun configuredWebTestPlaybackEngine(): WebPlaybackEngine =
-    when (val configured = readConfiguredWebTestPlaybackEngine().lowercase()) {
-        "movi" -> WebPlaybackEngine.MOVI
-        "legacy" -> WebPlaybackEngine.LEGACY
-        else -> error("Missing or invalid Karma playback engine: '$configured'.")
-    }
-
-@OptIn(ExperimentalWasmJsInterop::class)
-private fun readConfiguredWebTestPlaybackEngine(): String =
-    js("String(globalThis.__karma__?.config?.kmpPlaybackEngine || '')")
 
 @OptIn(ExperimentalWasmJsInterop::class)
 private fun canRequestFullscreenFromCurrentContext(): Boolean =

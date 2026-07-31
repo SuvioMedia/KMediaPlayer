@@ -42,6 +42,7 @@ internal class EventingVideoPlayerState(
     private var seekCompletionJob: Job? = null
     private var audioTrackSelectionJob: Job? = null
     private var subtitleTrackSelectionJob: Job? = null
+    private var adaptiveQualitySelectionJob: Job? = null
     private var lastError: VideoPlayerError? = null
     private var playbackEndedCallback: (() -> Unit)? = null
     private var restartCallback: (() -> Unit)? = null
@@ -251,6 +252,16 @@ internal class EventingVideoPlayerState(
     ) {
         openSource(uri) {
             delegate.openUri(uri, initializePlayerState, requestHeaders)
+        }
+    }
+
+    override fun openSource(
+        source: MediaSourceSpec,
+        initializePlayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
+    ) {
+        openSource(source.uri) {
+            delegate.openSource(source, initializePlayerState, requestHeaders)
         }
     }
 
@@ -560,22 +571,34 @@ internal class EventingVideoPlayerState(
         return result
     }
 
+    override val availableAdaptiveQualities: List<AdaptiveQualityVariant>
+        get() = delegate.availableAdaptiveQualities
+
+    override val currentAdaptiveQuality: AdaptiveQualityVariant?
+        get() = delegate.currentAdaptiveQuality
+
+    override val adaptiveQualityMode: AdaptiveQualityMode
+        get() = delegate.adaptiveQualityMode
+
+    override fun selectAdaptiveQuality(variantId: String?): AdaptiveQualitySelectionResult {
+        ensureNotDisposed()
+        return selectHlsQuality(variantId).toEventingAdaptiveQualitySelectionResult()
+    }
+
+    override fun selectAutoAdaptiveQuality(): AdaptiveQualitySelectionResult {
+        ensureNotDisposed()
+        return selectAdaptiveQuality(null)
+    }
+
     override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
         ensureNotDisposed()
         val selectionSessionId = mediaSessionId
         val result = delegate.selectHlsQuality(variantId)
-        if (result.isApplied) {
-            emitTrackChanged(
-                kind = TrackKind.HLS_QUALITY,
-                trackId =
-                    when (result) {
-                        HlsQualitySelectionResult.Auto -> null
-                        is HlsQualitySelectionResult.Selected -> result.quality.id
-                        else -> variantId
-                    },
-                expectedSessionId = selectionSessionId,
-            )
-        }
+        handleAdaptiveQualitySelectionResult(
+            result = result,
+            selectionSessionId = selectionSessionId,
+            requestedVariantId = variantId,
+        )
         emitCurrentErrorIfChanged()
         return result
     }
@@ -887,6 +910,60 @@ internal class EventingVideoPlayerState(
         if (shouldStart) newJob.start()
     }
 
+    private fun handleAdaptiveQualitySelectionResult(
+        result: HlsQualitySelectionResult,
+        selectionSessionId: Long,
+        requestedVariantId: String?,
+    ) {
+        val previousJob =
+            eventStateLock.withLock {
+                adaptiveQualitySelectionJob.also { adaptiveQualitySelectionJob = null }
+            }
+        previousJob?.cancel()
+        if (!result.isApplied) return
+
+        val isConfirmed: () -> Boolean = {
+            if (requestedVariantId == null) {
+                delegate.adaptiveQualityMode == AdaptiveQualityMode.AUTO
+            } else {
+                delegate.adaptiveQualityMode == AdaptiveQualityMode.MANUAL &&
+                    delegate.currentAdaptiveQuality?.id == requestedVariantId
+            }
+        }
+        if (isConfirmed()) {
+            emitTrackChanged(TrackKind.HLS_QUALITY, requestedVariantId, selectionSessionId)
+            return
+        }
+
+        lateinit var newJob: Job
+        val shouldStart =
+            eventStateLock.withLock {
+                if (isDisposed || mediaSessionId != selectionSessionId) {
+                    false
+                } else {
+                    newJob =
+                        eventScope.launch(start = CoroutineStart.LAZY) {
+                            repeat(TRACK_SELECTION_CONFIRMATION_POLL_ATTEMPTS) {
+                                delay(TRACK_SELECTION_CONFIRMATION_POLL_INTERVAL)
+                                if (!isCurrentEventSession(selectionSessionId)) return@launch
+                                emitCurrentErrorIfChanged()
+                                if (isConfirmed()) {
+                                    emitTrackChanged(
+                                        TrackKind.HLS_QUALITY,
+                                        requestedVariantId,
+                                        selectionSessionId,
+                                    )
+                                    return@launch
+                                }
+                            }
+                        }
+                    adaptiveQualitySelectionJob = newJob
+                    true
+                }
+            }
+        if (shouldStart) newJob.start()
+    }
+
     private fun emitPlaybackRestarted(sessionId: Long) {
         eventStateLock.withLock {
             if (isDisposed || activeSourceSessionId != sessionId) return@withLock
@@ -957,11 +1034,13 @@ internal class EventingVideoPlayerState(
                 seekCompletionJob,
                 audioTrackSelectionJob,
                 subtitleTrackSelectionJob,
+                adaptiveQualitySelectionJob,
             )
         sourceLoadedJob = null
         seekCompletionJob = null
         audioTrackSelectionJob = null
         subtitleTrackSelectionJob = null
+        adaptiveQualitySelectionJob = null
         activeSourceSessionId = 0L
         sourceLoadedSessionId = 0L
         return jobs
@@ -989,3 +1068,21 @@ internal class EventingVideoPlayerState(
         private val TRACK_SELECTION_CONFIRMATION_POLL_INTERVAL = 20.milliseconds
     }
 }
+
+private fun HlsQualitySelectionResult.toEventingAdaptiveQualitySelectionResult(): AdaptiveQualitySelectionResult =
+    when (this) {
+        HlsQualitySelectionResult.Auto -> AdaptiveQualitySelectionResult.Auto
+        is HlsQualitySelectionResult.Selected ->
+            AdaptiveQualitySelectionResult.Selected(
+                AdaptiveQualityVariant(
+                    id = quality.id,
+                    label = quality.label,
+                    width = quality.width,
+                    height = quality.height,
+                    bitrate = quality.bitrate,
+                    codecs = quality.codecs,
+                ),
+            )
+        is HlsQualitySelectionResult.NotFound -> AdaptiveQualitySelectionResult.NotFound(variantId)
+        HlsQualitySelectionResult.NotSupported -> AdaptiveQualitySelectionResult.NotSupported
+    }

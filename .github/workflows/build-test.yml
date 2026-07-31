@@ -272,12 +272,6 @@ jobs:
       - name: Install Rust Wasm target
         run: rustup target add wasm32-unknown-unknown
 
-      - name: Install the WGSL validator
-        run: cargo install --locked naga-cli --version 30.0.0
-
-      - name: Validate the embedded WebGPU projection shader
-        run: bash .github/scripts/verify_webgpu_wgsl.sh
-
       - name: Test Wasm in headless Chrome
         run: >-
           ./gradlew :mediaplayer-core:wasmJsBrowserTest
@@ -285,11 +279,6 @@ jobs:
           :mediaplayer:wasmJsBrowserTest
           :mediaplayer-ass:wasmJsBrowserTest
           :mediaplayer-dolbyvision:wasmJsBrowserTest --no-daemon --continue
-
-      - name: Repeat the mediaplayer Wasm suite with the legacy engine
-        run: >-
-          ./gradlew :mediaplayer:wasmJsBrowserTest
-          -PcomposeMediaPlayer.wasmTestPlaybackEngine=legacy --no-daemon
 
       - name: Build the production Wasm sample
         run: ./gradlew :sample:composeApp:wasmJsBrowserDistribution --no-daemon
@@ -337,7 +326,7 @@ jobs:
             }
           }
 
-      - name: Smoke-test the linked Movi KLIB and packaged runtime in Microsoft Edge
+      - name: Smoke-test the linked KMedia Wasm engine and packaged runtime in Microsoft Edge
         shell: pwsh
         run: |
           $edgePath = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
@@ -346,7 +335,7 @@ jobs:
           }
           $env:CHROME_BIN = $edgePath
           ./gradlew.bat :mediaplayer:wasmJsBrowserTest `
-            --tests '*MoviRealPackageBrowserTest*' --no-daemon --no-parallel
+            --tests '*WasmEngineRealPackageBrowserTest*' --no-daemon --no-parallel
 
       - name: Upload Edge smoke-test results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -359,7 +348,6 @@ jobs:
           if-no-files-found: warn
 
   wasm-firefox-smoke:
-    continue-on-error: true
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
@@ -373,10 +361,10 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Smoke-test the linked Movi KLIB and packaged runtime in Firefox
+      - name: Smoke-test the linked KMedia Wasm engine and packaged runtime in Firefox
         run: >-
           ./gradlew :mediaplayer:wasmJsBrowserTest
-          --tests '*MoviRealPackageBrowserTest*'
+          --tests '*WasmEngineRealPackageBrowserTest*'
           -PcomposeMediaPlayer.wasmTestBrowser=firefox --no-daemon
 
       - name: Upload Firefox smoke-test results
@@ -390,7 +378,6 @@ jobs:
           if-no-files-found: warn
 
   wasm-safari-smoke:
-    continue-on-error: true
     timeout-minutes: 20
     runs-on: macos-15
     steps:
@@ -404,10 +391,10 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Smoke-test the linked Movi KLIB and packaged runtime in Safari
+      - name: Smoke-test the linked KMedia Wasm engine and packaged runtime in Safari
         run: >-
           ./gradlew :mediaplayer:wasmJsBrowserTest
-          --tests '*MoviRealPackageBrowserTest*'
+          --tests '*WasmEngineRealPackageBrowserTest*'
           -PcomposeMediaPlayer.wasmTestBrowser=safari --no-daemon
 
       - name: Upload Safari smoke-test results

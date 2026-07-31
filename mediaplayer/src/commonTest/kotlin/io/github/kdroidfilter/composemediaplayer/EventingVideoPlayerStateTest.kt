@@ -340,6 +340,35 @@ class EventingVideoPlayerStateTest {
         }
 
     @Test
+    fun primaryAdaptiveQualityApiWaitsForTheConfirmedDelegateState() =
+        runTest {
+            val quality = HlsQualityVariant(id = "1080p", label = "1080p", height = 1080)
+            val delegate =
+                FakeVideoPlayerState().apply {
+                    hlsQualitySelectionResult = HlsQualitySelectionResult.Selected(quality)
+                }
+            val state = EventingVideoPlayerState(delegate)
+            val events = collectEvents(state)
+
+            val result = state.selectAdaptiveQuality("1080p")
+            runCurrent()
+
+            assertEquals(
+                AdaptiveQualitySelectionResult.Selected(
+                    AdaptiveQualityVariant(id = "1080p", label = "1080p", height = 1080),
+                ),
+                result,
+            )
+            assertEquals(AdaptiveQualityMode.MANUAL, state.adaptiveQualityMode)
+            assertEquals("1080p", state.currentAdaptiveQuality?.id)
+            val changed = assertIs<PlaybackEvent.TrackChanged>(events.single())
+            assertEquals(TrackKind.HLS_QUALITY, changed.kind)
+            assertEquals("1080p", changed.trackId)
+
+            state.dispose()
+        }
+
+    @Test
     fun autoHlsQualitySelectionEmitsTrackChangedEvent() =
         runTest {
             val delegate =
@@ -620,6 +649,15 @@ private class FakeVideoPlayerState : VideoPlayerState {
     override val metadata: VideoMetadata = VideoMetadata()
     override var currentAudioTrack: AudioTrack? = null
     override var availableAudioTracks: List<AudioTrack> = emptyList()
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override var availableHlsQualities: List<HlsQualityVariant> = emptyList()
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override var currentHlsQuality: HlsQualityVariant? = null
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override var hlsQualityMode: HlsQualityMode = HlsQualityMode.AUTO
     override var subtitlesEnabled: Boolean = false
     override var currentSubtitleTrack: SubtitleTrack? = null
     override val availableSubtitleTracks: List<SubtitleTrack> = emptyList()
@@ -713,7 +751,23 @@ private class FakeVideoPlayerState : VideoPlayerState {
 
     override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
         hlsQualitySelectionCalls += 1
-        return hlsQualitySelectionResult
+        return hlsQualitySelectionResult.also { result ->
+            when (result) {
+                HlsQualitySelectionResult.Auto -> {
+                    hlsQualityMode = HlsQualityMode.AUTO
+                    currentHlsQuality = null
+                }
+
+                is HlsQualitySelectionResult.Selected -> {
+                    hlsQualityMode = HlsQualityMode.MANUAL
+                    currentHlsQuality = result.quality
+                }
+
+                is HlsQualitySelectionResult.NotFound,
+                HlsQualitySelectionResult.NotSupported,
+                -> Unit
+            }
+        }
     }
 
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {

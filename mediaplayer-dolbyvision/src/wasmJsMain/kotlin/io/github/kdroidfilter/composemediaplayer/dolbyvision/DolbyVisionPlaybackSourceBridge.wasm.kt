@@ -393,7 +393,7 @@ private class WebMatroskaSession(
 private class WebDolbyVisionPreparedSource(
     private val session: WebDolbyVisionSession,
     private val audioSession: WebHlsAudioSession?,
-    private val mimeType: String,
+    override val mimeType: String,
     override val outputColorInfo: VideoColorInfo,
     override val detail: String,
 ) : WebPreparedVideoPipelineSource {

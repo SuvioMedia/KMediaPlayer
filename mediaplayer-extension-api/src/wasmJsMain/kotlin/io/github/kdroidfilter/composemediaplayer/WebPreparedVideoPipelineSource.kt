@@ -4,6 +4,10 @@ import org.w3c.dom.HTMLVideoElement
 
 /** Browser prepared source that owns a bounded MediaSource transport attached to the active video element. */
 public interface WebPreparedVideoPipelineSource : PreparedVideoPipelineSource {
+    /** MIME type exposed to the engine-owned browser media backend. */
+    public val mimeType: String?
+        get() = null
+
     public fun attach(
         videoElement: HTMLVideoElement,
         onFailure: (String) -> Unit,

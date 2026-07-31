@@ -97,6 +97,15 @@ fun PlayerScreen(
     val scope = rememberCoroutineScope()
 
     val startupVideoUrl = remember(initialVideoUrl) { initialVideoUrl?.takeIf { it.isNotBlank() } ?: SAMPLE_VIDEOS.first().second }
+    val availableSampleVideos =
+        remember(startupVideoUrl) {
+            buildList {
+                if (startupVideoUrl.startsWith("blob:")) {
+                    add("Bundled MKV / VP9 / dual Opus" to startupVideoUrl)
+                }
+                addAll(SAMPLE_VIDEOS)
+            }
+        }
     var videoUrl by remember(startupVideoUrl) { mutableStateOf(startupVideoUrl) }
     var initialPlayerState by remember { mutableStateOf(InitialPlayerState.PLAY) }
     var selectedContentScale by remember { mutableStateOf(ContentScale.Fit) }
@@ -206,6 +215,10 @@ fun PlayerScreen(
         playerState.colorPipelineStatus.collect { status ->
             println("KMP_COLOR_PIPELINE_STATUS=$status")
         }
+    }
+
+    LaunchedEffect(playerState.diagnostics) {
+        println("KMP_PLAYBACK_DIAGNOSTICS=${playerState.diagnostics}")
     }
 
     LaunchedEffect(playerState.subtitlesEnabled, playerState.currentSubtitleTrack) {
@@ -338,6 +351,7 @@ fun PlayerScreen(
         val desktopMkvBackendOptions = remember(showSourceSheet) { desktopMkvPlaybackBackendOptions() }
         MediaSourceSheet(
             videoUrl = videoUrl,
+            sampleVideos = availableSampleVideos,
             desktopMkvBackendAvailable = desktopMkvPlaybackBackendSelectionAvailable,
             desktopMkvBackendOptions = desktopMkvBackendOptions,
             selectedDesktopMkvBackend = selectedDesktopMkvBackend,
@@ -649,11 +663,10 @@ private fun FullscreenOverlay(playerState: VideoPlayerState) {
 // endregion
 
 internal val SAMPLE_VIDEOS = listOf(
-    "Big Buck Bunny" to "https://media.w3.org/2010/05/bunny/trailer.mp4",
-    "Sintel" to "https://media.w3.org/2010/05/sintel/trailer.mp4",
-    "Big Buck Bunny (clip)" to "https://www.w3schools.com/html/mov_bbb.mp4",
-    "Sample Video" to "https://archive.org/download/big-bunny-sample-video/SampleVideo.mp4",
-    "Big Buck Bunny (full)" to "https://media.w3.org/2010/05/bunny/movie.mp4",
+    "Flower (MP4)" to "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+    "Flower (WebM)" to "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm",
+    "Big Buck Bunny (HLS)" to "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    "Envivio (DASH)" to "https://dash.akamaized.net/envivio/EnvivioDash3/manifest.mpd",
     "Apple HDR / Dolby Vision HLS" to "https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/main.m3u8",
 )
 
