@@ -206,7 +206,20 @@ abstract interface io.github.kdroidfilter.composemediaplayer/IosSubtitlePipeline
 }
 
 // Targets: [wasmJs]
+abstract interface io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer { // io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer|null[0]
+    abstract fun clear() // io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer.clear|clear(){}[0]
+    abstract fun render(kotlin.time/Duration) // io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer.render|render(kotlin.time.Duration){}[0]
+    abstract fun setDelay(kotlin.time/Duration) // io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer.setDelay|setDelay(kotlin.time.Duration){}[0]
+    abstract suspend fun close() // io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer.close|close(){}[0]
+    abstract suspend fun configure(io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration, org.w3c.dom/HTMLElement) // io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer.configure|configure(io.github.kdroidfilter.composemediaplayer.WebSubtitleRendererConfiguration;org.w3c.dom.HTMLElement){}[0]
+    abstract suspend fun pushPacket(io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket) // io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer.pushPacket|pushPacket(io.github.kdroidfilter.composemediaplayer.WebSubtitlePacket){}[0]
+}
+
+// Targets: [wasmJs]
 abstract interface io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource : io.github.kdroidfilter.composemediaplayer/PreparedVideoPipelineSource { // io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource|null[0]
+    open val mimeType // io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource.mimeType|{}mimeType[0]
+        open fun <get-mimeType>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource.mimeType.<get-mimeType>|<get-mimeType>(){}[0]
+
     abstract fun attach(org.w3c.dom/HTMLVideoElement, kotlin/Function1<kotlin/String, kotlin/Unit>) // io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource.attach|attach(org.w3c.dom.HTMLVideoElement;kotlin.Function1<kotlin.String,kotlin.Unit>){}[0]
     abstract fun detach(org.w3c.dom/HTMLVideoElement) // io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPipelineSource.detach|detach(org.w3c.dom.HTMLVideoElement){}[0]
 }
@@ -215,5 +228,89 @@ abstract interface io.github.kdroidfilter.composemediaplayer/WebPreparedVideoPip
 abstract interface io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension : io.github.kdroidfilter.composemediaplayer/SubtitlePipelineExtension { // io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension|null[0]
     abstract fun SubtitleOverlay(io.github.kdroidfilter.composemediaplayer/VideoPlayerState, org.w3c.dom/HTMLVideoElement?, androidx.compose.ui/Modifier, kotlin/Function1<kotlin/Boolean, kotlin/Unit>, androidx.compose.runtime/Composer?, kotlin/Int) // io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension.SubtitleOverlay|SubtitleOverlay(io.github.kdroidfilter.composemediaplayer.VideoPlayerState;org.w3c.dom.HTMLVideoElement?;androidx.compose.ui.Modifier;kotlin.Function1<kotlin.Boolean,kotlin.Unit>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]
     open fun SubtitleOverlay(io.github.kdroidfilter.composemediaplayer/VideoPlayerState, org.w3c.dom/HTMLVideoElement?, org.w3c.dom/HTMLElement?, androidx.compose.ui.layout/ContentScale, androidx.compose.ui/Modifier, kotlin/Function1<kotlin/Boolean, kotlin/Unit>, androidx.compose.runtime/Composer?, kotlin/Int) // io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension.SubtitleOverlay|SubtitleOverlay(io.github.kdroidfilter.composemediaplayer.VideoPlayerState;org.w3c.dom.HTMLVideoElement?;org.w3c.dom.HTMLElement?;androidx.compose.ui.layout.ContentScale;androidx.compose.ui.Modifier;kotlin.Function1<kotlin.Boolean,kotlin.Unit>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]
-    open fun createMoviEmbeddedSubtitleRenderer(kotlin/Function1<kotlin/String, kotlin/Unit>): kotlin.js/JsAny? // io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension.createMoviEmbeddedSubtitleRenderer|createMoviEmbeddedSubtitleRenderer(kotlin.Function1<kotlin.String,kotlin.Unit>){}[0]
+    open fun createWasmMediaEmbeddedSubtitleRenderer(kotlin/Function1<kotlin/String, kotlin/Unit>): io.github.kdroidfilter.composemediaplayer/WebEmbeddedSubtitleRenderer? // io.github.kdroidfilter.composemediaplayer/WebSubtitlePipelineExtension.createWasmMediaEmbeddedSubtitleRenderer|createWasmMediaEmbeddedSubtitleRenderer(kotlin.Function1<kotlin.String,kotlin.Unit>){}[0]
 }
+
+// Targets: [wasmJs]
+final class io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment { // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment|null[0]
+    constructor <init>(kotlin/String, kotlin/String, kotlin/ByteArray) // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.<init>|<init>(kotlin.String;kotlin.String;kotlin.ByteArray){}[0]
+
+    final val data // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.data|{}data[0]
+        final fun <get-data>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.data.<get-data>|<get-data>(){}[0]
+    final val mimeType // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.mimeType|{}mimeType[0]
+        final fun <get-mimeType>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.mimeType.<get-mimeType>|<get-mimeType>(){}[0]
+    final val name // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.name|{}name[0]
+        final fun <get-name>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.name.<get-name>|<get-name>(){}[0]
+
+    final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.component1|component1(){}[0]
+    final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.component2|component2(){}[0]
+    final fun component3(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.component3|component3(){}[0]
+    final fun copy(kotlin/String = ..., kotlin/String = ..., kotlin/ByteArray = ...): io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.copy|copy(kotlin.String;kotlin.String;kotlin.ByteArray){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment.toString|toString(){}[0]
+}
+
+// Targets: [wasmJs]
+final class io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket { // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket|null[0]
+    constructor <init>(kotlin/ByteArray, kotlin.time/Duration, kotlin.time/Duration) // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.<init>|<init>(kotlin.ByteArray;kotlin.time.Duration;kotlin.time.Duration){}[0]
+
+    final val data // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.data|{}data[0]
+        final fun <get-data>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.data.<get-data>|<get-data>(){}[0]
+    final val duration // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.duration|{}duration[0]
+        final fun <get-duration>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.duration.<get-duration>|<get-duration>(){}[0]
+    final val presentationTime // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.presentationTime|{}presentationTime[0]
+        final fun <get-presentationTime>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.presentationTime.<get-presentationTime>|<get-presentationTime>(){}[0]
+
+    final fun component1(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.component1|component1(){}[0]
+    final fun component2(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.component2|component2(){}[0]
+    final fun component3(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.component3|component3(){}[0]
+    final fun copy(kotlin/ByteArray = ..., kotlin.time/Duration = ..., kotlin.time/Duration = ...): io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.copy|copy(kotlin.ByteArray;kotlin.time.Duration;kotlin.time.Duration){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitlePacket.toString|toString(){}[0]
+}
+
+// Targets: [wasmJs]
+final class io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration { // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration|null[0]
+    constructor <init>(kotlin/String, kotlin/ByteArray?, kotlin/Int, kotlin/Int, kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment>) // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.<init>|<init>(kotlin.String;kotlin.ByteArray?;kotlin.Int;kotlin.Int;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.WebSubtitleFontAttachment>){}[0]
+
+    final val attachments // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.attachments|{}attachments[0]
+        final fun <get-attachments>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment> // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.attachments.<get-attachments>|<get-attachments>(){}[0]
+    final val codec // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.codec|{}codec[0]
+        final fun <get-codec>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.codec.<get-codec>|<get-codec>(){}[0]
+    final val codecPrivate // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.codecPrivate|{}codecPrivate[0]
+        final fun <get-codecPrivate>(): kotlin/ByteArray? // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.codecPrivate.<get-codecPrivate>|<get-codecPrivate>(){}[0]
+    final val height // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.height.<get-height>|<get-height>(){}[0]
+    final val width // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.width.<get-width>|<get-width>(){}[0]
+
+    final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.component1|component1(){}[0]
+    final fun component2(): kotlin/ByteArray? // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.component2|component2(){}[0]
+    final fun component3(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.component3|component3(){}[0]
+    final fun component4(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.component4|component4(){}[0]
+    final fun component5(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment> // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.component5|component5(){}[0]
+    final fun copy(kotlin/String = ..., kotlin/ByteArray? = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/WebSubtitleFontAttachment> = ...): io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.copy|copy(kotlin.String;kotlin.ByteArray?;kotlin.Int;kotlin.Int;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.WebSubtitleFontAttachment>){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleRendererConfiguration.toString|toString(){}[0]
+}
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleFontAttachment$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleFontAttachment$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebSubtitleFontAttachment$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitlePacket$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitlePacket$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebSubtitlePacket$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleRendererConfiguration$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleRendererConfiguration$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebSubtitleRendererConfiguration$stableprop[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleFontAttachment$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleFontAttachment$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebSubtitleFontAttachment$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitlePacket$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitlePacket$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebSubtitlePacket$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleRendererConfiguration$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleRendererConfiguration$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebSubtitleRendererConfiguration$stableprop_getter(){}[0]

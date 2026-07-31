@@ -7,20 +7,53 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
-import kotlin.js.JsAny
+import kotlin.time.Duration
+
+public data class WebSubtitleRendererConfiguration(
+    public val codec: String,
+    public val codecPrivate: ByteArray?,
+    public val width: Int,
+    public val height: Int,
+    public val attachments: List<WebSubtitleFontAttachment>,
+)
+
+public data class WebSubtitleFontAttachment(
+    public val name: String,
+    public val mimeType: String,
+    public val data: ByteArray,
+)
+
+public data class WebSubtitlePacket(
+    public val data: ByteArray,
+    public val presentationTime: Duration,
+    public val duration: Duration,
+)
+
+/** KMedia-owned boundary for an optional embedded subtitle renderer. */
+public interface WebEmbeddedSubtitleRenderer {
+    public suspend fun configure(
+        configuration: WebSubtitleRendererConfiguration,
+        overlay: HTMLElement,
+    )
+
+    public suspend fun pushPacket(packet: WebSubtitlePacket)
+
+    public fun render(position: Duration)
+
+    public fun setDelay(delay: Duration)
+
+    public fun clear()
+
+    public suspend fun close()
+}
 
 /** Browser hook implemented by optional styled-subtitle companion artifacts. */
 public interface WebSubtitlePipelineExtension : SubtitlePipelineExtension {
     /**
-     * Optional low-level renderer consumed directly by Movi's pluggable embedded-subtitle
-     * pipeline. The returned JavaScript object must implement Movi's `SubtitleRenderer`
-     * contract. Returning null leaves the track on Movi's built-in subtitle renderer.
-     *
-     * The value is intentionally opaque outside the Wasm adapter: applications keep using
-     * [SubtitlePipelineExtension] and [VideoPlayerState], while optional renderer artifacts
-     * can integrate without making the core player depend on their JavaScript runtime.
+     * Optional typed renderer consumed directly by the Wasm engine's embedded-subtitle pipeline.
+     * Returning null leaves the track on the engine's built-in subtitle renderer.
      */
-    public fun createMoviEmbeddedSubtitleRenderer(onError: (String) -> Unit): JsAny? = null
+    public fun createWasmMediaEmbeddedSubtitleRenderer(onError: (String) -> Unit): WebEmbeddedSubtitleRenderer? = null
 
     @Composable
     public fun SubtitleOverlay(

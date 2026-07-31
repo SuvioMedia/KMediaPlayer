@@ -39,7 +39,9 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
 	public fun enterPip (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAdaptiveQualityMode ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode;
 	public fun getAspectRatio ()F
+	public fun getAvailableAdaptiveQualities ()Ljava/util/List;
 	public fun getAvailableAudioTracks ()Ljava/util/List;
 	public fun getAvailableHlsQualities ()Ljava/util/List;
 	public fun getAvailableSubtitleTracks ()Ljava/util/List;
@@ -48,6 +50,7 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
 	public fun getChapters ()Ljava/util/List;
 	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
+	public fun getCurrentAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityVariant;
 	public fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
 	public fun getCurrentChapter ()Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
@@ -95,6 +98,7 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun isSeeking ()Z
 	public fun openAsset (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openFile (Lio/github/vinceglb/filekit/PlatformFile;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
+	public fun openSource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun openUri (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun pause ()V
 	public fun play ()V
@@ -114,8 +118,10 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
 	public fun seekToMs (J)V
 	public fun seekToProgress (F)V
+	public fun selectAdaptiveQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun selectAudioTrack (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectAutoAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAutoHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectHlsQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
@@ -586,7 +592,9 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
 	public fun enterPip (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAdaptiveQualityMode ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode;
 	public fun getAspectRatio ()F
+	public fun getAvailableAdaptiveQualities ()Ljava/util/List;
 	public fun getAvailableAudioTracks ()Ljava/util/List;
 	public fun getAvailableHlsQualities ()Ljava/util/List;
 	public fun getAvailableSubtitleTracks ()Ljava/util/List;
@@ -595,6 +603,7 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
 	public fun getChapters ()Ljava/util/List;
 	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
+	public fun getCurrentAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityVariant;
 	public fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
 	public fun getCurrentChapter ()Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
@@ -641,6 +650,7 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 	public fun isSeeking ()Z
 	public fun openAsset (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openFile (Lio/github/vinceglb/filekit/PlatformFile;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
+	public fun openSource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun openUri (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun pause ()V
 	public fun play ()V
@@ -660,8 +670,10 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 	public fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
 	public fun seekToMs (J)V
 	public fun seekToProgress (F)V
+	public fun selectAdaptiveQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun selectAudioTrack (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectAutoAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAutoHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectHlsQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
@@ -697,11 +709,11 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 public final class io/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions {
 	public static final field $stable I
 	public fun <init> ()V
-	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;)V
-	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
-	public final fun component10 ()Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;
-	public final fun component11 ()Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;
+	public final fun component10 ()Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;
+	public final fun component11 ()Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;
 	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
 	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;
 	public final fun component4 ()Ljava/util/List;
@@ -710,8 +722,8 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoPlaybackOption
 	public final fun component7 ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;
 	public final fun component8 ()Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;
 	public final fun component9 ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;
-	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;)Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;)Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDetectionMode;Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getDesktopVideoBackend ()Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;
 	public final fun getDolbyVisionPolicy ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
@@ -723,8 +735,8 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoPlaybackOption
 	public final fun getProjectionTextureCrop ()Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;
 	public final fun getProjectionView ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;
 	public final fun getProjectionViewControlMode ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;
+	public final fun getWebDecoderPreference ()Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;
 	public final fun getWebDrmConfiguration ()Lio/github/kdroidfilter/composemediaplayer/WebDrmConfiguration;
-	public final fun getWebPlaybackEngine ()Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -842,21 +854,24 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoProjectionVide
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/WebDecoderPreference : java/lang/Enum {
+	public static final field AUTO Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;
+	public static final field SOFTWARE Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/WebDecoderPreference;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/WebDrmConfiguration {
 	public static final field $stable I
 	public fun <init> (Ljava/lang/String;Ljava/util/Map;)V
 	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getLicenseRequestHeaders ()Ljava/util/Map;
+	public final fun getLicenseServers ()Ljava/util/Map;
 	public final fun getLicenseUrl ()Ljava/lang/String;
 	public fun toString ()Ljava/lang/String;
-}
-
-public final class io/github/kdroidfilter/composemediaplayer/WebPlaybackEngine : java/lang/Enum {
-	public static final field LEGACY Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;
-	public static final field MOVI Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;
-	public static fun getEntries ()Lkotlin/enums/EnumEntries;
-	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;
-	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/WebPlaybackEngine;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/common/FullscreenVideoPlayerWindowKt {
@@ -892,7 +907,9 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
 	public fun enterPip (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAdaptiveQualityMode ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode;
 	public fun getAspectRatio ()F
+	public fun getAvailableAdaptiveQualities ()Ljava/util/List;
 	public fun getAvailableAudioTracks ()Ljava/util/List;
 	public fun getAvailableHlsQualities ()Ljava/util/List;
 	public fun getAvailableSubtitleTracks ()Ljava/util/List;
@@ -901,6 +918,7 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
 	public fun getChapters ()Ljava/util/List;
 	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
+	public fun getCurrentAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityVariant;
 	public fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
 	public fun getCurrentChapter ()Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
@@ -948,6 +966,7 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public final fun onResized (II)V
 	public fun openAsset (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openFile (Lio/github/vinceglb/filekit/PlatformFile;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
+	public fun openSource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun openUri (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun pause ()V
 	public fun play ()V
@@ -967,8 +986,10 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
 	public fun seekToMs (J)V
 	public fun seekToProgress (F)V
+	public fun selectAdaptiveQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun selectAudioTrack (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectAutoAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAutoHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectHlsQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
@@ -1034,7 +1055,9 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
 	public fun enterPip (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAdaptiveQualityMode ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode;
 	public fun getAspectRatio ()F
+	public fun getAvailableAdaptiveQualities ()Ljava/util/List;
 	public fun getAvailableAudioTracks ()Ljava/util/List;
 	public fun getAvailableHlsQualities ()Ljava/util/List;
 	public fun getAvailableSubtitleTracks ()Ljava/util/List;
@@ -1043,6 +1066,7 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
 	public fun getChapters ()Ljava/util/List;
 	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
+	public fun getCurrentAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityVariant;
 	public fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
 	public fun getCurrentChapter ()Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
@@ -1090,6 +1114,7 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public final fun onResized (II)V
 	public fun openAsset (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openFile (Lio/github/vinceglb/filekit/PlatformFile;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
+	public fun openSource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun openUri (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun pause ()V
 	public fun play ()V
@@ -1109,8 +1134,10 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
 	public fun seekToMs (J)V
 	public fun seekToProgress (F)V
+	public fun selectAdaptiveQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun selectAudioTrack (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectAutoAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAutoHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectHlsQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
@@ -1275,7 +1302,9 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
 	public fun enterPip (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAdaptiveQualityMode ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode;
 	public fun getAspectRatio ()F
+	public fun getAvailableAdaptiveQualities ()Ljava/util/List;
 	public fun getAvailableAudioTracks ()Ljava/util/List;
 	public fun getAvailableHlsQualities ()Ljava/util/List;
 	public fun getAvailableSubtitleTracks ()Ljava/util/List;
@@ -1284,6 +1313,7 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
 	public fun getChapters ()Ljava/util/List;
 	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
+	public fun getCurrentAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityVariant;
 	public fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
 	public fun getCurrentChapter ()Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
 	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
@@ -1334,6 +1364,7 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public static synthetic fun onResized$default (Lio/github/kdroidfilter/composemediaplayer/windows/WindowsVideoPlayerState;IIILjava/lang/Object;)V
 	public fun openAsset (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openFile (Lio/github/vinceglb/filekit/PlatformFile;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
+	public fun openSource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun openUri (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun pause ()V
 	public fun play ()V
@@ -1353,8 +1384,10 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
 	public fun seekToMs (J)V
 	public fun seekToProgress (F)V
+	public fun selectAdaptiveQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun selectAudioTrack (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectAutoAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
 	public fun selectAutoHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectHlsQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
 	public fun selectSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;

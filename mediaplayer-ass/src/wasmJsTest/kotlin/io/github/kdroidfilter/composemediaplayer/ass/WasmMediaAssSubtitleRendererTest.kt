@@ -19,7 +19,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class MoviAssSubtitleRendererTest {
+class WasmMediaAssSubtitleRendererTest {
     @Test
     fun supportsOnlyEmbeddedAssFamilyTextTracks() {
         val adapter = createAdapter(createFakeJassubCallbacks())
@@ -105,7 +105,7 @@ class MoviAssSubtitleRendererTest {
             val rejected = CompletableDeferred<String>()
             val reported = CompletableDeferred<String>()
             val adapter =
-                createMoviAssSubtitleRendererAdapter(
+                createWasmMediaAssSubtitleRendererAdapter(
                     settings = createFakeSettings(),
                     createRenderer = {
                         throw IllegalStateException("fake JASSUB constructor failure")
@@ -147,7 +147,7 @@ class MoviAssSubtitleRendererTest {
                     onTerminated = { terminated.complete(Unit) },
                 )
             val adapter =
-                createMoviAssSubtitleRendererAdapter(
+                createWasmMediaAssSubtitleRendererAdapter(
                     settings = createFakeSettings(),
                     createRenderer = { options -> createStuckFakeJassub(options, callbacks) },
                     hardenRenderer = {},
@@ -183,7 +183,7 @@ class MoviAssSubtitleRendererTest {
         callbacks: JsAny,
         onError: (String) -> Unit = {},
     ): JsAny =
-        createMoviAssSubtitleRendererAdapter(
+        createWasmMediaAssSubtitleRendererAdapter(
             settings = createFakeSettings(),
             createRenderer = { options -> createFakeJassub(options, callbacks) },
             hardenRenderer = {},

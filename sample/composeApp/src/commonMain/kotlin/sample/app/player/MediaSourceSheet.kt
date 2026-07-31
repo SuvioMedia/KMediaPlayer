@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun MediaSourceSheet(
     videoUrl: String,
+    sampleVideos: List<Pair<String, String>>,
     desktopMkvBackendAvailable: Boolean,
     desktopMkvBackendOptions: List<DesktopMkvPlaybackBackendOption>,
     selectedDesktopMkvBackend: DesktopMkvPlaybackBackend,
@@ -155,7 +156,7 @@ internal fun MediaSourceSheet(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SAMPLE_VIDEOS.forEach { (name, url) ->
+                sampleVideos.forEach { (name, url) ->
                     FilterChip(
                         selected = videoUrl == url,
                         onClick = { onSelectPreset(url) },

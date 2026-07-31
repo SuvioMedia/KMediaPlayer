@@ -305,6 +305,18 @@ interface VideoPlayerState {
         requestHeaders: Map<String, String> = emptyMap(),
     )
 
+    /**
+     * Opens a typed source and preserves its MIME hint for platform routing.
+     * [openUri] remains the shorthand when no MIME hint is available.
+     */
+    fun openSource(
+        source: MediaSourceSpec,
+        initializePlayerState: InitialPlayerState = InitialPlayerState.PLAY,
+        requestHeaders: Map<String, String> = emptyMap(),
+    ) {
+        openUri(source.uri, initializePlayerState, requestHeaders)
+    }
+
     fun prepare(
         uri: String,
         initializePlayerState: InitialPlayerState = InitialPlayerState.PLAY,
@@ -451,19 +463,38 @@ interface VideoPlayerState {
 
     fun disableSubtitles(): TrackSelectionResult
 
-    // HLS quality management
+    // Adaptive-stream quality management
+    val availableAdaptiveQualities: List<AdaptiveQualityVariant>
+        get() = availableHlsQualities.map(HlsQualityVariant::toAdaptiveQualityVariant)
+    val currentAdaptiveQuality: AdaptiveQualityVariant?
+        get() = currentHlsQuality?.toAdaptiveQualityVariant()
+    val adaptiveQualityMode: AdaptiveQualityMode
+        get() = hlsQualityMode.toAdaptiveQualityMode()
+
+    fun selectAdaptiveQuality(variantId: String?): AdaptiveQualitySelectionResult =
+        selectHlsQuality(variantId).toAdaptiveQualitySelectionResult()
+
+    fun selectAutoAdaptiveQuality(): AdaptiveQualitySelectionResult = selectAdaptiveQuality(null)
+
+    @Deprecated("Use availableAdaptiveQualities.", ReplaceWith("availableAdaptiveQualities"))
     val availableHlsQualities: List<HlsQualityVariant>
         get() = emptyList()
+
+    @Deprecated("Use currentAdaptiveQuality.", ReplaceWith("currentAdaptiveQuality"))
     val currentHlsQuality: HlsQualityVariant?
         get() = null
+
+    @Deprecated("Use adaptiveQualityMode.", ReplaceWith("adaptiveQualityMode"))
     val hlsQualityMode: HlsQualityMode
         get() = HlsQualityMode.AUTO
 
     /**
      * Selects a concrete HLS variant by id, or automatic variant selection when [variantId] is null.
      */
+    @Deprecated("Use selectAdaptiveQuality.", ReplaceWith("selectAdaptiveQuality(variantId)"))
     fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult = HlsQualitySelectionResult.NotSupported
 
+    @Deprecated("Use selectAutoAdaptiveQuality.", ReplaceWith("selectAutoAdaptiveQuality()"))
     fun selectAutoHlsQuality(): HlsQualitySelectionResult = selectHlsQuality(null)
 
     // Cache management

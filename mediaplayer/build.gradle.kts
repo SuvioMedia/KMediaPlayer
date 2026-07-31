@@ -2,7 +2,18 @@
 
 import dev.detekt.gradle.Detekt
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.ArchiveOperations
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Delete
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
@@ -11,6 +22,38 @@ import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import java.io.DataInputStream
 import java.util.zip.ZipFile
+import javax.inject.Inject
+
+@CacheableTask
+abstract class UnpackKMediaWasmRuntimeAssets : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val archives: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @get:Inject
+    abstract val archiveOperations: ArchiveOperations
+
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+
+    @TaskAction
+    fun unpack() {
+        fileSystemOperations.sync {
+            from(archives.files.map(archiveOperations::zipTree)) {
+                include("kmedia-wasm-runtime/**")
+                into("files")
+            }
+            from(archives.files.map(archiveOperations::zipTree)) {
+                include("META-INF/**")
+                into("files/kmedia-wasm-runtime")
+            }
+            into(outputDirectory)
+        }
+    }
+}
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -64,20 +107,34 @@ val wasmBrowserTestBrowser =
         .orElse("chrome")
         .map(String::lowercase)
         .get()
-val wasmTestPlaybackEngine =
-    providers
-        .gradleProperty("composeMediaPlayer.wasmTestPlaybackEngine")
-        .orElse("movi")
-        .map(String::lowercase)
-        .get()
+val kmediaWasmRuntimeAssets =
+    configurations.create("kmediaWasmRuntimeAssets") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        description = "Pinned KMedia Wasm engine runtime files."
+    }
+dependencies.add(
+    kmediaWasmRuntimeAssets.name,
+    "io.github.shusek:kmedia-wasm-engine-runtime-assets:${libs.versions.kmediaWasmEngine.get()}@zip",
+)
+val generatedKMediaWasmRuntimeResources = layout.buildDirectory.dir("generated/kmediaWasmRuntimeResources")
+val unpackKMediaWasmRuntimeAssets =
+    tasks.register<UnpackKMediaWasmRuntimeAssets>("unpackKMediaWasmRuntimeAssets") {
+        archives.from(kmediaWasmRuntimeAssets)
+        outputDirectory.set(generatedKMediaWasmRuntimeResources)
+    }
+
+compose.resources {
+    customDirectory(
+        sourceSetName = "wasmJsMain",
+        directoryProvider =
+            unpackKMediaWasmRuntimeAssets.flatMap(UnpackKMediaWasmRuntimeAssets::outputDirectory),
+    )
+}
 
 require(wasmBrowserTestBrowser in setOf("chrome", "firefox", "safari")) {
     "composeMediaPlayer.wasmTestBrowser must be one of: chrome, firefox, safari."
 }
-require(wasmTestPlaybackEngine in setOf("movi", "legacy")) {
-    "composeMediaPlayer.wasmTestPlaybackEngine must be one of: movi, legacy."
-}
-
 group = projectGroup
 version = projectVersion
 
@@ -122,8 +179,6 @@ kotlin {
     wasmJs {
         browser {
             testTask {
-                inputs.property("composeMediaPlayer.wasmTestPlaybackEngine", wasmTestPlaybackEngine)
-                environment("KMP_WASM_TEST_PLAYBACK_ENGINE", wasmTestPlaybackEngine)
                 useKarma {
                     when (wasmBrowserTestBrowser) {
                         "chrome" -> useChromeHeadless()
@@ -244,9 +299,12 @@ kotlin {
             }
         }
 
-        wasmJsMain.dependencies {
-            implementation(libs.kotlinx.browser)
-            implementation(libs.compose.ui)
+        wasmJsMain {
+            dependencies {
+                implementation(libs.kotlinx.browser)
+                implementation(libs.compose.ui)
+                implementation(libs.kmedia.wasm.engine)
+            }
         }
 
         wasmJsTest.dependencies {

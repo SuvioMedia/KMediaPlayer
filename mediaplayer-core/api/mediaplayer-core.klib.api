@@ -10,6 +10,17 @@ open annotation class io.github.kdroidfilter.composemediaplayer/ExperimentalComp
     constructor <init>() // io.github.kdroidfilter.composemediaplayer/ExperimentalComposeMediaPlayerBackendApi.<init>|<init>(){}[0]
 }
 
+final enum class io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode> { // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode|null[0]
+    enum entry AUTO // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode.AUTO|null[0]
+    enum entry MANUAL // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode.MANUAL|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode> // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode> // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode.values|values#static(){}[0]
+}
+
 final enum class io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason> { // io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason|null[0]
     enum entry DECODER_DOES_NOT_SUPPORT_SOURCE // io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason.DECODER_DOES_NOT_SUPPORT_SOURCE|null[0]
     enum entry DISPLAY_CAPABILITIES_UNKNOWN // io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason.DISPLAY_CAPABILITIES_UNKNOWN|null[0]
@@ -421,6 +432,10 @@ abstract interface io.github.kdroidfilter.composemediaplayer/VideoPlayerState { 
         abstract fun <get-positionText>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.positionText.<get-positionText>|<get-positionText>(){}[0]
     abstract val preciseCurrentTime // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.preciseCurrentTime|{}preciseCurrentTime[0]
         abstract fun <get-preciseCurrentTime>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.preciseCurrentTime.<get-preciseCurrentTime>|<get-preciseCurrentTime>(){}[0]
+    open val adaptiveQualityMode // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.adaptiveQualityMode|{}adaptiveQualityMode[0]
+        open fun <get-adaptiveQualityMode>(): io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.adaptiveQualityMode.<get-adaptiveQualityMode>|<get-adaptiveQualityMode>(){}[0]
+    open val availableAdaptiveQualities // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.availableAdaptiveQualities|{}availableAdaptiveQualities[0]
+        open fun <get-availableAdaptiveQualities>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant> // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.availableAdaptiveQualities.<get-availableAdaptiveQualities>|<get-availableAdaptiveQualities>(){}[0]
     open val availableHlsQualities // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.availableHlsQualities|{}availableHlsQualities[0]
         open fun <get-availableHlsQualities>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/HlsQualityVariant> // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.availableHlsQualities.<get-availableHlsQualities>|<get-availableHlsQualities>(){}[0]
     open val bufferedPercent // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.bufferedPercent|{}bufferedPercent[0]
@@ -433,6 +448,8 @@ abstract interface io.github.kdroidfilter.composemediaplayer/VideoPlayerState { 
         open fun <get-chapters>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/MediaChapter> // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.chapters.<get-chapters>|<get-chapters>(){}[0]
     open val colorPipelineStatus // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.colorPipelineStatus|{}colorPipelineStatus[0]
         open fun <get-colorPipelineStatus>(): kotlinx.coroutines.flow/StateFlow<io.github.kdroidfilter.composemediaplayer/VideoColorPipelineStatus> // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.colorPipelineStatus.<get-colorPipelineStatus>|<get-colorPipelineStatus>(){}[0]
+    open val currentAdaptiveQuality // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.currentAdaptiveQuality|{}currentAdaptiveQuality[0]
+        open fun <get-currentAdaptiveQuality>(): io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant? // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.currentAdaptiveQuality.<get-currentAdaptiveQuality>|<get-currentAdaptiveQuality>(){}[0]
     open val currentChapter // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.currentChapter|{}currentChapter[0]
         open fun <get-currentChapter>(): io.github.kdroidfilter.composemediaplayer/MediaChapter? // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.currentChapter.<get-currentChapter>|<get-currentChapter>(){}[0]
     open val currentHlsQuality // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.currentHlsQuality|{}currentHlsQuality[0]
@@ -541,6 +558,7 @@ abstract interface io.github.kdroidfilter.composemediaplayer/VideoPlayerState { 
     open fun canPlaySource(kotlin/String, kotlin/String? = ...): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.canPlaySource|canPlaySource(kotlin.String;kotlin.String?){}[0]
     open fun clearCache(): io.github.kdroidfilter.composemediaplayer/CacheClearResult // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.clearCache|clearCache(){}[0]
     open fun openAsset(kotlin/String, io.github.kdroidfilter.composemediaplayer/InitialPlayerState = ...) // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.openAsset|openAsset(kotlin.String;io.github.kdroidfilter.composemediaplayer.InitialPlayerState){}[0]
+    open fun openSource(io.github.kdroidfilter.composemediaplayer/MediaSourceSpec, io.github.kdroidfilter.composemediaplayer/InitialPlayerState = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.openSource|openSource(io.github.kdroidfilter.composemediaplayer.MediaSourceSpec;io.github.kdroidfilter.composemediaplayer.InitialPlayerState;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
     open fun playbackSnapshot(): io.github.kdroidfilter.composemediaplayer/PlaybackSnapshot // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.playbackSnapshot|playbackSnapshot(){}[0]
     open fun prepare(kotlin/String, io.github.kdroidfilter.composemediaplayer/InitialPlayerState = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.prepare|prepare(kotlin.String;io.github.kdroidfilter.composemediaplayer.InitialPlayerState;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
     open fun releaseSource() // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.releaseSource|releaseSource(){}[0]
@@ -555,7 +573,9 @@ abstract interface io.github.kdroidfilter.composemediaplayer/VideoPlayerState { 
     open fun seekToChapter(io.github.kdroidfilter.composemediaplayer/MediaChapter) // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.seekToChapter|seekToChapter(io.github.kdroidfilter.composemediaplayer.MediaChapter){}[0]
     open fun seekToMs(kotlin/Long) // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.seekToMs|seekToMs(kotlin.Long){}[0]
     open fun seekToProgress(kotlin/Float) // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.seekToProgress|seekToProgress(kotlin.Float){}[0]
+    open fun selectAdaptiveQuality(kotlin/String?): io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.selectAdaptiveQuality|selectAdaptiveQuality(kotlin.String?){}[0]
     open fun selectAudioTrack(kotlin/String?): io.github.kdroidfilter.composemediaplayer/TrackSelectionResult // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.selectAudioTrack|selectAudioTrack(kotlin.String?){}[0]
+    open fun selectAutoAdaptiveQuality(): io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.selectAutoAdaptiveQuality|selectAutoAdaptiveQuality(){}[0]
     open fun selectAutoHlsQuality(): io.github.kdroidfilter.composemediaplayer/HlsQualitySelectionResult // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.selectAutoHlsQuality|selectAutoHlsQuality(){}[0]
     open fun selectHlsQuality(kotlin/String?): io.github.kdroidfilter.composemediaplayer/HlsQualitySelectionResult // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.selectHlsQuality|selectHlsQuality(kotlin.String?){}[0]
     open fun selectSubtitleTrack(kotlin/String?): io.github.kdroidfilter.composemediaplayer/TrackSelectionResult // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.selectSubtitleTrack|selectSubtitleTrack(kotlin.String?){}[0]
@@ -603,6 +623,34 @@ sealed interface io.github.kdroidfilter.composemediaplayer.util/PipResult { // i
         final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.util/PipResult.Success.hashCode|hashCode(){}[0]
         final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer.util/PipResult.Success.toString|toString(){}[0]
     }
+}
+
+final class io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant { // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant|null[0]
+    constructor <init>(kotlin/String, kotlin/String, kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/String? = ...) // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.<init>|<init>(kotlin.String;kotlin.String;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.String?){}[0]
+
+    final val bitrate // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.bitrate|{}bitrate[0]
+        final fun <get-bitrate>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.bitrate.<get-bitrate>|<get-bitrate>(){}[0]
+    final val codecs // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.codecs|{}codecs[0]
+        final fun <get-codecs>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.codecs.<get-codecs>|<get-codecs>(){}[0]
+    final val height // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.height|{}height[0]
+        final fun <get-height>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.height.<get-height>|<get-height>(){}[0]
+    final val id // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.id|{}id[0]
+        final fun <get-id>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.id.<get-id>|<get-id>(){}[0]
+    final val label // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.label|{}label[0]
+        final fun <get-label>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.label.<get-label>|<get-label>(){}[0]
+    final val width // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.width|{}width[0]
+        final fun <get-width>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.width.<get-width>|<get-width>(){}[0]
+
+    final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.component1|component1(){}[0]
+    final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.component2|component2(){}[0]
+    final fun component3(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.component3|component3(){}[0]
+    final fun component4(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.component4|component4(){}[0]
+    final fun component5(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.component5|component5(){}[0]
+    final fun component6(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.component6|component6(){}[0]
+    final fun copy(kotlin/String = ..., kotlin/String = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/String? = ...): io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.copy|copy(kotlin.String;kotlin.String;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.String?){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant.toString|toString(){}[0]
 }
 
 final class io.github.kdroidfilter.composemediaplayer/AudioTrack { // io.github.kdroidfilter.composemediaplayer/AudioTrack|null[0]
@@ -952,8 +1000,14 @@ final class io.github.kdroidfilter.composemediaplayer/MediaSourceSpec { // io.gi
 }
 
 final class io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics { // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics|null[0]
-    constructor <init>(kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Float? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., io.github.kdroidfilter.composemediaplayer/HlsQualityVariant? = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/BufferedRange> = ..., kotlin/String? = ...) // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.<init>|<init>(kotlin.Long?;kotlin.Long?;kotlin.Long?;kotlin.Long?;kotlin.Float?;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Int?;io.github.kdroidfilter.composemediaplayer.HlsQualityVariant?;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.BufferedRange>;kotlin.String?){}[0]
+    constructor <init>(kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Float? = ..., kotlin/Float? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., io.github.kdroidfilter.composemediaplayer/HlsQualityVariant? = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/BufferedRange> = ..., kotlin/String? = ...) // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.<init>|<init>(kotlin.Long?;kotlin.Long?;kotlin.Long?;kotlin.Long?;kotlin.Float?;kotlin.Float?;kotlin.Long?;kotlin.Long?;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Int?;io.github.kdroidfilter.composemediaplayer.HlsQualityVariant?;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.BufferedRange>;kotlin.String?){}[0]
 
+    final val audioBufferAheadMs // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.audioBufferAheadMs|{}audioBufferAheadMs[0]
+        final fun <get-audioBufferAheadMs>(): kotlin/Float? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.audioBufferAheadMs.<get-audioBufferAheadMs>|<get-audioBufferAheadMs>(){}[0]
+    final val audioTimestampCorrections // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.audioTimestampCorrections|{}audioTimestampCorrections[0]
+        final fun <get-audioTimestampCorrections>(): kotlin/Long? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.audioTimestampCorrections.<get-audioTimestampCorrections>|<get-audioTimestampCorrections>(){}[0]
+    final val audioUnderruns // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.audioUnderruns|{}audioUnderruns[0]
+        final fun <get-audioUnderruns>(): kotlin/Long? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.audioUnderruns.<get-audioUnderruns>|<get-audioUnderruns>(){}[0]
     final val bitrate // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.bitrate|{}bitrate[0]
         final fun <get-bitrate>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.bitrate.<get-bitrate>|<get-bitrate>(){}[0]
     final val bufferedRanges // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.bufferedRanges|{}bufferedRanges[0]
@@ -987,18 +1041,21 @@ final class io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics { // i
 
     final fun component1(): kotlin/Long? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component1|component1(){}[0]
     final fun component10(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component10|component10(){}[0]
-    final fun component11(): io.github.kdroidfilter.composemediaplayer/HlsQualityVariant? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component11|component11(){}[0]
-    final fun component12(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/BufferedRange> // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component12|component12(){}[0]
-    final fun component13(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component13|component13(){}[0]
+    final fun component11(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component11|component11(){}[0]
+    final fun component12(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component12|component12(){}[0]
+    final fun component13(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component13|component13(){}[0]
+    final fun component14(): io.github.kdroidfilter.composemediaplayer/HlsQualityVariant? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component14|component14(){}[0]
+    final fun component15(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/BufferedRange> // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component15|component15(){}[0]
+    final fun component16(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component16|component16(){}[0]
     final fun component2(): kotlin/Long? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component2|component2(){}[0]
     final fun component3(): kotlin/Long? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component3|component3(){}[0]
     final fun component4(): kotlin/Long? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component4|component4(){}[0]
     final fun component5(): kotlin/Float? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component5|component5(){}[0]
-    final fun component6(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component6|component6(){}[0]
-    final fun component7(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component7|component7(){}[0]
-    final fun component8(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component8|component8(){}[0]
+    final fun component6(): kotlin/Float? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component6|component6(){}[0]
+    final fun component7(): kotlin/Long? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component7|component7(){}[0]
+    final fun component8(): kotlin/Long? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component8|component8(){}[0]
     final fun component9(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.component9|component9(){}[0]
-    final fun copy(kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Float? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., io.github.kdroidfilter.composemediaplayer/HlsQualityVariant? = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/BufferedRange> = ..., kotlin/String? = ...): io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.copy|copy(kotlin.Long?;kotlin.Long?;kotlin.Long?;kotlin.Long?;kotlin.Float?;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Int?;io.github.kdroidfilter.composemediaplayer.HlsQualityVariant?;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.BufferedRange>;kotlin.String?){}[0]
+    final fun copy(kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Float? = ..., kotlin/Float? = ..., kotlin/Long? = ..., kotlin/Long? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., io.github.kdroidfilter.composemediaplayer/HlsQualityVariant? = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/BufferedRange> = ..., kotlin/String? = ...): io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.copy|copy(kotlin.Long?;kotlin.Long?;kotlin.Long?;kotlin.Long?;kotlin.Float?;kotlin.Float?;kotlin.Long?;kotlin.Long?;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Int?;io.github.kdroidfilter.composemediaplayer.HlsQualityVariant?;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.BufferedRange>;kotlin.String?){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics.toString|toString(){}[0]
@@ -1800,6 +1857,49 @@ final class io.github.kdroidfilter.composemediaplayer/VideoTextureWindow { // io
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoTextureWindow.toString|toString(){}[0]
 }
 
+sealed class io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult { // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult|null[0]
+    final val isApplied // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.isApplied|{}isApplied[0]
+        final fun <get-isApplied>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.isApplied.<get-isApplied>|<get-isApplied>(){}[0]
+
+    final class NotFound : io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult { // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound|null[0]
+        constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound.<init>|<init>(kotlin.String){}[0]
+
+        final val variantId // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound.variantId|{}variantId[0]
+            final fun <get-variantId>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound.variantId.<get-variantId>|<get-variantId>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound.component1|component1(){}[0]
+        final fun copy(kotlin/String = ...): io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound.copy|copy(kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotFound.toString|toString(){}[0]
+    }
+
+    final class Selected : io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult { // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant) // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected.<init>|<init>(io.github.kdroidfilter.composemediaplayer.AdaptiveQualityVariant){}[0]
+
+        final val quality // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected.quality|{}quality[0]
+            final fun <get-quality>(): io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected.quality.<get-quality>|<get-quality>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected.component1|component1(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant = ...): io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected.copy|copy(io.github.kdroidfilter.composemediaplayer.AdaptiveQualityVariant){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Selected.toString|toString(){}[0]
+    }
+
+    final object Auto : io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult { // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Auto|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Auto.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Auto.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.Auto.toString|toString(){}[0]
+    }
+
+    final object NotSupported : io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult { // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotSupported|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotSupported.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotSupported.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult.NotSupported.toString|toString(){}[0]
+    }
+}
+
 sealed class io.github.kdroidfilter.composemediaplayer/CacheClearResult { // io.github.kdroidfilter.composemediaplayer/CacheClearResult|null[0]
     final class Failed : io.github.kdroidfilter.composemediaplayer/CacheClearResult { // io.github.kdroidfilter.composemediaplayer/CacheClearResult.Failed|null[0]
         constructor <init>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/CacheClearResult.Failed.<init>|<init>(kotlin.String){}[0]
@@ -2307,6 +2407,12 @@ final val io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_
 final val io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_NotPossible$stableprop // io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_NotPossible$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_util_PipResult_NotPossible$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_NotSupported$stableprop // io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_NotSupported$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_util_PipResult_NotSupported$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_Success$stableprop // io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_Success$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_util_PipResult_Success$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Auto$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Auto$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Auto$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotFound$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotFound$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotFound$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotSupported$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotSupported$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotSupported$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Selected$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Selected$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Selected$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualityVariant$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualityVariant$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_AdaptiveQualityVariant$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AudioTrack$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AudioTrack$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_AudioTrack$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_BufferedRange$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_BufferedRange$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_BufferedRange$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_CacheClearResult$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_CacheClearResult$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_CacheClearResult$stableprop[0]
@@ -2414,6 +2520,12 @@ final fun io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_
 final fun io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_NotSupported$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_NotSupported$stableprop_getter|io_github_kdroidfilter_composemediaplayer_util_PipResult_NotSupported$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_Success$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.util/io_github_kdroidfilter_composemediaplayer_util_PipResult_Success$stableprop_getter|io_github_kdroidfilter_composemediaplayer_util_PipResult_Success$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/BackendVideoPlayerSurface(io.github.kdroidfilter.composemediaplayer/VideoPlayerState, androidx.compose.ui/Modifier?, androidx.compose.ui.layout/ContentScale?, kotlin/Function2<androidx.compose.runtime/Composer, kotlin/Int, kotlin/Unit>?, androidx.compose.runtime/Composer?, kotlin/Int, kotlin/Int) // io.github.kdroidfilter.composemediaplayer/BackendVideoPlayerSurface|BackendVideoPlayerSurface(io.github.kdroidfilter.composemediaplayer.VideoPlayerState;androidx.compose.ui.Modifier?;androidx.compose.ui.layout.ContentScale?;kotlin.Function2<androidx.compose.runtime.Composer,kotlin.Int,kotlin.Unit>?;androidx.compose.runtime.Composer?;kotlin.Int;kotlin.Int){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult$stableprop_getter|io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Auto$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Auto$stableprop_getter|io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Auto$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotFound$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotFound$stableprop_getter|io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotFound$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotSupported$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotSupported$stableprop_getter|io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_NotSupported$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Selected$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Selected$stableprop_getter|io_github_kdroidfilter_composemediaplayer_AdaptiveQualitySelectionResult_Selected$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualityVariant$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AdaptiveQualityVariant$stableprop_getter|io_github_kdroidfilter_composemediaplayer_AdaptiveQualityVariant$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AudioTrack$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_AudioTrack$stableprop_getter|io_github_kdroidfilter_composemediaplayer_AudioTrack$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_BufferedRange$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_BufferedRange$stableprop_getter|io_github_kdroidfilter_composemediaplayer_BufferedRange$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_CacheClearResult$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_CacheClearResult$stableprop_getter|io_github_kdroidfilter_composemediaplayer_CacheClearResult$stableprop_getter(){}[0]

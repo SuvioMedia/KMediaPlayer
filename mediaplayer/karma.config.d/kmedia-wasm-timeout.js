@@ -1,5 +1,4 @@
-// Real Movi CDN smoke tests initialize an FFmpeg WebAssembly module before assertions.
-// Keep the ordinary Kotlin test runner arguments intact and only extend Mocha/Karma timeouts.
+// Real engine smoke tests initialize the packaged FFmpeg WebAssembly runtime before assertions.
 config.set({
     client: {
         mocha: {

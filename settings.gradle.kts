@@ -21,6 +21,16 @@ plugins {
 
 rootProject.name = "Compose-Media-Player"
 
+providers.gradleProperty("kmediaWasmEngineProjectDir").orNull?.let { projectDirectory ->
+    includeBuild(projectDirectory) {
+        dependencySubstitution {
+            substitute(module("io.github.shusek:kmedia-wasm-engine")).using(project(":player"))
+            substitute(module("io.github.shusek:kmedia-wasm-engine-runtime-assets"))
+                .using(project(":runtime-assets"))
+        }
+    }
+}
+
 providers.gradleProperty("kmediaFfmpegRuntimeProjectDir").orNull?.let { projectDirectory ->
     includeBuild(projectDirectory) {
         dependencySubstitution {
@@ -59,6 +69,21 @@ providers.gradleProperty("kmediaBridgeProjectDir").orNull?.let { projectDirector
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        providers.gradleProperty("kmediaWasmEngineMavenRepository").orNull?.let { repositoryPath ->
+            exclusiveContent {
+                forRepository {
+                    maven {
+                        name = "kmediaWasmEngineLocal"
+                        url = uri(repositoryPath)
+                    }
+                }
+                filter {
+                    includeModule("io.github.shusek", "kmedia-wasm-engine")
+                    includeModule("io.github.shusek", "kmedia-wasm-engine-wasm-js")
+                    includeModule("io.github.shusek", "kmedia-wasm-engine-runtime-assets")
+                }
+            }
+        }
         google {
             content {
                 includeGroupByRegex("com\\.android.*")

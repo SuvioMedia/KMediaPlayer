@@ -62,7 +62,7 @@ the renderer client loads.
 | Android | Full ASS/SSA styles, positioning, animation, karaoke, and supported embedded fonts. Media3 owns playback; the extension rasterizes subtitles and presents a transparent GLES overlay. API 23+ runtime, ARM64/ARMv7 only. |
 | JVM desktop | Full rendering through the shared libass runtime and writable BGRA frames. macOS ARM64, Linux x86_64/ARM64, and Windows x86_64 are published. Launch Java 25 with `--enable-native-access=ALL-UNNAMED`. |
 | iOS | Full external ASS/SSA rendering in a transparent UIKit overlay while AVPlayer keeps video decoding. ARM64 device/simulator only. The generated `ComposeMediaPlayerAss` pod depends on the exact `KMediaAssRuntime` pod. |
-| Browser Wasm | JASSUB 2.5.7 renders selected external or raw Movi ASS/SSA through a transparent canvas. |
+| Browser Wasm | JASSUB 2.5.7 renders selected external or engine-provided ASS/SSA through a transparent canvas. |
 
 Without the optional artifact, or without registering the extension, ASS/SSA
 uses the core/platform fallback without a full authored-style guarantee. SRT

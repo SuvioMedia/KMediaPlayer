@@ -218,20 +218,20 @@ class AssSubtitleRendererTest {
         }
 
     @Test
-    fun canvasOnlySessionRendersFromTheSuppliedMoviClockAndCanvasSize() =
+    fun canvasOnlySessionRendersFromTheSuppliedWasmMediaClockAndCanvasSize() =
         runTest {
             val wrapper = document.createElement("div") as HTMLElement
-            val moviCanvas =
+            val wasmMediaCanvas =
                 (document.createElement("canvas") as HTMLCanvasElement).apply {
                     width = 1_920
                     height = 1_080
                 }
             val subtitleCanvas = document.createElement("canvas") as HTMLCanvasElement
-            wrapper.appendChild(moviCanvas)
+            wrapper.appendChild(wasmMediaCanvas)
             wrapper.appendChild(subtitleCanvas)
             document.body?.appendChild(wrapper)
             stubElementRect(wrapper, width = 320.0, height = 180.0)
-            stubElementRect(moviCanvas, width = 320.0, height = 180.0)
+            stubElementRect(wasmMediaCanvas, width = 320.0, height = 180.0)
 
             val originalResizeObserver = installNoopResizeObserver()
             var session: JsAny? = null
@@ -263,7 +263,7 @@ class AssSubtitleRendererTest {
                         options = createFakeSessionOptions("initial", assScript(dialogues = emptyList())),
                         video = null,
                         canvas = subtitleCanvas,
-                        displayElement = moviCanvas,
+                        displayElement = wasmMediaCanvas,
                         contentScaleMode = "contain",
                         layoutCalculator = { width, height, _, _, _, _ -> "0|0|$width|$height" },
                         streamUpdateCalculator = ::computeAssSubtitleStreamUpdate,
@@ -283,7 +283,7 @@ class AssSubtitleRendererTest {
                     ManualRenderCall(mediaTime = 12.5, width = 1_920, height = 1_080, repaint = true),
                     rendered.awaitReal(),
                 )
-                publishFakeMkvFont(moviCanvas)
+                publishFakeMkvFont(wasmMediaCanvas)
                 assertEquals(1, fontsAdded.awaitReal())
                 assertTrue(!failure.isCompleted)
             } finally {

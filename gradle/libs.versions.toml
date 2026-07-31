@@ -10,6 +10,7 @@ kotlinxDatetime = "0.8.0"
 compose = "1.11.1"
 kmediaMpv = "0.3.0-rc.4"
 kmediaBridge = "0.5.0-rc.2"
+kmediaWasmEngine = "0.4.0-alpha.2"
 androidx-activityCompose = "1.13.0"
 androidx-core = "1.19.0"
 media3Exoplayer = "1.11.0-rc01"
@@ -44,6 +45,7 @@ kmedia-mpv-runtime-android = { module = "io.github.shusek:kmedia-mpv-runtime-and
 kmedia-mpv-runtime-desktop = { module = "io.github.shusek:kmedia-mpv-runtime-desktop", version.ref = "kmediaMpv" }
 kmedia-bridge-api = { module = "io.github.shusek:kmedia-bridge-api", version.ref = "kmediaBridge" }
 kmedia-bridge-ffmpeg = { module = "io.github.shusek:kmedia-bridge-ffmpeg", version.ref = "kmediaBridge" }
+kmedia-wasm-engine = { module = "io.github.shusek:kmedia-wasm-engine", version.ref = "kmediaWasmEngine" }
 androidx-activityCompose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose" }

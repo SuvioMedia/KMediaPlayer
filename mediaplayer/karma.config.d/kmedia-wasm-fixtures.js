@@ -5,15 +5,21 @@ const path = require("path");
 
 const fixtureSourcePath = path.resolve(
     config.basePath,
-    "../../../../mediaplayer/src/wasmJsTest/kotlin/io/github/kdroidfilter/composemediaplayer/MoviRealPackageFixtures.kt"
+    "../../../../mediaplayer/src/wasmJsTest/kotlin/io/github/kdroidfilter/composemediaplayer/WasmEngineRealPackageFixtures.kt"
 );
 const fixtureSource = fs.readFileSync(fixtureSourcePath, "utf8");
+const kmediaWasmRuntimeUrl =
+    "/composeResources/io.github.shusek.mediaplayer.generated.resources/files/kmedia-wasm-runtime";
+const kmediaWasmRuntimeDirectory = path.resolve(
+    config.basePath,
+    "kotlin/composeResources/io.github.shusek.mediaplayer.generated.resources/files/kmedia-wasm-runtime"
+);
 
 function readKotlinStringConstant(name) {
     const marker = `internal const val ${name} =`;
     const start = fixtureSource.indexOf(marker);
     if (start < 0) {
-        throw new Error(`Missing Movi fixture constant: ${name}`);
+        throw new Error(`Missing WasmEngine fixture constant: ${name}`);
     }
     const next = fixtureSource.indexOf("\ninternal const val ", start + marker.length);
     const expression = fixtureSource.slice(start + marker.length, next < 0 ? fixtureSource.length : next);
@@ -21,50 +27,61 @@ function readKotlinStringConstant(name) {
     return quotedParts.map((part) => JSON.parse(part)).join("");
 }
 
-const moviFixtureRoutes = {
-    "/__kmp_movi__/hls/index.m3u8": {
-        body: Buffer.from(readKotlinStringConstant("MOVI_HLS_MANIFEST_BASE64"), "base64"),
+const kmediaWasmFixtureRoutes = {
+    [`${kmediaWasmRuntimeUrl}/kmedia-wasm-runtime.json`]: {
+        body: fs.readFileSync(path.resolve(kmediaWasmRuntimeDirectory, "kmedia-wasm-runtime.json")),
+        contentType: "application/json"
+    },
+    [`${kmediaWasmRuntimeUrl}/kmedia-wasm.js`]: {
+        body: fs.readFileSync(path.resolve(kmediaWasmRuntimeDirectory, "kmedia-wasm.js")),
+        contentType: "text/javascript"
+    },
+    [`${kmediaWasmRuntimeUrl}/kmedia-wasm.wasm`]: {
+        body: fs.readFileSync(path.resolve(kmediaWasmRuntimeDirectory, "kmedia-wasm.wasm")),
+        contentType: "application/wasm"
+    },
+    "/__kmp_kmedia_wasm__/hls/index.m3u8": {
+        body: Buffer.from(readKotlinStringConstant("WASM_ENGINE_HLS_MANIFEST_BASE64"), "base64"),
         contentType: "application/vnd.apple.mpegurl"
     },
-    "/__kmp_movi__/hls/segment00.ts": {
-        body: Buffer.from(readKotlinStringConstant("MOVI_HLS_SEGMENT_BASE64"), "base64"),
+    "/__kmp_kmedia_wasm__/hls/segment00.ts": {
+        body: Buffer.from(readKotlinStringConstant("WASM_ENGINE_HLS_SEGMENT_BASE64"), "base64"),
         contentType: "video/mp2t"
     },
-    "/__kmp_movi__/dash/manifest.mpd": {
-        body: Buffer.from(readKotlinStringConstant("MOVI_DASH_MANIFEST_BASE64"), "base64"),
+    "/__kmp_kmedia_wasm__/dash/manifest.mpd": {
+        body: Buffer.from(readKotlinStringConstant("WASM_ENGINE_DASH_MANIFEST_BASE64"), "base64"),
         contentType: "application/dash+xml"
     },
-    "/__kmp_movi__/dash/init-stream0.m4s": {
-        body: Buffer.from(readKotlinStringConstant("MOVI_DASH_VIDEO_INIT_BASE64"), "base64"),
+    "/__kmp_kmedia_wasm__/dash/init-stream0.m4s": {
+        body: Buffer.from(readKotlinStringConstant("WASM_ENGINE_DASH_VIDEO_INIT_BASE64"), "base64"),
         contentType: "video/mp4"
     },
-    "/__kmp_movi__/dash/init-stream1.m4s": {
-        body: Buffer.from(readKotlinStringConstant("MOVI_DASH_AUDIO_INIT_BASE64"), "base64"),
+    "/__kmp_kmedia_wasm__/dash/init-stream1.m4s": {
+        body: Buffer.from(readKotlinStringConstant("WASM_ENGINE_DASH_AUDIO_INIT_BASE64"), "base64"),
         contentType: "audio/mp4"
     },
-    "/__kmp_movi__/dash/chunk-stream0-00001.m4s": {
-        body: Buffer.from(readKotlinStringConstant("MOVI_DASH_VIDEO_CHUNK_BASE64"), "base64"),
+    "/__kmp_kmedia_wasm__/dash/chunk-stream0-00001.m4s": {
+        body: Buffer.from(readKotlinStringConstant("WASM_ENGINE_DASH_VIDEO_CHUNK_BASE64"), "base64"),
         contentType: "video/mp4"
     },
-    "/__kmp_movi__/dash/chunk-stream1-00001.m4s": {
-        body: Buffer.from(readKotlinStringConstant("MOVI_DASH_AUDIO_CHUNK_ONE_BASE64"), "base64"),
+    "/__kmp_kmedia_wasm__/dash/chunk-stream1-00001.m4s": {
+        body: Buffer.from(readKotlinStringConstant("WASM_ENGINE_DASH_AUDIO_CHUNK_ONE_BASE64"), "base64"),
         contentType: "audio/mp4"
     },
-    "/__kmp_movi__/dash/chunk-stream1-00002.m4s": {
-        body: Buffer.from(readKotlinStringConstant("MOVI_DASH_AUDIO_CHUNK_TWO_BASE64"), "base64"),
+    "/__kmp_kmedia_wasm__/dash/chunk-stream1-00002.m4s": {
+        body: Buffer.from(readKotlinStringConstant("WASM_ENGINE_DASH_AUDIO_CHUNK_TWO_BASE64"), "base64"),
         contentType: "audio/mp4"
     }
 };
 
-const moviFixtureMiddleware = ["factory", function() {
+const kmediaWasmFixtureMiddleware = ["factory", function() {
     return function(request, response, next) {
         const pathname = new URL(request.url, "http://karma.local").pathname;
-        const route = moviFixtureRoutes[pathname];
+        const route = kmediaWasmFixtureRoutes[pathname];
         if (!route) {
             next();
             return;
         }
-
         const fullBody = route.body;
         response.setHeader("Content-Type", route.contentType);
         response.setHeader("Accept-Ranges", "bytes");
@@ -103,5 +120,5 @@ const moviFixtureMiddleware = ["factory", function() {
 }];
 
 config.plugins = config.plugins || [];
-config.plugins.push({ "middleware:movi-fixtures": moviFixtureMiddleware });
-config.set({ middleware: ["movi-fixtures"] });
+config.plugins.push({ "middleware:kmedia-wasm-fixtures": kmediaWasmFixtureMiddleware });
+config.set({ middleware: ["kmedia-wasm-fixtures"] });

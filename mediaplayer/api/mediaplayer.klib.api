@@ -122,15 +122,15 @@ final enum class io.github.kdroidfilter.composemediaplayer/VideoProjectionDetect
     final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/VideoProjectionDetectionMode> // io.github.kdroidfilter.composemediaplayer/VideoProjectionDetectionMode.values|values#static(){}[0]
 }
 
-final enum class io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine> { // io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine|null[0]
-    enum entry LEGACY // io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine.LEGACY|null[0]
-    enum entry MOVI // io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine.MOVI|null[0]
+final enum class io.github.kdroidfilter.composemediaplayer/WebDecoderPreference : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/WebDecoderPreference> { // io.github.kdroidfilter.composemediaplayer/WebDecoderPreference|null[0]
+    enum entry AUTO // io.github.kdroidfilter.composemediaplayer/WebDecoderPreference.AUTO|null[0]
+    enum entry SOFTWARE // io.github.kdroidfilter.composemediaplayer/WebDecoderPreference.SOFTWARE|null[0]
 
-    final val entries // io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine.entries|#static{}entries[0]
-        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine> // io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine.entries.<get-entries>|<get-entries>#static(){}[0]
+    final val entries // io.github.kdroidfilter.composemediaplayer/WebDecoderPreference.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/WebDecoderPreference> // io.github.kdroidfilter.composemediaplayer/WebDecoderPreference.entries.<get-entries>|<get-entries>#static(){}[0]
 
-    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine // io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine.valueOf|valueOf#static(kotlin.String){}[0]
-    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine> // io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine.values|values#static(){}[0]
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/WebDecoderPreference // io.github.kdroidfilter.composemediaplayer/WebDecoderPreference.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/WebDecoderPreference> // io.github.kdroidfilter.composemediaplayer/WebDecoderPreference.values|values#static(){}[0]
 }
 
 sealed interface io.github.kdroidfilter.composemediaplayer/Hdr10PlusParseResult { // io.github.kdroidfilter.composemediaplayer/Hdr10PlusParseResult|null[0]
@@ -468,8 +468,12 @@ final class io.github.kdroidfilter.composemediaplayer/MediaSupportSnapshot { // 
 }
 
 final class io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState : io.github.kdroidfilter.composemediaplayer/VideoPlayerState { // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState|null[0]
+    final val adaptiveQualityMode // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.adaptiveQualityMode|{}adaptiveQualityMode[0]
+        final fun <get-adaptiveQualityMode>(): io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.adaptiveQualityMode.<get-adaptiveQualityMode>|<get-adaptiveQualityMode>(){}[0]
     final val aspectRatio // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.aspectRatio|{}aspectRatio[0]
         final fun <get-aspectRatio>(): kotlin/Float // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.aspectRatio.<get-aspectRatio>|<get-aspectRatio>(){}[0]
+    final val availableAdaptiveQualities // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.availableAdaptiveQualities|{}availableAdaptiveQualities[0]
+        final fun <get-availableAdaptiveQualities>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant> // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.availableAdaptiveQualities.<get-availableAdaptiveQualities>|<get-availableAdaptiveQualities>(){}[0]
     final val availableAudioTracks // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.availableAudioTracks|{}availableAudioTracks[0]
         final fun <get-availableAudioTracks>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/AudioTrack> // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.availableAudioTracks.<get-availableAudioTracks>|<get-availableAudioTracks>(){}[0]
     final val availableHlsQualities // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.availableHlsQualities|{}availableHlsQualities[0]
@@ -486,6 +490,8 @@ final class io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState
         final fun <get-chapters>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/MediaChapter> // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.chapters.<get-chapters>|<get-chapters>(){}[0]
     final val colorPipelineStatus // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.colorPipelineStatus|{}colorPipelineStatus[0]
         final fun <get-colorPipelineStatus>(): kotlinx.coroutines.flow/StateFlow<io.github.kdroidfilter.composemediaplayer/VideoColorPipelineStatus> // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.colorPipelineStatus.<get-colorPipelineStatus>|<get-colorPipelineStatus>(){}[0]
+    final val currentAdaptiveQuality // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.currentAdaptiveQuality|{}currentAdaptiveQuality[0]
+        final fun <get-currentAdaptiveQuality>(): io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant? // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.currentAdaptiveQuality.<get-currentAdaptiveQuality>|<get-currentAdaptiveQuality>(){}[0]
     final val currentChapter // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.currentChapter|{}currentChapter[0]
         final fun <get-currentChapter>(): io.github.kdroidfilter.composemediaplayer/MediaChapter? // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.currentChapter.<get-currentChapter>|<get-currentChapter>(){}[0]
     final val currentHlsQuality // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.currentHlsQuality|{}currentHlsQuality[0]
@@ -605,6 +611,7 @@ final class io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState
     final fun dispose() // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.dispose|dispose(){}[0]
     final fun openAsset(kotlin/String, io.github.kdroidfilter.composemediaplayer/InitialPlayerState) // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.openAsset|openAsset(kotlin.String;io.github.kdroidfilter.composemediaplayer.InitialPlayerState){}[0]
     final fun openFile(io.github.vinceglb.filekit/PlatformFile, io.github.kdroidfilter.composemediaplayer/InitialPlayerState) // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.openFile|openFile(io.github.vinceglb.filekit.PlatformFile;io.github.kdroidfilter.composemediaplayer.InitialPlayerState){}[0]
+    final fun openSource(io.github.kdroidfilter.composemediaplayer/MediaSourceSpec, io.github.kdroidfilter.composemediaplayer/InitialPlayerState, kotlin.collections/Map<kotlin/String, kotlin/String>) // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.openSource|openSource(io.github.kdroidfilter.composemediaplayer.MediaSourceSpec;io.github.kdroidfilter.composemediaplayer.InitialPlayerState;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
     final fun openUri(kotlin/String, io.github.kdroidfilter.composemediaplayer/InitialPlayerState, kotlin.collections/Map<kotlin/String, kotlin/String>) // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.openUri|openUri(kotlin.String;io.github.kdroidfilter.composemediaplayer.InitialPlayerState;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
     final fun pause() // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.pause|pause(){}[0]
     final fun play() // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.play|play(){}[0]
@@ -624,8 +631,10 @@ final class io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState
     final fun seekToChapter(io.github.kdroidfilter.composemediaplayer/MediaChapter) // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.seekToChapter|seekToChapter(io.github.kdroidfilter.composemediaplayer.MediaChapter){}[0]
     final fun seekToMs(kotlin/Long) // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.seekToMs|seekToMs(kotlin.Long){}[0]
     final fun seekToProgress(kotlin/Float) // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.seekToProgress|seekToProgress(kotlin.Float){}[0]
+    final fun selectAdaptiveQuality(kotlin/String?): io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.selectAdaptiveQuality|selectAdaptiveQuality(kotlin.String?){}[0]
     final fun selectAudioTrack(io.github.kdroidfilter.composemediaplayer/AudioTrack?): io.github.kdroidfilter.composemediaplayer/TrackSelectionResult // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.selectAudioTrack|selectAudioTrack(io.github.kdroidfilter.composemediaplayer.AudioTrack?){}[0]
     final fun selectAudioTrack(kotlin/String?): io.github.kdroidfilter.composemediaplayer/TrackSelectionResult // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.selectAudioTrack|selectAudioTrack(kotlin.String?){}[0]
+    final fun selectAutoAdaptiveQuality(): io.github.kdroidfilter.composemediaplayer/AdaptiveQualitySelectionResult // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.selectAutoAdaptiveQuality|selectAutoAdaptiveQuality(){}[0]
     final fun selectAutoHlsQuality(): io.github.kdroidfilter.composemediaplayer/HlsQualitySelectionResult // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.selectAutoHlsQuality|selectAutoHlsQuality(){}[0]
     final fun selectHlsQuality(kotlin/String?): io.github.kdroidfilter.composemediaplayer/HlsQualitySelectionResult // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.selectHlsQuality|selectHlsQuality(kotlin.String?){}[0]
     final fun selectSubtitleTrack(io.github.kdroidfilter.composemediaplayer/SubtitleTrack?): io.github.kdroidfilter.composemediaplayer/TrackSelectionResult // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.selectSubtitleTrack|selectSubtitleTrack(io.github.kdroidfilter.composemediaplayer.SubtitleTrack?){}[0]
@@ -636,7 +645,7 @@ final class io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState
 }
 
 final class io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions { // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions|null[0]
-    constructor <init>(io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy = ..., io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension> = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode = ..., io.github.kdroidfilter.composemediaplayer/VideoTextureCrop = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionDetectionMode = ..., io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine = ..., io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration? = ...) // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.<init>|<init>(io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy;io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy;io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.VideoPipelineExtension>;io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode;io.github.kdroidfilter.composemediaplayer.VideoTextureCrop;io.github.kdroidfilter.composemediaplayer.VideoProjectionDetectionMode;io.github.kdroidfilter.composemediaplayer.WebPlaybackEngine;io.github.kdroidfilter.composemediaplayer.WebDrmConfiguration?){}[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy = ..., io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension> = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode = ..., io.github.kdroidfilter.composemediaplayer/VideoTextureCrop = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionDetectionMode = ..., io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration? = ..., io.github.kdroidfilter.composemediaplayer/WebDecoderPreference = ...) // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.<init>|<init>(io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy;io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy;io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.VideoPipelineExtension>;io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode;io.github.kdroidfilter.composemediaplayer.VideoTextureCrop;io.github.kdroidfilter.composemediaplayer.VideoProjectionDetectionMode;io.github.kdroidfilter.composemediaplayer.WebDrmConfiguration?;io.github.kdroidfilter.composemediaplayer.WebDecoderPreference){}[0]
 
     final val desktopVideoBackend // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.desktopVideoBackend|{}desktopVideoBackend[0]
         final fun <get-desktopVideoBackend>(): io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.desktopVideoBackend.<get-desktopVideoBackend>|<get-desktopVideoBackend>(){}[0]
@@ -658,14 +667,14 @@ final class io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions { // 
         final fun <get-projectionView>(): io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.projectionView.<get-projectionView>|<get-projectionView>(){}[0]
     final val projectionViewControlMode // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.projectionViewControlMode|{}projectionViewControlMode[0]
         final fun <get-projectionViewControlMode>(): io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.projectionViewControlMode.<get-projectionViewControlMode>|<get-projectionViewControlMode>(){}[0]
+    final val webDecoderPreference // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.webDecoderPreference|{}webDecoderPreference[0]
+        final fun <get-webDecoderPreference>(): io.github.kdroidfilter.composemediaplayer/WebDecoderPreference // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.webDecoderPreference.<get-webDecoderPreference>|<get-webDecoderPreference>(){}[0]
     final val webDrmConfiguration // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.webDrmConfiguration|{}webDrmConfiguration[0]
         final fun <get-webDrmConfiguration>(): io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration? // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.webDrmConfiguration.<get-webDrmConfiguration>|<get-webDrmConfiguration>(){}[0]
-    final val webPlaybackEngine // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.webPlaybackEngine|{}webPlaybackEngine[0]
-        final fun <get-webPlaybackEngine>(): io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.webPlaybackEngine.<get-webPlaybackEngine>|<get-webPlaybackEngine>(){}[0]
 
     final fun component1(): io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component1|component1(){}[0]
-    final fun component10(): io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component10|component10(){}[0]
-    final fun component11(): io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration? // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component11|component11(){}[0]
+    final fun component10(): io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration? // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component10|component10(){}[0]
+    final fun component11(): io.github.kdroidfilter.composemediaplayer/WebDecoderPreference // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component11|component11(){}[0]
     final fun component2(): io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component2|component2(){}[0]
     final fun component3(): io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component3|component3(){}[0]
     final fun component4(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension> // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component4|component4(){}[0]
@@ -674,7 +683,7 @@ final class io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions { // 
     final fun component7(): io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component7|component7(){}[0]
     final fun component8(): io.github.kdroidfilter.composemediaplayer/VideoTextureCrop // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component8|component8(){}[0]
     final fun component9(): io.github.kdroidfilter.composemediaplayer/VideoProjectionDetectionMode // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.component9|component9(){}[0]
-    final fun copy(io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy = ..., io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension> = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode = ..., io.github.kdroidfilter.composemediaplayer/VideoTextureCrop = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionDetectionMode = ..., io.github.kdroidfilter.composemediaplayer/WebPlaybackEngine = ..., io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration? = ...): io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.copy|copy(io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy;io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy;io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.VideoPipelineExtension>;io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode;io.github.kdroidfilter.composemediaplayer.VideoTextureCrop;io.github.kdroidfilter.composemediaplayer.VideoProjectionDetectionMode;io.github.kdroidfilter.composemediaplayer.WebPlaybackEngine;io.github.kdroidfilter.composemediaplayer.WebDrmConfiguration?){}[0]
+    final fun copy(io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy = ..., io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/VideoPipelineExtension> = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode = ..., io.github.kdroidfilter.composemediaplayer/VideoTextureCrop = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionDetectionMode = ..., io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration? = ..., io.github.kdroidfilter.composemediaplayer/WebDecoderPreference = ...): io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.copy|copy(io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy;io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy;io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.VideoPipelineExtension>;io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode;io.github.kdroidfilter.composemediaplayer.VideoTextureCrop;io.github.kdroidfilter.composemediaplayer.VideoProjectionDetectionMode;io.github.kdroidfilter.composemediaplayer.WebDrmConfiguration?;io.github.kdroidfilter.composemediaplayer.WebDecoderPreference){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/VideoPlaybackOptions.toString|toString(){}[0]
@@ -761,9 +770,12 @@ final class io.github.kdroidfilter.composemediaplayer/VideoProjectionVideoSize {
 
 final class io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration { // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration|null[0]
     constructor <init>(kotlin/String, kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration.<init>|<init>(kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
+    constructor <init>(kotlin/String, kotlin.collections/Map<kotlin/String, kotlin/String> = ..., kotlin.collections/Map<kotlin/String, kotlin/String>) // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration.<init>|<init>(kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String>;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
 
     final val licenseRequestHeaders // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration.licenseRequestHeaders|{}licenseRequestHeaders[0]
         final fun <get-licenseRequestHeaders>(): kotlin.collections/Map<kotlin/String, kotlin/String> // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration.licenseRequestHeaders.<get-licenseRequestHeaders>|<get-licenseRequestHeaders>(){}[0]
+    final val licenseServers // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration.licenseServers|{}licenseServers[0]
+        final fun <get-licenseServers>(): kotlin.collections/Map<kotlin/String, kotlin/String> // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration.licenseServers.<get-licenseServers>|<get-licenseServers>(){}[0]
     final val licenseUrl // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration.licenseUrl|{}licenseUrl[0]
         final fun <get-licenseUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebDrmConfiguration.licenseUrl.<get-licenseUrl>|<get-licenseUrl>(){}[0]
 
@@ -971,6 +983,9 @@ open class io.github.kdroidfilter.composemediaplayer/DefaultVideoPlayerState : i
     open fun canPlaySource(kotlin/String, kotlin/String?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/DefaultVideoPlayerState.canPlaySource|canPlaySource(kotlin.String;kotlin.String?){}[0]
 
     // Targets: [wasmJs]
+    open fun openSource(io.github.kdroidfilter.composemediaplayer/MediaSourceSpec, io.github.kdroidfilter.composemediaplayer/InitialPlayerState, kotlin.collections/Map<kotlin/String, kotlin/String>) // io.github.kdroidfilter.composemediaplayer/DefaultVideoPlayerState.openSource|openSource(io.github.kdroidfilter.composemediaplayer.MediaSourceSpec;io.github.kdroidfilter.composemediaplayer.InitialPlayerState;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
+
+    // Targets: [wasmJs]
     final object Companion // io.github.kdroidfilter.composemediaplayer/DefaultVideoPlayerState.Companion|null[0]
 }
 
@@ -1151,6 +1166,61 @@ final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_compo
 final fun io.github.kdroidfilter.composemediaplayer/openFullscreenView(io.github.kdroidfilter.composemediaplayer/VideoPlayerState, kotlin/Function5<io.github.kdroidfilter.composemediaplayer/VideoPlayerState, androidx.compose.ui/Modifier, kotlin/Boolean, androidx.compose.runtime/Composer, kotlin/Int, kotlin/Unit>, androidx.compose.runtime/Composer?, kotlin/Int) // io.github.kdroidfilter.composemediaplayer/openFullscreenView|openFullscreenView(io.github.kdroidfilter.composemediaplayer.VideoPlayerState;kotlin.Function5<io.github.kdroidfilter.composemediaplayer.VideoPlayerState,androidx.compose.ui.Modifier,kotlin.Boolean,androidx.compose.runtime.Composer,kotlin.Int,kotlin.Unit>;androidx.compose.runtime.Composer?;kotlin.Int){}[0]
 
 // Targets: [wasmJs]
+abstract interface io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls { // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls|null[0]
+    abstract val coverArt // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.coverArt|{}coverArt[0]
+        abstract fun <get-coverArt>(): org.w3c.dom/ImageBitmap? // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.coverArt.<get-coverArt>|<get-coverArt>(){}[0]
+    abstract val liveWindow // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.liveWindow|{}liveWindow[0]
+        abstract fun <get-liveWindow>(): io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow? // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.liveWindow.<get-liveWindow>|<get-liveWindow>(){}[0]
+    abstract val renderingDiagnostics // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.renderingDiagnostics|{}renderingDiagnostics[0]
+        abstract fun <get-renderingDiagnostics>(): io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics? // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.renderingDiagnostics.<get-renderingDiagnostics>|<get-renderingDiagnostics>(){}[0]
+    abstract val subtitleCues // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.subtitleCues|{}subtitleCues[0]
+        abstract fun <get-subtitleCues>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/WebSubtitleCue> // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.subtitleCues.<get-subtitleCues>|<get-subtitleCues>(){}[0]
+    abstract val surface // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.surface|{}surface[0]
+        abstract fun <get-surface>(): io.github.kdroidfilter.composemediaplayer/WebMediaSurface? // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.surface.<get-surface>|<get-surface>(){}[0]
+
+    abstract fun setStableVolume(kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.setStableVolume|setStableVolume(kotlin.Boolean){}[0]
+    abstract suspend fun listAudioOutputs(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice> // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.listAudioOutputs|listAudioOutputs(){}[0]
+    abstract suspend fun prefetchSubtitleCues(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/WebSubtitleCue> // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.prefetchSubtitleCues|prefetchSubtitleCues(){}[0]
+    abstract suspend fun seekToLive() // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.seekToLive|seekToLive(){}[0]
+    abstract suspend fun setAudioOnly(kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.setAudioOnly|setAudioOnly(kotlin.Boolean){}[0]
+    abstract suspend fun setAudioOutput(kotlin/String?) // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.setAudioOutput|setAudioOutput(kotlin.String?){}[0]
+    abstract suspend fun snapshot(): io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.snapshot|snapshot(){}[0]
+    abstract suspend fun thumbnail(kotlin.time/Duration): io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.thumbnail|thumbnail(kotlin.time.Duration){}[0]
+}
+
+// Targets: [wasmJs]
+sealed interface io.github.kdroidfilter.composemediaplayer/WebMediaSurface { // io.github.kdroidfilter.composemediaplayer/WebMediaSurface|null[0]
+    final class Canvas : io.github.kdroidfilter.composemediaplayer/WebMediaSurface { // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas|null[0]
+        constructor <init>(org.w3c.dom/HTMLCanvasElement, org.w3c.dom/HTMLVideoElement? = ...) // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.<init>|<init>(org.w3c.dom.HTMLCanvasElement;org.w3c.dom.HTMLVideoElement?){}[0]
+
+        final val element // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.element|{}element[0]
+            final fun <get-element>(): org.w3c.dom/HTMLCanvasElement // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.element.<get-element>|<get-element>(){}[0]
+        final val mediaElement // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.mediaElement|{}mediaElement[0]
+            final fun <get-mediaElement>(): org.w3c.dom/HTMLVideoElement? // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.mediaElement.<get-mediaElement>|<get-mediaElement>(){}[0]
+
+        final fun component1(): org.w3c.dom/HTMLCanvasElement // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.component1|component1(){}[0]
+        final fun component2(): org.w3c.dom/HTMLVideoElement? // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.component2|component2(){}[0]
+        final fun copy(org.w3c.dom/HTMLCanvasElement = ..., org.w3c.dom/HTMLVideoElement? = ...): io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.copy|copy(org.w3c.dom.HTMLCanvasElement;org.w3c.dom.HTMLVideoElement?){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.Canvas.toString|toString(){}[0]
+    }
+
+    final class NativeVideo : io.github.kdroidfilter.composemediaplayer/WebMediaSurface { // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo|null[0]
+        constructor <init>(org.w3c.dom/HTMLVideoElement) // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo.<init>|<init>(org.w3c.dom.HTMLVideoElement){}[0]
+
+        final val element // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo.element|{}element[0]
+            final fun <get-element>(): org.w3c.dom/HTMLVideoElement // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo.element.<get-element>|<get-element>(){}[0]
+
+        final fun component1(): org.w3c.dom/HTMLVideoElement // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo.component1|component1(){}[0]
+        final fun copy(org.w3c.dom/HTMLVideoElement = ...): io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo.copy|copy(org.w3c.dom.HTMLVideoElement){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaSurface.NativeVideo.toString|toString(){}[0]
+    }
+}
+
+// Targets: [wasmJs]
 final class io.github.kdroidfilter.composemediaplayer.jsinterop/AnalyserNode : io.github.kdroidfilter.composemediaplayer.jsinterop/AudioNode { // io.github.kdroidfilter.composemediaplayer.jsinterop/AnalyserNode|null[0]
     constructor <init>() // io.github.kdroidfilter.composemediaplayer.jsinterop/AnalyserNode.<init>|<init>(){}[0]
 
@@ -1235,6 +1305,98 @@ final class io.github.kdroidfilter.composemediaplayer.jsinterop/MediaError : kot
 }
 
 // Targets: [wasmJs]
+final class io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice { // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice|null[0]
+    constructor <init>(kotlin/String, kotlin/String, kotlin/Boolean) // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.<init>|<init>(kotlin.String;kotlin.String;kotlin.Boolean){}[0]
+
+    final val id // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.id|{}id[0]
+        final fun <get-id>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.id.<get-id>|<get-id>(){}[0]
+    final val isDefault // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.isDefault|{}isDefault[0]
+        final fun <get-isDefault>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.isDefault.<get-isDefault>|<get-isDefault>(){}[0]
+    final val label // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.label|{}label[0]
+        final fun <get-label>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.label.<get-label>|<get-label>(){}[0]
+
+    final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.component1|component1(){}[0]
+    final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.component2|component2(){}[0]
+    final fun component3(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.component3|component3(){}[0]
+    final fun copy(kotlin/String = ..., kotlin/String = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.copy|copy(kotlin.String;kotlin.String;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebAudioOutputDevice.toString|toString(){}[0]
+}
+
+// Targets: [wasmJs]
+final class io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow { // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow|null[0]
+    constructor <init>(kotlin.time/Duration, kotlin.time/Duration, kotlin.time/Duration) // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.<init>|<init>(kotlin.time.Duration;kotlin.time.Duration;kotlin.time.Duration){}[0]
+
+    final val end // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.end|{}end[0]
+        final fun <get-end>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.end.<get-end>|<get-end>(){}[0]
+    final val liveEdge // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.liveEdge|{}liveEdge[0]
+        final fun <get-liveEdge>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.liveEdge.<get-liveEdge>|<get-liveEdge>(){}[0]
+    final val start // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.start|{}start[0]
+        final fun <get-start>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.start.<get-start>|<get-start>(){}[0]
+
+    final fun component1(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.component1|component1(){}[0]
+    final fun component2(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.component2|component2(){}[0]
+    final fun component3(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.component3|component3(){}[0]
+    final fun copy(kotlin.time/Duration = ..., kotlin.time/Duration = ..., kotlin.time/Duration = ...): io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.copy|copy(kotlin.time.Duration;kotlin.time.Duration;kotlin.time.Duration){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebLivePlaybackWindow.toString|toString(){}[0]
+}
+
+// Targets: [wasmJs]
+final class io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot { // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot|null[0]
+    constructor <init>(org.w3c.dom/ImageBitmap, kotlin.time/Duration, kotlin/Int, kotlin/Int) // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.<init>|<init>(org.w3c.dom.ImageBitmap;kotlin.time.Duration;kotlin.Int;kotlin.Int){}[0]
+
+    final val height // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.height.<get-height>|<get-height>(){}[0]
+    final val image // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.image|{}image[0]
+        final fun <get-image>(): org.w3c.dom/ImageBitmap // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.image.<get-image>|<get-image>(){}[0]
+    final val timestamp // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val width // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.width.<get-width>|<get-width>(){}[0]
+
+    final fun component1(): org.w3c.dom/ImageBitmap // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.component1|component1(){}[0]
+    final fun component2(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.component2|component2(){}[0]
+    final fun component3(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.component3|component3(){}[0]
+    final fun component4(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.component4|component4(){}[0]
+    final fun copy(org.w3c.dom/ImageBitmap = ..., kotlin.time/Duration = ..., kotlin/Int = ..., kotlin/Int = ...): io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.copy|copy(org.w3c.dom.ImageBitmap;kotlin.time.Duration;kotlin.Int;kotlin.Int){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot.toString|toString(){}[0]
+}
+
+// Targets: [wasmJs]
+final class io.github.kdroidfilter.composemediaplayer/WebSubtitleCue { // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue|null[0]
+    constructor <init>(kotlin.time/Duration, kotlin.time/Duration, kotlin/String? = ..., org.w3c.dom/ImageBitmap? = ..., kotlin/Int? = ..., kotlin/Int? = ...) // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.<init>|<init>(kotlin.time.Duration;kotlin.time.Duration;kotlin.String?;org.w3c.dom.ImageBitmap?;kotlin.Int?;kotlin.Int?){}[0]
+
+    final val end // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.end|{}end[0]
+        final fun <get-end>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.end.<get-end>|<get-end>(){}[0]
+    final val image // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.image|{}image[0]
+        final fun <get-image>(): org.w3c.dom/ImageBitmap? // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.image.<get-image>|<get-image>(){}[0]
+    final val start // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.start|{}start[0]
+        final fun <get-start>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.start.<get-start>|<get-start>(){}[0]
+    final val text // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.text|{}text[0]
+        final fun <get-text>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.text.<get-text>|<get-text>(){}[0]
+    final val x // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.x|{}x[0]
+        final fun <get-x>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.x.<get-x>|<get-x>(){}[0]
+    final val y // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.y|{}y[0]
+        final fun <get-y>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.y.<get-y>|<get-y>(){}[0]
+
+    final fun component1(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.component1|component1(){}[0]
+    final fun component2(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.component2|component2(){}[0]
+    final fun component3(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.component3|component3(){}[0]
+    final fun component4(): org.w3c.dom/ImageBitmap? // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.component4|component4(){}[0]
+    final fun component5(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.component5|component5(){}[0]
+    final fun component6(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.component6|component6(){}[0]
+    final fun copy(kotlin.time/Duration = ..., kotlin.time/Duration = ..., kotlin/String? = ..., org.w3c.dom/ImageBitmap? = ..., kotlin/Int? = ..., kotlin/Int? = ...): io.github.kdroidfilter.composemediaplayer/WebSubtitleCue // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.copy|copy(kotlin.time.Duration;kotlin.time.Duration;kotlin.String?;org.w3c.dom.ImageBitmap?;kotlin.Int?;kotlin.Int?){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebSubtitleCue.toString|toString(){}[0]
+}
+
+// Targets: [wasmJs]
 open class io.github.kdroidfilter.composemediaplayer.jsinterop/AudioNode : kotlin.js/JsAny { // io.github.kdroidfilter.composemediaplayer.jsinterop/AudioNode|null[0]
     constructor <init>() // io.github.kdroidfilter.composemediaplayer.jsinterop/AudioNode.<init>|<init>(){}[0]
 
@@ -1251,15 +1413,9 @@ final object io.github.kdroidfilter.composemediaplayer/FullscreenManager { // io
 
 // Targets: [wasmJs]
 final object io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig { // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig|null[0]
-    final var matroskaSubtitlesScriptIntegrity // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity|{}matroskaSubtitlesScriptIntegrity[0]
-        final fun <get-matroskaSubtitlesScriptIntegrity>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity.<get-matroskaSubtitlesScriptIntegrity>|<get-matroskaSubtitlesScriptIntegrity>(){}[0]
-        final fun <set-matroskaSubtitlesScriptIntegrity>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptIntegrity.<set-matroskaSubtitlesScriptIntegrity>|<set-matroskaSubtitlesScriptIntegrity>(kotlin.String){}[0]
-    final var matroskaSubtitlesScriptUrl // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptUrl|{}matroskaSubtitlesScriptUrl[0]
-        final fun <get-matroskaSubtitlesScriptUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.<get-matroskaSubtitlesScriptUrl>|<get-matroskaSubtitlesScriptUrl>(){}[0]
-        final fun <set-matroskaSubtitlesScriptUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.matroskaSubtitlesScriptUrl.<set-matroskaSubtitlesScriptUrl>|<set-matroskaSubtitlesScriptUrl>(kotlin.String){}[0]
-    final var moviPlayerModuleUrl // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviPlayerModuleUrl|{}moviPlayerModuleUrl[0]
-        final fun <get-moviPlayerModuleUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviPlayerModuleUrl.<get-moviPlayerModuleUrl>|<get-moviPlayerModuleUrl>(){}[0]
-        final fun <set-moviPlayerModuleUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.moviPlayerModuleUrl.<set-moviPlayerModuleUrl>|<set-moviPlayerModuleUrl>(kotlin.String){}[0]
+    final var kmediaWasmRuntimeAssetBaseUrl // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.kmediaWasmRuntimeAssetBaseUrl|{}kmediaWasmRuntimeAssetBaseUrl[0]
+        final fun <get-kmediaWasmRuntimeAssetBaseUrl>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.kmediaWasmRuntimeAssetBaseUrl.<get-kmediaWasmRuntimeAssetBaseUrl>|<get-kmediaWasmRuntimeAssetBaseUrl>(){}[0]
+        final fun <set-kmediaWasmRuntimeAssetBaseUrl>(kotlin/String) // io.github.kdroidfilter.composemediaplayer/WebMediaDependencyConfig.kmediaWasmRuntimeAssetBaseUrl.<set-kmediaWasmRuntimeAssetBaseUrl>|<set-kmediaWasmRuntimeAssetBaseUrl>(kotlin.String){}[0]
 }
 
 // Targets: [wasmJs]
@@ -1287,7 +1443,29 @@ final val io.github.kdroidfilter.composemediaplayer.jsinterop/io_github_kdroidfi
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_FullscreenManager$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_FullscreenManager$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_FullscreenManager$stableprop[0]
 
 // Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebAudioOutputDevice$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebAudioOutputDevice$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebAudioOutputDevice$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebLivePlaybackWindow$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebLivePlaybackWindow$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebLivePlaybackWindow$stableprop[0]
+
+// Targets: [wasmJs]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaDependencyConfig$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaDependencyConfig$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebMediaDependencyConfig$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSnapshot$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSnapshot$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebMediaSnapshot$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSurface_Canvas$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSurface_Canvas$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebMediaSurface_Canvas$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSurface_NativeVideo$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSurface_NativeVideo$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebMediaSurface_NativeVideo$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleCue$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleCue$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_WebSubtitleCue$stableprop[0]
+
+// Targets: [wasmJs]
+final val io.github.kdroidfilter.composemediaplayer/webMediaAdvancedControls // io.github.kdroidfilter.composemediaplayer/webMediaAdvancedControls|@io.github.kdroidfilter.composemediaplayer.VideoPlayerState{}webMediaAdvancedControls[0]
+    final fun (io.github.kdroidfilter.composemediaplayer/VideoPlayerState).<get-webMediaAdvancedControls>(): io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls? // io.github.kdroidfilter.composemediaplayer/webMediaAdvancedControls.<get-webMediaAdvancedControls>|<get-webMediaAdvancedControls>@io.github.kdroidfilter.composemediaplayer.VideoPlayerState(){}[0]
 
 // Targets: [wasmJs]
 final fun (androidx.compose.ui/Modifier).io.github.kdroidfilter.composemediaplayer/videoRatioClip(kotlin/Float?, androidx.compose.ui.layout/ContentScale = ...): androidx.compose.ui/Modifier // io.github.kdroidfilter.composemediaplayer/videoRatioClip|videoRatioClip@androidx.compose.ui.Modifier(kotlin.Float?;androidx.compose.ui.layout.ContentScale){}[0]
@@ -1317,4 +1495,22 @@ final fun io.github.kdroidfilter.composemediaplayer.jsinterop/io_github_kdroidfi
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_FullscreenManager$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_FullscreenManager$stableprop_getter|io_github_kdroidfilter_composemediaplayer_FullscreenManager$stableprop_getter(){}[0]
 
 // Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebAudioOutputDevice$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebAudioOutputDevice$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebAudioOutputDevice$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebLivePlaybackWindow$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebLivePlaybackWindow$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebLivePlaybackWindow$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaDependencyConfig$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaDependencyConfig$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebMediaDependencyConfig$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSnapshot$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSnapshot$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebMediaSnapshot$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSurface_Canvas$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSurface_Canvas$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebMediaSurface_Canvas$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSurface_NativeVideo$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebMediaSurface_NativeVideo$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebMediaSurface_NativeVideo$stableprop_getter(){}[0]
+
+// Targets: [wasmJs]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleCue$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_WebSubtitleCue$stableprop_getter|io_github_kdroidfilter_composemediaplayer_WebSubtitleCue$stableprop_getter(){}[0]

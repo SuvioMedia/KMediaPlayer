@@ -63,49 +63,59 @@ enum class VideoProjectionDetectionMode {
     DISABLED,
 }
 
-/**
- * Selects the playback engine used by the WebAssembly target.
- */
-enum class WebPlaybackEngine {
-    /**
-     * Use the externally loaded Movi player for demuxing, decoding, adaptive streaming, audio-track selection,
-     * and DRM.
-     */
-    MOVI,
-
-    /**
-     * Use native HTML5 video without a bundled adaptive-streaming implementation.
-     *
-     * This is an explicit compatibility route for non-adaptive sources. Recognized HLS, DASH and MSS manifests
-     * require [MOVI], and a Movi failure never switches to this engine automatically.
-     */
-    LEGACY,
+enum class WebDecoderPreference {
+    AUTO,
+    SOFTWARE,
 }
 
 /**
  * Runtime-only DRM configuration for the WebAssembly player.
  *
- * The license URL and request headers are passed only to the license request made by Movi/Shaka. They are never
- * reused as media request headers. [toString] deliberately redacts all values so accidental logging cannot expose
- * license endpoints or credentials.
+ * The license URL and request headers are passed only to the license request made by the
+ * Wasm engine/Shaka. They are never reused as media request headers. [toString] deliberately
+ * redacts all values so accidental logging cannot expose license endpoints or credentials.
  */
 @Stable
 class WebDrmConfiguration(
     val licenseUrl: String,
     licenseRequestHeaders: Map<String, String> = emptyMap(),
+    licenseServers: Map<String, String>,
 ) {
+    constructor(
+        licenseUrl: String,
+        licenseRequestHeaders: Map<String, String> = emptyMap(),
+    ) : this(
+        licenseUrl = licenseUrl,
+        licenseRequestHeaders = licenseRequestHeaders,
+        licenseServers = DEFAULT_WEB_DRM_KEY_SYSTEMS.associateWith { licenseUrl },
+    )
+
     val licenseRequestHeaders: Map<String, String> = licenseRequestHeaders.toMap()
+    val licenseServers: Map<String, String> = licenseServers.toMap()
 
     init {
         require(licenseUrl.isNotBlank()) { "The DRM license URL must not be blank." }
         require(this.licenseRequestHeaders.keys.none(String::isBlank)) {
             "DRM license request header names must not be blank."
         }
+        require(this.licenseServers.isNotEmpty()) { "At least one DRM key system must be configured." }
+        require(this.licenseServers.keys.none(String::isBlank)) { "DRM key-system names must not be blank." }
+        require(this.licenseServers.values.none(String::isBlank)) { "DRM license URLs must not be blank." }
     }
 
     override fun toString(): String =
-        "WebDrmConfiguration(licenseUrl=<redacted>, licenseRequestHeaders=<redacted:${licenseRequestHeaders.size}>)"
+        "WebDrmConfiguration(licenseUrl=<redacted>, " +
+            "licenseRequestHeaders=<redacted:${licenseRequestHeaders.size}>, " +
+            "licenseServers=<redacted:${licenseServers.size}>)"
 }
+
+private val DEFAULT_WEB_DRM_KEY_SYSTEMS: List<String> =
+    listOf(
+        "com.widevine.alpha",
+        "com.microsoft.playready",
+        "com.apple.fps",
+        "org.w3.clearkey",
+    )
 
 @Stable
 data class VideoPlaybackOptions(
@@ -118,8 +128,8 @@ data class VideoPlaybackOptions(
     val projectionViewControlMode: VideoProjectionViewControlMode = VideoProjectionViewControlMode.AUTO,
     val projectionTextureCrop: VideoTextureCrop = VideoTextureCrop(),
     val projectionDetectionMode: VideoProjectionDetectionMode = VideoProjectionDetectionMode.AUTO,
-    val webPlaybackEngine: WebPlaybackEngine = WebPlaybackEngine.MOVI,
     val webDrmConfiguration: WebDrmConfiguration? = null,
+    val webDecoderPreference: WebDecoderPreference = WebDecoderPreference.AUTO,
 ) {
     init {
         val invalidIds = extensions.map(VideoPipelineExtension::id).filter(String::isBlank)
