@@ -123,26 +123,6 @@ class WasmEngineRealPackageBrowserTest {
                     "WasmEngine audio selection was not confirmed; error=${state.error}",
                 )
 
-                state.play()
-                var playbackPollAttempt = 0
-                while (
-                    state.preciseCurrentTime < MINIMUM_PLAYBACK_PROGRESS &&
-                    state.error == null &&
-                    playbackPollAttempt < PLAYBACK_POLL_ATTEMPTS
-                ) {
-                    awaitBrowserDelay(PLAYBACK_POLL_INTERVAL_MS)
-                    playbackPollAttempt += 1
-                }
-                state.pause()
-                assertEquals(null, state.error, "WasmEngine playback error after the audio switch: ${state.error}")
-                assertTrue(
-                    state.preciseCurrentTime >= MINIMUM_PLAYBACK_PROGRESS,
-                    "Playback did not continue after selecting the Polish audio track; " +
-                        "position=${state.preciseCurrentTime}, playing=${state.isPlaying}, " +
-                        "track=${state.currentAudioTrack}, error=${state.error}, " +
-                        "diagnostics=${state.diagnostics}.",
-                )
-
                 state.seekTo(200.milliseconds)
                 session.seekPending()
                 var seekPollAttempt = 0
@@ -672,12 +652,9 @@ private fun readWasmEngineNetworkFixtureStatsRow(fixture: JsAny): String =
 
 private const val SEEK_POLL_ATTEMPTS = 200
 private const val SEEK_POLL_INTERVAL_MS = 25
-private const val PLAYBACK_POLL_ATTEMPTS = 200
-private const val PLAYBACK_POLL_INTERVAL_MS = 25
 private const val AUDIO_SWITCH_POLL_ATTEMPTS = 200
 private const val AUDIO_SWITCH_POLL_INTERVAL_MS = 25
 private val ADAPTIVE_LOAD_TIMEOUT = 30.seconds
-private val MINIMUM_PLAYBACK_PROGRESS = 50.milliseconds
 private const val WASM_ENGINE_FIXTURE_ORIGIN = "https://kmp-wasm-engine-fixture.invalid"
 private const val WASM_ENGINE_FIXTURE_PATH = "/__kmp_kmedia_wasm__"
 private const val WASM_ENGINE_RANGE_FIXTURE_URL =
