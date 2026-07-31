@@ -377,7 +377,7 @@ jobs:
             mediaplayer/build/test-results/
           if-no-files-found: warn
 
-  wasm-safari-smoke:
+  wasm-webkit-smoke:
     timeout-minutes: 20
     runs-on: macos-15
     steps:
@@ -391,17 +391,23 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Smoke-test the linked KMedia Wasm engine and packaged runtime in Safari
+      - name: Install the pinned headless WebKit runtime
+        run: |
+          ./gradlew kotlinWasmNpmInstall \
+            -PcomposeMediaPlayer.wasmTestBrowser=webkit --no-daemon
+          build/wasm/node_modules/.bin/playwright install webkit
+
+      - name: Smoke-test the linked KMedia Wasm engine and packaged runtime in headless WebKit
         run: >-
           ./gradlew :mediaplayer:wasmJsBrowserTest
           --tests '*WasmEngineRealPackageBrowserTest*'
-          -PcomposeMediaPlayer.wasmTestBrowser=safari --no-daemon
+          -PcomposeMediaPlayer.wasmTestBrowser=webkit --no-daemon
 
-      - name: Upload Safari smoke-test results
+      - name: Upload WebKit smoke-test results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
-          name: test-results-wasm-safari
+          name: test-results-wasm-webkit
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
@@ -561,7 +567,8 @@ jobs:
 
   verification-complete:
     if: always()
-    needs: [jvm, android, ios, wasm-js, wasm-edge-smoke, consumer, quality, abi]
+    needs:
+      [jvm, android, ios, wasm-js, wasm-edge-smoke, wasm-firefox-smoke, wasm-webkit-smoke, consumer, quality, abi]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every verification job

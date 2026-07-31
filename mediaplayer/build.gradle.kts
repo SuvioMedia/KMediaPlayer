@@ -132,8 +132,8 @@ compose.resources {
     )
 }
 
-require(wasmBrowserTestBrowser in setOf("chrome", "firefox", "safari")) {
-    "composeMediaPlayer.wasmTestBrowser must be one of: chrome, firefox, safari."
+require(wasmBrowserTestBrowser in setOf("chrome", "firefox", "webkit")) {
+    "composeMediaPlayer.wasmTestBrowser must be one of: chrome, firefox, webkit."
 }
 group = projectGroup
 version = projectVersion
@@ -183,7 +183,8 @@ kotlin {
                     when (wasmBrowserTestBrowser) {
                         "chrome" -> useChromeHeadless()
                         "firefox" -> useFirefoxHeadless()
-                        "safari" -> useSafari()
+                        // The config fragment replaces the legacy Safari launcher with headless WebKit.
+                        "webkit" -> useSafari()
                     }
                 }
             }
@@ -310,6 +311,8 @@ kotlin {
         wasmJsTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(npm("karma-webkit-launcher", "2.6.0"))
+            implementation(npm("playwright-webkit", "1.62.1"))
         }
     }
 
