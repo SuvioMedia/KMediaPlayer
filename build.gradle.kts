@@ -122,6 +122,9 @@ rootProject.plugins.withType<WasmYarnPlugin> {
         reportNewYarnLock = true
         yarnLockAutoReplace = false
         ignoreScripts = true
+        // karma-webkit-launcher still permits only uuid 10.x, which contains a
+        // bounds-check vulnerability. Its launcher usage is compatible with uuid 11.
+        resolution("uuid", "11.1.1")
     }
 }
 
