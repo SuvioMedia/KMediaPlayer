@@ -3,6 +3,7 @@
 
 #include <jni.h>
 #include <jawt_md.h>
+#include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <limits.h>
 #include <pthread.h>
@@ -290,6 +291,99 @@ static double component_backing_scale(JNIEnv* env, jobject component) {
     return scale;
 }
 
+#ifdef __OBJC__
+typedef struct {
+    NSString* window_title;
+    NSView** native_view_slot;
+    CALayer* layer;
+    jint width;
+    jint height;
+    jint x;
+    jint y;
+    jboolean attached;
+} AwtNativeViewAttachment;
+
+static void run_on_appkit_main_sync(dispatch_function_t operation, void* context) {
+    if (pthread_main_np()) {
+        operation(context);
+    } else {
+        dispatch_sync_f(dispatch_get_main_queue(), context, operation);
+    }
+}
+
+static NSWindow* find_awt_window(NSString* target_window_title) {
+    NSWindow* window = nil;
+    if ([target_window_title length] > 0) {
+        for (NSWindow* candidate in [NSApp windows]) {
+            if ([[candidate title] isEqualToString:target_window_title]) {
+                window = candidate;
+                break;
+            }
+        }
+    }
+    if (!window) {
+        window = [NSApp keyWindow] ?: [NSApp mainWindow];
+    }
+    if (!window) {
+        window = [[NSApp windows] firstObject];
+    }
+    return window;
+}
+
+static void attach_awt_native_view_on_appkit_main(void* raw_context) {
+    AwtNativeViewAttachment* context = (AwtNativeViewAttachment*)raw_context;
+    @autoreleasepool {
+        NSView* content_view = [[find_awt_window(context->window_title) contentView] retain];
+        if (!content_view || context->width <= 0 || context->height <= 0) {
+            [content_view release];
+            return;
+        }
+
+        if (!*context->native_view_slot) {
+            *context->native_view_slot = [[NSView alloc] initWithFrame:NSZeroRect];
+            [*context->native_view_slot setWantsLayer:YES];
+        }
+
+        CGFloat view_y = [content_view isFlipped]
+            ? context->y
+            : content_view.bounds.size.height - context->y - context->height;
+        if (view_y < 0.0 && view_y > -64.0) {
+            view_y = 0.0;
+        }
+        [*context->native_view_slot setFrame:NSMakeRect(
+            context->x,
+            view_y,
+            context->width,
+            context->height
+        )];
+        if (context->layer) {
+            [*context->native_view_slot setLayer:context->layer];
+        } else {
+            [*context->native_view_slot setWantsLayer:YES];
+            [[*context->native_view_slot layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
+        }
+        [*context->native_view_slot setWantsLayer:YES];
+        if ([*context->native_view_slot superview] != content_view) {
+            [*context->native_view_slot removeFromSuperview];
+            [content_view addSubview:*context->native_view_slot positioned:NSWindowAbove relativeTo:nil];
+        }
+        context->attached = JNI_TRUE;
+        [content_view release];
+    }
+}
+
+static void detach_awt_native_view_on_appkit_main(void* raw_native_view_slot) {
+    NSView** native_view_slot = (NSView**)raw_native_view_slot;
+    @autoreleasepool {
+        if (!native_view_slot || !*native_view_slot) return;
+        [*native_view_slot removeFromSuperview];
+        [*native_view_slot setLayer:nil];
+        [*native_view_slot release];
+        *native_view_slot = nil;
+    }
+}
+#endif
+
 static jboolean set_awt_component_layer(
     JNIEnv* env,
     jobject component,
@@ -304,15 +398,28 @@ static jboolean set_awt_component_layer(
         ? (*env)->GetStringUTFChars(env, awt_window_title, NULL)
         : NULL;
     NSString* target_window_title = awt_window_title_utf
-        ? [NSString stringWithUTF8String:awt_window_title_utf]
+        ? [[NSString alloc] initWithUTF8String:awt_window_title_utf]
         : nil;
+    if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
+    if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
+    if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+
+    AwtNativeViewAttachment attachment = {
+        .window_title = target_window_title,
+        .native_view_slot = native_view_slot,
+        .layer = layer,
+        .width = call_component_int(env, component, "getWidth"),
+        .height = call_component_int(env, component, "getHeight"),
+        .x = 0,
+        .y = 0,
+        .attached = JNI_FALSE,
+    };
+    component_position_in_window(env, component, &attachment.x, &attachment.y);
 
     JAWT_GetAWT_Fn get_awt = resolve_jawt_get_awt();
     if (!get_awt) {
         if (layer) native_logf("HDR Metal: JAWT_GetAWT unavailable\n");
-        if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
-        if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
-        if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+        [target_window_title release];
         return JNI_FALSE;
     }
 
@@ -321,22 +428,18 @@ static jboolean set_awt_component_layer(
     awt.version = JAWT_VERSION_1_4 | JAWT_MACOSX_USE_CALAYER;
     if (get_awt(env, &awt) == JNI_FALSE) {
         if (layer) native_logf("HDR Metal: JAWT_GetAWT returned false\n");
-        if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
-        if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
-        if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+        [target_window_title release];
         return JNI_FALSE;
     }
 
     JAWT_DrawingSurface* ds = awt.GetDrawingSurface(env, component);
     if (!ds) {
         if (layer) native_logf("HDR Metal: GetDrawingSurface returned null\n");
-        if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
-        if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
-        if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+        [target_window_title release];
         return JNI_FALSE;
     }
 
-    jboolean ok = JNI_FALSE;
+    jboolean surface_layers_found = JNI_FALSE;
     jint lock = ds->Lock(ds);
     if ((lock & JAWT_LOCK_ERROR) == 0) {
         JAWT_DrawingSurfaceInfo* dsi = ds->GetDrawingSurfaceInfo(ds);
@@ -344,56 +447,7 @@ static jboolean set_awt_component_layer(
             id surface_layers = (id)dsi->platformInfo;
             if ([surface_layers respondsToSelector:@selector(setLayer:)]) {
                 ((id<JAWT_SurfaceLayers>)surface_layers).layer = nil;
-                if (!layer) {
-                    [*native_view_slot removeFromSuperview];
-                    [*native_view_slot setLayer:nil];
-                    [*native_view_slot release];
-                    *native_view_slot = nil;
-                    ok = JNI_TRUE;
-                } else {
-                    jint width = call_component_int(env, component, "getWidth");
-                    jint height = call_component_int(env, component, "getHeight");
-                    jint component_x = 0;
-                    jint component_y = 0;
-                    component_position_in_window(env, component, &component_x, &component_y);
-
-                    NSWindow* window = nil;
-                    if ([target_window_title length] > 0) {
-                        for (NSWindow* candidate in [NSApp windows]) {
-                            if ([[candidate title] isEqualToString:target_window_title]) {
-                                window = candidate;
-                                break;
-                            }
-                        }
-                    }
-                    if (!window) {
-                        window = [NSApp keyWindow] ?: [NSApp mainWindow];
-                    }
-                    if (!window) {
-                        window = [[NSApp windows] firstObject];
-                    }
-                    NSView* content_view = [window contentView];
-                    if (content_view) {
-                        if (!*native_view_slot) {
-                            *native_view_slot = [[NSView alloc] initWithFrame:NSZeroRect];
-                            [*native_view_slot setWantsLayer:YES];
-                        }
-                        CGFloat view_y = [content_view isFlipped]
-                            ? component_y
-                            : content_view.bounds.size.height - component_y - height;
-                        if (view_y < 0.0 && view_y > -64.0) {
-                            view_y = 0.0;
-                        }
-                        [*native_view_slot setFrame:NSMakeRect(component_x, view_y, width, height)];
-                        [*native_view_slot setLayer:layer];
-                        [*native_view_slot setWantsLayer:YES];
-                        if ([*native_view_slot superview] != content_view) {
-                            [*native_view_slot removeFromSuperview];
-                            [content_view addSubview:*native_view_slot positioned:NSWindowAbove relativeTo:nil];
-                        }
-                        ok = JNI_TRUE;
-                    }
-                }
+                surface_layers_found = JNI_TRUE;
             } else if (layer) {
                 native_logf("HDR Metal: platformInfo does not accept setLayer:\n");
             }
@@ -406,10 +460,16 @@ static jboolean set_awt_component_layer(
         native_logf("HDR Metal: drawing surface lock error %d\n", lock);
     }
     awt.FreeDrawingSurface(ds);
-    if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
-    if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
-    if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
-    return ok;
+    if (surface_layers_found) {
+        if (layer) {
+            run_on_appkit_main_sync(attach_awt_native_view_on_appkit_main, &attachment);
+        } else {
+            run_on_appkit_main_sync(detach_awt_native_view_on_appkit_main, native_view_slot);
+            attachment.attached = JNI_TRUE;
+        }
+    }
+    [target_window_title release];
+    return attachment.attached;
 #else
     (void)env;
     (void)component;
@@ -434,62 +494,30 @@ static NSView* attach_awt_component_native_view(
         ? (*env)->GetStringUTFChars(env, awt_window_title, NULL)
         : NULL;
     NSString* target_window_title = awt_window_title_utf
-        ? [NSString stringWithUTF8String:awt_window_title_utf]
+        ? [[NSString alloc] initWithUTF8String:awt_window_title_utf]
         : nil;
-
-    jint width = call_component_int(env, component, "getWidth");
-    jint height = call_component_int(env, component, "getHeight");
-    jint component_x = 0;
-    jint component_y = 0;
-    component_position_in_window(env, component, &component_x, &component_y);
-
-    NSWindow* window = nil;
-    if ([target_window_title length] > 0) {
-        for (NSWindow* candidate in [NSApp windows]) {
-            if ([[candidate title] isEqualToString:target_window_title]) {
-                window = candidate;
-                break;
-            }
-        }
-    }
-    if (!window) {
-        window = [NSApp keyWindow] ?: [NSApp mainWindow];
-    }
-    if (!window) {
-        window = [[NSApp windows] firstObject];
-    }
-
-    NSView* content_view = [window contentView];
-    if (!content_view || width <= 0 || height <= 0) {
-        if (log_prefix) native_logf("%s: missing content view or invalid size\n", log_prefix);
-        if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
-        if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
-        if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
-        return nil;
-    }
-
-    if (!*native_view_slot) {
-        *native_view_slot = [[NSView alloc] initWithFrame:NSZeroRect];
-        [*native_view_slot setWantsLayer:YES];
-        [[*native_view_slot layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
-    }
-
-    CGFloat view_y = [content_view isFlipped]
-        ? component_y
-        : content_view.bounds.size.height - component_y - height;
-    if (view_y < 0.0 && view_y > -64.0) {
-        view_y = 0.0;
-    }
-    [*native_view_slot setFrame:NSMakeRect(component_x, view_y, width, height)];
-    [*native_view_slot setWantsLayer:YES];
-    if ([*native_view_slot superview] != content_view) {
-        [*native_view_slot removeFromSuperview];
-        [content_view addSubview:*native_view_slot positioned:NSWindowAbove relativeTo:nil];
-    }
-
     if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
     if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
     if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
+
+    AwtNativeViewAttachment attachment = {
+        .window_title = target_window_title,
+        .native_view_slot = native_view_slot,
+        .layer = nil,
+        .width = call_component_int(env, component, "getWidth"),
+        .height = call_component_int(env, component, "getHeight"),
+        .x = 0,
+        .y = 0,
+        .attached = JNI_FALSE,
+    };
+    component_position_in_window(env, component, &attachment.x, &attachment.y);
+    run_on_appkit_main_sync(attach_awt_native_view_on_appkit_main, &attachment);
+    [target_window_title release];
+
+    if (!attachment.attached) {
+        if (log_prefix) native_logf("%s: missing content view or invalid size\n", log_prefix);
+        return nil;
+    }
     return *native_view_slot;
 #else
     (void)env;
@@ -503,9 +531,7 @@ static NSView* attach_awt_component_native_view(
 static void detach_awt_component_native_view(NSView** native_view_slot) {
 #ifdef __OBJC__
     if (!native_view_slot || !*native_view_slot) return;
-    [*native_view_slot removeFromSuperview];
-    [*native_view_slot release];
-    *native_view_slot = nil;
+    run_on_appkit_main_sync(detach_awt_native_view_on_appkit_main, native_view_slot);
 #else
     (void)native_view_slot;
 #endif
