@@ -121,10 +121,10 @@ is-ci@^3.0.1:
   dependencies:
     ci-info "^3.2.0"
 
-jassub@2.5.7:
-  version "2.5.7"
-  resolved "https://registry.yarnpkg.com/jassub/-/jassub-2.5.7.tgz#01418b282f1fefeb570a86eb7735d9879e4b1a05"
-  integrity sha512-ynn0D65lsQwkBhnTi7WqJ7upy7jHMq+ePP637rI2x7cQYVJlsG8zrAacP5DCq9nO+W3lY0IXRT2VzjBwSpHzWA==
+jassub@2.5.14:
+  version "2.5.14"
+  resolved "https://registry.yarnpkg.com/jassub/-/jassub-2.5.14.tgz#83cb189d103b0f3de08156c9d5adcaea97476d48"
+  integrity sha512-r50p9+SwC+A/I5/5qWFpuo7mpY+b16SiUyykWwjTuiLqwuSiUds9HEFrBUE1a1VjidqS2XtHfUwhGJz3Zm7nYQ==
   dependencies:
     abslink "^1.2.2"
     lfa-ponyfill "^1.1.0"

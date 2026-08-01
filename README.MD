@@ -1028,7 +1028,7 @@ use JASSUB with the Wasm engine. For embedded ASS/SSA, the engine
 mounts the same extension as its pluggable renderer, forwards the codec header, timed Matroska
 packets and bounded font attachments, and drives JASSUB from its media clock. Unsupported embedded
 formats remain on the engine's built-in subtitle path. Protected DRM playback uses the engine's
-native video clock. The optional artifact pins JASSUB 2.5.7, so applications do not add JASSUB,
+native video clock. The optional artifact pins JASSUB 2.5.14, so applications do not add JASSUB,
 libass, worker scripts or WASM files manually.
 
 Create stable player options and then select an `.ass` or `.ssa` subtitle track:
