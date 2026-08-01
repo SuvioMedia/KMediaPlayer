@@ -31,6 +31,13 @@ class DesktopPlaybackBridgeContractsTest {
                 forceSdrOutput = true,
             )
         }
+        assertFailsWith<IllegalArgumentException> {
+            DesktopPlaybackBridgeRequest(
+                uri = "file:///movie.avi",
+                allowHdrCmafPassthrough = true,
+                forceAvFoundationCompatibility = true,
+            )
+        }
     }
 
     @Test
@@ -61,6 +68,14 @@ class DesktopPlaybackBridgeContractsTest {
                 playlistUrl = "http://127.0.0.1/movie.m3u8",
                 durationMs = null,
                 hdrCmafPassthrough = true,
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            DesktopPlaybackBridgeSource(
+                playlistUrl = "http://127.0.0.1/movie.m3u8",
+                durationMs = null,
+                videoCopiedWithoutReencoding = true,
+                avFoundationCompatibleTranscode = true,
             )
         }
     }

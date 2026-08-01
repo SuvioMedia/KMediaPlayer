@@ -73,6 +73,13 @@ val skipAppleNativeBuild =
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
 val canBuildAppleNative = Os.isFamily(Os.FAMILY_MAC) && !skipAppleNativeBuild
+// IDEA schedules Apple cinterops during every project import. The runtime SDK is a release input,
+// so JVM-only development must not require it merely to synchronize the Gradle model.
+val skipAppleInteropDuringIdeaSync =
+    providers
+        .systemProperty("idea.sync.active")
+        .map(String::toBoolean)
+        .getOrElse(false)
 
 fun registerAppleAssBuild(
     taskName: String,
@@ -354,6 +361,26 @@ tasks.matching { it.name == "cinteropAppleAssIosArm64" }.configureEach {
 }
 tasks.matching { it.name == "cinteropAppleAssIosSimulatorArm64" }.configureEach {
     dependsOn(buildIosSimulatorArm64AppleAss)
+}
+
+if (skipAppleInteropDuringIdeaSync) {
+    val appleInteropPreparationTasks =
+        setOf(
+            "buildIosArm64AppleAss",
+            "buildIosSimulatorArm64AppleAss",
+            "cinteropAppleAssIosArm64",
+            "cinteropAppleAssIosSimulatorArm64",
+            "commonizeCInterop",
+            "copyCommonizeCInteropForIde",
+            "iosArm64Cinterop-appleAssKlib",
+            "iosSimulatorArm64Cinterop-appleAssKlib",
+            "podspec",
+            "podInstall",
+            "podImport",
+        )
+    tasks.matching { it.name in appleInteropPreparationTasks }.configureEach {
+        enabled = false
+    }
 }
 
 val verifyCoreAndroidAarHasNoAssPayload =

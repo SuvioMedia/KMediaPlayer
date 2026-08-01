@@ -97,7 +97,7 @@ internal fun MediaSourceSheet(
                 val selectedBackendOption = backendOptions.firstOrNull { it.backend == selectedDesktopMkvBackend }
 
                 Text(
-                    text = "JVM MKV backend",
+                    text = "JVM playback backend",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )

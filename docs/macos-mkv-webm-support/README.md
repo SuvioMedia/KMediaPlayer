@@ -6,7 +6,7 @@ The desktop backend selector may use a compatible user-installed libVLC before a
 
 KMediaBridge and VLC are never started for the same HLS fallback session. The packaged FFmpeg libraries have private `-kmb` filenames and dependency identities, so they do not satisfy or replace VLC's FFmpeg dependencies. On macOS and Windows those private identities also keep the native loader bindings separate; an external VLC executable is isolated by the operating-system process boundary. The runtime manifest is inspected first, and KMediaBridge's JNA/native libraries are loaded only after the planner has selected that backend.
 
-The opt-in `libvlc-native-view` backend lets VLC render directly into a native desktop child window instead of copying decoded frames into Compose. It uses an NSView on macOS, an HWND on Windows, and an X11/XWayland xwindow on Linux. Compose controls render above it in a separate overlay layer, so the video path stays native while the UI stays Compose.
+The `libvlc-native-view` backend lets VLC render directly into a native desktop child window instead of copying decoded frames into Compose. It uses an NSView on macOS, an HWND on Windows, and an X11/XWayland xwindow on Linux. Compose controls render above it in a separate overlay layer, so the video path stays native while the UI stays Compose. macOS no longer exposes a separate libVLC canvas route: the legacy `libvlc` selector is a compatibility alias for this native NSView backend.
 
 The Linux native-view backend is deliberately X11/XWayland today. It is hosted by an AWT `Canvas`; JAWT exposes that surface as an X11 drawable, and the supported libVLC embedding call is `libvlc_media_player_set_xwindow`. A real native Wayland path needs a separate `wl_surface` host plus a stable libVLC Wayland embedding API, so it should be added as its own backend instead of pretending the X11 path is Wayland-compatible.
 
@@ -59,13 +59,52 @@ COMPOSE_MEDIA_PLAYER_LINUX_FALLBACK_BACKEND=libvlc
 -Dcomposemediaplayer.linux.fallbackBackend=libvlc
 ```
 
-To require direct native libVLC rendering, use `libvlc-native-view` instead of `libvlc` in the same environment variables or JVM properties. The aliases `libvlc-native`, `libvlc-view`, `libvlc-nsview`, `libvlc-hwnd`, and `libvlc-xwindow` are also accepted on their matching desktop targets. On Linux, this path requires an X11/XWayland `DISPLAY`; `libvlc-wayland` is intentionally rejected until native Wayland embedding is implemented.
+On macOS, `libvlc` and `libvlc-native-view` both select direct native NSView rendering. On Windows and Linux, use `libvlc-native-view` instead of `libvlc` to request the native surface explicitly. The aliases `libvlc-native`, `libvlc-view`, `libvlc-nsview`, `libvlc-hwnd`, and `libvlc-xwindow` are also accepted on their matching desktop targets. On Linux, this path requires an X11/XWayland `DISPLAY`; `libvlc-wayland` is intentionally rejected until native Wayland embedding is implemented.
+
+AVFoundation has one playback implementation with two presentation modes. Full players use the native AppKit window by default. Embedded previews can keep the same AVFoundation decoder while copying its frames into their Compose layout:
+
+```kotlin
+VideoPlaybackOptions(
+    desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE,
+)
+```
+
+This mode is intended for galleries, feeds, and thumbnails. It does not create a second native backend and it does not route through libVLC.
 
 The sample app can still request direct libVLC rendering for container compatibility with:
 
 ```shell
 -Dsample.app.desktopVideoBackend=LIBVLC_NATIVE
 ```
+
+### AVI and WMV on macOS
+
+`DesktopVideoBackend.AUTO` recognizes AVI (`RIFF/AVI`) and ASF/WMV by extension, MIME type, or
+container signature. For known 8-bit legacy codecs such as MPEG-4 Part 2, MJPEG, WMV1/2/3, and
+VC-1, it selects the user-installed native libVLC NSView backend directly when one is available. Without
+libVLC, an application that registered `KMediaBridgeDesktopExtension()` uses the in-process FFmpeg
+runtime to decode the legacy streams, normalize them to SDR BT.709, encode AVC with VideoToolbox
+and AAC, and send bounded fMP4/CMAF fragments to AVFoundation. This is transcoding rather than a
+remux: AVFoundation receives codecs it supports instead of the original MPEG-4 Part 2, MJPEG, or
+Windows Media elementary stream.
+
+The explicit choices have the following behavior on Apple Silicon macOS:
+
+| Choice | AVI / WMV behavior |
+| --- | --- |
+| `AUTO` | Direct native libVLC NSView when compatible VLC is installed; otherwise KMediaBridge-to-AVFoundation when that extension is registered and advertises video/audio transcoding. |
+| `PLATFORM` | AVFoundation only; MJPEG AVI can work, while MPEG-4 Part 2 AVI and WMV are not generally supported. |
+| `LIBVLC` | Compatibility alias for direct native libVLC `NSView` rendering on macOS. |
+| `LIBVLC_NATIVE` | Direct libVLC `NSView` rendering. |
+| Optional MPV artifact | Direct playback through the verified bundled runtime. Its desktop FFmpeg profile includes AVI/ASF demuxing plus MPEG-4 Part 2, MJPEG, WMV1/2/3, VC-1, WMA1/2, MP3, and PCM decoding. |
+| KMediaBridge (`ffmpeg`, `kmediabridge`, or `bridge`) | Forces the bounded FFmpeg decode -> AVC/AAC -> AVFoundation compatibility route; AVFoundation presents the result in its native AppKit window by default. |
+| VLC HLS | Uses VLC as an external HLS adapter and the same native AVFoundation/AppKit presentation. It remains separate from direct libVLC playback. |
+
+The lightweight AVI/ASF probe only classifies codecs that are known to be 8-bit SDR. The verified
+fixtures cover MPEG-4 Part 2 + MP3 AVI, MJPEG + PCM AVI, and WMV2 + WMA2 ASF/WMV. Ambiguous
+H.264/HEVC-in-AVI remains outside this compatibility path until a richer color probe confirms the
+signal. Legacy input is deliberately reported as controlled SDR; the transcoder never claims HDR
+preservation for these containers.
 
 To point at a specific libVLC install on macOS, Windows, or Linux, set:
 
@@ -127,7 +166,15 @@ COMPOSE_MEDIA_PLAYER_VLC=/path/to/VLC
 -Dcomposemediaplayer.macos.vlc=/path/to/VLC
 ```
 
-The default JVM artifact has no KMediaBridge or FFmpeg dependency. The optional `composemediaplayer-kmediabridge` adapter transitively selects a thin KMediaBridge client plus the exact shared KMediaFfmpegRuntime. That runtime dynamically provides FFmpeg, FreeType, FriBidi, HarfBuzz and libass once for both KMediaBridge and MPV, together with corresponding source, notices, checksums, SBOM and replacement instructions. It does **not** bundle an `ffmpeg` executable or GPL/nonfree FFmpeg components. User-installed libass remains available only through the separate `composemediaplayer-ass` extension for the macOS Compose/Skia canvas renderer. The optional Dolby Vision component is separate.
+The default JVM artifact has no KMediaBridge or FFmpeg dependency. The optional
+`composemediaplayer-kmediabridge` adapter selects the thin KMediaBridge client and its reviewed
+runtime. The optional MPV artifact selects its own reviewed KMediaMpv payload. Their dynamic
+libraries use separate application-private identities (`-kmb` and `-kmediampv`), and both loading
+orders are integration-tested so neither payload can satisfy or replace the other's dependencies.
+Each ships corresponding source, notices, checksums, SBOM, and replacement instructions. Neither
+bundles an `ffmpeg` executable or GPL/nonfree FFmpeg components. User-installed libass remains
+available only through the separate `composemediaplayer-ass` extension for the macOS Compose/Skia
+canvas renderer. The optional Dolby Vision component is separate.
 
 To disable the external HLS fallback, set one of:
 

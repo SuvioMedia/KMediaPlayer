@@ -61,17 +61,23 @@ internal object JvmLibVlcMediaProbe {
     ): JvmLibVlcTrackInfo {
         val containerInfo =
             runCatching {
-                MacMatroskaAssExtractor.probe(uri, requestHeaders)?.toLibVlcTrackInfo()
-            }.getOrNull() ?: JvmLibVlcTrackInfo()
+                JvmLegacyVideoContainerSupport.probe(uri, requestHeaders)
+            }.getOrNull()
+                ?: runCatching {
+                    MacMatroskaAssExtractor.probe(uri, requestHeaders)?.toLibVlcTrackInfo()
+                }.getOrNull()
+                ?: JvmLibVlcTrackInfo()
         val fallback =
             runCatching {
                 JvmMediaChapterProbe.probe(uri, requestHeaders)
             }.getOrNull() ?: return containerInfo
-        if (fallback.rows.isEmpty()) return containerInfo
 
         val durationSeconds =
             containerInfo.durationSeconds
                 ?: fallback.durationMs?.div(1_000.0)
+        if (fallback.rows.isEmpty()) {
+            return containerInfo.copy(durationSeconds = durationSeconds)
+        }
         val fallbackChapters =
             normalizeMediaChapters(
                 rows = fallback.rows,

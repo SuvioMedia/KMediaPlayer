@@ -1198,12 +1198,13 @@ class MacVideoPlayer {
 
     /// Detects the video's native frame rate from its asset
     private func detectVideoFrameRate(from asset: AVAsset) {
-        // For HLS streams, default to 30 fps as it's variable
+        // Poll HLS at the display cadence until AVFoundation exposes the selected
+        // variant's nominal rate. This preserves 50/60 fps bounded VOD bridges.
         if isHLSStream {
-            videoFrameRate = 30.0
+            videoFrameRate = screenRefreshRate > 0 ? screenRefreshRate : 60.0
             updateCaptureFrameRate()
-            return
         }
+        let fallbackFrameRate = isHLSStream && screenRefreshRate > 0 ? screenRefreshRate : 30.0
 
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
             guard let videoTrack = tracks?.first, error == nil else {
@@ -1220,16 +1221,14 @@ class MacVideoPlayer {
                         let frameRate = try await videoTrack.load(.nominalFrameRate)
                         self.videoFrameRate = Float(frameRate)
                         if self.videoFrameRate <= 0 {
-                            // Fallback to common default if detection fails
-                            self.videoFrameRate = 30.0
+                            self.videoFrameRate = fallbackFrameRate
                         }
 
                         // Set capture rate to the lower of the two rates
                         self.updateCaptureFrameRate()
                     } catch {
                         nativeVideoLog("Error loading nominal frame rate: \(error.localizedDescription)")
-                        // Fallback to common default if detection fails
-                        self.videoFrameRate = 30.0
+                        self.videoFrameRate = fallbackFrameRate
                         self.updateCaptureFrameRate()
                     }
                 }
@@ -1237,8 +1236,7 @@ class MacVideoPlayer {
                 // Use deprecated property for older OS versions
                 videoFrameRate = Float(videoTrack.nominalFrameRate)
                 if videoFrameRate <= 0 {
-                    // Fallback to common default if detection fails
-                    videoFrameRate = 30.0
+                    videoFrameRate = fallbackFrameRate
                 }
 
                 // Set capture rate to the lower of the two rates
@@ -1539,10 +1537,15 @@ class MacVideoPlayer {
             hdrMetalRenderer?.detachFromItem()
             var outputSettings: [String: Any] = [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: frameWidth,
-                kCVPixelBufferHeightKey as String: frameHeight,
                 kCVPixelBufferIOSurfacePropertiesKey as String: [:],
             ]
+            // HLS can expose its dimensions only after a variant is selected and may change
+            // resolution later. Omitting a requested size preserves the decoded pixel-buffer
+            // dimensions instead of scaling an unknown stream to the temporary 1920x1080 value.
+            if !isHLSStream, frameWidth > 0, frameHeight > 0 {
+                outputSettings[kCVPixelBufferWidthKey as String] = frameWidth
+                outputSettings[kCVPixelBufferHeightKey as String] = frameHeight
+            }
             if toneMapsHdrToSdr {
                 outputSettings[AVVideoColorPropertiesKey] = [
                     AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,

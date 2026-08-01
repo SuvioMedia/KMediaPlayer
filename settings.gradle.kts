@@ -69,6 +69,20 @@ providers.gradleProperty("kmediaBridgeProjectDir").orNull?.let { projectDirector
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        providers.gradleProperty("kmediaBridgeMavenRepository").orNull?.let { repositoryPath ->
+            exclusiveContent {
+                forRepository {
+                    maven {
+                        name = "kmediaBridgeLocal"
+                        url = uri(repositoryPath)
+                    }
+                }
+                filter {
+                    includeModuleByRegex("io\\.github\\.shusek", "kmedia-bridge-api(?:-.*)?")
+                    includeModuleByRegex("io\\.github\\.shusek", "kmedia-bridge-ffmpeg(?:-.*)?")
+                }
+            }
+        }
         providers.gradleProperty("kmediaWasmEngineMavenRepository").orNull?.let { repositoryPath ->
             exclusiveContent {
                 forRepository {

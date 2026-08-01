@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer.mac
 
 import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
 import java.awt.Component
+import java.awt.Window
 import java.nio.ByteBuffer
 
 /**
@@ -122,6 +123,12 @@ internal object MacNativeBridge {
         component: Component,
     )
 
+    /** Attaches the native AVPlayer/Metal layer below a transparent Compose layer in a full window. */
+    @JvmStatic external fun nAttachHdrMetalWindow(
+        handle: Long,
+        window: Window,
+    ): Boolean
+
     @JvmStatic external fun nAttachLibVlcNativeView(
         handle: Long,
         component: Component,
@@ -131,6 +138,21 @@ internal object MacNativeBridge {
         handle: Long,
         component: Component,
     )
+
+    /** Attaches libVLC below a transparent Compose layer and lets AppKit own window resizing. */
+    @JvmStatic external fun nAttachLibVlcNativeWindow(
+        handle: Long,
+        window: Window,
+    ): Boolean
+
+    /** Requests AppKit's native full-screen transition for a dedicated native video window. */
+    @JvmStatic external fun nSetWindowFullscreen(
+        window: Window,
+        fullscreen: Boolean,
+    ): Boolean
+
+    /** Returns the current AppKit NSWindow full-screen style state. */
+    @JvmStatic external fun nIsWindowFullscreen(window: Window): Boolean
 
     @JvmStatic external fun nSetHdrMetalContentScaleMode(
         handle: Long,

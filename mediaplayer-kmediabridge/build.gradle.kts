@@ -111,6 +111,12 @@ nativeJvmTestResources.orNull?.let { resourcesDirectory ->
 
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    providers.gradleProperty("composeMediaPlayerLegacyTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.test.legacyMedia", mediaPath)
+    }
+    providers.gradleProperty("composeMediaPlayerKMediaBridgeTestRuntimeDirectory").orNull?.let { runtimeDirectory ->
+        systemProperty("composemediaplayer.test.kMediaBridgeRuntimeDirectory", runtimeDirectory)
+    }
 }
 
 val consumerSmokeRepository = rootProject.layout.buildDirectory.dir("consumer-repository")

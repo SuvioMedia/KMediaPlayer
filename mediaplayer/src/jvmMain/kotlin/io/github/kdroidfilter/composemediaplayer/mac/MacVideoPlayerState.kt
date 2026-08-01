@@ -17,6 +17,7 @@ import io.github.kdroidfilter.composemediaplayer.DesktopSubtitleFont
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitlePipelineExtension
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitleRenderer
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
 import io.github.kdroidfilter.composemediaplayer.DolbyVisionProfileMapping
@@ -32,6 +33,7 @@ import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
 import io.github.kdroidfilter.composemediaplayer.HlsFallbackSource
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.JvmExternalFallbackContainerSupport
+import io.github.kdroidfilter.composemediaplayer.JvmLegacyVideoContainerSupport
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcAudioStream
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcInstallation
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcMediaProbe
@@ -95,6 +97,7 @@ import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import java.awt.Component
+import java.awt.Window
 import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -113,15 +116,62 @@ private const val ASPECT_RATIO_CHANGE_EPSILON = 0.001f
 private const val PAUSED_SEEK_FRAME_ATTEMPTS = 10
 private const val PAUSED_SEEK_FRAME_RETRY_DELAY_MS = 25L
 
-private enum class MacLibVlcRenderMode {
-    MEMORY,
-    NATIVE_VIEW,
-}
-
 private data class MacResolvedLibVlcBackend(
     val installation: JvmLibVlcInstallation,
-    val renderMode: MacLibVlcRenderMode,
 )
+
+/** AVI/ASF need either a decoder backend or the KMediaBridge AVC/AAC compatibility pipeline. */
+internal fun resolveMacConfiguredFallbackBackend(
+    configured: String,
+    isLegacyContainer: Boolean,
+): String {
+    val normalized = configured.trim().lowercase()
+    if (!isLegacyContainer) return normalized
+    return when (normalized) {
+        "platform", "avfoundation",
+        "libvlc",
+        "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-nsview",
+        "ffmpeg", "kmediabridge", "bridge", "vlc",
+        -> normalized
+        else -> "auto"
+    }
+}
+
+internal fun shouldUseMacLibVlcCandidate(
+    sourceColorInfo: VideoColorInfo,
+    explicitlyRequested: Boolean,
+): Boolean = explicitlyRequested || sourceColorInfo.isSafeForUnmanagedSdrFallback()
+
+internal fun visibleLibVlcFrameDimension(
+    decodedDimension: Int,
+    probedDimension: Int?,
+): Int = probedDimension?.takeIf { it in 1..decodedDimension } ?: decodedDimension
+
+internal fun shouldUseMacNativeAvFoundationPresentation(
+    surfaceMode: DesktopVideoSurfaceMode,
+    dynamicRangePolicy: DynamicRangePolicy,
+    usesMetalProjection: Boolean,
+    sourceAlreadyConvertedForAvFoundation: Boolean,
+): Boolean =
+    surfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE &&
+        (
+            dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR ||
+                usesMetalProjection ||
+                sourceAlreadyConvertedForAvFoundation
+        )
+
+private fun DesktopVideoBackend.requestsLibVlcExplicitly(): Boolean =
+    this == DesktopVideoBackend.LIBVLC || this == DesktopVideoBackend.LIBVLC_NATIVE
+
+private fun DesktopVideoBackend.forcedMacFallbackBackend(): String? =
+    when (this) {
+        // Preserve the public legacy enum value while removing the duplicate frame-copy backend
+        // from the macOS runtime model.
+        DesktopVideoBackend.LIBVLC -> "libvlc-native-view"
+        DesktopVideoBackend.LIBVLC_NATIVE -> "libvlc-native-view"
+        DesktopVideoBackend.PLATFORM -> "platform"
+        DesktopVideoBackend.AUTO -> null
+    }
 
 private data class MacLibVlcRuntimeTrackDescription(
     val ordinal: Int,
@@ -244,6 +294,7 @@ class MacVideoPlayerState(
     private var ffmpegHlsOutputColorInfo: VideoColorInfo? = null
     private var ffmpegHlsHdrCmafPassthrough: Boolean = false
     private var ffmpegHlsToneMappedHdrToSdr: Boolean = false
+    private var ffmpegHlsAvFoundationCompatibleTranscode: Boolean = false
     private var preparedPipelineSource: PreparedVideoPipelineSource? = null
     private var preparedPipelineOriginalColorInfo: VideoColorInfo? = null
     private var ffmpegHlsSourceUri: String? = null
@@ -255,9 +306,7 @@ class MacVideoPlayerState(
     private var libVlcTrackInfo: JvmLibVlcTrackInfo? = null
     private var libVlcSelectedAudioStreamIndex: Int? = null
     private var libVlcSelectedSubtitleStreamIndex: Int? = null
-    private var libVlcRenderMode: MacLibVlcRenderMode? = null
     private var nativeBackendUsesLibVlc: Boolean = false
-    private var nativeBackendLibVlcRenderMode: MacLibVlcRenderMode? = null
     internal var libVlcNativeSurfaceRequested: Boolean by mutableStateOf(false)
         private set
     private val libAssLock = Any()
@@ -268,7 +317,10 @@ class MacVideoPlayerState(
     private var libAssSubtitleSource: String? = null
     private val dynamicRangePolicy: DynamicRangePolicy = playbackOptions.dynamicRangePolicy
     private val desktopVideoBackend: DesktopVideoBackend = playbackOptions.desktopVideoBackend
-    private val hdrMetalRequested: Boolean = dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR
+    private val nativeAvFoundationSurfaceRequested: Boolean =
+        playbackOptions.desktopVideoSurfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE
+    private val hdrMetalRequested: Boolean =
+        nativeAvFoundationSurfaceRequested && dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR
     private val hdrToneMappingRequested: Boolean =
         dynamicRangePolicy == DynamicRangePolicy.AUTO ||
             dynamicRangePolicy == DynamicRangePolicy.PREFER_HDR ||
@@ -588,7 +640,7 @@ class MacVideoPlayerState(
         uri: String,
         requestHeaders: Map<String, String>,
     ): MacPlaybackSourceResolution {
-        val candidateLibVlcBackend = resolveLibVlcBackendForUri(uri)
+        val candidateLibVlcBackend = resolveLibVlcBackendForUri(uri, requestHeaders)
         val hasSourcePipelineExtension =
             playbackOptions.extensions.any { extension ->
                 extension is VideoSourcePipelineExtension && extension.availability.canContribute
@@ -651,7 +703,10 @@ class MacVideoPlayerState(
                     requestHeaders = requestHeaders,
                     libVlcBackend =
                         candidateLibVlcBackend?.takeIf {
-                            sourceProbe.videoColorInfo.isSafeForUnmanagedSdrFallback()
+                            shouldUseMacLibVlcCandidate(
+                                sourceColorInfo = sourceProbe.videoColorInfo,
+                                explicitlyRequested = desktopVideoBackend.requestsLibVlcExplicitly(),
+                            )
                         },
                 )
         }
@@ -717,9 +772,8 @@ class MacVideoPlayerState(
                 ffmpegHlsPlaybackOffsetSeconds = 0.0
                 clearLibVlcTrackState()
 
-                // A generic libVLC canvas/native view is not a verified color path. Probe before backend
-                // selection so HDR and ambiguous high-precision input can only use AVFoundation or the
-                // controlled FFmpeg bridge.
+                // The native libVLC view is not a verified color path. Probe before backend selection so
+                // HDR and ambiguous high-precision input can only use AVFoundation or the controlled bridge.
                 val resolvedSource = resolveMacPlaybackSource(uri, sanitizedHeaders)
                 resolvedSource.error?.let { pipelineError ->
                     setPlayerError(pipelineError)
@@ -736,7 +790,6 @@ class MacVideoPlayerState(
                         prepareUriForLibVlcPlayback(
                             resolvedSource.uri,
                             resolvedSource.requestHeaders,
-                            libVlcBackend.renderMode,
                         )
                     } else {
                         prepareUriForMacPlayback(resolvedSource.uri, resolvedSource.requestHeaders)
@@ -854,7 +907,6 @@ class MacVideoPlayerState(
         }
 
         nativeBackendUsesLibVlc = false
-        nativeBackendLibVlcRenderMode = null
         hdrMetalSurfaceAllowed = false
         nativeHdrSurfaceAttached = false
         lastMetalProjectionConfiguration = null
@@ -930,7 +982,12 @@ class MacVideoPlayerState(
     ): Boolean {
         val ptr = playerPtr
         val configuration =
-            if (!forceDisabled && usesMacMetalProjectionRenderer() && !metalProjectionRendererDisabled) {
+            if (
+                !forceDisabled &&
+                nativeAvFoundationSurfaceRequested &&
+                usesMacMetalProjectionRenderer() &&
+                !metalProjectionRendererDisabled
+            ) {
                 macMetalProjectionConfiguration(
                     projection = projection,
                     projectionView = projectionView,
@@ -957,15 +1014,25 @@ class MacVideoPlayerState(
     private fun applyProjectionColorRoute() {
         val projectedSurface = usesMacMetalProjectionRenderer() && !metalProjectionRendererDisabled
         val nativeSurfaceAllowed =
-            !nativeBackendUsesLibVlc &&
-                !usesLibAssSubtitleOverlay &&
-                (projectedSurface || hdrMetalRequested)
+            shouldUseMacNativeAvFoundationPresentation(
+                surfaceMode = playbackOptions.desktopVideoSurfaceMode,
+                dynamicRangePolicy = dynamicRangePolicy,
+                usesMetalProjection = projectedSurface,
+                sourceAlreadyConvertedForAvFoundation = ffmpegHlsFallback != null,
+            ) &&
+                !nativeBackendUsesLibVlc &&
+                !usesLibAssSubtitleOverlay
         hdrMetalSurfaceAllowed = nativeSurfaceAllowed
         nativeHdrSurfaceAttached = false
         colorOutputVerification = ColorPipelineVerification.NONE
         if (!configureNativeMetalProjection()) {
             metalProjectionRendererDisabled = projectedSurface
-            hdrMetalSurfaceAllowed = hdrMetalRequested && !usesMacMetalProjectionRenderer()
+            hdrMetalSurfaceAllowed =
+                nativeAvFoundationSurfaceRequested &&
+                    !nativeBackendUsesLibVlc &&
+                    !usesLibAssSubtitleOverlay &&
+                    hdrMetalRequested &&
+                    !usesMacMetalProjectionRenderer()
             metalProjectionFallbackDetail = "The macOS Metal projection shader or pipeline could not be configured."
         }
         setNativeHdrMetalPreferred(hdrMetalSurfaceAllowed)
@@ -1058,7 +1125,6 @@ class MacVideoPlayerState(
 
     internal fun shouldUseHdrMetalSurface(): Boolean =
         !lifecycle.isDisposed &&
-            (hdrMetalRequested || usesMacMetalProjectionRenderer()) &&
             hdrMetalSurfaceAllowed &&
             !nativeBackendUsesLibVlc &&
             !usesLibAssSubtitleOverlay
@@ -1067,7 +1133,6 @@ class MacVideoPlayerState(
         !lifecycle.isDisposed &&
             libVlcNativeSurfaceRequested &&
             libVlcBackendActive &&
-            libVlcRenderMode == MacLibVlcRenderMode.NATIVE_VIEW &&
             nativeBackendUsesLibVlc
 
     private fun shouldUseNativeVideoSurface(): Boolean = shouldUseHdrMetalSurface() || shouldUseLibVlcNativeSurface()
@@ -1093,25 +1158,30 @@ class MacVideoPlayerState(
                 }.getOrElse { e ->
                     macLogger.e { "Failed to attach HDR Metal surface: ${e.message}" }
                     false
-                }
+            }
             if (!attached) {
-                if (usesMacMetalProjectionRenderer()) {
-                    metalProjectionRendererDisabled = true
-                    metalProjectionFallbackDetail =
-                        "The macOS Metal projection layer could not be attached to the JBR/AWT host."
-                }
-                hdrMetalSurfaceAllowed = false
-                nativeHdrSurfaceAttached = false
-                activeDisplayColorCapabilities = DisplayColorCapabilities()
-                setNativeHdrMetalPreferred(false)
-                setNativeHdrToneMappingEnabled(hdrToneMappingRequested)
-                refreshColorPipelineOutput(ColorPipelineVerification.NONE)
-                if (hdrToneMappingRequested) {
-                    startFrameUpdates()
-                    playerScope.launch { updateFrameAsync() }
-                }
+                handleNativeHdrAttachmentFailure(
+                    "The macOS Metal projection layer could not be attached to the JBR/AWT host.",
+                )
             }
             return attached
+        }
+    }
+
+    private fun handleNativeHdrAttachmentFailure(detail: String) {
+        if (usesMacMetalProjectionRenderer()) {
+            metalProjectionRendererDisabled = true
+            metalProjectionFallbackDetail = detail
+        }
+        hdrMetalSurfaceAllowed = false
+        nativeHdrSurfaceAttached = false
+        activeDisplayColorCapabilities = DisplayColorCapabilities()
+        setNativeHdrMetalPreferred(false)
+        setNativeHdrToneMappingEnabled(hdrToneMappingRequested)
+        refreshColorPipelineOutput(ColorPipelineVerification.NONE)
+        if (hdrToneMappingRequested) {
+            startFrameUpdates()
+            playerScope.launch { updateFrameAsync() }
         }
     }
 
@@ -1127,6 +1197,37 @@ class MacVideoPlayerState(
             }.onFailure { e ->
                 macLogger.e { "Failed to detach HDR Metal surface: ${e.message}" }
             }
+        }
+    }
+
+    internal fun attachHdrMetalWindow(
+        window: Window,
+        contentScaleMode: Int,
+    ): Boolean {
+        synchronized(nativeInstanceLock) {
+            if (!shouldUseHdrMetalSurface()) return false
+            val ptr = playerPtr
+            if (ptr == 0L || !MacNativeBridge.nIsHdrMetalAvailable(ptr)) return false
+
+            val attached =
+                runCatching {
+                    MacNativeBridge.nAttachHdrMetalWindow(ptr, window).also { didAttach ->
+                        if (didAttach) {
+                            MacNativeBridge.nSetHdrMetalContentScaleMode(ptr, contentScaleMode)
+                            nativeHdrSurfaceAttached = true
+                            refreshAttachedHdrColorPipeline()
+                        }
+                    }
+                }.getOrElse { error ->
+                    macLogger.e { "Failed to attach the dedicated HDR/Metal window: ${error.message}" }
+                    false
+                }
+            if (!attached) {
+                handleNativeHdrAttachmentFailure(
+                    "The macOS Metal layer could not be attached below the dedicated Compose window.",
+                )
+            }
+            return attached
         }
     }
 
@@ -1222,10 +1323,41 @@ class MacVideoPlayerState(
         }
     }
 
+    internal fun attachLibVlcNativeWindow(window: Window): Boolean {
+        synchronized(nativeInstanceLock) {
+            if (!shouldUseLibVlcNativeSurface()) return false
+            val ptr = playerPtr
+            if (ptr == 0L) return false
+
+            return runCatching {
+                MacNativeBridge.nAttachLibVlcNativeWindow(ptr, window)
+            }.getOrElse { error ->
+                macLogger.e { "Failed to attach the dedicated libVLC window: ${error.message}" }
+                false
+            }
+        }
+    }
+
     private suspend fun prepareUriForMacPlayback(
         uri: String,
         requestHeaders: Map<String, String> = emptyMap(),
     ): String {
+        val legacyContainer = JvmLegacyVideoContainerSupport.containerFor(uri, requestHeaders)
+        if (legacyContainer != null) {
+            val configured =
+                desktopVideoBackend.forcedMacFallbackBackend()
+                    ?: resolveMacConfiguredFallbackBackend(
+                        configured = macFallbackBackendProperty(),
+                        isLegacyContainer = true,
+                    )
+            if (configured !in setOf("platform", "avfoundation")) {
+                return prepareUriForExternalHlsPlayback(
+                    uri = uri,
+                    requestHeaders = requestHeaders,
+                    forceAvFoundationCompatibility = true,
+                )
+            }
+        }
         if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders)) {
             return prepareUriForAvFoundationPlayback(uri)
         }
@@ -1238,9 +1370,15 @@ class MacVideoPlayerState(
         metalProjectionFallbackDetail = null
         metalProjectionRendererDisabled = false
         lastMetalProjectionConfiguration = null
-        hdrMetalSurfaceAllowed = hdrMetalRequested || usesMacMetalProjectionRenderer()
+        hdrMetalSurfaceAllowed =
+            shouldUseMacNativeAvFoundationPresentation(
+                surfaceMode = playbackOptions.desktopVideoSurfaceMode,
+                dynamicRangePolicy = dynamicRangePolicy,
+                usesMetalProjection = usesMacMetalProjectionRenderer(),
+                sourceAlreadyConvertedForAvFoundation = false,
+            )
         nativeHdrSurfaceAttached = false
-        configureNativeMetalProjection()
+        configureNativeMetalProjection(forceDisabled = !nativeAvFoundationSurfaceRequested)
         setNativeHdrMetalPreferred(hdrMetalSurfaceAllowed)
         setNativeHdrToneMappingEnabled(hdrToneMappingRequested && !hdrMetalSurfaceAllowed)
         withContext(Dispatchers.Main) {
@@ -1268,8 +1406,6 @@ class MacVideoPlayerState(
     private fun macJvmCanvasVideoRenderer(): String? =
         when {
             shouldUseNativeVideoSurface() -> null
-            libVlcBackendActive && libVlcRenderMode == MacLibVlcRenderMode.MEMORY ->
-                libVlcVideoRenderer(MacLibVlcRenderMode.MEMORY)
             ffmpegHlsFallback != null ->
                 projection.jvmCanvasRendererLabel(
                     baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
@@ -1283,7 +1419,7 @@ class MacVideoPlayerState(
         when {
             shouldUseHdrMetalSurface() && usesMacMetalProjectionRenderer() ->
                 "AVPlayerItemVideoOutput P010/NV12 -> FP16 Metal projection"
-            shouldUseHdrMetalSurface() -> "AVPlayerLayer native HDR/EDR"
+            shouldUseHdrMetalSurface() -> "AVPlayerLayer native AppKit surface (HDR/EDR capable)"
             hdrToneMappingRequested ->
                 projection.jvmCanvasRendererLabel(
                     baseRenderer = "AVPlayerItemVideoOutput tone-mapped BT.709 -> Compose Canvas",
@@ -1298,9 +1434,10 @@ class MacVideoPlayerState(
 
     private fun avFoundationNotes(): String =
         when {
-            usesMacMetalProjectionRenderer() ->
-                "Projected video uses a per-player FP16 Metal layer; Compose overlay uses a separate window."
-            hdrMetalRequested -> "Native macOS HDR path; Compose overlay uses a separate transparent window."
+            shouldUseHdrMetalSurface() && usesMacMetalProjectionRenderer() ->
+                "Projected video uses a per-player FP16 Metal layer in a dedicated native player window; Compose controls share that window."
+            shouldUseHdrMetalSurface() ->
+                "Native macOS HDR path uses a dedicated player window shared with Compose controls."
             hdrToneMappingRequested -> "HDR sources are tone-mapped to SDR for stable Compose rendering."
             else -> "No external GPL components are bundled or linked."
         }
@@ -1308,9 +1445,11 @@ class MacVideoPlayerState(
     private suspend fun prepareUriForExternalHlsPlayback(
         uri: String,
         requestHeaders: Map<String, String>,
+        forceAvFoundationCompatibility: Boolean = false,
     ): String {
         ffmpegHlsHdrCmafPassthrough = false
         ffmpegHlsToneMappedHdrToSdr = false
+        ffmpegHlsAvFoundationCompatibleTranscode = false
         hdrMetalSurfaceAllowed = false
         configureNativeMetalProjection(forceDisabled = true)
         setNativeHdrMetalPreferred(false)
@@ -1323,9 +1462,16 @@ class MacVideoPlayerState(
                 selectedAudioStreamIndex = ffmpegHlsSelectedAudioStreamIndex,
                 selectedSubtitleStreamIndex = ffmpegHlsSelectedSubtitleStreamIndex,
                 startTimeSeconds = ffmpegHlsPlaybackOffsetSeconds,
-                allowHdrCmafPassthrough = dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR,
-                requireHdrCmafPassthrough = dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR,
-                forceSdrOutput = dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR,
+                allowHdrCmafPassthrough =
+                    !forceAvFoundationCompatibility &&
+                        dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR,
+                requireHdrCmafPassthrough =
+                    !forceAvFoundationCompatibility &&
+                        dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR,
+                forceSdrOutput =
+                    !forceAvFoundationCompatibility &&
+                        dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR,
+                forceAvFoundationCompatibility = forceAvFoundationCompatibility,
                 extensions = playbackOptions.extensions,
             )
         val hlsSource = startedFallback.source
@@ -1335,6 +1481,7 @@ class MacVideoPlayerState(
         ffmpegHlsOutputColorInfo = hlsSource.outputColorInfo
         ffmpegHlsHdrCmafPassthrough = hlsSource.hdrCmafPassthrough
         ffmpegHlsToneMappedHdrToSdr = hlsSource.toneMappedHdrToSdr
+        ffmpegHlsAvFoundationCompatibleTranscode = hlsSource.avFoundationCompatibleTranscode
         ffmpegHlsSourceUri = uri
         ffmpegHlsSelectedAudioStreamIndex = hlsSource.selectedAudioStreamIndex
         ffmpegHlsSelectedSubtitleStreamIndex = hlsSource.selectedSubtitleStreamIndex
@@ -1350,6 +1497,8 @@ class MacVideoPlayerState(
                         hlsSource.hdrCmafPassthrough ->
                             "KMediaBridge HDR sample copy -> AVFoundation system decoder"
                         hlsSource.toneMappedHdrToSdr -> "Color-managed SDR bridge -> AVFoundation"
+                        hlsSource.avFoundationCompatibleTranscode ->
+                            "FFmpeg legacy decode -> AVC/AAC -> AVFoundation"
                         else -> "KMediaBridge CMAF adapter -> AVFoundation"
                     },
                 decoderCapabilities = activeDecoderColorCapabilities,
@@ -1357,21 +1506,32 @@ class MacVideoPlayerState(
             )
         }
 
+        // The bridge adapts the source, but AVFoundation still owns presentation. SDR legacy
+        // transcodes, tone-mapped output, and HDR passthrough all use the same native AppKit
+        // window unless this player was explicitly created for embedded Compose rendering.
         hdrMetalSurfaceAllowed =
-            hlsSource.hdrCmafPassthrough &&
-            (hdrMetalRequested || usesMacMetalProjectionRenderer())
+            shouldUseMacNativeAvFoundationPresentation(
+                surfaceMode = playbackOptions.desktopVideoSurfaceMode,
+                dynamicRangePolicy = dynamicRangePolicy,
+                usesMetalProjection = usesMacMetalProjectionRenderer(),
+                sourceAlreadyConvertedForAvFoundation = true,
+            )
         nativeHdrSurfaceAttached = false
         lastMetalProjectionConfiguration = null
-        if (!configureNativeMetalProjection(forceDisabled = !hlsSource.hdrCmafPassthrough)) {
+        if (
+            !configureNativeMetalProjection(
+                forceDisabled = !nativeAvFoundationSurfaceRequested || !hlsSource.hdrCmafPassthrough,
+            )
+        ) {
             metalProjectionRendererDisabled = usesMacMetalProjectionRenderer()
             metalProjectionFallbackDetail =
                 "The macOS Metal projection shader or pipeline could not be configured for remuxed HDR."
-            hdrMetalSurfaceAllowed = hlsSource.hdrCmafPassthrough && !usesMacMetalProjectionRenderer()
+            hdrMetalSurfaceAllowed = nativeAvFoundationSurfaceRequested && !usesMacMetalProjectionRenderer()
         }
         setNativeHdrMetalPreferred(hdrMetalSurfaceAllowed)
         setNativeHdrToneMappingEnabled(hdrToneMappingRequested && !hdrMetalSurfaceAllowed)
         refreshColorPipelineOutput(
-            if (hlsSource.toneMappedHdrToSdr) {
+            if (hlsSource.toneMappedHdrToSdr || hlsSource.avFoundationCompatibleTranscode) {
                 ColorPipelineVerification.RENDERER_CONFIGURED
             } else {
                 ColorPipelineVerification.NONE
@@ -1395,26 +1555,21 @@ class MacVideoPlayerState(
                         "${backend.displayName} CMAF bridge"
                     },
                 container =
-                    if (hlsSource.videoCopiedWithoutReencoding) {
-                        "Matroska/WebM video samples copied to CMAF/fMP4"
-                    } else {
-                        "Container adapted to HLS"
+                    when {
+                        hlsSource.videoCopiedWithoutReencoding ->
+                            "Matroska/WebM video samples copied to CMAF/fMP4"
+                        hlsSource.avFoundationCompatibleTranscode ->
+                            "AVI/ASF decoded to AVC/AAC CMAF/fMP4"
+                        else -> "Container adapted to HLS"
                     },
                 videoDecoder =
-                    if (hlsSource.hdrCmafPassthrough) {
-                        "AVFoundation HEVC Main 10 from CMAF"
-                    } else {
-                        "AVFoundation system decoder from CMAF"
+                    when {
+                        hlsSource.hdrCmafPassthrough -> "AVFoundation HEVC Main 10 from CMAF"
+                        hlsSource.avFoundationCompatibleTranscode ->
+                            "FFmpeg legacy decoder -> H.264 VideoToolbox -> AVFoundation"
+                        else -> "AVFoundation system decoder from CMAF"
                     },
-                videoRenderer =
-                    if (hlsSource.hdrCmafPassthrough) {
-                        avFoundationVideoRenderer()
-                    } else {
-                        projection.jvmCanvasRendererLabel(
-                            baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
-                            textureCrop = projectionTextureCrop,
-                        )
-                    },
+                videoRenderer = avFoundationVideoRenderer(),
                 audioRenderer = "AVFoundation / CoreAudio",
                 subtitleRenderer =
                     hlsSource.selectedSubtitleStreamIndex?.let {
@@ -1431,6 +1586,9 @@ class MacVideoPlayerState(
                             "The selected KMediaBridge runtime uses dynamically linked FFmpeg. Compressed video " +
                                 "and compatible audio are remuxed without re-encoding; " +
                                 "display output is reported separately."
+                        hlsSource.usesMediaBridge && hlsSource.avFoundationCompatibleTranscode ->
+                            "The selected KMediaBridge runtime decoded legacy video/audio with dynamically linked " +
+                                "FFmpeg, encoded H.264 through VideoToolbox and AAC, then delivered CMAF to AVFoundation."
                         hlsSource.usesMediaBridge ->
                             "The selected KMediaBridge runtime used dynamically linked FFmpeg to emit a bounded SDR " +
                                 "CMAF stream."
@@ -1443,7 +1601,6 @@ class MacVideoPlayerState(
     private suspend fun prepareUriForLibVlcPlayback(
         uri: String,
         requestHeaders: Map<String, String> = emptyMap(),
-        renderMode: MacLibVlcRenderMode,
     ): String {
         libVlcBackendActive = true
         hdrMetalSurfaceAllowed = false
@@ -1451,28 +1608,18 @@ class MacVideoPlayerState(
         setNativeHdrMetalPreferred(false)
         setNativeHdrToneMappingEnabled(false)
         libVlcSourceUri = uri
-        libVlcRenderMode = renderMode
         withContext(Dispatchers.Main) {
-            libVlcNativeSurfaceRequested = renderMode == MacLibVlcRenderMode.NATIVE_VIEW
+            libVlcNativeSurfaceRequested = true
             renderingInfo.update(
-                backend =
-                    when (renderMode) {
-                        MacLibVlcRenderMode.MEMORY -> "libVLC memory backend"
-                        MacLibVlcRenderMode.NATIVE_VIEW -> "libVLC native-view backend"
-                    },
+                backend = "libVLC native-view backend",
                 container = "Source through user-installed libVLC",
                 videoDecoder = "libVLC",
-                videoRenderer = libVlcVideoRenderer(renderMode),
+                videoRenderer = "libVLC native NSView",
                 audioRenderer = "libVLC / AUHAL",
                 subtitleRenderer = null,
                 subtitleSource = null,
                 notes =
-                    when (renderMode) {
-                        MacLibVlcRenderMode.MEMORY ->
-                            "VLC is loaded dynamically from the user's installation; not bundled or linked."
-                        MacLibVlcRenderMode.NATIVE_VIEW ->
-                            "VLC renders into a native macOS view; Compose controls use a separate overlay window."
-                    },
+                    "VLC renders into a native macOS view in a dedicated player window shared with Compose controls.",
             )
         }
         val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
@@ -1480,16 +1627,6 @@ class MacVideoPlayerState(
         updateLibVlcTracks(trackInfo)
         return uri
     }
-
-    private fun libVlcVideoRenderer(renderMode: MacLibVlcRenderMode): String =
-        when (renderMode) {
-            MacLibVlcRenderMode.MEMORY ->
-                projection.jvmCanvasRendererLabel(
-                    baseRenderer = "libVLC vmem -> Compose Canvas (Skia)",
-                    textureCrop = projectionTextureCrop,
-                )
-            MacLibVlcRenderMode.NATIVE_VIEW -> "libVLC native NSView"
-        }
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
         withContext(Dispatchers.Main) {
@@ -1600,7 +1737,6 @@ class MacVideoPlayerState(
         libVlcTrackInfo = null
         libVlcSelectedAudioStreamIndex = null
         libVlcSelectedSubtitleStreamIndex = null
-        libVlcRenderMode = null
         withContext(Dispatchers.Main) {
             libVlcNativeSurfaceRequested = false
             _availableAudioTracks.removeAll { isMacLibVlcAudioTrackId(it.id) }
@@ -1882,30 +2018,35 @@ class MacVideoPlayerState(
             else -> false
         }
 
-    private suspend fun resolveLibVlcBackendForUri(uri: String): MacResolvedLibVlcBackend? {
-        val forcedDesktopBackend =
-            when (desktopVideoBackend) {
-                DesktopVideoBackend.LIBVLC -> "libvlc"
-                DesktopVideoBackend.LIBVLC_NATIVE -> "libvlc-native-view"
-                DesktopVideoBackend.PLATFORM -> "platform"
-                DesktopVideoBackend.AUTO -> null
-            }
-        if (forcedDesktopBackend == null && !JvmExternalFallbackContainerSupport.needsContainerFallback(uri)) {
+    private suspend fun resolveLibVlcBackendForUri(
+        uri: String,
+        requestHeaders: Map<String, String>,
+    ): MacResolvedLibVlcBackend? {
+        val forcedDesktopBackend = desktopVideoBackend.forcedMacFallbackBackend()
+        val legacyContainer = JvmLegacyVideoContainerSupport.containerFor(uri, requestHeaders)
+        val needsExternalContainerFallback =
+            legacyContainer == null &&
+                JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders)
+        if (forcedDesktopBackend == null && legacyContainer == null && !needsExternalContainerFallback) {
             return null
         }
 
         val configured =
-            (forcedDesktopBackend ?: macFallbackBackendProperty()).lowercase()
+            forcedDesktopBackend
+                ?: resolveMacConfiguredFallbackBackend(
+                    configured = macFallbackBackendProperty(),
+                    isLegacyContainer = legacyContainer != null,
+                )
 
         return when (configured) {
             "platform", "avfoundation" -> null
             "libvlc" ->
-                ExternalVlcLocator.findLibVlc()?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
+                ExternalVlcLocator.findLibVlc()?.let(::MacResolvedLibVlcBackend)
                     ?: throw missingLibVlcBackendException()
             "auto" ->
-                ExternalVlcLocator.findLibVlc()?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.MEMORY) }
+                ExternalVlcLocator.findLibVlc()?.let(::MacResolvedLibVlcBackend)
             "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-nsview" ->
-                ExternalVlcLocator.findLibVlc()?.let { MacResolvedLibVlcBackend(it, MacLibVlcRenderMode.NATIVE_VIEW) }
+                ExternalVlcLocator.findLibVlc()?.let(::MacResolvedLibVlcBackend)
                     ?: throw missingLibVlcBackendException()
             "ffmpeg", "kmediabridge", "bridge", "vlc" -> null
             else -> null
@@ -1940,6 +2081,7 @@ class MacVideoPlayerState(
         ffmpegHlsOutputColorInfo = null
         ffmpegHlsHdrCmafPassthrough = false
         ffmpegHlsToneMappedHdrToSdr = false
+        ffmpegHlsAvFoundationCompatibleTranscode = false
         ffmpegHlsSourceUri = null
         ffmpegHlsSelectedAudioStreamIndex = null
         ffmpegHlsSelectedSubtitleStreamIndex = null
@@ -2054,14 +2196,9 @@ class MacVideoPlayerState(
         }
 
         val wantsLibVlc = libVlcBackend != null
-        val wantsLibVlcRenderMode = libVlcBackend?.renderMode
         val needsBackendReplacement =
             synchronized(nativeInstanceLock) {
-                playerPtr != 0L &&
-                    (
-                        nativeBackendUsesLibVlc != wantsLibVlc ||
-                            (wantsLibVlc && nativeBackendLibVlcRenderMode != wantsLibVlcRenderMode)
-                    )
+                playerPtr != 0L && nativeBackendUsesLibVlc != wantsLibVlc
             }
         if (needsBackendReplacement) {
             cancelAndResetPlayerScope(recreate = true)
@@ -2072,7 +2209,6 @@ class MacVideoPlayerState(
                         MacNativeBridge.nDisposePlayer(ptrToDispose)
                     }
                     nativeBackendUsesLibVlc = false
-                    nativeBackendLibVlcRenderMode = null
                 }
             }
         }
@@ -2083,7 +2219,7 @@ class MacVideoPlayerState(
                     MacNativeBridge.nCreateLibVlcPlayer(
                         libVlcPath = libVlcBackend.installation.libVlcPath,
                         pluginPath = libVlcBackend.installation.pluginPath,
-                        nativeVideoOutput = libVlcBackend.renderMode == MacLibVlcRenderMode.NATIVE_VIEW,
+                        nativeVideoOutput = true,
                     )
                 } else {
                     MacNativeBridge.nCreatePlayer()
@@ -2096,7 +2232,6 @@ class MacVideoPlayerState(
                             false
                         } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
                             nativeBackendUsesLibVlc = wantsLibVlc
-                            nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
                             true
                         } else {
                             false
@@ -2264,6 +2399,8 @@ class MacVideoPlayerState(
                 "FFmpeg MKV to CMAF video copy -> AVFoundation system decoder"
             hasBridgedColor && ffmpegHlsToneMappedHdrToSdr ->
                 "Color-managed SDR bridge -> AVFoundation"
+            hasBridgedColor && ffmpegHlsAvFoundationCompatibleTranscode ->
+                "FFmpeg legacy decode -> AVC/AAC -> AVFoundation"
             hasBridgedColor -> "External color-managed bridge -> AVFoundation"
             nativeBackendUsesLibVlc -> "libVLC (unverified color path)"
             else -> "AVFoundation system decoder"
@@ -2494,6 +2631,16 @@ class MacVideoPlayerState(
         bufferingCheckJob = null
     }
 
+    private fun visibleNativeFrameDimension(
+        decodedDimension: Int,
+        probedDimension: Int?,
+    ): Int =
+        if (nativeBackendUsesLibVlc) {
+            visibleLibVlcFrameDimension(decodedDimension, probedDimension)
+        } else {
+            decodedDimension
+        }
+
     /** Updates the current video frame on a background thread. */
     private suspend fun updateFrameAsync() {
         withContext(frameDispatcher) {
@@ -2506,6 +2653,7 @@ class MacVideoPlayerState(
                 var failedSubtitleRenderer: DesktopSubtitleRenderer? = null
                 var subtitleRendererFailed = false
                 var subtitleFailureSelectionToken = 0L
+                var publishedFrameGeometry: Triple<Int, Int, Float>? = null
 
                 videoReaderMutex.withLock {
                     // Lock the CVPixelBuffer directly — eliminates the Swift-side memcpy.
@@ -2515,8 +2663,10 @@ class MacVideoPlayerState(
                     if (frameAddress == 0L) return@withLock
 
                     try {
-                        val width = outInfo[0]
-                        val height = outInfo[1]
+                        val decodedWidth = outInfo[0]
+                        val decodedHeight = outInfo[1]
+                        val width = visibleNativeFrameDimension(decodedWidth, libVlcTrackInfo?.videoWidth)
+                        val height = visibleNativeFrameDimension(decodedHeight, libVlcTrackInfo?.videoHeight)
                         val srcBytesPerRow = outInfo[2]
                         if (
                             width <= 0 ||
@@ -2600,15 +2750,19 @@ class MacVideoPlayerState(
 
                         lastSentSkiaBitmap = targetBitmap
                         lastFrameHash = frameHash ?: Int.MIN_VALUE
+                        val frameAspectRatio = displayAspectRatio(ptr, width, height)
                         _currentFrameState.value =
                             RenderedFrame(
                                 bitmap = targetBitmap,
                                 imageBitmap = targetBitmap.asComposeImageBitmap(),
-                                displayAspectRatio = displayAspectRatio(ptr, width, height),
+                                displayAspectRatio = frameAspectRatio,
                                 width = width,
                                 height = height,
                                 epoch = publicationEpoch,
                             )
+                        if (frameBuffersChanged) {
+                            publishedFrameGeometry = Triple(width, height, frameAspectRatio)
+                        }
                         framePublished = true
                     } finally {
                         MacNativeBridge.nUnlockFrame(ptr)
@@ -2640,21 +2794,33 @@ class MacVideoPlayerState(
                 }
 
                 if (framePublished) {
-                    lastFrameUpdateTime = System.currentTimeMillis()
-                    if (colorOutputVerification != ColorPipelineVerification.RENDERER_CONFIGURED) {
-                        refreshColorPipelineOutput(ColorPipelineVerification.RENDERER_CONFIGURED)
-                    }
-
-                    // Update loading state if needed on the main thread
-                    if (isLoading && !seekInProgress) {
-                        withContext(Dispatchers.Main) {
-                            isLoading = false
-                        }
-                    }
+                    handlePublishedFrame(publishedFrameGeometry)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 macLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
+            }
+        }
+    }
+
+    private suspend fun handlePublishedFrame(publishedFrameGeometry: Triple<Int, Int, Float>?) {
+        lastFrameUpdateTime = System.currentTimeMillis()
+        publishedFrameGeometry?.let { (width, height, aspectRatio) ->
+            withContext(Dispatchers.Main) {
+                metadata.width = width
+                metadata.height = height
+                _aspectRatio.value = aspectRatio
+            }
+            macLogger.d { "Decoded frame geometry updated: ${width}x$height" }
+        }
+        if (colorOutputVerification != ColorPipelineVerification.RENDERER_CONFIGURED) {
+            refreshColorPipelineOutput(ColorPipelineVerification.RENDERER_CONFIGURED)
+        }
+
+        // Update loading state if needed on the main thread
+        if (isLoading && !seekInProgress) {
+            withContext(Dispatchers.Main) {
+                isLoading = false
             }
         }
     }
@@ -3201,6 +3367,7 @@ class MacVideoPlayerState(
                 ffmpegHlsOutputColorInfo = null
                 ffmpegHlsHdrCmafPassthrough = false
                 ffmpegHlsToneMappedHdrToSdr = false
+                ffmpegHlsAvFoundationCompatibleTranscode = false
                 ffmpegHlsSourceUri = null
                 ffmpegHlsSelectedAudioStreamIndex = null
                 ffmpegHlsSelectedSubtitleStreamIndex = null
@@ -3212,7 +3379,6 @@ class MacVideoPlayerState(
                 libVlcTrackInfo = null
                 libVlcSelectedAudioStreamIndex = null
                 libVlcSelectedSubtitleStreamIndex = null
-                libVlcRenderMode = null
                 libVlcNativeSurfaceRequested = false
 
                 val ptrToDispose =
@@ -3235,7 +3401,6 @@ class MacVideoPlayerState(
                 }
 
                 nativeBackendUsesLibVlc = false
-                nativeBackendLibVlcRenderMode = null
                 fallbackToClose?.close()
                 preparedSourceToClose?.close()
                 resetState()
@@ -3692,63 +3857,32 @@ class MacVideoPlayerState(
         selectionToken: Long,
         generation: Long,
     ) {
-        if (isAssLikeTrack(track)) {
-            try {
-                markLibAssSubtitlePreparing(track, streamIndex, selectionToken)
-                if (!configureLibAssSubtitleRenderer(track, streamIndex, selectionToken, generation)) return
-                val ptr = playerPtr
-                val nativeSubtitlesDisabled = ptr != 0L && MacNativeBridge.nDisableLibVlcSubtitles(ptr)
-                lifecycle.ensureCurrentSource(generation)
-                if (!nativeSubtitlesDisabled) {
-                    clearLibAssSubtitleRenderer(selectionToken)
-                    commitCurrentSourceOnMain(generation) {
-                        if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
-                        currentSubtitleTrack = null
-                        subtitlesEnabled = false
-                        error = VideoPlayerError.CodecError("Failed to disable libVLC subtitles")
-                    }
-                    return
-                }
-                lifecycle.commitCurrentSource(generation) {
-                    libVlcSelectedSubtitleStreamIndex = streamIndex
-                }
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                if (lifecycle.isCurrentSource(generation) && isCurrentLibAssSelection(selectionToken)) {
-                    clearLibAssSubtitleRenderer(selectionToken)
-                    commitCurrentSourceOnMain(generation) {
-                        if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
-                        libVlcSelectedSubtitleStreamIndex = null
-                        currentSubtitleTrack = null
-                        subtitlesEnabled = false
-                        error = VideoPlayerError.CodecError("ASS subtitle rendering failed: ${e.message}")
-                    }
-                }
-            }
-            return
-        }
-
-        val sourceUri = libVlcSourceUri
-        if (sourceUri == null) {
-            commitCurrentSourceOnMain(generation) {
+        val subtitleOrdinal =
+            libVlcTrackInfo
+                ?.subtitleStreams
+                ?.firstOrNull { it.streamIndex == streamIndex }
+                ?.ordinal
+        val ptr = playerPtr
+        val applied =
+            ptr != 0L &&
+                subtitleOrdinal != null &&
+                MacNativeBridge.nSelectLibVlcSubtitleTrack(ptr, subtitleOrdinal)
+        lifecycle.ensureCurrentSource(generation)
+        commitCurrentSourceOnMain(generation) {
+            if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
+            if (applied) {
+                libVlcSelectedSubtitleStreamIndex = streamIndex
+                currentSubtitleTrack = track
+                subtitlesEnabled = true
+                renderingInfo.subtitleRenderer = "libVLC native subtitle renderer"
+                renderingInfo.subtitleSource = "embedded stream $streamIndex"
+            } else {
+                libVlcSelectedSubtitleStreamIndex = null
                 currentSubtitleTrack = null
                 subtitlesEnabled = false
-                error = VideoPlayerError.SourceError("No libVLC source is available for subtitle rendering")
+                error = VideoPlayerError.CodecError("Failed to select the native libVLC subtitle track")
             }
-            return
         }
-
-        macLogger.d {
-            "libVLC memory callbacks do not expose rendered subtitle pixels; switching to HLS renderer"
-        }
-        switchMacHlsSubtitleTrack(
-            sourceUri = sourceUri,
-            track = track,
-            streamIndex = streamIndex,
-            selectedAudioStreamIndex = libVlcSelectedAudioStreamIndex,
-            failureMessage = "Failed to switch subtitle track through the external HLS renderer",
-            generation = generation,
-        )
     }
 
     private suspend fun disableLibVlcSubtitles(generation: Long) {
@@ -3760,6 +3894,8 @@ class MacVideoPlayerState(
                 libVlcSelectedSubtitleStreamIndex = null
                 subtitlesEnabled = false
                 currentSubtitleTrack = null
+                renderingInfo.subtitleRenderer = null
+                renderingInfo.subtitleSource = null
             } else {
                 error = VideoPlayerError.CodecError("Failed to disable libVLC subtitles")
             }

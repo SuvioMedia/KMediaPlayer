@@ -59,7 +59,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
-import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
@@ -77,19 +76,19 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(
+internal fun PlayerScreen(
     modifier: Modifier = Modifier,
-    playerState: RenderableVideoPlayerState = rememberRenderableVideoPlayerState(),
+    playerState: VideoPlayerState = rememberRenderableVideoPlayerState(),
     initialVideoUrl: String? = null,
     initialSubtitleUrl: String? = null,
     demoSubtitleEnabled: Boolean = true,
+    selectedDesktopMkvBackend: DesktopMkvPlaybackBackend = DesktopMkvPlaybackBackend.AUTO,
+    onDesktopMkvBackendChange: (DesktopMkvPlaybackBackend) -> Unit = {},
 ) {
-    // Pause when leaving the screen, resume when coming back
-    DisposableEffect(playerState) {
+    // The state owner releases backend resources when this player leaves composition.
+    // Calling pause() here races with that release while switching backend instances.
+    DisposableEffect(Unit) {
         onDispose {
-            if (playerState.isPlaying) {
-                playerState.pause()
-            }
             restoreDesktopMkvPlaybackBackend()
         }
     }
@@ -109,7 +108,6 @@ fun PlayerScreen(
     var videoUrl by remember(startupVideoUrl) { mutableStateOf(startupVideoUrl) }
     var initialPlayerState by remember { mutableStateOf(InitialPlayerState.PLAY) }
     var selectedContentScale by remember { mutableStateOf(ContentScale.Fit) }
-    var selectedDesktopMkvBackend by remember { mutableStateOf(DesktopMkvPlaybackBackend.AUTO) }
 
     val controlsVisible = true
     var showSourceSheet by remember { mutableStateOf(false) }
@@ -122,7 +120,8 @@ fun PlayerScreen(
     var pendingPickVideo by remember { mutableStateOf(false) }
     var pendingPickSubtitle by remember { mutableStateOf(false) }
     val demoSubtitleUrl = initialSubtitleUrl ?: DEFAULT_DEMO_ASS_SUBTITLE_URL
-    var demoLoaded by remember { mutableStateOf(false) }
+    var initializedPlayerState by remember { mutableStateOf<VideoPlayerState?>(null) }
+    var appliedDesktopBackend by remember { mutableStateOf<DesktopMkvPlaybackBackend?>(null) }
     var playbackEndedVisible by remember { mutableStateOf(false) }
 
     fun applyDesktopMkvBackend() {
@@ -135,9 +134,10 @@ fun PlayerScreen(
         playerState.openUri(url, initialPlayerState)
     }
 
-    val videoFileLauncher = rememberFilePickerLauncher(type = FileKitType.Video) { file ->
+    val videoFileLauncher = rememberFilePickerLauncher(type = SAMPLE_VIDEO_FILE_TYPE) { file ->
         file?.let {
             playbackEndedVisible = false
+            videoUrl = it.getUri()
             applyDesktopMkvBackend()
             playerState.openFile(it, initialPlayerState)
         }
@@ -158,9 +158,21 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(playerState) {
-        if (!demoLoaded && !playerState.hasMedia) {
-            if (demoSubtitleEnabled) {
+    LaunchedEffect(playerState, selectedDesktopMkvBackend) {
+        val playerChanged = initializedPlayerState !== playerState
+        val backendChanged = appliedDesktopBackend != selectedDesktopMkvBackend
+        if (playerChanged || backendChanged) {
+            val previousPlayerState =
+                initializedPlayerState?.takeIf { previous -> previous !== playerState }
+            if (previousPlayerState != null) {
+                // A dedicated MPV surface lives in a nested Compose window, whose onDispose may
+                // finish one AppKit turn after the replacement state is created. Quiesce the old
+                // native player before opening media in AVFoundation/libVLC so their callbacks and
+                // surfaces never overlap during a dynamic backend handoff.
+                previousPlayerState.dispose()
+                delay(DESKTOP_BACKEND_HANDOFF_SETTLE_MS)
+            }
+            if (playerChanged && demoSubtitleEnabled && !playerState.hasMedia) {
                 val track =
                     SubtitleTrack(
                         label = "ASS demo",
@@ -171,8 +183,11 @@ fun PlayerScreen(
                 playerState.addSubtitleTrack(track)
                 playerState.selectSubtitleTrack(track)
             }
-            openVideoUrl(videoUrl)
-            demoLoaded = true
+            if (!playerState.hasMedia || backendChanged) {
+                openVideoUrl(videoUrl)
+            }
+            initializedPlayerState = playerState
+            appliedDesktopBackend = selectedDesktopMkvBackend
         }
     }
 
@@ -230,7 +245,6 @@ fun PlayerScreen(
     }
 
     Box(modifier = modifier.background(Color.Black)) {
-        // Video fills the entire area
         VideoPlayerSurface(
             playerState = playerState,
             modifier = Modifier.fillMaxSize(),
@@ -254,6 +268,78 @@ fun PlayerScreen(
                         )
                     }
                 }
+            }
+
+            if (showSourceSheet) {
+                val desktopMkvBackendOptions = remember(showSourceSheet) { desktopMkvPlaybackBackendOptions() }
+                MediaSourceSheet(
+                    videoUrl = videoUrl,
+                    sampleVideos = availableSampleVideos,
+                    desktopMkvBackendAvailable = desktopMkvPlaybackBackendSelectionAvailable,
+                    desktopMkvBackendOptions = desktopMkvBackendOptions,
+                    selectedDesktopMkvBackend = selectedDesktopMkvBackend,
+                    onUrlChange = { videoUrl = it },
+                    onDesktopMkvBackendChange = { backend ->
+                        applyDesktopMkvPlaybackBackend(backend)
+                        onDesktopMkvBackendChange(backend)
+                    },
+                    onLoadUrl = {
+                        if (videoUrl.isNotEmpty()) {
+                            disableDemoSubtitleForNewSource()
+                            openVideoUrl(videoUrl)
+                        }
+                        showSourceSheet = false
+                    },
+                    onPickFile = {
+                        disableDemoSubtitleForNewSource()
+                        pendingPickVideo = true
+                        showSourceSheet = false
+                    },
+                    onSelectPreset = { url ->
+                        videoUrl = url
+                        disableDemoSubtitleForNewSource()
+                        openVideoUrl(url)
+                        showSourceSheet = false
+                    },
+                    onDismiss = { showSourceSheet = false },
+                )
+            }
+            if (showSettingsSheet) {
+                SettingsSheet(
+                    playerState = playerState,
+                    selectedContentScale = selectedContentScale,
+                    onContentScaleChange = { selectedContentScale = it },
+                    initialPlayerState = initialPlayerState,
+                    onInitialPlayerStateChange = { initialPlayerState = it },
+                    onDismiss = { showSettingsSheet = false },
+                )
+            }
+            if (showSubtitleSheet) {
+                SubtitleSheet(
+                    audioTracks = playerState.availableAudioTracks,
+                    selectedAudioTrack = playerState.currentAudioTrack,
+                    controlsEnabled = !playerState.isLoading,
+                    onAudioTrackSelected = { track ->
+                        playerState.selectAudioTrack(track)
+                    },
+                    subtitleTracks = playerState.availableSubtitleTracks,
+                    selectedSubtitleTrack = playerState.currentSubtitleTrack,
+                    onSubtitleTrackSelected = { track ->
+                        playerState.selectSubtitleTrack(track)
+                    },
+                    onDisableSubtitles = {
+                        playerState.disableSubtitles()
+                    },
+                    onPickFile = {
+                        pendingPickSubtitle = true
+                        showSubtitleSheet = false
+                    },
+                    onAddTrack = { track ->
+                        playerState.addSubtitleTrack(track)
+                        playerState.selectSubtitleTrack(track)
+                    },
+                    onDismiss = { showSubtitleSheet = false },
+                )
             }
         }
 
@@ -346,79 +432,29 @@ fun PlayerScreen(
         }
     }
 
-    // Bottom sheets
-    if (showSourceSheet) {
-        val desktopMkvBackendOptions = remember(showSourceSheet) { desktopMkvPlaybackBackendOptions() }
-        MediaSourceSheet(
-            videoUrl = videoUrl,
-            sampleVideos = availableSampleVideos,
-            desktopMkvBackendAvailable = desktopMkvPlaybackBackendSelectionAvailable,
-            desktopMkvBackendOptions = desktopMkvBackendOptions,
-            selectedDesktopMkvBackend = selectedDesktopMkvBackend,
-            onUrlChange = { videoUrl = it },
-            onDesktopMkvBackendChange = { backend ->
-                selectedDesktopMkvBackend = backend
-                applyDesktopMkvPlaybackBackend(backend)
-            },
-            onLoadUrl = {
-                if (videoUrl.isNotEmpty()) {
-                    disableDemoSubtitleForNewSource()
-                    openVideoUrl(videoUrl)
-                }
-                showSourceSheet = false
-            },
-            onPickFile = {
-                disableDemoSubtitleForNewSource()
-                pendingPickVideo = true
-                showSourceSheet = false
-            },
-            onSelectPreset = { url ->
-                videoUrl = url
-                disableDemoSubtitleForNewSource()
-                openVideoUrl(url)
-                showSourceSheet = false
-            },
-            onDismiss = { showSourceSheet = false },
-        )
-    }
-    if (showSettingsSheet) {
-        SettingsSheet(
-            playerState = playerState,
-            selectedContentScale = selectedContentScale,
-            onContentScaleChange = { selectedContentScale = it },
-            initialPlayerState = initialPlayerState,
-            onInitialPlayerStateChange = { initialPlayerState = it },
-            onDismiss = { showSettingsSheet = false },
-        )
-    }
-    if (showSubtitleSheet) {
-        SubtitleSheet(
-            audioTracks = playerState.availableAudioTracks,
-            selectedAudioTrack = playerState.currentAudioTrack,
-            controlsEnabled = !playerState.isLoading,
-            onAudioTrackSelected = { track ->
-                playerState.selectAudioTrack(track)
-            },
-            subtitleTracks = playerState.availableSubtitleTracks,
-            selectedSubtitleTrack = playerState.currentSubtitleTrack,
-            onSubtitleTrackSelected = { track ->
-                playerState.selectSubtitleTrack(track)
-            },
-            onDisableSubtitles = {
-                playerState.disableSubtitles()
-            },
-            onPickFile = {
-                pendingPickSubtitle = true
-                showSubtitleSheet = false
-            },
-            onAddTrack = { track ->
-                playerState.addSubtitleTrack(track)
-                playerState.selectSubtitleTrack(track)
-            },
-            onDismiss = { showSubtitleSheet = false },
-        )
-    }
 }
+
+private val SAMPLE_VIDEO_FILE_TYPE =
+    FileKitType.File(
+        "mp4",
+        "m4v",
+        "mov",
+        "mkv",
+        "webm",
+        "avi",
+        "divx",
+        "wmv",
+        "asf",
+        "mpg",
+        "mpeg",
+        "ts",
+        "m2ts",
+        "mts",
+        "flv",
+        "ogv",
+        "vob",
+        "3gp",
+    )
 
 // region Overlay controls
 
@@ -672,3 +708,4 @@ internal val SAMPLE_VIDEOS = listOf(
 
 private const val DEFAULT_DEMO_ASS_SUBTITLE_URL =
     "https://raw.githubusercontent.com/Shusek/KMediaPlayer/refs/heads/master/assets/subtitles/en.ass"
+private const val DESKTOP_BACKEND_HANDOFF_SETTLE_MS = 75L

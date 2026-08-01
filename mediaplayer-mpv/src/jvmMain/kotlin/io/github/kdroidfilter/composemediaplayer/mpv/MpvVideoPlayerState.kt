@@ -43,6 +43,7 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
+import java.awt.Window
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.util.concurrent.atomic.AtomicBoolean
@@ -65,6 +66,13 @@ internal class MpvVideoPlayerState(
     private val eventJob: Job
     private val frameState = mutableStateOf<ImageBitmap?>(null)
     private val framePool = MpvFramePool(runtimeConfig.maxRenderPixels)
+
+    @Volatile
+    private var nativeMacRenderer = 0L
+    private var nativeMacColorMode = MpvMacOutputColorMode.SDR
+
+    @Volatile
+    private var renderContextSwitchDeadlineNanos = 0L
 
     private var lastTrackRefreshMs = 0L
 
@@ -95,6 +103,9 @@ internal class MpvVideoPlayerState(
                     "User-provided libmpv; native runtime license is unverified."
                 },
         )
+
+    internal val canUseNativeMacSurface: Boolean
+        get() = !disposed.get() && MpvMacNativeBridge.isAvailable
 
     init {
         eventJob = scope.launch { eventLoop() }
@@ -276,7 +287,7 @@ internal class MpvVideoPlayerState(
         width: Int,
         height: Int,
     ) {
-        if (disposed.get() || !_hasMedia || width <= 0 || height <= 0) return
+        if (disposed.get() || nativeMacRenderer != 0L || !_hasMedia || width <= 0 || height <= 0) return
         try {
             renderLock.withLock {
                 if (disposed.get() || !_hasMedia) return
@@ -301,6 +312,81 @@ internal class MpvVideoPlayerState(
 
     internal fun setCropMode(crop: Boolean) {
         if (!disposed.get()) runCatching { engine.setProperty("panscan", if (crop) "1.0" else "0.0") }
+    }
+
+    internal fun attachNativeMacWindow(window: Window): Boolean {
+        if (!canUseNativeMacSurface) return false
+        return renderLock.withLock {
+            if (disposed.get()) return@withLock false
+            if (nativeMacRenderer != 0L) return@withLock true
+
+            val selectedVideo = suspendVideoOutputForContextSwitch()
+            val target =
+                try {
+                    engine.beginExternalRendering()
+                } catch (_: RuntimeException) {
+                    renderContextSwitchDeadlineNanos = 0L
+                    resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
+                    return@withLock false
+                }
+            val renderer =
+                try {
+                    MpvMacNativeBridge.nAttach(
+                        mpvHandle = target.mpvHandle,
+                        window = window,
+                        libraryLoadName = target.libraryLoadName,
+                        colorMode = nativeMacColorMode.nativeValue,
+                    )
+                } catch (_: Throwable) {
+                    0L
+                }
+            if (renderer == 0L) {
+                runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
+                resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
+                return@withLock false
+            }
+
+            nativeMacRenderer = renderer
+            frameState.value = null
+            applyNativeMacOutputColorMode(nativeMacColorMode)
+            resumeVideoOutputAfterContextSwitch(selectedVideo, NATIVE_RENDER_HWDEC)
+            Snapshot.withMutableSnapshot {
+                renderingInfo.videoRenderer = "libmpv OpenGL in a native macOS EDR surface"
+                renderingInfo.notes = nativeMacRenderingNotes()
+            }
+            true
+        }
+    }
+
+    internal fun detachNativeMacWindow() {
+        renderLock.withLock {
+            detachNativeMacRendererLocked(restoreSoftwareRenderer = !disposed.get())
+        }
+    }
+
+    private fun detachNativeMacRendererLocked(restoreSoftwareRenderer: Boolean) {
+        val renderer = nativeMacRenderer
+        if (renderer == 0L) return
+        val selectedVideo =
+            if (restoreSoftwareRenderer) {
+                suspendVideoOutputForContextSwitch()
+            } else {
+                null
+            }
+        nativeMacRenderer = 0L
+        try {
+            MpvMacNativeBridge.nDetach(renderer)
+        } finally {
+            engine.endExternalRendering(restoreSoftwareRenderer)
+        }
+        if (restoreSoftwareRenderer) {
+            resetNativeMacTargetColorProperties()
+            resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
+            Snapshot.withMutableSnapshot {
+                renderingInfo.videoRenderer = "libmpv software render API"
+                renderingInfo.notes = softwareRenderingNotes()
+            }
+        }
     }
 
     private suspend fun eventLoop() {
@@ -338,6 +424,11 @@ internal class MpvVideoPlayerState(
 
     private fun onEndFile(event: NativeMpvEvent.EndFile) {
         if (!_hasMedia || event.reason == MPV_END_FILE_REASON_STOP || event.reason == MPV_END_FILE_REASON_QUIT) return
+        if ((event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) &&
+            System.nanoTime() < renderContextSwitchDeadlineNanos
+        ) {
+            return
+        }
         if (event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) {
             Snapshot.withMutableSnapshot { _hasMedia = false }
             publishError(VideoPlayerError.SourceError("libmpv could not finish the media source."))
@@ -347,6 +438,7 @@ internal class MpvVideoPlayerState(
     }
 
     private fun onPlaybackRestarted() {
+        renderContextSwitchDeadlineNanos = 0L
         val completedSeek = _isSeeking
         _isLoading = false
         if (completedSeek) {
@@ -369,7 +461,15 @@ internal class MpvVideoPlayerState(
         val frameRate = engine.getProperty("container-fps").positiveFloatOrNull()
         val container = engine.getProperty("file-format")
         val videoDecoder = engine.getProperty("video-codec")
+        val hardwareDecoder =
+            engine
+                .getProperty("hwdec-current")
+                ?.takeUnless { it.equals("no", ignoreCase = true) }
         val audioDecoder = engine.getProperty("audio-codec-name")
+        val audioOutput = engine.getProperty("current-ao")
+        val transfer = engine.getProperty("video-params/gamma")
+
+        updateNativeMacOutputColorMode(transfer.toMacOutputColorMode())
 
         updatePlaybackPosition(
             position = position,
@@ -384,8 +484,18 @@ internal class MpvVideoPlayerState(
             metadata.height = height
             metadata.frameRate = frameRate
             renderingInfo.container = container
-            renderingInfo.videoDecoder = videoDecoder
-            renderingInfo.audioRenderer = audioDecoder ?: "mpv audio output"
+            renderingInfo.videoDecoder =
+                when {
+                    videoDecoder != null && hardwareDecoder != null -> "$videoDecoder via $hardwareDecoder"
+                    else -> videoDecoder ?: hardwareDecoder
+                }
+            renderingInfo.audioRenderer =
+                when {
+                    audioDecoder != null && audioOutput != null -> "$audioDecoder via $audioOutput"
+                    audioDecoder != null -> audioDecoder
+                    audioOutput != null -> audioOutput
+                    else -> "mpv audio output"
+                }
         }
         updateAspectRatio(width, height)
     }
@@ -511,6 +621,7 @@ internal class MpvVideoPlayerState(
 
     override fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
+        runCatching { engine.command("stop") }
         engine.wakeup()
         runBlocking {
             withTimeoutOrNull(DISPOSE_TIMEOUT_MS) {
@@ -518,6 +629,7 @@ internal class MpvVideoPlayerState(
             }
         }
         renderLock.withLock {
+            detachNativeMacRendererLocked(restoreSoftwareRenderer = false)
             frameState.value = null
             framePool.close()
             engine.close()
@@ -525,11 +637,78 @@ internal class MpvVideoPlayerState(
         scope.cancel()
     }
 
+    private fun updateNativeMacOutputColorMode(mode: MpvMacOutputColorMode) {
+        if (nativeMacColorMode == mode) return
+        nativeMacColorMode = mode
+        renderLock.withLock {
+            if (nativeMacRenderer != 0L) applyNativeMacOutputColorMode(mode)
+        }
+    }
+
+    private fun applyNativeMacOutputColorMode(mode: MpvMacOutputColorMode) {
+        when (mode) {
+            MpvMacOutputColorMode.SDR -> resetNativeMacTargetColorProperties()
+            MpvMacOutputColorMode.BT2100_PQ -> {
+                runCatching { engine.setProperty("target-prim", "bt.2020") }
+                runCatching { engine.setProperty("target-trc", "pq") }
+            }
+            MpvMacOutputColorMode.BT2100_HLG -> {
+                runCatching { engine.setProperty("target-prim", "bt.2020") }
+                runCatching { engine.setProperty("target-trc", "hlg") }
+            }
+        }
+        MpvMacNativeBridge.nSetColorMode(nativeMacRenderer, mode.nativeValue)
+    }
+
+    private fun resetNativeMacTargetColorProperties() {
+        runCatching { engine.setProperty("target-prim", "auto") }
+        runCatching { engine.setProperty("target-trc", "auto") }
+    }
+
+    /** Rebuilds mpv's video chain after replacing its sole render context. */
+    private fun suspendVideoOutputForContextSwitch(): String? {
+        if (!_hasMedia) return null
+        renderContextSwitchDeadlineNanos =
+            System.nanoTime() + RENDER_CONTEXT_SWITCH_GRACE_NANOS
+        val selectedVideo =
+            engine
+                .getProperty("vid")
+                ?.takeUnless { it.equals("no", ignoreCase = true) }
+                ?: "auto"
+        runCatching { engine.setProperty("vid", "no") }
+        return selectedVideo
+    }
+
+    private fun resumeVideoOutputAfterContextSwitch(
+        selectedVideo: String?,
+        hwdec: String,
+    ) {
+        runCatching { engine.setProperty("hwdec", hwdec) }
+        selectedVideo?.let { video -> runCatching { engine.setProperty("vid", video) } }
+    }
+
+    private fun nativeMacRenderingNotes(): String =
+        if (usesVerifiedBundledRuntime) {
+            "Verified KMediaMpv runtime; native macOS OpenGL/EDR output with Compose controls."
+        } else {
+            "User-provided libmpv; native macOS OpenGL/EDR output; runtime license is unverified."
+        }
+
+    private fun softwareRenderingNotes(): String =
+        if (usesVerifiedBundledRuntime) {
+            "Verified KMediaMpv local-file runtime."
+        } else {
+            "User-provided libmpv; native runtime license is unverified."
+        }
+
     companion object {
         private const val MPV_VOLUME_SCALE = 100f
         private const val EVENT_WAIT_SECONDS = 0.05
         private const val TRACK_REFRESH_INTERVAL_MS = 1_000L
         private const val DISPOSE_TIMEOUT_MS = 2_000L
+        private const val RENDER_CONTEXT_SWITCH_GRACE_NANOS = 2_000_000_000L
+        private const val SOFTWARE_RENDER_HWDEC = "no"
+        private const val NATIVE_RENDER_HWDEC = "auto-safe"
         private const val MPV_END_FILE_REASON_STOP = 2
         private const val MPV_END_FILE_REASON_QUIT = 3
         private const val MPV_END_FILE_REASON_ERROR = 4
@@ -537,6 +716,13 @@ internal class MpvVideoPlayerState(
         private const val SUBTITLE_TRACK_PREFIX = "mpv:subtitle:"
     }
 }
+
+private fun String?.toMacOutputColorMode(): MpvMacOutputColorMode =
+    when (this?.lowercase()) {
+        "pq", "st2084", "smpte2084" -> MpvMacOutputColorMode.BT2100_PQ
+        "hlg", "arib-std-b67" -> MpvMacOutputColorMode.BT2100_HLG
+        else -> MpvMacOutputColorMode.SDR
+    }
 
 internal fun mpvInitializationOptions(config: MpvRuntimeConfig): Map<String, String> {
     val subtitleFontsDirectory =

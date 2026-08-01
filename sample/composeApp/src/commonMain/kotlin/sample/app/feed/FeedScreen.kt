@@ -50,8 +50,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
+import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
+
+private val MINI_VIDEO_PLAYBACK_OPTIONS =
+    VideoPlaybackOptions(desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE)
 
 private data class Post(
     val author: String,
@@ -134,7 +139,7 @@ fun FeedScreen(modifier: Modifier = Modifier) {
 
 @Composable
 private fun FeedPostCard(post: Post, isMuted: Boolean, onMuteToggle: (Boolean) -> Unit) {
-    val playerState = rememberRenderableVideoPlayerState()
+    val playerState = rememberRenderableVideoPlayerState(playbackOptions = MINI_VIDEO_PLAYBACK_OPTIONS)
 
     LaunchedEffect(post.videoUrl) {
         playerState.openUri(post.videoUrl)

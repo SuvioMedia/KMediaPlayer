@@ -178,6 +178,7 @@ internal data class HlsFallbackSource(
     val toneMappedHdrToSdr: Boolean = false,
     val hdrCmafPassthrough: Boolean = false,
     val videoCopiedWithoutReencoding: Boolean = false,
+    val avFoundationCompatibleTranscode: Boolean = false,
     val usesMediaBridge: Boolean = false,
 )
 

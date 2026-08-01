@@ -285,6 +285,7 @@ kotlin {
         }
 
         jvmTest.dependencies {
+            implementation(compose.desktop.currentOs)
             implementation(kotlin("test"))
             implementation(kotlin("test-junit"))
             implementation(libs.kotlinx.coroutines.test)

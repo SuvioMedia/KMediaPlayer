@@ -180,7 +180,7 @@ internal class LibMpvLibrary private constructor(
         }
     }
 
-    private fun createSoftwareRenderContext(handle: MemorySegment): MemorySegment =
+    internal fun createSoftwareRenderContext(handle: MemorySegment): MemorySegment =
         Arena.ofConfined().use { callArena ->
             val output = callArena.allocate(ValueLayout.ADDRESS)
             val apiType = callArena.allocateFrom("sw")
@@ -591,10 +591,13 @@ internal fun nativeNumericLocaleCategory(osName: String): Int {
 internal class LibMpvEngine(
     private val library: LibMpvLibrary,
     private val handle: MemorySegment,
-    private val renderContext: MemorySegment,
+    renderContext: MemorySegment,
 ) : AutoCloseable {
     @Volatile
     private var closed = false
+
+    private var softwareRenderContext: MemorySegment? = renderContext
+    private var externalRenderContextActive = false
 
     fun command(vararg arguments: String) {
         checkOpen()
@@ -630,7 +633,37 @@ internal class LibMpvEngine(
         pixelsAddress: Long,
     ) {
         checkOpen()
+        check(!externalRenderContextActive) { "A native libmpv render context is active." }
+        val renderContext =
+            softwareRenderContext ?: library.createSoftwareRenderContext(handle).also {
+                softwareRenderContext = it
+            }
         library.render(renderContext, width, height, rowBytes, pixelsAddress)
+    }
+
+    /**
+     * Releases the software renderer before an embedded native renderer creates its own libmpv
+     * render context. libmpv permits only one render context per player handle at a time.
+     */
+    fun beginExternalRendering(): ExternalMpvRenderTarget {
+        checkOpen()
+        check(!externalRenderContextActive) { "A native libmpv render context is already active." }
+        softwareRenderContext?.let(library::freeRenderContext)
+        softwareRenderContext = null
+        externalRenderContextActive = true
+        return ExternalMpvRenderTarget(
+            mpvHandle = handle.address(),
+            libraryLoadName = library.loadedFrom.nativeLoadName(),
+        )
+    }
+
+    /** Must be called only after the native render context has been destroyed. */
+    fun endExternalRendering(restoreSoftwareRenderer: Boolean) {
+        if (!externalRenderContextActive) return
+        externalRenderContextActive = false
+        if (restoreSoftwareRenderer && !closed) {
+            softwareRenderContext = library.createSoftwareRenderContext(handle)
+        }
     }
 
     fun errorMessage(errorCode: Int): String = library.errorMessage(errorCode)
@@ -640,8 +673,34 @@ internal class LibMpvEngine(
     override fun close() {
         if (closed) return
         closed = true
-        library.freeRenderContext(renderContext)
+        check(!externalRenderContextActive) {
+            "The native libmpv render context must be detached before closing the player."
+        }
+        softwareRenderContext?.let(library::freeRenderContext)
+        softwareRenderContext = null
         library.terminate(handle)
         library.close()
     }
 }
+
+internal data class ExternalMpvRenderTarget(
+    val mpvHandle: Long,
+    val libraryLoadName: String,
+)
+
+private fun MpvLibrarySource.nativeLoadName(): String =
+    when (this) {
+        is MpvLibrarySource.ExplicitPath -> path.toString()
+        is MpvLibrarySource.SystemLibrary ->
+            if (System.getProperty("os.name", "").lowercase(Locale.ROOT).let {
+                    it.contains("mac") || it.contains("darwin")
+                }
+            ) {
+                name.takeIf { it.endsWith(".dylib") } ?: "lib$name.dylib"
+            } else {
+                name
+            }
+        MpvLibrarySource.Automatic,
+        MpvLibrarySource.Bundled,
+        -> error("The libmpv source must be resolved before native rendering.")
+    }

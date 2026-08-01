@@ -131,8 +131,17 @@ fun main(args: Array<String>) {
                 App(
                     initialVideoUrl = initialVideoUrl,
                     demoSubtitleEnabled = demoSubtitleEnabled,
+                    initialLoop =
+                        System.getProperty("sample.app.loop")
+                            ?.toBooleanStrictOrNull()
+                            ?: false,
                     playbackOptions = playbackOptions,
                     initialProjection = initialProjection,
+                    initialDesktopBackendName = System.getProperty("sample.app.playbackBackend"),
+                    initialFullscreen =
+                        System.getProperty("sample.app.initialFullscreen")
+                            ?.toBooleanStrictOrNull()
+                            ?: false,
                 )
             }
         }

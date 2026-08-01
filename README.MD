@@ -110,7 +110,7 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
 
 > Flat Android video follows the platform-recommended MediaCodec + `SurfaceView` path; KMediaPlayer does not overwrite decoder buffers with a guessed dataspace. On Android 9+, a small read-only JNI bridge compares `ANativeWindow_getBuffersDataSpace()` with the decoded HDR10/HDR10+/HLG signal after the first frame. An exact match is `RENDERER_CONFIGURED`; Android 14+'s active HDR/SDR composition report is independent `SYSTEM_REPORTED` evidence and is retained only for the current decoded output signal, source, surface and display. Dolby Vision remains vendor-managed. If neither public signal confirms the route, `AUTO` uses a verified controlled or source-bridge SDR fallback when available, while `REQUIRE_HDR` fails instead of labeling inferred playback as HDR.
 
-> macOS JVM uses one native AVPlayer/EDR layer per player for flat AVFoundation-supported video. Runtime selection is controlled by the 2.0 color policy; see [macOS color pipeline](docs/macos-color-pipeline.md) for the current behavior.
+> macOS JVM uses one AVFoundation implementation with two presentation modes: a native AVPlayer/EDR layer by default, or AVFoundation frame-copy into Compose for embedded mini players via `DesktopVideoSurfaceMode.COMPOSE`. Runtime selection is controlled by the 2.0 color policy; see [macOS color pipeline](docs/macos-color-pipeline.md) for the current behavior.
 
 > Linux `libvlc-native-view` currently embeds VLC through an X11/XWayland xwindow. Native Wayland needs a separate `wl_surface` backend and is not implemented by this path.
 
@@ -1002,8 +1002,9 @@ runtime publishes libass 0.17.5 for macOS ARM64, Linux x86_64/ARM64 and Windows
 x86_64, with SHA-256 verification before native loading. Windows uses
 DirectWrite font discovery; Linux uses the desktop's normal fontconfig
 configuration. External ASS/SSA files are composited into writable BGRA video
-frames. Embedded Matroska ASS/SSA tracks exposed by the libVLC canvas backend
-use the built-in extractor and pass container font attachments to libass.
+frames. On Windows and Linux, embedded Matroska ASS/SSA tracks exposed by the
+libVLC canvas backend use the built-in extractor and pass container font
+attachments to libass. macOS maps libVLC selection to its native NSView path.
 
 Users do not install libass or copy its native files. Register
 `AssSubtitleExtension()` and launch the application with native access enabled:

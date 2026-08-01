@@ -12,9 +12,7 @@ import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.createMpvVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.kmediabridge.KMediaBridgeDesktopExtension
-import io.github.shusek.kmediaffmpeg.runtime.KMediaAssRuntime
-import io.github.shusek.kmediaffmpeg.runtime.KMediaFfmpegRuntime
-import io.github.shusek.kmediaffmpeg.runtime.RuntimeSource
+import io.github.kdroidfilter.composemediaplayer.kmediabridge.KMediaBridgeDesktopRuntimeSelection
 import kotlinx.coroutines.runBlocking
 import java.awt.Font
 import java.net.URI
@@ -36,17 +34,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class SharedRuntimeBridgeFirstIntegrationTest {
+class IsolatedRuntimeBridgeFirstIntegrationTest {
     @Test
-    fun bridgeThenMpvRenderAssThroughOneRuntime() {
-        exerciseSharedRuntime(FirstClient.BRIDGE)
+    fun bridgeThenMpvRenderAssWithoutNativeCollisions() {
+        exerciseRuntimeCoexistence(FirstClient.BRIDGE)
     }
 }
 
-class SharedRuntimeMpvFirstIntegrationTest {
+class IsolatedRuntimeMpvFirstIntegrationTest {
     @Test
-    fun mpvThenBridgeRenderAssThroughOneRuntime() {
-        exerciseSharedRuntime(FirstClient.MPV)
+    fun mpvThenBridgeRenderAssWithoutNativeCollisions() {
+        exerciseRuntimeCoexistence(FirstClient.MPV)
     }
 }
 
@@ -55,7 +53,7 @@ private enum class FirstClient {
     MPV,
 }
 
-private fun exerciseSharedRuntime(firstClient: FirstClient) =
+private fun exerciseRuntimeCoexistence(firstClient: FirstClient) =
     runBlocking {
         val video = Files.createTempFile("kmediaplayer-shared-runtime-", ".mkv")
         val subtitle = Files.createTempFile("kmediaplayer-shared-runtime-", ".ass")
@@ -102,15 +100,6 @@ private fun exerciseSharedRuntime(firstClient: FirstClient) =
             assertEquals(TrackSelectionResult.Selected(track.id), player.selectSubtitleTrack(track))
             assertAssPixelsRendered(player, baseline)
 
-            val runtime = KMediaFfmpegRuntime.current().orElseThrow()
-            assertEquals(EXPECTED_RUNTIME_ID, runtime.runtimeId())
-            assertEquals(
-                runtime,
-                KMediaFfmpegRuntime.initialize(RuntimeSource.bundled()),
-                "FFmpeg runtime initialization must be process-idempotent.",
-            )
-            val assRuntime = KMediaAssRuntime.current().orElseThrow()
-            assertEquals(EXPECTED_ASS_RUNTIME_ID, assRuntime.runtimeId())
             assertTrue(
                 URI
                     .create(requireNotNull(bridge).source.playlistUrl)
@@ -129,19 +118,28 @@ private fun exerciseSharedRuntime(firstClient: FirstClient) =
     }
 
 private suspend fun openBridge(video: Path): DesktopPlaybackBridgeSession =
-    KMediaBridgeDesktopExtension().open(
+    configuredKMediaBridgeExtension().open(
         DesktopPlaybackBridgeRequest(
             uri = video.toUri().toString(),
             allowHdrCmafPassthrough = true,
         ),
     )
 
+private fun configuredKMediaBridgeExtension(): KMediaBridgeDesktopExtension =
+    System
+        .getProperty(KMEDIA_BRIDGE_RUNTIME_PROPERTY)
+        ?.takeIf(String::isNotBlank)
+        ?.let(Path::of)
+        ?.let(KMediaBridgeDesktopRuntimeSelection::fromExternalDirectory)
+        ?.let(::KMediaBridgeDesktopExtension)
+        ?: KMediaBridgeDesktopExtension()
+
 private fun openPausedAndRender(
     player: MpvVideoPlayerState,
     video: Path,
 ): IntArray {
     player.openUri(video.toUri().toString(), InitialPlayerState.PAUSE)
-    await("MPV did not finish loading the shared-runtime fixture.") {
+    await("MPV did not finish loading the runtime-coexistence fixture.") {
         player.hasMedia && !player.isLoading
     }
     return renderPixels(player)
@@ -161,7 +159,7 @@ private fun assertAssPixelsRendered(
     }
     assertTrue(
         changedPixels >= MINIMUM_ASS_PIXELS,
-        "MPV did not render the authored ASS layer through the shared libass runtime.",
+        "MPV did not render the authored ASS layer through its isolated libass runtime.",
     )
 }
 
@@ -191,7 +189,7 @@ private fun await(
 
 private fun writeVideoFixture(output: Path) {
     val encoded =
-        SharedRuntimeBridgeFirstIntegrationTest::class.java.classLoader
+        IsolatedRuntimeBridgeFirstIntegrationTest::class.java.classLoader
             .getResourceAsStream("kmediabridge-subtitle-test.mkv.b64")
             .orEmpty()
             .bufferedReader()
@@ -298,10 +296,10 @@ private fun makeApplicationPrivate(directory: Path) {
     aclView.setAcl(listOf(ownerOnly))
 }
 
-private const val EXPECTED_RUNTIME_ID = "kmediaffmpeg-8.1.2-ass-0.17.5-78fbb23ab073fc90"
-private const val EXPECTED_ASS_RUNTIME_ID = "kmediaass-0.17.5-36443523f0148567"
 private const val FRAME_WIDTH = 160
 private const val FRAME_HEIGHT = 90
 private const val MINIMUM_ASS_PIXELS = 500
 private const val POLL_INTERVAL_MILLIS = 25L
 private const val TEST_TIMEOUT_NANOS = 15_000_000_000L
+private const val KMEDIA_BRIDGE_RUNTIME_PROPERTY =
+    "composemediaplayer.test.kMediaBridgeRuntimeDirectory"

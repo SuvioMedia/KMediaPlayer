@@ -125,6 +125,7 @@ internal object ExternalHlsFallbackSupport {
         allowHdrCmafPassthrough: Boolean = false,
         requireHdrCmafPassthrough: Boolean = false,
         forceSdrOutput: Boolean = false,
+        forceAvFoundationCompatibility: Boolean = false,
         extensions: List<VideoPipelineExtension> = emptyList(),
     ): StartedExternalHlsFallback {
         require(startTimeSeconds.isFinite() && startTimeSeconds >= 0.0) {
@@ -139,12 +140,16 @@ internal object ExternalHlsFallbackSupport {
                 JvmLibVlcMediaProbe.probe(uri, requestHeaders).videoColorInfo
             }
         val backend =
-            selectBackendForInput(
-                uri = uri,
-                inputColorInfo = inputColorInfo,
-                requiresSubtitleRendering = selectedSubtitleStreamIndex != null,
-                extensions = extensions,
-            )
+            if (forceAvFoundationCompatibility && configuredHlsFallbackBackend() != "vlc") {
+                ExternalHlsFallbackBackend.KMEDIA_BRIDGE
+            } else {
+                selectBackendForInput(
+                    uri = uri,
+                    inputColorInfo = inputColorInfo,
+                    requiresSubtitleRendering = selectedSubtitleStreamIndex != null,
+                    extensions = extensions,
+                )
+            }
         val fallback =
             when (backend) {
                 ExternalHlsFallbackBackend.VLC -> {
@@ -167,6 +172,7 @@ internal object ExternalHlsFallbackSupport {
                             allowHdrCmafPassthrough = allowHdrCmafPassthrough,
                             requireHdrCmafPassthrough = requireHdrCmafPassthrough,
                             forceSdrOutput = forceSdrOutput,
+                            forceAvFoundationCompatibility = forceAvFoundationCompatibility,
                         ),
                     )
                 }
@@ -259,6 +265,7 @@ private fun DesktopPlaybackBridgeSource.toHlsFallbackSource(): HlsFallbackSource
         toneMappedHdrToSdr = toneMappedHdrToSdr,
         hdrCmafPassthrough = hdrCmafPassthrough,
         videoCopiedWithoutReencoding = videoCopiedWithoutReencoding,
+        avFoundationCompatibleTranscode = avFoundationCompatibleTranscode,
         usesMediaBridge = true,
     )
 

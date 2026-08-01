@@ -56,6 +56,12 @@ val skipNativeBuild =
         .orElse(providers.environmentVariable("COMPOSE_MEDIA_PLAYER_SKIP_NATIVE_BUILD"))
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
+// Keep Rust Apple builds out of IDEA model import; ordinary iOS tasks still build the shim.
+val skipAppleInteropDuringIdeaSync =
+    providers
+        .systemProperty("idea.sync.active")
+        .map(String::toBoolean)
+        .getOrElse(false)
 
 val buildIosArm64LibDovi =
     tasks.register<Exec>("buildIosArm64LibDovi") {
@@ -428,6 +434,23 @@ tasks.matching { it.name == "cinteropLibdoviIosArm64" }.configureEach {
 }
 tasks.matching { it.name == "cinteropLibdoviIosSimulatorArm64" }.configureEach {
     dependsOn(buildIosSimulatorArm64LibDovi)
+}
+
+if (skipAppleInteropDuringIdeaSync) {
+    val appleInteropPreparationTasks =
+        setOf(
+            "buildIosArm64LibDovi",
+            "buildIosSimulatorArm64LibDovi",
+            "cinteropLibdoviIosArm64",
+            "cinteropLibdoviIosSimulatorArm64",
+            "commonizeCInterop",
+            "copyCommonizeCInteropForIde",
+            "iosArm64Cinterop-libdoviKlib",
+            "iosSimulatorArm64Cinterop-libdoviKlib",
+        )
+    tasks.matching { it.name in appleInteropPreparationTasks }.configureEach {
+        enabled = false
+    }
 }
 
 tasks.withType<Test>().configureEach {

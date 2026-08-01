@@ -44,13 +44,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
+import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 import sample.app.player.SAMPLE_VIDEOS
 
+private val MINI_VIDEO_PLAYBACK_OPTIONS =
+    VideoPlaybackOptions(desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE)
+
 @Composable
 fun GalleryScreen(modifier: Modifier = Modifier) {
-    val featuredState = rememberRenderableVideoPlayerState()
+    val featuredState = rememberRenderableVideoPlayerState(playbackOptions = MINI_VIDEO_PLAYBACK_OPTIONS)
     val featured = SAMPLE_VIDEOS.first()
     var activePreviewUrl by remember { mutableStateOf<String?>(null) }
 
@@ -246,7 +251,7 @@ private fun VideoCard(
 
 @Composable
 private fun ActiveVideoCardSurface(url: String) {
-    val playerState = rememberRenderableVideoPlayerState()
+    val playerState = rememberRenderableVideoPlayerState(playbackOptions = MINI_VIDEO_PLAYBACK_OPTIONS)
 
     LaunchedEffect(url) {
         playerState.loop = true

@@ -27,13 +27,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
-import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
+import kotlinx.coroutines.delay
 import sample.app.feed.FeedScreen
 import sample.app.gallery.GalleryScreen
+import sample.app.player.DesktopMkvPlaybackBackend
 import sample.app.player.PlayerScreen
+import sample.app.player.rememberSampleVideoPlayerState
 import sample.app.theme.AppTheme
 
 private enum class Screen(val label: String, val icon: ImageVector) {
@@ -49,18 +51,39 @@ fun App(
     demoSubtitleEnabled: Boolean = true,
     initialMuted: Boolean = false,
     initialLoop: Boolean = false,
+    initialFullscreen: Boolean = false,
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
     initialProjection: VideoProjectionSettings = VideoProjectionSettings(),
+    initialDesktopBackendName: String? = null,
 ) {
     AppTheme {
         var currentScreen by remember { mutableStateOf(Screen.Player) }
-        val playerState = rememberRenderableVideoPlayerState(playbackOptions = playbackOptions)
+        var selectedDesktopBackend by
+            remember(initialDesktopBackendName) {
+                mutableStateOf(
+                    DesktopMkvPlaybackBackend.entries.firstOrNull { backend ->
+                        backend.name.equals(initialDesktopBackendName, ignoreCase = true)
+                    } ?: DesktopMkvPlaybackBackend.AUTO,
+                )
+            }
+        val playerState = rememberSampleVideoPlayerState(selectedDesktopBackend, playbackOptions)
+        var initialFullscreenApplied by remember { mutableStateOf(false) }
         LaunchedEffect(playerState, initialMuted, initialLoop) {
             if (initialMuted) playerState.volume = 0f
             playerState.loop = initialLoop
         }
         LaunchedEffect(playerState, initialProjection) {
             playerState.projection = initialProjection
+        }
+        LaunchedEffect(playerState, initialFullscreen) {
+            if (!initialFullscreen || initialFullscreenApplied) return@LaunchedEffect
+            while (!playerState.hasMedia && playerState.error == null) {
+                delay(INITIAL_FULLSCREEN_POLL_MILLIS)
+            }
+            if (playerState.hasMedia) {
+                playerState.isFullscreen = true
+                initialFullscreenApplied = true
+            }
         }
         LaunchedEffect(currentScreen, playerState) {
             if (currentScreen != Screen.Player) playerState.stop()
@@ -77,6 +100,8 @@ fun App(
                     initialVideoUrl = initialVideoUrl,
                     initialSubtitleUrl = initialSubtitleUrl,
                     demoSubtitleEnabled = demoSubtitleEnabled,
+                    selectedDesktopBackend = selectedDesktopBackend,
+                    onDesktopBackendChange = { selectedDesktopBackend = it },
                 )
             } else {
                 BarLayout(
@@ -86,21 +111,27 @@ fun App(
                     initialVideoUrl = initialVideoUrl,
                     initialSubtitleUrl = initialSubtitleUrl,
                     demoSubtitleEnabled = demoSubtitleEnabled,
+                    selectedDesktopBackend = selectedDesktopBackend,
+                    onDesktopBackendChange = { selectedDesktopBackend = it },
                 )
             }
         }
     }
 }
 
+private const val INITIAL_FULLSCREEN_POLL_MILLIS = 25L
+
 // Compact: bottom NavigationBar
 @Composable
 private fun BarLayout(
     current: Screen,
     onScreenChange: (Screen) -> Unit,
-    playerState: RenderableVideoPlayerState,
+    playerState: VideoPlayerState,
     initialVideoUrl: String?,
     initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
+    selectedDesktopBackend: DesktopMkvPlaybackBackend,
+    onDesktopBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
 ) {
     Scaffold(
         bottomBar = {
@@ -123,6 +154,8 @@ private fun BarLayout(
             initialVideoUrl,
             initialSubtitleUrl,
             demoSubtitleEnabled,
+            selectedDesktopBackend,
+            onDesktopBackendChange,
         )
     }
 }
@@ -132,10 +165,12 @@ private fun BarLayout(
 private fun RailLayout(
     current: Screen,
     onScreenChange: (Screen) -> Unit,
-    playerState: RenderableVideoPlayerState,
+    playerState: VideoPlayerState,
     initialVideoUrl: String?,
     initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
+    selectedDesktopBackend: DesktopMkvPlaybackBackend,
+    onDesktopBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
         NavigationRail(modifier = Modifier.zIndex(2f)) {
@@ -157,6 +192,8 @@ private fun RailLayout(
             initialVideoUrl,
             initialSubtitleUrl,
             demoSubtitleEnabled,
+            selectedDesktopBackend,
+            onDesktopBackendChange,
         )
     }
 }
@@ -165,10 +202,12 @@ private fun RailLayout(
 private fun ScreenContent(
     screen: Screen,
     modifier: Modifier,
-    playerState: RenderableVideoPlayerState,
+    playerState: VideoPlayerState,
     initialVideoUrl: String?,
     initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
+    selectedDesktopBackend: DesktopMkvPlaybackBackend,
+    onDesktopBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
 ) {
     when (screen) {
         Screen.Player ->
@@ -178,6 +217,8 @@ private fun ScreenContent(
                 initialVideoUrl = initialVideoUrl,
                 initialSubtitleUrl = initialSubtitleUrl,
                 demoSubtitleEnabled = demoSubtitleEnabled,
+                selectedDesktopMkvBackend = selectedDesktopBackend,
+                onDesktopMkvBackendChange = onDesktopBackendChange,
             )
         Screen.Gallery -> GalleryScreen(modifier)
         Screen.Feed -> FeedScreen(modifier)

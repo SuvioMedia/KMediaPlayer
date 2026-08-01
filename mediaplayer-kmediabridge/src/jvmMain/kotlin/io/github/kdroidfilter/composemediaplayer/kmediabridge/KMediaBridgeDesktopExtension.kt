@@ -114,6 +114,8 @@ public class KMediaBridgeDesktopExtension(
                         canProbe = capabilities.canProbe,
                         canCopyVideo = capabilities.canCopyVideo,
                         canToneMapToSdr = capabilities.canToneMapToSdr,
+                        canTranscodeVideo = capabilities.canTranscodeVideo,
+                        canTranscodeAudio = capabilities.canTranscodeAudio,
                         canBurnSubtitles = capabilities.canBurnSubtitles,
                     )
                 } ?: DesktopPlaybackBridgeCapabilities()
@@ -181,10 +183,11 @@ private class KMediaBridgeDesktopSession(
                             selectedAudioTrackId = request.selectedAudioStreamIndex,
                             selectedSubtitleTrackId = request.selectedSubtitleStreamIndex,
                             videoOutputPolicy =
-                                if (request.forceSdrOutput) {
-                                    FfmpegHlsVideoOutputPolicy.FORCE_SDR
-                                } else {
-                                    FfmpegHlsVideoOutputPolicy.PRESERVE_SOURCE
+                                when {
+                                    request.forceAvFoundationCompatibility ->
+                                        FfmpegHlsVideoOutputPolicy.AVFOUNDATION_COMPATIBLE_SDR
+                                    request.forceSdrOutput -> FfmpegHlsVideoOutputPolicy.FORCE_SDR
+                                    else -> FfmpegHlsVideoOutputPolicy.PRESERVE_SOURCE
                                 },
                             startTimeUs = startTimeUs,
                         ),
@@ -228,7 +231,13 @@ private class KMediaBridgeDesktopSession(
                             hdrCmafPassthrough = request.allowHdrCmafPassthrough && hdrSampleCopy,
                             videoCopiedWithoutReencoding =
                                 bridgeSource.outputInfo.videoHandling == VideoHandling.COPY,
-                            detail = "KMediaBridge provided the desktop decoder-ready stream.",
+                            avFoundationCompatibleTranscode = request.forceAvFoundationCompatibility,
+                            detail =
+                                if (request.forceAvFoundationCompatibility) {
+                                    "KMediaBridge decoded the source to AVFoundation-compatible AVC/AAC CMAF."
+                                } else {
+                                    "KMediaBridge provided the desktop decoder-ready stream."
+                                },
                         ),
                 )
             }

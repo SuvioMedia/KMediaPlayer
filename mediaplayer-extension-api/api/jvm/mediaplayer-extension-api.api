@@ -1,19 +1,23 @@
 public final class io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeCapabilities {
 	public static final field $stable I
 	public fun <init> ()V
-	public fun <init> (ZZZZ)V
-	public synthetic fun <init> (ZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (ZZZZZZ)V
+	public synthetic fun <init> (ZZZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Z
 	public final fun component2 ()Z
 	public final fun component3 ()Z
 	public final fun component4 ()Z
-	public final fun copy (ZZZZ)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeCapabilities;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeCapabilities;ZZZZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeCapabilities;
+	public final fun component5 ()Z
+	public final fun component6 ()Z
+	public final fun copy (ZZZZZZ)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeCapabilities;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeCapabilities;ZZZZZZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeCapabilities;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getCanBurnSubtitles ()Z
 	public final fun getCanCopyVideo ()Z
 	public final fun getCanProbe ()Z
 	public final fun getCanToneMapToSdr ()Z
+	public final fun getCanTranscodeAudio ()Z
+	public final fun getCanTranscodeVideo ()Z
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
 }
@@ -31,8 +35,8 @@ public final class io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBrid
 
 public final class io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeRequest {
 	public static final field $stable I
-	public fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/lang/Integer;Ljava/lang/Integer;JZZZ)V
-	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/lang/Integer;Ljava/lang/Integer;JZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/lang/Integer;Ljava/lang/Integer;JZZZZ)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/lang/Integer;Ljava/lang/Integer;JZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component2 ()Ljava/util/Map;
 	public final fun component3 ()Ljava/lang/Integer;
@@ -41,10 +45,12 @@ public final class io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBrid
 	public final fun component6 ()Z
 	public final fun component7 ()Z
 	public final fun component8 ()Z
-	public final fun copy (Ljava/lang/String;Ljava/util/Map;Ljava/lang/Integer;Ljava/lang/Integer;JZZZ)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeRequest;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeRequest;Ljava/lang/String;Ljava/util/Map;Ljava/lang/Integer;Ljava/lang/Integer;JZZZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeRequest;
+	public final fun component9 ()Z
+	public final fun copy (Ljava/lang/String;Ljava/util/Map;Ljava/lang/Integer;Ljava/lang/Integer;JZZZZ)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeRequest;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeRequest;Ljava/lang/String;Ljava/util/Map;Ljava/lang/Integer;Ljava/lang/Integer;JZZZZILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeRequest;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAllowHdrCmafPassthrough ()Z
+	public final fun getForceAvFoundationCompatibility ()Z
 	public final fun getForceSdrOutput ()Z
 	public final fun getRequestHeaders ()Ljava/util/Map;
 	public final fun getRequireHdrCmafPassthrough ()Z
@@ -62,13 +68,14 @@ public abstract interface class io/github/kdroidfilter/composemediaplayer/Deskto
 
 public final class io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeSource {
 	public static final field $stable I
-	public fun <init> (Ljava/lang/String;Ljava/lang/Long;JLjava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;ZZZLjava/lang/String;)V
-	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Long;JLjava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;ZZZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/Long;JLjava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;ZZZZLjava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Long;JLjava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;ZZZZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component10 ()Z
 	public final fun component11 ()Z
 	public final fun component12 ()Z
-	public final fun component13 ()Ljava/lang/String;
+	public final fun component13 ()Z
+	public final fun component14 ()Ljava/lang/String;
 	public final fun component2 ()Ljava/lang/Long;
 	public final fun component3 ()J
 	public final fun component4 ()Ljava/util/List;
@@ -77,10 +84,11 @@ public final class io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBrid
 	public final fun component7 ()Ljava/lang/Integer;
 	public final fun component8 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
 	public final fun component9 ()Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;
-	public final fun copy (Ljava/lang/String;Ljava/lang/Long;JLjava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;ZZZLjava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeSource;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeSource;Ljava/lang/String;Ljava/lang/Long;JLjava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;ZZZLjava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeSource;
+	public final fun copy (Ljava/lang/String;Ljava/lang/Long;JLjava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;ZZZZLjava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeSource;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeSource;Ljava/lang/String;Ljava/lang/Long;JLjava/util/List;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;Lio/github/kdroidfilter/composemediaplayer/VideoColorInfo;ZZZZLjava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/DesktopPlaybackBridgeSource;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAudioTracks ()Ljava/util/List;
+	public final fun getAvFoundationCompatibleTranscode ()Z
 	public final fun getDetail ()Ljava/lang/String;
 	public final fun getDurationMs ()Ljava/lang/Long;
 	public final fun getHdrCmafPassthrough ()Z

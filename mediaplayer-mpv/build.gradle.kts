@@ -3,6 +3,8 @@ import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
@@ -50,6 +52,8 @@ val kmediaMpvAssRuntimePodDirectory =
         .map(rootProject::file)
         .orElse(layout.buildDirectory.dir("kmediaAssRuntimePod").map { it.asFile })
 val appleMpvNativeDirectory = layout.projectDirectory.dir("native/apple")
+val macMpvNativeDirectory = layout.projectDirectory.dir("src/jvmMain/native/macos")
+val macMpvNativeResources = layout.buildDirectory.dir("generated/mpvMacNative/resources")
 val iosArm64MpvBridge = layout.buildDirectory.dir("generated/appleMpvBridge/ios-arm64")
 val iosSimulatorArm64MpvBridge =
     layout.buildDirectory.dir("generated/appleMpvBridge/ios-simulator-arm64")
@@ -61,6 +65,38 @@ val skipAppleMpvBridgeBuild =
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
 val canBuildAppleMpvBridge = Os.isFamily(Os.FAMILY_MAC) && !skipAppleMpvBridgeBuild
+// Local runtime pods are release inputs and must not be required by a JVM-only IDEA import.
+val skipAppleInteropDuringIdeaSync =
+    providers
+        .systemProperty("idea.sync.active")
+        .map(String::toBoolean)
+        .getOrElse(false)
+
+val javaToolchains = extensions.getByType<JavaToolchainService>()
+val macMpvNativeJdk =
+    javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(25))
+    }
+val buildMacMpvNative =
+    tasks.register<Exec>("buildMacMpvNative") {
+        description = "Builds the embedded macOS libmpv OpenGL/EDR surface."
+        group = "build"
+        enabled = Os.isFamily(Os.FAMILY_MAC)
+        workingDir(layout.projectDirectory)
+        commandLine(
+            "bash",
+            macMpvNativeDirectory.file("build.sh").asFile.absolutePath,
+            macMpvNativeJdk.get().metadata.installationPath.asFile.absolutePath,
+            macMpvNativeResources.get().asFile.absolutePath,
+        )
+        inputs.file(macMpvNativeDirectory.file("build.sh"))
+        inputs.file(macMpvNativeDirectory.file("MpvMacVideoBridge.m"))
+        outputs.file(
+            macMpvNativeResources.map {
+                it.file("composemediaplayer/native/darwin-arm64/libComposeMediaPlayerMpvMac.dylib")
+            },
+        )
+    }
 
 fun registerAppleMpvBridgeBuild(
     taskName: String,
@@ -192,11 +228,13 @@ kotlin {
             }
         }
         jvmMain.dependencies {
+            implementation(libs.compose.ui)
             api("io.github.shusek:kmedia-mpv-runtime-desktop:$kmediaMpvVersion") {
                 version { strictly(kmediaMpvVersion) }
             }
         }
         jvmTest.dependencies {
+            implementation(project(":mediaplayer"))
             implementation(project(":mediaplayer-kmediabridge"))
             implementation(compose.desktop.currentOs)
             implementation(kotlin("test-junit"))
@@ -217,6 +255,10 @@ nativeJvmTestResources.orNull?.let { resourcesDirectory ->
         from(resourcesDirectory)
     }
 }
+tasks.named<ProcessResources>("jvmProcessResources") {
+    dependsOn(buildMacMpvNative)
+    from(macMpvNativeResources)
+}
 tasks.named<ProcessResources>("jvmTestProcessResources") {
     from(rootProject.file("mediaplayer-kmediabridge/src/jvmTest/resources"))
 }
@@ -232,6 +274,20 @@ tasks.matching { it.name == "cinteropAppleMpvIosArm64" }.configureEach {
 }
 tasks.matching { it.name == "cinteropAppleMpvIosSimulatorArm64" }.configureEach {
     dependsOn(buildIosSimulatorArm64MpvBridge)
+}
+
+if (skipAppleInteropDuringIdeaSync) {
+    val appleInteropPreparationTasks =
+        setOf(
+            "iosArm64Cinterop-appleMpvKlib",
+            "iosSimulatorArm64Cinterop-appleMpvKlib",
+            "podspec",
+            "podInstall",
+            "podImport",
+        )
+    tasks.matching { it.name in appleInteropPreparationTasks }.configureEach {
+        enabled = false
+    }
 }
 
 val java25ClassFileVersion = 69
@@ -278,10 +334,25 @@ tasks.named("check") {
 
 tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    providers.gradleProperty("composeMediaPlayerLegacyTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.legacyTestMedia", mediaPath)
+    }
+    providers.gradleProperty("composeMediaPlayerWmaProTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.wmaProTestMedia", mediaPath)
+    }
+    providers.gradleProperty("composeMediaPlayerMpvLibraryPath").orNull?.let { libraryPath ->
+        systemProperty("composemediaplayer.mpvLibraryPath", libraryPath)
+    }
+    providers.gradleProperty("composeMediaPlayerKMediaBridgeTestRuntimeDirectory").orNull?.let { runtimeDirectory ->
+        systemProperty("composemediaplayer.test.kMediaBridgeRuntimeDirectory", runtimeDirectory)
+    }
+    providers.gradleProperty("composeMediaPlayerNativeSurfaceTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.nativeSurfaceTestMedia", mediaPath)
+    }
 }
 tasks.named<Test>("jvmTest") {
-    // Each load-order test needs a fresh process because the shared runtime is
-    // intentionally process-global and rejects replacement after initialization.
+    // Keep process-global native loader and libmpv lifecycle state from leaking
+    // between otherwise isolated integration tests.
     forkEvery = 1
 }
 

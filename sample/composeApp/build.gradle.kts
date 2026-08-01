@@ -1,9 +1,10 @@
-@file:OptIn(ExperimentalWasmDsl::class)
+@file:OptIn(ExperimentalWasmDsl::class, ExperimentalKotlinGradlePluginApi::class)
 
 import io.github.kdroidfilter.nucleus.desktop.application.dsl.CompressionLevel
 import io.github.kdroidfilter.nucleus.desktop.application.dsl.TargetFormat
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.tasks.JavaExec
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
@@ -16,20 +17,28 @@ plugins {
     alias(libs.plugins.nucleus)
 }
 
+val desktopSampleMainClass = "sample.app.MainKt"
+
 // Keep the desktop sample's documented -Dsample.app.* launch controls available through Gradle's
 // forked run task. Reading only this allow-list avoids forwarding unrelated JVM properties.
 val desktopSampleSystemProperties =
     listOf(
+        "composemediaplayer.fallbackBackend",
+        "composemediaplayer.hlsFallbackBackend",
         "sample.app.videoUrl",
         "sample.app.demoSubtitle",
         "sample.app.windowX",
         "sample.app.windowY",
         "sample.app.windowWidth",
         "sample.app.windowHeight",
+        "sample.app.initialFullscreen",
+        "sample.app.loop",
         "sample.app.dynamicRangePolicy",
         "sample.app.dolbyVisionPolicy",
         "sample.app.desktopVideoBackend",
+        "sample.app.playbackBackend",
         "sample.app.kMediaBridgeRuntimeDirectory",
+        "sample.app.mpvLibraryPath",
         "sample.app.projectionType",
         "sample.app.colorSelfTestSeconds",
         "sample.app.colorSelfTestResultFile",
@@ -64,6 +73,9 @@ kotlin {
     jvm {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_25)
+        }
+        mainRun {
+            mainClass.set(desktopSampleMainClass)
         }
     }
     wasmJs {
@@ -110,6 +122,7 @@ kotlin {
             implementation(libs.nucleus.graalvm.runtime)
             implementation(project(":mediaplayer-ass"))
             implementation(project(":mediaplayer-kmediabridge"))
+            implementation(project(":mediaplayer-mpv"))
         }
         iosMain.dependencies {
             implementation(project(":mediaplayer-ass"))
@@ -122,7 +135,7 @@ kotlin {
 }
 
 nucleus.application {
-    mainClass = "sample.app.MainKt"
+    mainClass = desktopSampleMainClass
 
     nativeDistributions {
         targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb)

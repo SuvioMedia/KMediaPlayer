@@ -7,6 +7,8 @@ public data class DesktopPlaybackBridgeCapabilities(
     public val canProbe: Boolean = false,
     public val canCopyVideo: Boolean = false,
     public val canToneMapToSdr: Boolean = false,
+    public val canTranscodeVideo: Boolean = false,
+    public val canTranscodeAudio: Boolean = false,
     public val canBurnSubtitles: Boolean = false,
 )
 
@@ -20,6 +22,7 @@ public data class DesktopPlaybackBridgeRequest(
     public val allowHdrCmafPassthrough: Boolean = false,
     public val requireHdrCmafPassthrough: Boolean = false,
     public val forceSdrOutput: Boolean = false,
+    public val forceAvFoundationCompatibility: Boolean = false,
 ) {
     init {
         require(uri.isNotBlank()) { "A desktop bridge URI must not be blank." }
@@ -35,6 +38,9 @@ public data class DesktopPlaybackBridgeRequest(
         }
         require(!forceSdrOutput || !allowHdrCmafPassthrough) {
             "Forced SDR output cannot be combined with HDR CMAF passthrough."
+        }
+        require(!forceAvFoundationCompatibility || !allowHdrCmafPassthrough) {
+            "AVFoundation compatibility transcoding cannot be combined with HDR CMAF passthrough."
         }
     }
 }
@@ -53,6 +59,7 @@ public data class DesktopPlaybackBridgeSource(
     public val toneMappedHdrToSdr: Boolean = false,
     public val hdrCmafPassthrough: Boolean = false,
     public val videoCopiedWithoutReencoding: Boolean = false,
+    public val avFoundationCompatibleTranscode: Boolean = false,
     public val detail: String? = null,
 ) {
     init {
@@ -73,6 +80,12 @@ public data class DesktopPlaybackBridgeSource(
         }
         require(!hdrCmafPassthrough || videoCopiedWithoutReencoding) {
             "HDR CMAF passthrough requires an unchanged compressed video signal."
+        }
+        require(!avFoundationCompatibleTranscode || !videoCopiedWithoutReencoding) {
+            "An AVFoundation compatibility source cannot claim unchanged compressed video."
+        }
+        require(!avFoundationCompatibleTranscode || !hdrCmafPassthrough) {
+            "An AVFoundation compatibility source cannot also be HDR passthrough."
         }
     }
 }

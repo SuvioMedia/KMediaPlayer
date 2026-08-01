@@ -13,6 +13,11 @@ class V20ApiContractTest {
 
         assertEquals(DynamicRangePolicy.AUTO, options.dynamicRangePolicy)
         assertEquals(DolbyVisionPolicy.AUTO, options.dolbyVisionPolicy)
+        assertEquals(DesktopVideoSurfaceMode.PREFER_NATIVE, options.desktopVideoSurfaceMode)
+        assertEquals(
+            DesktopVideoSurfaceMode.COMPOSE,
+            options.copy(desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE).desktopVideoSurfaceMode,
+        )
         assertFailsWith<ClassNotFoundException> {
             Class.forName("io.github.kdroidfilter.composemediaplayer.VideoOutputMode")
         }

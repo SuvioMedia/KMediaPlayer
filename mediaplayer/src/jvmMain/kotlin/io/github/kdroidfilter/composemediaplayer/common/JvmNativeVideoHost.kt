@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
@@ -47,6 +48,7 @@ internal fun JvmNativeVideoHost(
     showExternalOverlay: Boolean,
     overlay: @Composable () -> Unit,
 ) {
+    val hostWindowFocused = LocalWindowInfo.current.isWindowFocused
     var overlayVisible by remember { mutableStateOf(false) }
     var initialOverlayBounds by remember { mutableStateOf(AwtOverlayBounds(0, 0, 1, 1)) }
     val currentAttachNative by rememberUpdatedState(attachNative)
@@ -97,14 +99,15 @@ internal fun JvmNativeVideoHost(
             Window(
                 onCloseRequest = {},
                 state = overlayWindowState,
-                visible = true,
+                visible = hostWindowFocused,
                 title = "Compose Media Player Overlay",
                 undecorated = true,
                 transparent = true,
                 resizable = false,
-                alwaysOnTop = true,
+                focusable = false,
+                alwaysOnTop = hostWindowFocused,
             ) {
-                DisposableEffect(panel, window) {
+                DisposableEffect(panel, window, hostWindowFocused) {
                     var pendingBounds: AwtOverlayBounds? = null
                     var updateScheduled = false
                     var disposed = false
@@ -133,8 +136,10 @@ internal fun JvmNativeVideoHost(
                                             boundsToApply.height,
                                         )
                                     }
-                                    if (!window.isVisible) {
+                                    if (hostWindowFocused && !window.isVisible) {
                                         window.isVisible = true
+                                    } else if (!hostWindowFocused && window.isVisible) {
+                                        window.isVisible = false
                                     }
                                 }
                             }

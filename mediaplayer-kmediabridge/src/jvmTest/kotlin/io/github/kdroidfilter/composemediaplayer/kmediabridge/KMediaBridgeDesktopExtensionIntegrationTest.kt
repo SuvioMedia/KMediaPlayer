@@ -31,7 +31,7 @@ class KMediaBridgeDesktopExtensionIntegrationTest {
     fun remuxesMkvThroughKMediaBridgeWithoutAnExecutable() =
         runBlocking {
             val input = Files.createTempFile("kmediaplayer-bridge-test-", ".mkv")
-            val extension = KMediaBridgeDesktopExtension()
+            val extension = configuredTestExtension()
             var fallback: DesktopPlaybackBridgeSession? = null
             try {
                 val encoded =
@@ -66,9 +66,9 @@ class KMediaBridgeDesktopExtensionIntegrationTest {
         }
 
     @Test
-    fun burnsSelectedMkvSubtitleThroughTheIsolatedBundledRuntime() =
+    fun burnsSelectedMkvSubtitleThroughTheSelectedRuntime() =
         runBlocking {
-            val extension = KMediaBridgeDesktopExtension()
+            val extension = configuredTestExtension()
             if (!extension.desktopCapabilities.canBurnSubtitles) return@runBlocking
 
             val input = Files.createTempFile("kmediaplayer-bridge-subtitle-test-", ".mkv")
@@ -121,7 +121,7 @@ class KMediaBridgeDesktopExtensionIntegrationTest {
                 java.nio.file.Path
                     .of(configuredPath)
             require(Files.isRegularFile(input)) { "The configured KMediaPlayer HDR fixture does not exist." }
-            val extension = configuredHdrTestExtension()
+            val extension = configuredTestExtension()
             var fallback: DesktopPlaybackBridgeSession? = null
             try {
                 fallback =
@@ -148,11 +148,65 @@ class KMediaBridgeDesktopExtensionIntegrationTest {
             }
         }
 
+    @Test
+    fun transcodesLegacyMediaForAvFoundationThroughTheSelectedRuntime() =
+        runBlocking {
+            val configuredPath =
+                System.getProperty(LEGACY_TEST_MEDIA_PROPERTY)?.takeIf(String::isNotBlank) ?: return@runBlocking
+            val configured = Path.of(configuredPath)
+            val input =
+                if (Files.isDirectory(configured)) {
+                    Files.list(configured).use { paths ->
+                        paths
+                            .filter(Files::isRegularFile)
+                            .filter { path ->
+                                path.fileName
+                                    .toString()
+                                    .substringAfterLast('.', "")
+                                    .lowercase() in
+                                    setOf("avi", "wmv", "asf")
+                            }.findFirst()
+                            .orElseThrow()
+                    }
+                } else {
+                    configured
+                }
+            val extension = configuredTestExtension()
+            assertTrue(extension.desktopCapabilities.canTranscodeVideo)
+            assertTrue(extension.desktopCapabilities.canTranscodeAudio)
+            var fallback: DesktopPlaybackBridgeSession? = null
+            try {
+                fallback =
+                    extension.open(
+                        DesktopPlaybackBridgeRequest(
+                            uri = input.toUri().toString(),
+                            forceAvFoundationCompatibility = true,
+                        ),
+                    )
+                val source = fallback.source
+
+                assertTrue(source.avFoundationCompatibleTranscode)
+                assertFalse(source.videoCopiedWithoutReencoding)
+                assertFalse(source.hdrCmafPassthrough)
+                assertEquals(VideoDynamicRange.SDR, source.outputColorInfo.dynamicRange)
+                assertTrue(
+                    URI
+                        .create(source.playlistUrl)
+                        .toURL()
+                        .readText()
+                        .contains("#EXT-X-MAP"),
+                )
+            } finally {
+                fallback?.close()
+            }
+        }
+
     private companion object {
         const val HDR_TEST_MEDIA_PROPERTY: String = "composemediaplayer.test.hdrMedia"
         const val HDR_TEST_RUNTIME_PROPERTY: String = "composemediaplayer.test.kMediaBridgeRuntimeDirectory"
+        const val LEGACY_TEST_MEDIA_PROPERTY: String = "composemediaplayer.test.legacyMedia"
 
-        fun configuredHdrTestExtension(): KMediaBridgeDesktopExtension =
+        fun configuredTestExtension(): KMediaBridgeDesktopExtension =
             System
                 .getProperty(HDR_TEST_RUNTIME_PROPERTY)
                 ?.takeIf(String::isNotBlank)

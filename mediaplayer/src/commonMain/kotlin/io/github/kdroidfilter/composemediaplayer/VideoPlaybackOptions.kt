@@ -22,8 +22,9 @@ internal fun ColorConversionCapabilities.mergedWith(other: ColorConversionCapabi
  * Selects the JVM desktop playback backend.
  *
  * [AUTO] keeps the platform default and optional fallback policy. [PLATFORM] disables optional fallbacks.
- * [LIBVLC] requires the in-process libVLC canvas backend on macOS, Windows, and Linux. [LIBVLC_NATIVE] requires
- * the libVLC native-view backend: NSView on macOS, HWND on Windows, and X11/XWayland xwindow on Linux.
+ * [LIBVLC] selects the in-process libVLC frame-copy backend where it is supported; on macOS it is retained as
+ * a compatibility alias for [LIBVLC_NATIVE]. [LIBVLC_NATIVE] requires the libVLC native-view backend: NSView on
+ * macOS, HWND on Windows, and X11/XWayland xwindow on Linux.
  */
 enum class DesktopVideoBackend {
     /**
@@ -37,7 +38,9 @@ enum class DesktopVideoBackend {
     PLATFORM,
 
     /**
-     * Use a user-installed libVLC backend that copies decoded frames into Compose.
+     * Use a user-installed libVLC backend that copies decoded frames into Compose where supported. On macOS this
+     * compatibility value selects the native NSView backend instead; use [VideoPlaybackOptions.desktopVideoSurfaceMode]
+     * to request Compose frame-copy presentation from AVFoundation for embedded mini players.
      */
     LIBVLC,
 
@@ -46,6 +49,19 @@ enum class DesktopVideoBackend {
      * Compose frame-copy path but is not evidence of a configured HDR swapchain or HDR display output.
      */
     LIBVLC_NATIVE,
+}
+
+/**
+ * Selects how the default desktop platform backend presents video.
+ *
+ * [PREFER_NATIVE] uses the platform's direct video surface when it is compatible with the
+ * requested color pipeline. On macOS this is the dedicated AVFoundation/AppKit player window.
+ * [COMPOSE] copies decoded frames into Compose and is intended for thumbnails, feeds, and other
+ * embedded mini players that must remain inside their parent layout.
+ */
+enum class DesktopVideoSurfaceMode {
+    PREFER_NATIVE,
+    COMPOSE,
 }
 
 /**
@@ -130,6 +146,7 @@ data class VideoPlaybackOptions(
     val projectionDetectionMode: VideoProjectionDetectionMode = VideoProjectionDetectionMode.AUTO,
     val webDrmConfiguration: WebDrmConfiguration? = null,
     val webDecoderPreference: WebDecoderPreference = WebDecoderPreference.AUTO,
+    val desktopVideoSurfaceMode: DesktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
 ) {
     init {
         val invalidIds = extensions.map(VideoPipelineExtension::id).filter(String::isBlank)

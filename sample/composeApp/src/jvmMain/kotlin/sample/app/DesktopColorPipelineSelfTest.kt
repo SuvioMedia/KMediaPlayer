@@ -61,6 +61,12 @@ internal fun DesktopColorPipelineSelfTest(
                         delay(100L)
                     }
                 }
+                withTimeout(SELF_TEST_START_TIMEOUT_MS) {
+                    while (!playerState.isPlaying || playerState.isLoading) {
+                        check(playerState.error == null) { "Playback failed before the sustained run: ${playerState.error}" }
+                        delay(50L)
+                    }
+                }
                 delay(STABLE_OUTPUT_WINDOW_MS)
                 val stableStatus = playerState.colorPipelineStatus.value
                 lastStatus = stableStatus
@@ -153,7 +159,11 @@ private suspend fun runDesktopSustainedPlaybackCheck(
     val sampledMinimumFps = minimumFps.takeIf(Float::isFinite) ?: 0f
     val residentSetGrowthKib = (peakResidentSetKib - initialResidentSetKib).coerceAtLeast(0L)
 
-    check(averageFps >= MINIMUM_AVERAGE_FPS) { "Average frame rate $averageFps is below $MINIMUM_AVERAGE_FPS." }
+    check(averageFps >= MINIMUM_AVERAGE_FPS) {
+        "Average frame rate $averageFps is below $MINIMUM_AVERAGE_FPS " +
+            "(rendered=$renderedFrames, dropped=$droppedFrames, duration=$actualDurationSeconds, " +
+            "minimumWindowFps=$sampledMinimumFps)."
+    }
     check(sampledMinimumFps >= MINIMUM_WINDOW_FPS) {
         "Minimum sampled frame rate $sampledMinimumFps is below $MINIMUM_WINDOW_FPS."
     }

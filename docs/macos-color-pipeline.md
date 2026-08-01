@@ -6,10 +6,13 @@ The old opt-in HDR experiment has been replaced by the 2.0 color-pipeline policy
 The macOS implementation follows the production color-pipeline contract described below. Hardware
 qualification results are intentionally kept outside the repository.
 
-For a flat source that AVFoundation can open, every player owns its own native `AVPlayerLayer`.
-The layer requests extended dynamic range, follows the `NSScreen` containing its host view, and is
-kept separate from the transparent Compose controls window. Moving the player between monitors
-re-evaluates display capabilities. Multiple players never share a global layer.
+For a flat source that AVFoundation can open, `DesktopVideoSurfaceMode.PREFER_NATIVE` gives every
+player its own native `AVPlayerLayer`. The layer requests extended dynamic range, follows the
+`NSScreen` containing its host view, and is kept separate from the Compose controls overlay. Moving
+the player between monitors re-evaluates display capabilities. Multiple players never share a
+global layer. `DesktopVideoSurfaceMode.COMPOSE` keeps AVFoundation as the decoder but copies frames
+into Compose for embedded gallery/feed previews; it does not attach the native layer or Metal
+projection surface.
 
 For an HDR source on an SDR display, AVFoundation may provide the system tone-mapped surface. The
 Compose BGRA frame-copy fallback is only eligible when the native bridge explicitly enables its

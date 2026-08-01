@@ -1,5 +1,9 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
+import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -176,6 +180,44 @@ class MacVideoPlayerStateTest {
     fun testOpenLocalFileWithSchemeWithAuthority() {
         val path = assertNotNull(javaClass.classLoader.getResource("existing_file.mp4")).toURI().path
         testOpenLocalFile("file://$path")
+    }
+
+    @Test
+    fun `Compose mini-player mode receives AVFoundation frame copies without a native surface`() {
+        val configuredMedia =
+            System
+                .getProperty("composemediaplayer.test.hdrMedia")
+                ?.takeIf(String::isNotBlank)
+                ?.let { java.io.File(it) }
+                ?.takeIf(java.io.File::isFile)
+        Assume.assumeTrue(
+            "The AVFoundation frame-copy integration test needs -PkmediaPlayerHdrTestMedia=<MP4>.",
+            configuredMedia != null,
+        )
+        val path = checkNotNull(configuredMedia).toURI().toString()
+        val playerState =
+            MacVideoPlayerState(
+                VideoPlaybackOptions(
+                    desktopVideoBackend = DesktopVideoBackend.PLATFORM,
+                    desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE,
+                ),
+            )
+        try {
+            runBlocking {
+                playerState.openUri(path, InitialPlayerState.PLAY)
+                withTimeout(15_000) {
+                    while (playerState.currentFrameState.value == null && playerState.error == null) {
+                        delay(25.milliseconds)
+                    }
+                }
+            }
+
+            assertNull(playerState.error)
+            assertNotNull(playerState.currentFrameState.value)
+            assertFalse(playerState.shouldUseHdrMetalSurface())
+        } finally {
+            playerState.dispose()
+        }
     }
 
     private fun testMalformedUri(uri: String) {
