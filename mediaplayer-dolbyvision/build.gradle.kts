@@ -113,6 +113,7 @@ kotlin {
     }
     wasmJs {
         browser()
+        binaries.executable()
     }
     listOf(
         iosArm64() to "aarch64-apple-ios",

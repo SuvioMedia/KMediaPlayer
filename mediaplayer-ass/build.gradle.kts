@@ -169,6 +169,7 @@ kotlin {
 
     wasmJs {
         browser()
+        binaries.executable()
     }
 
     listOf(

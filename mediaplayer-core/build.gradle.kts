@@ -59,6 +59,7 @@ kotlin {
 
     wasmJs {
         browser()
+        binaries.executable()
     }
 
     iosArm64()
