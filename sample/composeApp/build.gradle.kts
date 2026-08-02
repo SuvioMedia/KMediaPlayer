@@ -37,6 +37,7 @@ val desktopSampleSystemProperties =
         "sample.app.dolbyVisionPolicy",
         "sample.app.desktopVideoBackend",
         "sample.app.playbackBackend",
+        "sample.app.sourceAdapter",
         "sample.app.kMediaBridgeRuntimeDirectory",
         "sample.app.mpvLibraryPath",
         "sample.app.projectionType",

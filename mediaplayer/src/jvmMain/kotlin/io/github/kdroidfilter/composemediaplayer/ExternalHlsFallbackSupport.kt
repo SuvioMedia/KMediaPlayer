@@ -41,8 +41,9 @@ internal object ExternalHlsFallbackSupport {
     fun selectBackend(
         requiresSubtitleRendering: Boolean,
         extensions: List<VideoPipelineExtension> = emptyList(),
+        sourcePolicy: DesktopMediaSourcePolicy = DesktopMediaSourcePolicy.INHERIT,
     ): ExternalHlsFallbackBackend {
-        val configured = configuredHlsFallbackBackend()
+        val configured = configuredHlsFallbackBackend(sourcePolicy)
 
         return when (configured) {
             "vlc" -> ExternalHlsFallbackBackend.VLC
@@ -60,6 +61,7 @@ internal object ExternalHlsFallbackSupport {
         inputColorInfo: VideoColorInfo,
         requiresSubtitleRendering: Boolean,
         extensions: List<VideoPipelineExtension> = emptyList(),
+        sourcePolicy: DesktopMediaSourcePolicy = DesktopMediaSourcePolicy.INHERIT,
     ): ExternalHlsFallbackBackend {
         if (inputColorInfo.isHdr) {
             // VLC's generic transcode path does not expose a verifiable HDR color pipeline.
@@ -71,14 +73,22 @@ internal object ExternalHlsFallbackSupport {
         if (requiresSubtitleRendering) {
             // This selects VLC only before any KMediaBridge dylib/DLL is loaded. It is the explicit
             // BEST_EFFORT fallback on platforms whose reviewed runtime is still remux-only.
-            return selectBackend(requiresSubtitleRendering = true, extensions = extensions)
+            return selectBackend(
+                requiresSubtitleRendering = true,
+                extensions = extensions,
+                sourcePolicy = sourcePolicy,
+            )
         }
         if (!inputColorInfo.isSafeForUnmanagedSdrFallback()) {
             // KMediaBridge will perform its typed probe and either preserve a verified compressed
             // signal or reject it. Merely recognizing HDR here is not treated as output proof.
             return ExternalHlsFallbackBackend.KMEDIA_BRIDGE
         }
-        return selectBackend(requiresSubtitleRendering = false, extensions = extensions)
+        return selectBackend(
+            requiresSubtitleRendering = false,
+            extensions = extensions,
+            sourcePolicy = sourcePolicy,
+        )
     }
 
     internal fun selectBackendForInput(
@@ -86,35 +96,54 @@ internal object ExternalHlsFallbackSupport {
         inputColorInfo: VideoColorInfo,
         requiresSubtitleRendering: Boolean,
         extensions: List<VideoPipelineExtension> = emptyList(),
+        sourcePolicy: DesktopMediaSourcePolicy = DesktopMediaSourcePolicy.INHERIT,
     ): ExternalHlsFallbackBackend =
         if (uri.isRemoteMediaUri() &&
             inputColorInfo.isSafeForUnmanagedSdrFallback() &&
-            configuredHlsFallbackBackend() == "auto" &&
+            configuredHlsFallbackBackend(sourcePolicy) == "auto" &&
             ExternalVlcLocator.findVlc() != null
         ) {
             ExternalHlsFallbackBackend.VLC
         } else {
-            selectBackendForColor(inputColorInfo, requiresSubtitleRendering, extensions)
+            selectBackendForColor(
+                inputColorInfo = inputColorInfo,
+                requiresSubtitleRendering = requiresSubtitleRendering,
+                extensions = extensions,
+                sourcePolicy = sourcePolicy,
+            )
         }
 
-    private fun configuredHlsFallbackBackend(): String =
-        (
-            when (CurrentPlatform.os) {
-                CurrentPlatform.OS.MAC -> System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
-                CurrentPlatform.OS.WINDOWS -> System.getProperty("composemediaplayer.windows.hlsFallbackBackend")
-                CurrentPlatform.OS.LINUX -> System.getProperty("composemediaplayer.linux.hlsFallbackBackend")
-            }
-                ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
-                ?: when (CurrentPlatform.os) {
-                    CurrentPlatform.OS.MAC -> System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
-                    CurrentPlatform.OS.WINDOWS -> System.getenv("COMPOSE_MEDIA_PLAYER_WINDOWS_HLS_FALLBACK_BACKEND")
-                    CurrentPlatform.OS.LINUX -> System.getenv("COMPOSE_MEDIA_PLAYER_LINUX_HLS_FALLBACK_BACKEND")
-                }
-                ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
-                ?: System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
-                ?: System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
-                ?: "auto"
-        ).lowercase()
+    private fun configuredHlsFallbackBackend(sourcePolicy: DesktopMediaSourcePolicy): String =
+        when (sourcePolicy) {
+            DesktopMediaSourcePolicy.AUTO -> "auto"
+            DesktopMediaSourcePolicy.DIRECT -> "disabled"
+            DesktopMediaSourcePolicy.KMEDIA_BRIDGE -> "kmediabridge"
+            DesktopMediaSourcePolicy.VLC_HLS -> "vlc"
+            DesktopMediaSourcePolicy.INHERIT ->
+                (
+                    when (CurrentPlatform.os) {
+                        CurrentPlatform.OS.MAC ->
+                            System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
+                        CurrentPlatform.OS.WINDOWS ->
+                            System.getProperty("composemediaplayer.windows.hlsFallbackBackend")
+                        CurrentPlatform.OS.LINUX ->
+                            System.getProperty("composemediaplayer.linux.hlsFallbackBackend")
+                    }
+                        ?: System.getProperty("composemediaplayer.hlsFallbackBackend")
+                        ?: when (CurrentPlatform.os) {
+                            CurrentPlatform.OS.MAC ->
+                                System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
+                            CurrentPlatform.OS.WINDOWS ->
+                                System.getenv("COMPOSE_MEDIA_PLAYER_WINDOWS_HLS_FALLBACK_BACKEND")
+                            CurrentPlatform.OS.LINUX ->
+                                System.getenv("COMPOSE_MEDIA_PLAYER_LINUX_HLS_FALLBACK_BACKEND")
+                        }
+                        ?: System.getenv("COMPOSE_MEDIA_PLAYER_HLS_FALLBACK_BACKEND")
+                        ?: System.getProperty("composemediaplayer.macos.hlsFallbackBackend")
+                        ?: System.getenv("COMPOSE_MEDIA_PLAYER_MACOS_HLS_FALLBACK_BACKEND")
+                        ?: "auto"
+                ).lowercase()
+        }
 
     suspend fun start(
         uri: String,
@@ -127,11 +156,15 @@ internal object ExternalHlsFallbackSupport {
         forceSdrOutput: Boolean = false,
         forceAvFoundationCompatibility: Boolean = false,
         extensions: List<VideoPipelineExtension> = emptyList(),
+        sourcePolicy: DesktopMediaSourcePolicy = DesktopMediaSourcePolicy.INHERIT,
     ): StartedExternalHlsFallback {
         require(startTimeSeconds.isFinite() && startTimeSeconds >= 0.0) {
             "The desktop bridge start time must be finite and non-negative."
         }
         if (isDisabled()) {
+            externalHlsFallbackDisabled()
+        }
+        if (sourcePolicy == DesktopMediaSourcePolicy.DIRECT) {
             externalHlsFallbackDisabled()
         }
 
@@ -140,7 +173,7 @@ internal object ExternalHlsFallbackSupport {
                 JvmLibVlcMediaProbe.probe(uri, requestHeaders).videoColorInfo
             }
         val backend =
-            if (forceAvFoundationCompatibility && configuredHlsFallbackBackend() != "vlc") {
+            if (forceAvFoundationCompatibility && configuredHlsFallbackBackend(sourcePolicy) != "vlc") {
                 ExternalHlsFallbackBackend.KMEDIA_BRIDGE
             } else {
                 selectBackendForInput(
@@ -148,6 +181,7 @@ internal object ExternalHlsFallbackSupport {
                     inputColorInfo = inputColorInfo,
                     requiresSubtitleRendering = selectedSubtitleStreamIndex != null,
                     extensions = extensions,
+                    sourcePolicy = sourcePolicy,
                 )
             }
         val fallback =

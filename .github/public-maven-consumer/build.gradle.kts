@@ -29,6 +29,7 @@ val androidBackends = configurations.create("androidBackends") {
 }
 
 dependencies {
+    add(desktopBackends.name, "io.github.shusek:composemediaplayer-desktop-window-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-mpv-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-kmediabridge-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-ass-jvm:$testedVersion")
@@ -53,6 +54,7 @@ tasks.register("verifyPublicBackends") {
         val androidComponents = androidBackends.kmediaComponents()
 
         check("io.github.shusek:composemediaplayer-mpv-jvm:$testedVersion" in desktopComponents)
+        check("io.github.shusek:composemediaplayer-desktop-window-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-kmediabridge-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-ass-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-mpv-android:$testedVersion" in androidComponents)

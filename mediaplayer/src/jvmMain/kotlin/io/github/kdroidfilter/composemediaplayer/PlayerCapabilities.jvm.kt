@@ -71,7 +71,7 @@ private val detectedLibVlcBackend: Boolean by lazy {
     runCatching { ExternalVlcLocator.findLibVlc() != null }.getOrDefault(false)
 }
 
-private fun hasLibVlcBackend(): Boolean = detectedLibVlcBackend
+internal fun hasLibVlcBackend(): Boolean = detectedLibVlcBackend
 
 private fun hasExternalHlsContainerFallback(playbackOptions: VideoPlaybackOptions): Boolean =
     !ExternalHlsFallbackSupport.isDisabled() &&

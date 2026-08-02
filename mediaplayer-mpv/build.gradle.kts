@@ -86,7 +86,9 @@ val buildMacMpvNative =
         commandLine(
             "bash",
             macMpvNativeDirectory.file("build.sh").asFile.absolutePath,
-            macMpvNativeJdk.get().metadata.installationPath.asFile.absolutePath,
+            macMpvNativeJdk
+                .get()
+                .metadata.installationPath.asFile.absolutePath,
             macMpvNativeResources.get().asFile.absolutePath,
         )
         inputs.file(macMpvNativeDirectory.file("build.sh"))
@@ -228,6 +230,7 @@ kotlin {
             }
         }
         jvmMain.dependencies {
+            api(project(":mediaplayer-desktop-window"))
             implementation(libs.compose.ui)
             api("io.github.shusek:kmedia-mpv-runtime-desktop:$kmediaMpvVersion") {
                 version { strictly(kmediaMpvVersion) }

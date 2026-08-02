@@ -12,3 +12,22 @@ internal fun VideoPlaybackOptions.forcedJvmDesktopBackend(): String? =
         DesktopVideoBackend.AUTO ->
             null
     }
+
+internal fun DesktopMediaSourcePolicy.explicitFallbackBackend(): String? =
+    when (this) {
+        DesktopMediaSourcePolicy.INHERIT -> null
+        DesktopMediaSourcePolicy.AUTO -> "auto"
+        DesktopMediaSourcePolicy.DIRECT -> JVM_DESKTOP_BACKEND_PLATFORM
+        DesktopMediaSourcePolicy.KMEDIA_BRIDGE -> "kmediabridge"
+        DesktopMediaSourcePolicy.VLC_HLS -> "vlc"
+    }
+
+internal fun VideoPlaybackOptions.allowsExternalSourceAdapter(): Boolean =
+    when (desktopMediaSourcePolicy) {
+        DesktopMediaSourcePolicy.DIRECT -> false
+        DesktopMediaSourcePolicy.AUTO,
+        DesktopMediaSourcePolicy.KMEDIA_BRIDGE,
+        DesktopMediaSourcePolicy.VLC_HLS,
+        -> true
+        DesktopMediaSourcePolicy.INHERIT -> desktopVideoBackend == DesktopVideoBackend.AUTO
+    }

@@ -45,7 +45,11 @@ class VerifyMavenPomsTest(unittest.TestCase):
             pom.write_text(
                 pom.read_text().replace(
                     "</project>",
-                    "<dependencies><dependency><groupId>io.github.shusek</groupId><artifactId>kmedia-mpv-runtime-android</artifactId><version>0.3.0-rc.4</version></dependency></dependencies></project>",
+                    "<dependencies>"
+                    "<dependency><groupId>io.github.shusek</groupId>"
+                    "<artifactId>kmedia-mpv-runtime-android</artifactId>"
+                    "<version>0.3.0-rc.5</version></dependency>"
+                    "</dependencies></project>",
                 ),
             )
             verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
@@ -59,7 +63,23 @@ class VerifyMavenPomsTest(unittest.TestCase):
             pom.write_text(
                 pom.read_text().replace(
                     "</project>",
-                    "<dependencies><dependency><groupId>io.github.shusek</groupId><artifactId>kmedia-bridge-ffmpeg-android</artifactId><version>0.5.0-rc.2</version></dependency></dependencies></project>",
+                    "<dependencies><dependency><groupId>io.github.shusek</groupId><artifactId>kmedia-bridge-ffmpeg-android</artifactId><version>0.5.0-rc.3</version></dependency></dependencies></project>",
+                ),
+            )
+            verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
+
+    def test_requires_same_version_desktop_window_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+            pom = self._write_pom(repository, "composemediaplayer-jvm", "3.0.0-rc.1")
+            with self.assertRaisesRegex(ValueError, "desktop-window"):
+                verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
+            pom.write_text(
+                pom.read_text().replace(
+                    "</project>",
+                    "<dependencies><dependency><groupId>io.github.shusek</groupId>"
+                    "<artifactId>composemediaplayer-desktop-window-jvm</artifactId>"
+                    "<version>3.0.0-rc.1</version></dependency></dependencies></project>",
                 ),
             )
             verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")

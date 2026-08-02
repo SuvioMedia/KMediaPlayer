@@ -204,12 +204,14 @@ jobs:
         run: >-
           ./gradlew :mediaplayer-core:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-extension-api:publishAllPublicationsToReleaseStagingRepository
+          :mediaplayer-desktop-window:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-mpv:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-ass:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-dolbyvision:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-kmediabridge:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-core:verifyJvm25Bytecode
+          :mediaplayer-desktop-window:verifyJvm25Bytecode
           :mediaplayer:verifyJvm25Bytecode
           :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion="$RELEASE_VERSION"
@@ -246,6 +248,8 @@ jobs:
 
           expected_coordinates=(
             composemediaplayer-core
+            composemediaplayer-desktop-window
+            composemediaplayer-desktop-window-jvm
             composemediaplayer
             composemediaplayer-mpv
             composemediaplayer-mpv-iosarm64
@@ -323,6 +327,7 @@ jobs:
         run: >-
           ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
           :mediaplayer-extension-api:publishAndReleaseToMavenCentral
+          :mediaplayer-desktop-window:publishAndReleaseToMavenCentral
           :mediaplayer:publishAndReleaseToMavenCentral
           :mediaplayer-mpv:publishAndReleaseToMavenCentral
           :mediaplayer-ass:publishAndReleaseToMavenCentral

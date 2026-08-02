@@ -38,8 +38,11 @@ internal fun MediaSourceSheet(
     desktopMkvBackendAvailable: Boolean,
     desktopMkvBackendOptions: List<DesktopMkvPlaybackBackendOption>,
     selectedDesktopMkvBackend: DesktopMkvPlaybackBackend,
+    desktopSourceAdapterOptions: List<DesktopMediaSourceAdapterOption>,
+    selectedDesktopSourceAdapter: DesktopMediaSourceAdapter,
     onUrlChange: (String) -> Unit,
     onDesktopMkvBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
+    onDesktopSourceAdapterChange: (DesktopMediaSourceAdapter) -> Unit,
     onLoadUrl: () -> Unit,
     onPickFile: () -> Unit,
     onSelectPreset: (String) -> Unit,
@@ -95,9 +98,21 @@ internal fun MediaSourceSheet(
                         }
                     }
                 val selectedBackendOption = backendOptions.firstOrNull { it.backend == selectedDesktopMkvBackend }
+                val sourceAdapterOptions =
+                    desktopSourceAdapterOptions.ifEmpty {
+                        DesktopMediaSourceAdapter.entries.map { adapter ->
+                            DesktopMediaSourceAdapterOption(
+                                adapter = adapter,
+                                enabled = true,
+                                status = "Availability was not reported by this platform.",
+                            )
+                        }
+                    }
+                val selectedSourceAdapterOption =
+                    sourceAdapterOptions.firstOrNull { it.adapter == selectedDesktopSourceAdapter }
 
                 Text(
-                    text = "JVM playback backend",
+                    text = "Desktop renderer backend",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -128,6 +143,44 @@ internal fun MediaSourceSheet(
                     .forEach { option ->
                         Text(
                             text = "${option.backend.label}: ${listOfNotNull(option.status, option.installHint).joinToString(" ")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+
+                Text(
+                    text = "Media source adapter",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    sourceAdapterOptions.forEach { option ->
+                        FilterChip(
+                            enabled = option.enabled,
+                            selected = selectedDesktopSourceAdapter == option.adapter,
+                            onClick = { onDesktopSourceAdapterChange(option.adapter) },
+                            label = { Text(option.adapter.label) },
+                        )
+                    }
+                }
+
+                selectedSourceAdapterOption?.let { option ->
+                    Text(
+                        text = listOfNotNull(option.status, option.installHint).joinToString(" "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                sourceAdapterOptions
+                    .filter { option -> !option.enabled && option.adapter != DesktopMediaSourceAdapter.AUTO }
+                    .forEach { option ->
+                        Text(
+                            text = "${option.adapter.label}: " +
+                                listOfNotNull(option.status, option.installHint).joinToString(" "),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )

@@ -110,7 +110,7 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
 
 > Flat Android video follows the platform-recommended MediaCodec + `SurfaceView` path; KMediaPlayer does not overwrite decoder buffers with a guessed dataspace. On Android 9+, a small read-only JNI bridge compares `ANativeWindow_getBuffersDataSpace()` with the decoded HDR10/HDR10+/HLG signal after the first frame. An exact match is `RENDERER_CONFIGURED`; Android 14+'s active HDR/SDR composition report is independent `SYSTEM_REPORTED` evidence and is retained only for the current decoded output signal, source, surface and display. Dolby Vision remains vendor-managed. If neither public signal confirms the route, `AUTO` uses a verified controlled or source-bridge SDR fallback when available, while `REQUIRE_HDR` fails instead of labeling inferred playback as HDR.
 
-> macOS JVM uses one AVFoundation implementation with two presentation modes: a native AVPlayer/EDR layer by default, or AVFoundation frame-copy into Compose for embedded mini players via `DesktopVideoSurfaceMode.COMPOSE`. Runtime selection is controlled by the 2.0 color policy; see [macOS color pipeline](docs/macos-color-pipeline.md) for the current behavior.
+> Full macOS JVM playback uses the explicit `DesktopVideoPlayerWindow`: AVFoundation/Metal, native MPV, or libVLC attaches below its Compose controls in one caller-owned `NSWindow`. Embedded `VideoPlayerSurface` stays on the Compose frame-copy path for feeds, galleries, and mini players. Runtime selection is controlled by the color policy; see [macOS color pipeline](docs/macos-color-pipeline.md) for the current behavior.
 
 > Linux `libvlc-native-view` currently embeds VLC through an X11/XWayland xwindow. Native Wayland needs a separate `wl_surface` backend and is not implemented by this path.
 
@@ -184,6 +184,22 @@ composemediaplayer ────────────────────�
 The MPV and KMediaBridge adapters are optional. When both are present they transitively select their
 own thin native clients and the same exact KMediaFfmpegRuntime; the base `composemediaplayer`
 artifact still contains neither backend.
+
+JVM applications should use `composemediaplayer-desktop-window` for full-size
+playback. It is available transitively from the default player and MPV JVM
+artifacts, or can be declared directly by a coordinator module:
+
+```kotlin
+dependencies {
+    implementation("io.github.shusek:composemediaplayer-desktop-window:<version>")
+}
+```
+
+`DesktopPlaybackSession` owns one full player, selects platform direct →
+KMediaBridge remux → MPV → libVLC → KMediaBridge transcode, and switches
+transactionally with rollback. `DesktopVideoPlayerWindow` keeps the catalog
+window untouched and hosts native video below Compose controls. Embedded
+`VideoPlayerSurface` remains the right API for feed/gallery/mini players.
 
 Normal applications receive `composemediaplayer-extension-api` transitively. Add it directly only
 when authoring an extension. An optional artifact has no effect until its stable extension instance
@@ -638,7 +654,7 @@ val nextPreset = playerState.projection.nextVideoProjectionPreset()
 
 Supported projection metadata includes flat 2D/3D, equirectangular 180/360, fisheye 180/190/200/220, and EAC 360 with mono, side-by-side, and over-under stereo layouts. A non-default `projectionTextureCrop` switches `SurfaceType.Auto` and canvas paths to projection renderers so the crop can be applied.
 
-On Android, `SurfaceType.Auto` sends every projection mode through Media3's `DefaultVideoFrameProcessor` so PQ/HLG input cannot accidentally be drawn as washed-out SDR. HDR projection requires GLES3 plus `EXT_YUV_target`; HDR10/PQ and HLG outputs additionally require the matching EGL colorspace and use RGBA16F intermediates with an RGBA_1010102 output surface. `AUTO` and `PREFER_HDR` retry Media3's managed SDR tone mapping if HDR output setup fails, while `REQUIRE_HDR` reports a typed error. Flat video uses `SurfaceView`; `TextureView` is an explicit compositing opt-out and is not advertised as HDR. Android projected surfaces can use device rotation automatically unless `projectionViewControlMode` is set to `MANUAL`. iOS projections use `AVPlayerItemVideoOutput` to pull P010/NV12 frames into CoreVideo Metal textures. One `rgba16Float` shader handles flat stereo, equirectangular, fisheye, EAC, crops and CoreMotion-backed viewport control; HDR10/HLG is confirmed only after an EDR Metal frame completes, and runtime failure replans to controlled SDR unless `REQUIRE_HDR` was selected. Flat iOS playback keeps `AVPlayerLayer`; `FORCE_SDR` explicitly disables EDR on that layer so AVFoundation performs the SDR presentation. macOS JVM uses the same P010/NV12 and FP16 color/projection ordering in a per-player native Metal layer, follows the active `NSScreen`, and keeps Compose controls/subtitles in a separate overlay window.
+On Android, `SurfaceType.Auto` sends every projection mode through Media3's `DefaultVideoFrameProcessor` so PQ/HLG input cannot accidentally be drawn as washed-out SDR. HDR projection requires GLES3 plus `EXT_YUV_target`; HDR10/PQ and HLG outputs additionally require the matching EGL colorspace and use RGBA16F intermediates with an RGBA_1010102 output surface. `AUTO` and `PREFER_HDR` retry Media3's managed SDR tone mapping if HDR output setup fails, while `REQUIRE_HDR` reports a typed error. Flat video uses `SurfaceView`; `TextureView` is an explicit compositing opt-out and is not advertised as HDR. Android projected surfaces can use device rotation automatically unless `projectionViewControlMode` is set to `MANUAL`. iOS projections use `AVPlayerItemVideoOutput` to pull P010/NV12 frames into CoreVideo Metal textures. One `rgba16Float` shader handles flat stereo, equirectangular, fisheye, EAC, crops and CoreMotion-backed viewport control; HDR10/HLG is confirmed only after an EDR Metal frame completes, and runtime failure replans to controlled SDR unless `REQUIRE_HDR` was selected. Flat iOS playback keeps `AVPlayerLayer`; `FORCE_SDR` explicitly disables EDR on that layer so AVFoundation performs the SDR presentation. In the explicit macOS desktop player, the P010/NV12 and FP16 Metal layer follows the active `NSScreen` while Compose controls/subtitles remain in the same `NSWindow` above it.
 
 Windows requests Media Foundation hardware transforms and requires a decoded P010 GPU surface before
 its D3D11 projection/color shader feeds a flip-model swapchain; it does not invent a decoder

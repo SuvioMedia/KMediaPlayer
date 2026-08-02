@@ -1,8 +1,12 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopVideoWindowSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
@@ -10,6 +14,7 @@ import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.awt.Window
 import kotlin.time.Duration
 
 actual fun createVideoPlayerState(
@@ -43,7 +48,8 @@ actual fun createVideoPlayerState(
 @Stable
 open class DefaultVideoPlayerState(
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
-) : VideoPlayerState {
+) : VideoPlayerState,
+    DesktopVideoWindowSurfaceProvider {
     val delegate: VideoPlayerState =
         EventingVideoPlayerState(
             when (CurrentPlatform.os) {
@@ -248,4 +254,22 @@ open class DefaultVideoPlayerState(
     override fun restart() = delegate.restart()
 
     override fun clearError() = delegate.clearError()
+
+    @Composable
+    override fun RenderDesktopVideoWindowSurface(
+        window: Window,
+        modifier: Modifier,
+        contentScale: ContentScale,
+        overlay: @Composable () -> Unit,
+        onSurfaceAttached: () -> Unit,
+    ) {
+        JvmDesktopVideoWindowSurface(
+            playerState = delegate,
+            window = window,
+            modifier = modifier,
+            contentScale = contentScale,
+            overlay = overlay,
+            onSurfaceAttached = onSurfaceAttached,
+        )
+    }
 }

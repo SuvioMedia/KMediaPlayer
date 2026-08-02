@@ -94,6 +94,8 @@ public final class io/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions_
 	public static synthetic fun createMpvVideoPlayerState$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
 	public static final fun inspectMpvBackend (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability;
 	public static synthetic fun inspectMpvBackend$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvBackendAvailability;
+	public static final fun mpvDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
+	public static synthetic fun mpvDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 }
 
 public abstract interface class io/github/kdroidfilter/composemediaplayer/MpvRuntimeSource {
@@ -146,6 +148,7 @@ public final class io/github/kdroidfilter/composemediaplayer/MpvVideoPlayerBacke
 public final class io/github/kdroidfilter/composemediaplayer/mpv/ComposableSingletons$MpvVideoPlayerSurfaceKt {
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/mpv/ComposableSingletons$MpvVideoPlayerSurfaceKt;
 	public fun <init> ()V
+	public final fun getLambda$1934248245$io_github_shusek_mediaplayer_mpv ()Lkotlin/jvm/functions/Function2;
 	public final fun getLambda$201422425$io_github_shusek_mediaplayer_mpv ()Lkotlin/jvm/functions/Function2;
 }
 

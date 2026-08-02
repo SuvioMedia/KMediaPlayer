@@ -138,6 +138,7 @@ fun main(args: Array<String>) {
                     playbackOptions = playbackOptions,
                     initialProjection = initialProjection,
                     initialDesktopBackendName = System.getProperty("sample.app.playbackBackend"),
+                    initialDesktopSourceAdapterName = System.getProperty("sample.app.sourceAdapter"),
                     initialFullscreen =
                         System.getProperty("sample.app.initialFullscreen")
                             ?.toBooleanStrictOrNull()

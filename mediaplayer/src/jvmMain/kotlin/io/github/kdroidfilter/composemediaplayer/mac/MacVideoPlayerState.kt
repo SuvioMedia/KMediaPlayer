@@ -12,6 +12,7 @@ import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
 import io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities
+import io.github.kdroidfilter.composemediaplayer.DesktopMediaSourcePolicy
 import io.github.kdroidfilter.composemediaplayer.DesktopPlayerLifecycle
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitleFont
 import io.github.kdroidfilter.composemediaplayer.DesktopSubtitlePipelineExtension
@@ -66,7 +67,9 @@ import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
 import io.github.kdroidfilter.composemediaplayer.VideoSourcePipelineExtension
 import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
+import io.github.kdroidfilter.composemediaplayer.allowsExternalSourceAdapter
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.explicitFallbackBackend
 import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
 import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
@@ -806,11 +809,6 @@ class MacVideoPlayerState(
                         launch { updateMetadata() }
                     }
                     lifecycle.ensureCurrentSource(generation)
-                    if (libVlcBackend != null) {
-                        refreshLibVlcRuntimeTracksIfNeeded()
-                    }
-                    applyLibVlcSelectedTracks()
-
                     // Scale output to match display surface if size is already known
                     if (surfaceWidth > 0 && surfaceHeight > 0) {
                         applyOutputScaling()
@@ -845,13 +843,19 @@ class MacVideoPlayerState(
                     }
 
                     // Start playback if needed - in the background
-                    if (isPlaying) {
-                        if (shouldUseLibVlcNativeSurface()) {
-                            delay(75.milliseconds)
-                        }
+                    if (libVlcBackend != null) {
+                        // libVLC exposes its runtime track descriptions only after playback has
+                        // started. Populate the model from the live player, then restore a paused
+                        // initial state when requested.
                         playInBackground()
-                    } else if (libVlcBackendActive) {
-                        pauseInBackground()
+                        delay(75.milliseconds)
+                        refreshLibVlcRuntimeTracksIfNeeded()
+                        applyLibVlcSelectedTracks()
+                        if (initializePlayerState != InitialPlayerState.PLAY) {
+                            pauseInBackground()
+                        }
+                    } else if (isPlaying) {
+                        playInBackground()
                     }
                 } else {
                     macLogger.e { "Failed to open URI" }
@@ -1029,10 +1033,10 @@ class MacVideoPlayerState(
             metalProjectionRendererDisabled = projectedSurface
             hdrMetalSurfaceAllowed =
                 nativeAvFoundationSurfaceRequested &&
-                    !nativeBackendUsesLibVlc &&
-                    !usesLibAssSubtitleOverlay &&
-                    hdrMetalRequested &&
-                    !usesMacMetalProjectionRenderer()
+                !nativeBackendUsesLibVlc &&
+                !usesLibAssSubtitleOverlay &&
+                hdrMetalRequested &&
+                !usesMacMetalProjectionRenderer()
             metalProjectionFallbackDetail = "The macOS Metal projection shader or pipeline could not be configured."
         }
         setNativeHdrMetalPreferred(hdrMetalSurfaceAllowed)
@@ -1158,7 +1162,7 @@ class MacVideoPlayerState(
                 }.getOrElse { e ->
                     macLogger.e { "Failed to attach HDR Metal surface: ${e.message}" }
                     false
-            }
+                }
             if (!attached) {
                 handleNativeHdrAttachmentFailure(
                     "The macOS Metal projection layer could not be attached to the JBR/AWT host.",
@@ -1345,7 +1349,8 @@ class MacVideoPlayerState(
         val legacyContainer = JvmLegacyVideoContainerSupport.containerFor(uri, requestHeaders)
         if (legacyContainer != null) {
             val configured =
-                desktopVideoBackend.forcedMacFallbackBackend()
+                playbackOptions.desktopMediaSourcePolicy.explicitFallbackBackend()
+                    ?: desktopVideoBackend.forcedMacFallbackBackend()
                     ?: resolveMacConfiguredFallbackBackend(
                         configured = macFallbackBackendProperty(),
                         isLegacyContainer = true,
@@ -1358,7 +1363,9 @@ class MacVideoPlayerState(
                 )
             }
         }
-        if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders)) {
+        if (!JvmExternalFallbackContainerSupport.needsContainerFallback(uri, requestHeaders) ||
+            !playbackOptions.allowsExternalSourceAdapter()
+        ) {
             return prepareUriForAvFoundationPlayback(uri)
         }
 
@@ -1473,6 +1480,7 @@ class MacVideoPlayerState(
                         dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR,
                 forceAvFoundationCompatibility = forceAvFoundationCompatibility,
                 extensions = playbackOptions.extensions,
+                sourcePolicy = playbackOptions.desktopMediaSourcePolicy,
             )
         val hlsSource = startedFallback.source
         ffmpegHlsFallback = startedFallback.fallback
@@ -2023,6 +2031,11 @@ class MacVideoPlayerState(
         requestHeaders: Map<String, String>,
     ): MacResolvedLibVlcBackend? {
         val forcedDesktopBackend = desktopVideoBackend.forcedMacFallbackBackend()
+        if (playbackOptions.desktopMediaSourcePolicy != DesktopMediaSourcePolicy.INHERIT &&
+            !desktopVideoBackend.requestsLibVlcExplicitly()
+        ) {
+            return null
+        }
         val legacyContainer = JvmLegacyVideoContainerSupport.containerFor(uri, requestHeaders)
         val needsExternalContainerFallback =
             legacyContainer == null &&
@@ -2033,6 +2046,7 @@ class MacVideoPlayerState(
 
         val configured =
             forcedDesktopBackend
+                ?: playbackOptions.desktopMediaSourcePolicy.explicitFallbackBackend()
                 ?: resolveMacConfiguredFallbackBackend(
                     configured = macFallbackBackendProperty(),
                     isLegacyContainer = legacyContainer != null,

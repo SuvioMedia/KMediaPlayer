@@ -37,6 +37,9 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
     abstract val extensionApiDependencies: SetProperty<String>
 
     @get:Input
+    abstract val desktopWindowDependencies: SetProperty<String>
+
+    @get:Input
     abstract val defaultPlayerDependencies: SetProperty<String>
 
     @get:Input
@@ -52,6 +55,7 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
     fun verifyBoundaries() {
         val core = coreDependencies.get()
         val extensionApi = extensionApiDependencies.get()
+        val desktopWindow = desktopWindowDependencies.get()
         val defaultPlayer = defaultPlayerDependencies.get()
         val defaultPlayerExternal = defaultPlayerExternalDependencies.get()
         val mpvBackend = mpvBackendDependencies.get()
@@ -65,6 +69,15 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         }
         check(":mediaplayer-core" in extensionApi) {
             "The extension API must consume the backend-neutral :mediaplayer-core contracts."
+        }
+        check(":mediaplayer-core" in desktopWindow) {
+            "The desktop-window API must consume the backend-neutral :mediaplayer-core contracts."
+        }
+        check(":mediaplayer-desktop-window" in defaultPlayer) {
+            "The default JVM player must implement the explicit desktop-window SPI."
+        }
+        check(":mediaplayer-desktop-window" in mpvBackend) {
+            "The MPV JVM backend must implement the explicit desktop-window SPI."
         }
         check(":mediaplayer-core" in mpvBackend) {
             "The MPV backend must consume the backend-neutral :mediaplayer-core contracts."
@@ -83,6 +96,9 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         }
         check(extensionApi.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
             ":mediaplayer-extension-api must not depend on a player implementation."
+        }
+        check(desktopWindow.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
+            ":mediaplayer-desktop-window must not depend on a player implementation."
         }
         check(optionalExtensions.none { edge -> edge.endsWith("->:mediaplayer") }) {
             "Optional pipeline extensions must depend on :mediaplayer-extension-api, not on the default player."
@@ -156,6 +172,8 @@ tasks.register("publishConsumerSmokeArtifacts") {
         ":mediaplayer-core:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-core:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-core:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-window:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-window:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-extension-api:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-extension-api:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-extension-api:publishAndroidPublicationToConsumerSmokeRepository",
@@ -185,16 +203,22 @@ val verifyBackendModuleBoundaries =
     }
 
 gradle.projectsEvaluated {
-    fun Project.projectDependencyPaths(): Set<String> =
-        configurations
+    // Integration tests intentionally compose multiple implementations; enforce boundaries only on shipped graphs.
+    fun Project.productionConfigurations() =
+        configurations.filterNot { configuration ->
+            configuration.name.contains("test", ignoreCase = true)
+        }
+
+    fun Project.productionProjectDependencyPaths(): Set<String> =
+        productionConfigurations()
             .flatMap { configuration ->
                 configuration.dependencies
                     .withType(ProjectDependency::class.java)
                     .map(ProjectDependency::getPath)
             }.toSet()
 
-    fun Project.externalDependencyCoordinates(): Set<String> =
-        configurations
+    fun Project.productionExternalDependencyCoordinates(): Set<String> =
+        productionConfigurations()
             .flatMap { configuration ->
                 configuration.dependencies.mapNotNull { dependency ->
                     dependency.group
@@ -204,11 +228,12 @@ gradle.projectsEvaluated {
             }.toSet()
 
     verifyBackendModuleBoundaries.configure {
-        coreDependencies.set(project(":mediaplayer-core").projectDependencyPaths())
-        extensionApiDependencies.set(project(":mediaplayer-extension-api").projectDependencyPaths())
-        defaultPlayerDependencies.set(project(":mediaplayer").projectDependencyPaths())
-        defaultPlayerExternalDependencies.set(project(":mediaplayer").externalDependencyCoordinates())
-        mpvBackendDependencies.set(project(":mediaplayer-mpv").projectDependencyPaths())
+        coreDependencies.set(project(":mediaplayer-core").productionProjectDependencyPaths())
+        extensionApiDependencies.set(project(":mediaplayer-extension-api").productionProjectDependencyPaths())
+        desktopWindowDependencies.set(project(":mediaplayer-desktop-window").productionProjectDependencyPaths())
+        defaultPlayerDependencies.set(project(":mediaplayer").productionProjectDependencyPaths())
+        defaultPlayerExternalDependencies.set(project(":mediaplayer").productionExternalDependencyCoordinates())
+        mpvBackendDependencies.set(project(":mediaplayer-mpv").productionProjectDependencyPaths())
         optionalExtensionDependencies.set(
             setOf(
                 project(":mediaplayer-ass"),
@@ -216,7 +241,7 @@ gradle.projectsEvaluated {
                 project(":mediaplayer-kmediabridge"),
             ).flatMap { extensionProject ->
                 extensionProject
-                    .projectDependencyPaths()
+                    .productionProjectDependencyPaths()
                     .map { dependencyPath -> "${extensionProject.path}->$dependencyPath" }
             }.toSet(),
         )

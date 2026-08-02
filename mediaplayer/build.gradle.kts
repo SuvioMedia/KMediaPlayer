@@ -279,6 +279,7 @@ kotlin {
         jvmMain {
             resources.exclude("composemediaplayer/native/darwin-x86-64/**")
             dependencies {
+                api(project(":mediaplayer-desktop-window"))
                 implementation(libs.compose.ui)
                 implementation(libs.kotlinx.coroutines.swing)
             }
@@ -510,6 +511,12 @@ tasks.withType<Test>().configureEach {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
     providers.gradleProperty("kmediaPlayerHdrTestMedia").orNull?.let { mediaPath ->
         systemProperty("composemediaplayer.test.hdrMedia", mediaPath)
+    }
+    providers.gradleProperty("composeMediaPlayerLegacyTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.test.legacyMedia", mediaPath)
+    }
+    providers.gradleProperty("composeMediaPlayerWmaProTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.test.wmaProMedia", mediaPath)
     }
 }
 

@@ -1,14 +1,17 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerSurface
+import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerWindowSurface
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerSurface
+import java.awt.Window
 
 /**
  * Composable function for rendering a video player surface.
@@ -41,6 +44,58 @@ actual fun VideoPlayerSurface(
         is MacVideoPlayerState -> MacVideoPlayerSurface(surfaceState, modifier, contentScale, overlay)
         is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(surfaceState, modifier, contentScale, overlay)
         else -> error("Unsupported JVM player state: ${surfaceState.javaClass.name}")
+    }
+}
+
+/** Explicit full-player surface hosted by composemediaplayer-desktop-window. */
+@Composable
+internal fun JvmDesktopVideoWindowSurface(
+    playerState: VideoPlayerState,
+    window: Window,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit,
+    onSurfaceAttached: () -> Unit,
+) {
+    when (val surfaceState = playerState.resolveJvmSurfaceState()) {
+        is PreviewableVideoPlayerState -> {
+            VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
+            SurfaceAttachedEffect(surfaceState, window, onSurfaceAttached)
+        }
+        is VideoPlayerSurfaceProvider -> {
+            surfaceState.RenderVideoPlayerSurface(modifier, contentScale, overlay)
+            SurfaceAttachedEffect(surfaceState, window, onSurfaceAttached)
+        }
+        is WindowsVideoPlayerState -> {
+            WindowsVideoPlayerSurface(surfaceState, modifier, contentScale, overlay)
+            SurfaceAttachedEffect(surfaceState, window, onSurfaceAttached)
+        }
+        is MacVideoPlayerState ->
+            MacVideoPlayerWindowSurface(
+                surfaceState,
+                window,
+                modifier,
+                contentScale,
+                overlay,
+                onSurfaceAttached,
+            )
+        is LinuxVideoPlayerState -> {
+            LinuxVideoPlayerSurface(surfaceState, modifier, contentScale, overlay)
+            SurfaceAttachedEffect(surfaceState, window, onSurfaceAttached)
+        }
+        else -> error("Unsupported JVM player state: ${surfaceState.javaClass.name}")
+    }
+}
+
+@Composable
+private fun SurfaceAttachedEffect(
+    playerState: VideoPlayerState,
+    window: Window,
+    onSurfaceAttached: () -> Unit,
+) {
+    DisposableEffect(playerState, window) {
+        onSurfaceAttached()
+        onDispose { }
     }
 }
 

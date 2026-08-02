@@ -28,14 +28,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import kotlinx.coroutines.delay
 import sample.app.feed.FeedScreen
 import sample.app.gallery.GalleryScreen
+import sample.app.player.DesktopMediaSourceAdapter
 import sample.app.player.DesktopMkvPlaybackBackend
 import sample.app.player.PlayerScreen
-import sample.app.player.rememberSampleVideoPlayerState
+import sample.app.player.SampleVideoPlayerHandle
+import sample.app.player.rememberSampleVideoPlayer
 import sample.app.theme.AppTheme
 
 private enum class Screen(val label: String, val icon: ImageVector) {
@@ -55,6 +56,7 @@ fun App(
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
     initialProjection: VideoProjectionSettings = VideoProjectionSettings(),
     initialDesktopBackendName: String? = null,
+    initialDesktopSourceAdapterName: String? = null,
 ) {
     AppTheme {
         var currentScreen by remember { mutableStateOf(Screen.Player) }
@@ -66,7 +68,21 @@ fun App(
                     } ?: DesktopMkvPlaybackBackend.AUTO,
                 )
             }
-        val playerState = rememberSampleVideoPlayerState(selectedDesktopBackend, playbackOptions)
+        var selectedDesktopSourceAdapter by
+            remember(initialDesktopSourceAdapterName) {
+                mutableStateOf(
+                    DesktopMediaSourceAdapter.entries.firstOrNull { adapter ->
+                        adapter.name.equals(initialDesktopSourceAdapterName, ignoreCase = true)
+                    } ?: DesktopMediaSourceAdapter.AUTO,
+                )
+            }
+        val player =
+            rememberSampleVideoPlayer(
+                selectedDesktopBackend,
+                selectedDesktopSourceAdapter,
+                playbackOptions,
+            )
+        val playerState = player.playerState
         var initialFullscreenApplied by remember { mutableStateOf(false) }
         LaunchedEffect(playerState, initialMuted, initialLoop) {
             if (initialMuted) playerState.volume = 0f
@@ -96,23 +112,27 @@ fun App(
                 RailLayout(
                     currentScreen,
                     onScreenChange = { currentScreen = it },
-                    playerState = playerState,
+                    player = player,
                     initialVideoUrl = initialVideoUrl,
                     initialSubtitleUrl = initialSubtitleUrl,
                     demoSubtitleEnabled = demoSubtitleEnabled,
                     selectedDesktopBackend = selectedDesktopBackend,
                     onDesktopBackendChange = { selectedDesktopBackend = it },
+                    selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
+                    onDesktopSourceAdapterChange = { selectedDesktopSourceAdapter = it },
                 )
             } else {
                 BarLayout(
                     currentScreen,
                     onScreenChange = { currentScreen = it },
-                    playerState = playerState,
+                    player = player,
                     initialVideoUrl = initialVideoUrl,
                     initialSubtitleUrl = initialSubtitleUrl,
                     demoSubtitleEnabled = demoSubtitleEnabled,
                     selectedDesktopBackend = selectedDesktopBackend,
                     onDesktopBackendChange = { selectedDesktopBackend = it },
+                    selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
+                    onDesktopSourceAdapterChange = { selectedDesktopSourceAdapter = it },
                 )
             }
         }
@@ -126,12 +146,14 @@ private const val INITIAL_FULLSCREEN_POLL_MILLIS = 25L
 private fun BarLayout(
     current: Screen,
     onScreenChange: (Screen) -> Unit,
-    playerState: VideoPlayerState,
+    player: SampleVideoPlayerHandle,
     initialVideoUrl: String?,
     initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
     selectedDesktopBackend: DesktopMkvPlaybackBackend,
     onDesktopBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
+    selectedDesktopSourceAdapter: DesktopMediaSourceAdapter,
+    onDesktopSourceAdapterChange: (DesktopMediaSourceAdapter) -> Unit,
 ) {
     Scaffold(
         bottomBar = {
@@ -150,12 +172,14 @@ private fun BarLayout(
         ScreenContent(
             current,
             Modifier.fillMaxSize().padding(padding).zIndex(0f),
-            playerState,
+            player,
             initialVideoUrl,
             initialSubtitleUrl,
             demoSubtitleEnabled,
             selectedDesktopBackend,
             onDesktopBackendChange,
+            selectedDesktopSourceAdapter,
+            onDesktopSourceAdapterChange,
         )
     }
 }
@@ -165,12 +189,14 @@ private fun BarLayout(
 private fun RailLayout(
     current: Screen,
     onScreenChange: (Screen) -> Unit,
-    playerState: VideoPlayerState,
+    player: SampleVideoPlayerHandle,
     initialVideoUrl: String?,
     initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
     selectedDesktopBackend: DesktopMkvPlaybackBackend,
     onDesktopBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
+    selectedDesktopSourceAdapter: DesktopMediaSourceAdapter,
+    onDesktopSourceAdapterChange: (DesktopMediaSourceAdapter) -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
         NavigationRail(modifier = Modifier.zIndex(2f)) {
@@ -188,12 +214,14 @@ private fun RailLayout(
         ScreenContent(
             current,
             Modifier.weight(1f).fillMaxHeight().zIndex(0f),
-            playerState,
+            player,
             initialVideoUrl,
             initialSubtitleUrl,
             demoSubtitleEnabled,
             selectedDesktopBackend,
             onDesktopBackendChange,
+            selectedDesktopSourceAdapter,
+            onDesktopSourceAdapterChange,
         )
     }
 }
@@ -202,23 +230,27 @@ private fun RailLayout(
 private fun ScreenContent(
     screen: Screen,
     modifier: Modifier,
-    playerState: VideoPlayerState,
+    player: SampleVideoPlayerHandle,
     initialVideoUrl: String?,
     initialSubtitleUrl: String?,
     demoSubtitleEnabled: Boolean,
     selectedDesktopBackend: DesktopMkvPlaybackBackend,
     onDesktopBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
+    selectedDesktopSourceAdapter: DesktopMediaSourceAdapter,
+    onDesktopSourceAdapterChange: (DesktopMediaSourceAdapter) -> Unit,
 ) {
     when (screen) {
         Screen.Player ->
             PlayerScreen(
                 modifier,
-                playerState,
+                player = player,
                 initialVideoUrl = initialVideoUrl,
                 initialSubtitleUrl = initialSubtitleUrl,
                 demoSubtitleEnabled = demoSubtitleEnabled,
                 selectedDesktopMkvBackend = selectedDesktopBackend,
                 onDesktopMkvBackendChange = onDesktopBackendChange,
+                selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
+                onDesktopSourceAdapterChange = onDesktopSourceAdapterChange,
             )
         Screen.Gallery -> GalleryScreen(modifier)
         Screen.Feed -> FeedScreen(modifier)

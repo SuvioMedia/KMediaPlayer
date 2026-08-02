@@ -23,12 +23,12 @@ import java.nio.file.Path
 import javax.swing.JFrame
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
+import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
 
 class MpvMacNativeSurfaceIntegrationTest {
@@ -78,14 +78,14 @@ class MpvMacNativeSurfaceIntegrationTest {
         val window = createTransparentWindow()
 
         try {
+            player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
+            await("MPV did not start the native-surface fixture before attachment.") {
+                player.hasMedia && player.isPlaying && !player.isLoading && player.currentTime >= 250.milliseconds
+            }
             assertTrue(player.attachNativeMacWindow(window), "The native macOS MPV surface did not attach.")
             assertContains(player.renderingInfo.videoRenderer.orEmpty(), "OpenGL")
             dragWindowThroughNativeAppKitRegion(window)
 
-            player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
-            await("MPV did not play the native-surface fixture.") {
-                player.hasMedia && player.isPlaying && !player.isLoading && player.currentTime >= 250.milliseconds
-            }
             assertEquals(null, player.error)
             if (nativeSurfaceFixture != null) {
                 await("MPV did not activate VideoToolbox for the H.264 native-surface fixture.") {
@@ -143,13 +143,13 @@ class MpvMacNativeSurfaceIntegrationTest {
         var platformPlayer: VideoPlayerState? = null
 
         try {
-            assertTrue(mpvPlayer.attachNativeMacWindow(window))
             mpvPlayer.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
             await("MPV did not start before the backend handoff.") {
                 mpvPlayer.hasMedia &&
                     mpvPlayer.isPlaying &&
                     mpvPlayer.currentTime >= 250.milliseconds
             }
+            assertTrue(mpvPlayer.attachNativeMacWindow(window))
 
             // Match the sample handoff: dispose MPV while its AWT window still exists, then start
             // AVFoundation. A stale render callback here used to crash inside Objective-C retain.
@@ -224,8 +224,7 @@ class MpvMacNativeSurfaceIntegrationTest {
 
     private fun windowBounds(window: JFrame): Rectangle = onEdtResult { window.bounds }
 
-    private fun screenBounds(window: JFrame): Rectangle =
-        onEdtResult { window.graphicsConfiguration.bounds }
+    private fun screenBounds(window: JFrame): Rectangle = onEdtResult { window.graphicsConfiguration.bounds }
 
     private fun sameBounds(
         actual: Rectangle,
