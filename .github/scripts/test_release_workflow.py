@@ -103,12 +103,12 @@ class ReleaseWorkflowTest(unittest.TestCase):
             repository_root / "mediaplayer-mpv/ComposeMediaPlayerMpv.podspec"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("MPV_VERSION: 0.3.0-rc.5", build_natives)
-        self.assertIn("RUNTIME_VERSION: 0.1.0-rc.4", build_natives)
-        self.assertIn("KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.4", verifier)
-        self.assertIn('kmediaFfmpegRuntimeVersion = "0.1.0-rc.4"', mpv_build)
-        self.assertIn("KMediaAssRuntime', '0.1.0-rc.4'", podspec)
-        self.assertIn("KMediaFfmpegRuntime', '0.1.0-rc.4'", podspec)
+        self.assertIn("MPV_VERSION: 0.3.0-rc.6", build_natives)
+        self.assertIn("RUNTIME_VERSION: 0.1.0-rc.5", build_natives)
+        self.assertIn("KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.5", verifier)
+        self.assertIn('kmediaFfmpegRuntimeVersion = "0.1.0-rc.5"', mpv_build)
+        self.assertIn("KMediaAssRuntime', '0.1.0-rc.5'", podspec)
+        self.assertIn("KMediaFfmpegRuntime', '0.1.0-rc.5'", podspec)
 
     def test_every_native_ass_consumer_uses_one_runtime_version(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
@@ -127,8 +127,33 @@ class ReleaseWorkflowTest(unittest.TestCase):
             for relative_path in runtime_consumers
         )
 
-        self.assertIn("0.1.0-rc.4", source)
+        self.assertIn("0.1.0-rc.5", source)
         self.assertNotIn("0.1.0-rc.3", source)
+
+    def test_windows_jvm_job_verifies_packaged_dll_dependency_closure(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        workflow = (
+            repository_root / ".github/workflows/build-test.yml"
+        ).read_text(encoding="utf-8")
+        ass_build = (
+            repository_root / "mediaplayer-ass/build.gradle.kts"
+        ).read_text(encoding="utf-8")
+
+        stage_position = workflow.index("Stage Windows native runtimes for DLL closure verification")
+        verify_position = workflow.index("Verify packaged Windows DLL dependency closure")
+        test_position = workflow.index("Test desktop JVM on ${{ matrix.label }}")
+
+        self.assertLess(stage_position, verify_position)
+        self.assertLess(verify_position, test_position)
+        self.assertIn(":mediaplayer-ass:stageWindowsAssRuntimeForVerification", workflow)
+        self.assertIn(":mediaplayer-mpv:stageWindowsMpvRuntimeForVerification", workflow)
+        self.assertIn("verify_windows_dll_closure.py", workflow)
+        self.assertIn("if: runner.os == 'Windows'", workflow[stage_position:test_position])
+        self.assertIn("stageWindowsAssRuntimeForVerification", ass_build)
+        mpv_build = (
+            repository_root / "mediaplayer-mpv/build.gradle.kts"
+        ).read_text(encoding="utf-8")
+        self.assertIn("stageWindowsMpvRuntimeForVerification", mpv_build)
 
     def test_consumer_smoke_trusts_the_generated_desktop_window_fixtures(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]

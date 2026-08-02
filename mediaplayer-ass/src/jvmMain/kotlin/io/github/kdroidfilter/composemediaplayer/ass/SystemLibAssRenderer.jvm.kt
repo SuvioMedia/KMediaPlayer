@@ -368,7 +368,7 @@ internal object SystemLibAssRuntime {
     )
 
     private const val REQUIRED_LIBASS_VERSION = 0x01705000
-    private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-36443523f0148567"
+    private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-132a1d9ab8838bbd"
     private const val MAX_FAILURE_DETAIL_LENGTH = 240
     private const val HEX_RADIX = 16
     private const val VERSION_HEX_WIDTH = 8

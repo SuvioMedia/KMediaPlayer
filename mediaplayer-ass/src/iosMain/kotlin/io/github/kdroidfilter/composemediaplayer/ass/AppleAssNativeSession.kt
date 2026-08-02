@@ -115,7 +115,7 @@ internal class AppleAssNativeSession private constructor(
         }
 
         private const val REQUIRED_LIBASS_VERSION = 0x01705000L
-        private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-36443523f0148567"
+        private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-132a1d9ab8838bbd"
         private const val MAX_ASS_SCRIPT_BYTES = 64 * 1024 * 1024
     }
 }

@@ -100,7 +100,7 @@ verify_runtime_target() {
     )
 
     require_file "$directory/ass-runtime-id.txt"
-    [[ "$(<"$directory/ass-runtime-id.txt")" == "kmediaass-0.17.5-36443523f0148567" ]] || {
+    [[ "$(<"$directory/ass-runtime-id.txt")" == "kmediaass-0.17.5-132a1d9ab8838bbd" ]] || {
         echo "The Apple ASS runtime ID differs for $target." >&2
         exit 65
     }
@@ -146,7 +146,7 @@ verify_runtime_target() {
     exit 66
 }
 require_file "$POD_ROOT/KMediaAssRuntime.podspec"
-grep -Fq "spec.version              = '0.1.0-rc.4'" \
+grep -Fq "spec.version              = '0.1.0-rc.5'" \
     "$POD_ROOT/KMediaAssRuntime.podspec" || {
         echo "The local KMediaAssRuntime podspec has another version." >&2
         exit 65

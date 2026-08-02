@@ -19,7 +19,7 @@ class AppleAssRendererTest {
         if (!isSupportedDesktop()) return
         assertTrue(SystemLibAssRuntime.isAvailable, SystemLibAssRuntime.failureDetail)
         assertEquals(
-            "kmediaass-0.17.5-36443523f0148567",
+            "kmediaass-0.17.5-132a1d9ab8838bbd",
             KMediaAssRuntime.current().orElseThrow().runtimeId(),
         )
 
