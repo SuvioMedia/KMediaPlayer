@@ -22,6 +22,12 @@ class JvmLegacyVideoContainerSupportTest {
             assertEquals(VideoDynamicRange.SDR, result.videoColorInfo.dynamicRange)
             assertEquals(8, result.videoColorInfo.bitDepth)
             assertTrue(result.videoColorInfo.isSafeForUnmanagedSdrFallback())
+            val audio = result.audioStreams.single()
+            assertEquals(1, audio.streamIndex)
+            assertEquals("MP3", audio.track.label)
+            assertEquals(2, audio.track.channels)
+            assertEquals(48_000, audio.track.sampleRate)
+            assertEquals(192_000, audio.track.bitrate)
         }
     }
 
@@ -36,6 +42,13 @@ class JvmLegacyVideoContainerSupportTest {
         assertEquals(VideoDynamicRange.SDR, result.videoColorInfo.dynamicRange)
         assertEquals(8, result.videoColorInfo.bitDepth)
         assertTrue(result.videoColorInfo.isSafeForUnmanagedSdrFallback())
+        val audio = result.audioStreams.single()
+        assertEquals(1, audio.streamIndex)
+        assertEquals("wmapro", audio.codecName)
+        assertEquals("Windows Media Audio Pro", audio.track.label)
+        assertEquals(6, audio.track.channels)
+        assertEquals(48_000, audio.track.sampleRate)
+        assertEquals(384_000, audio.track.bitrate)
     }
 
     @Test
@@ -112,10 +125,26 @@ class JvmLegacyVideoContainerSupportTest {
                     riffChunk("strh", streamHeader) +
                     riffChunk("strf", bitmapInfo),
             )
+        val audioStreamHeader = ByteArray(56)
+        audioStreamHeader.putAscii(0, "auds")
+        val waveFormat = ByteArray(16)
+        waveFormat.putLeShort(0, 0x0055)
+        waveFormat.putLeShort(2, 2)
+        waveFormat.putLeInt(4, 48_000)
+        waveFormat.putLeInt(8, 24_000)
+        waveFormat.putLeShort(12, 1)
+        waveFormat.putLeShort(14, 0)
+        val audioStreamList =
+            riffChunk(
+                "LIST",
+                "strl".asciiBytes() +
+                    riffChunk("strh", audioStreamHeader) +
+                    riffChunk("strf", waveFormat),
+            )
         val headerList =
             riffChunk(
                 "LIST",
-                "hdrl".asciiBytes() + riffChunk("avih", mainHeader) + streamList,
+                "hdrl".asciiBytes() + riffChunk("avih", mainHeader) + streamList + audioStreamList,
             )
         val body = "AVI ".asciiBytes() + headerList
         return "RIFF".asciiBytes() + body.size.leIntBytes() + body
@@ -129,6 +158,7 @@ class JvmLegacyVideoContainerSupportTest {
         val streamProperties = ByteArray(54 + 55)
         asfVideoMediaGuid.copyInto(streamProperties, destinationOffset = 0)
         streamProperties.putLeInt(40, 55)
+        streamProperties.putLeShort(48, 1)
         val typeData = 54
         streamProperties.putLeInt(typeData, 320)
         streamProperties.putLeInt(typeData + 4, 180)
@@ -141,13 +171,30 @@ class JvmLegacyVideoContainerSupportTest {
         streamProperties.putLeShort(typeData + 25, 24)
         streamProperties.putAscii(typeData + 27, codec)
 
+        val audioStreamProperties = ByteArray(54 + 40)
+        asfAudioMediaGuid.copyInto(audioStreamProperties, destinationOffset = 0)
+        audioStreamProperties.putLeInt(40, 40)
+        audioStreamProperties.putLeShort(48, 2)
+        val audioTypeData = 54
+        audioStreamProperties.putLeShort(audioTypeData, 0xFFFE)
+        audioStreamProperties.putLeShort(audioTypeData + 2, 6)
+        audioStreamProperties.putLeInt(audioTypeData + 4, 48_000)
+        audioStreamProperties.putLeInt(audioTypeData + 8, 48_000)
+        audioStreamProperties.putLeShort(audioTypeData + 12, 12)
+        audioStreamProperties.putLeShort(audioTypeData + 14, 24)
+        audioStreamProperties.putLeShort(audioTypeData + 16, 22)
+        audioStreamProperties.putLeShort(audioTypeData + 18, 24)
+        audioStreamProperties.putLeInt(audioTypeData + 20, 0x3F)
+        wmaProSubformatGuid.copyInto(audioStreamProperties, destinationOffset = audioTypeData + 24)
+
         val objects =
             asfObject(asfFilePropertiesGuid, fileProperties) +
-                asfObject(asfStreamPropertiesGuid, streamProperties)
+                asfObject(asfStreamPropertiesGuid, streamProperties) +
+                asfObject(asfStreamPropertiesGuid, audioStreamProperties)
         val headerSize = 30 + objects.size
         return asfHeaderGuid +
             headerSize.toLong().leLongBytes() +
-            2.leIntBytes() +
+            3.leIntBytes() +
             byteArrayOf(1, 2) +
             objects
     }
@@ -226,6 +273,25 @@ class JvmLegacyVideoContainerSupportTest {
             0xCE.toByte(),
             0x6C,
         )
+    private val wmaProSubformatGuid =
+        byteArrayOf(
+            0x62,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x10,
+            0x00,
+            0x80.toByte(),
+            0x00,
+            0x00,
+            0xAA.toByte(),
+            0x00,
+            0x38,
+            0x9B.toByte(),
+            0x71,
+        )
     private val asfFilePropertiesGuid =
         byteArrayOf(
             0xA1.toByte(),
@@ -270,6 +336,25 @@ class JvmLegacyVideoContainerSupportTest {
             0xEF.toByte(),
             0x19,
             0xBC.toByte(),
+            0x4D,
+            0x5B,
+            0xCF.toByte(),
+            0x11,
+            0xA8.toByte(),
+            0xFD.toByte(),
+            0x00,
+            0x80.toByte(),
+            0x5F,
+            0x5C,
+            0x44,
+            0x2B,
+        )
+    private val asfAudioMediaGuid =
+        byteArrayOf(
+            0x40,
+            0x9E.toByte(),
+            0x69,
+            0xF8.toByte(),
             0x4D,
             0x5B,
             0xCF.toByte(),

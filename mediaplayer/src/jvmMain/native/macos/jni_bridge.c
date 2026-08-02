@@ -32,6 +32,7 @@ extern void   openUri(void* ctx, const char* uri);
 extern void   openUriWithHeaders(void* ctx, const char* uri, const char* headersJson);
 extern void   playVideo(void* ctx);
 extern void   pauseVideo(void* ctx);
+extern int32_t isReadyForPlayback(void* ctx);
 extern void   setVolume(void* ctx, float volume);
 extern float  getVolume(void* ctx);
 extern void*  lockLatestFrame(void* ctx, int32_t* outInfo);
@@ -932,6 +933,7 @@ static const void* native_window_zoom_coordinator_key(void) {
 - (void)toggleZoom;
 - (void)startPendingZoomAnimation;
 - (void)removeEventMonitor;
+- (void)windowDidResize:(NSNotification*)notification;
 - (void)windowWillClose:(NSNotification*)notification;
 @end
 
@@ -951,6 +953,11 @@ static const void* native_window_zoom_coordinator_key(void) {
             addObserver:self
             selector:@selector(windowWillClose:)
             name:NSWindowWillCloseNotification
+            object:window];
+        [[NSNotificationCenter defaultCenter]
+            addObserver:self
+            selector:@selector(windowDidResize:)
+            name:NSWindowDidResizeNotification
             object:window];
     }
     return self;
@@ -974,6 +981,21 @@ static const void* native_window_zoom_coordinator_key(void) {
     if ([notification object] != _window) return;
     [self removeEventMonitor];
     _window = nil;
+}
+
+- (void)windowDidResize:(NSNotification*)notification {
+    NSWindow* window = _window;
+    if ([notification object] != window ||
+        (!_animationInProgress && ![window inLiveResize])) {
+        return;
+    }
+    NSView* compose_view = [window contentView];
+    if (!compose_view) return;
+    [compose_view setNeedsLayout:YES];
+    [compose_view layoutSubtreeIfNeeded];
+    [compose_view setNeedsDisplay:YES];
+    [window setViewsNeedDisplay:YES];
+    [window displayIfNeeded];
 }
 
 - (BOOL)isTitleBarEvent:(NSEvent*)event {
@@ -2269,6 +2291,14 @@ static void JNICALL jni_Pause(JNIEnv* env, jclass cls, jlong handle) {
     if (ctx) pauseVideo(ctx);
 }
 
+static jboolean JNICALL jni_IsReadyForPlayback(JNIEnv* env, jclass cls, jlong handle) {
+    NativePlayerHandle* native = toHandle(handle);
+    LibVlcPlayer* vlc = vlcCtx(native);
+    if (vlc) return (jboolean)(vlc->player != NULL);
+    void* ctx = avCtx(native);
+    return ctx ? (jboolean)(isReadyForPlayback(ctx) != 0) : JNI_FALSE;
+}
+
 static void JNICALL jni_SetVolume(JNIEnv* env, jclass cls, jlong handle, jfloat volume) {
     NativePlayerHandle* native = toHandle(handle);
     LibVlcPlayer* vlc = vlcCtx(native);
@@ -2853,6 +2883,7 @@ static const JNINativeMethod g_methods[] = {
     { "nOpenUriWithHeaderLines", "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaderLines },
     { "nPlay",                   "(J)V",                        (void*)jni_Play },
     { "nPause",                  "(J)V",                        (void*)jni_Pause },
+    { "nIsReadyForPlayback",     "(J)Z",                        (void*)jni_IsReadyForPlayback },
     { "nSetVolume",              "(JF)V",                       (void*)jni_SetVolume },
     { "nGetVolume",              "(J)F",                        (void*)jni_GetVolume },
     { "nLockFrame",              "(J[I)J",                      (void*)jni_LockFrame },

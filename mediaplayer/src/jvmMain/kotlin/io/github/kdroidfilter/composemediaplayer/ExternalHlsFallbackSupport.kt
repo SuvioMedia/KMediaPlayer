@@ -15,10 +15,18 @@ internal enum class ExternalHlsFallbackBackend(
 }
 
 internal data class StartedExternalHlsFallback(
+    val requestedBackend: ExternalHlsFallbackBackend,
     val backend: ExternalHlsFallbackBackend,
     val fallback: Closeable,
     val source: HlsFallbackSource,
-)
+    val vlcBridgeAudioCodec: String? = null,
+) {
+    val usesMediaBridgeForVlcSeek: Boolean
+        get() =
+            requestedBackend == ExternalHlsFallbackBackend.VLC &&
+                backend == ExternalHlsFallbackBackend.KMEDIA_BRIDGE &&
+                vlcBridgeAudioCodec == null
+}
 
 internal object ExternalHlsFallbackSupport {
     suspend fun needsContainerFallback(
@@ -168,11 +176,17 @@ internal object ExternalHlsFallbackSupport {
             externalHlsFallbackDisabled()
         }
 
-        val inputColorInfo =
+        val inputProbe =
             withContext(Dispatchers.IO) {
-                JvmLibVlcMediaProbe.probe(uri, requestHeaders).videoColorInfo
+                JvmLibVlcMediaProbe.probe(uri, requestHeaders)
             }
-        val backend =
+        val inputColorInfo = inputProbe.videoColorInfo
+        val vlcBridgeAudioCodec =
+            selectedProbedAudioStream(inputProbe, selectedAudioStreamIndex)
+                ?.codecName
+                ?.lowercase()
+                ?.takeIf(VLC_AUDIO_CODECS_REQUIRING_BRIDGE::contains)
+        val requestedBackend =
             if (forceAvFoundationCompatibility && configuredHlsFallbackBackend(sourcePolicy) != "vlc") {
                 ExternalHlsFallbackBackend.KMEDIA_BRIDGE
             } else {
@@ -184,6 +198,20 @@ internal object ExternalHlsFallbackSupport {
                     sourcePolicy = sourcePolicy,
                 )
             }
+        val bridgeExtension = desktopPlaybackBridge(extensions)
+        val backend =
+            selectRuntimeHlsFallbackBackend(
+                requestedBackend = requestedBackend,
+                startTimeSeconds = startTimeSeconds,
+                selectedSubtitleStreamIndex = selectedSubtitleStreamIndex,
+                bridgeCapabilities = bridgeExtension?.desktopCapabilities,
+                isMacOs = CurrentPlatform.os == CurrentPlatform.OS.MAC,
+                requiresVlcAudioCodecFallback = vlcBridgeAudioCodec != null,
+            )
+        val overridesVlcWithBridge =
+            requestedBackend == ExternalHlsFallbackBackend.VLC &&
+                backend == ExternalHlsFallbackBackend.KMEDIA_BRIDGE
+        val requireAvFoundationCompatibility = forceAvFoundationCompatibility || overridesVlcWithBridge
         val fallback =
             when (backend) {
                 ExternalHlsFallbackBackend.VLC -> {
@@ -194,7 +222,7 @@ internal object ExternalHlsFallbackSupport {
                 }
                 ExternalHlsFallbackBackend.KMEDIA_BRIDGE -> {
                     val extension =
-                        desktopPlaybackBridge(extensions)
+                        bridgeExtension
                             ?: missingMediaBridgeFallback()
                     extension.open(
                         DesktopPlaybackBridgeRequest(
@@ -203,10 +231,10 @@ internal object ExternalHlsFallbackSupport {
                             selectedAudioStreamIndex = selectedAudioStreamIndex,
                             selectedSubtitleStreamIndex = selectedSubtitleStreamIndex,
                             startPositionMs = (startTimeSeconds * MILLISECONDS_PER_SECOND).roundToLong(),
-                            allowHdrCmafPassthrough = allowHdrCmafPassthrough,
-                            requireHdrCmafPassthrough = requireHdrCmafPassthrough,
+                            allowHdrCmafPassthrough = allowHdrCmafPassthrough && !requireAvFoundationCompatibility,
+                            requireHdrCmafPassthrough = requireHdrCmafPassthrough && !requireAvFoundationCompatibility,
                             forceSdrOutput = forceSdrOutput,
-                            forceAvFoundationCompatibility = forceAvFoundationCompatibility,
+                            forceAvFoundationCompatibility = requireAvFoundationCompatibility,
                         ),
                     )
                 }
@@ -226,7 +254,13 @@ internal object ExternalHlsFallbackSupport {
                     is DesktopPlaybackBridgeSession -> fallback.source.toHlsFallbackSource()
                     else -> error("Unsupported external HLS fallback backend")
                 }
-            StartedExternalHlsFallback(backend = backend, fallback = fallback, source = source)
+            StartedExternalHlsFallback(
+                requestedBackend = requestedBackend,
+                backend = backend,
+                fallback = fallback,
+                source = source,
+                vlcBridgeAudioCodec = vlcBridgeAudioCodec.takeIf { overridesVlcWithBridge },
+            )
         }.getOrElse { error ->
             fallback.close()
             externalHlsFallbackFailed(backend, error)
@@ -279,6 +313,45 @@ internal object ExternalHlsFallbackSupport {
         !isDisabled() &&
             desktopPlaybackBridge(extensions)?.desktopCapabilities?.canCopyVideo == true
 }
+
+/**
+ * VLC 3.x can expose an audio-only/non-monotonic pre-roll after an ASF/WMV `--start-time` seek.
+ * AVFoundation may then leave the replacement item permanently unready. When the application has
+ * a full desktop bridge, use it for timestamped VLC restarts and codecs missing from VLC's own
+ * decoder set, forcing a clean AVC/AAC stream. Other initial sources remain on the selected VLC
+ * HLS route.
+ */
+internal fun selectRuntimeHlsFallbackBackend(
+    requestedBackend: ExternalHlsFallbackBackend,
+    startTimeSeconds: Double,
+    selectedSubtitleStreamIndex: Int?,
+    bridgeCapabilities: DesktopPlaybackBridgeCapabilities?,
+    isMacOs: Boolean,
+    requiresVlcAudioCodecFallback: Boolean = false,
+): ExternalHlsFallbackBackend {
+    val canNormalizeTimestampedPlayback =
+        bridgeCapabilities?.let { capabilities ->
+            capabilities.canTranscodeVideo &&
+                capabilities.canTranscodeAudio &&
+                (selectedSubtitleStreamIndex == null || capabilities.canBurnSubtitles)
+        } == true
+    val needsBridgeCompatibility = startTimeSeconds > 0.0 || requiresVlcAudioCodecFallback
+    val canOverrideVlc = isMacOs && requestedBackend == ExternalHlsFallbackBackend.VLC
+    return if (canOverrideVlc && needsBridgeCompatibility && canNormalizeTimestampedPlayback) {
+        ExternalHlsFallbackBackend.KMEDIA_BRIDGE
+    } else {
+        requestedBackend
+    }
+}
+
+private fun selectedProbedAudioStream(
+    inputProbe: JvmLibVlcTrackInfo,
+    selectedAudioStreamIndex: Int?,
+): JvmLibVlcAudioStream? =
+    selectedAudioStreamIndex
+        ?.let { selected -> inputProbe.audioStreams.firstOrNull { it.streamIndex == selected } }
+        ?: inputProbe.audioStreams.firstOrNull { it.track.isDefault }
+        ?: inputProbe.audioStreams.firstOrNull()
 
 private fun desktopPlaybackBridge(extensions: List<VideoPipelineExtension>): DesktopPlaybackBridgeExtension? =
     extensions
@@ -342,3 +415,4 @@ private fun String.isRemoteMediaUri(): Boolean =
         .getOrNull() in setOf("http", "https")
 
 private const val MILLISECONDS_PER_SECOND = 1_000.0
+private val VLC_AUDIO_CODECS_REQUIRING_BRIDGE = setOf("wmapro", "wmalossless")

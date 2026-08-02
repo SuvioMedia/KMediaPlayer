@@ -5,9 +5,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import io.github.kdroidfilter.composemediaplayer.JvmMediaToolAvailability
 import io.github.kdroidfilter.composemediaplayer.JvmMediaTools
 import io.github.kdroidfilter.composemediaplayer.MediaSourceSpec
@@ -27,6 +29,7 @@ import io.github.kdroidfilter.composemediaplayer.platformDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.vlcHlsDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackRequest
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackSession
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackSessionState
 import io.github.kdroidfilter.composemediaplayer.desktop.JvmHttpSeekableMediaDataSourceFactory
 import io.github.vinceglb.filekit.path
 import kotlinx.coroutines.launch
@@ -112,6 +115,26 @@ internal actual fun rememberSampleVideoPlayer(
     val selectedBackend by rememberUpdatedState(backend)
     val selectedSourceAdapter by rememberUpdatedState(sourceAdapter)
     val activePlayer by session.playerState.collectAsState()
+    val sessionState by session.state.collectAsState()
+    var surfaceTransitionPending by remember(session) { mutableStateOf(false) }
+    val sessionIsOpeningOrSwitching =
+        sessionState is DesktopPlaybackSessionState.Opening ||
+            sessionState is DesktopPlaybackSessionState.Switching
+    LaunchedEffect(sessionState) {
+        when (sessionState) {
+            is DesktopPlaybackSessionState.Opening,
+            is DesktopPlaybackSessionState.Switching,
+            -> surfaceTransitionPending = true
+
+            is DesktopPlaybackSessionState.Failed,
+            DesktopPlaybackSessionState.Idle,
+            DesktopPlaybackSessionState.Closed,
+            -> surfaceTransitionPending = false
+
+            is DesktopPlaybackSessionState.Ready -> Unit
+        }
+    }
+    val isPlaybackTransitioning = sessionIsOpeningOrSwitching || surfaceTransitionPending
     val placeholder =
         remember {
             PreviewableVideoPlayerState(
@@ -132,9 +155,10 @@ internal actual fun rememberSampleVideoPlayer(
     }
 
     val playerState = activePlayer ?: placeholder
-    return remember(playerState, session, scope) {
+    return remember(playerState, session, scope, isPlaybackTransitioning) {
         SampleVideoPlayerHandle(
             playerState = playerState,
+            isPlaybackTransitioning = isPlaybackTransitioning,
             openUriAction = { uri, initial ->
                 scope.launch {
                     applyDesktopPlaybackSelection(selectedBackend, selectedSourceAdapter)
@@ -165,7 +189,12 @@ internal actual fun rememberSampleVideoPlayer(
                     }
                 }
             },
-            surfaceAttachedAction = session::notifySurfaceAttached,
+            surfaceAttachedAction = { attachedPlayer ->
+                session.notifySurfaceAttached(attachedPlayer)
+                if (session.playerState.value === attachedPlayer) {
+                    surfaceTransitionPending = false
+                }
+            },
         )
     }
 }

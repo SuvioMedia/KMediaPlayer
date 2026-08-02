@@ -415,6 +415,7 @@ class MacVideoPlayer {
 
     // Observers for HLS monitoring
     private var playerItemObserver: NSKeyValueObservation?
+    private var playerItemStatusObserver: NSKeyValueObservation?
     private var playerObserver: NSKeyValueObservation?
     private var timeControlStatusObserver: NSKeyValueObservation?
     private var bufferEmptyObserver: NSKeyValueObservation?
@@ -1259,11 +1260,22 @@ class MacVideoPlayer {
         openUri(uri, requestHeaders: [:])
     }
 
+    /// Invalidates readiness synchronously before an asynchronous source replacement starts.
+    /// Without this edge, a JVM poll can observe the previous item as ready and resume playback
+    /// before the replacement AVPlayer has been installed.
+    func beginOpening() {
+        isReadyForPlayback = false
+        pendingPlay = false
+    }
+
+    func getIsReadyForPlayback() -> Bool { return isReadyForPlayback }
+
     /// Opens the video from the given URI (local or network) with HTTP headers for remote assets.
     func openUri(_ uri: String, requestHeaders: [String: String]) {
         isReadyForPlayback = false
         pendingPlay = false
         sourceGeneration &+= 1
+        let generation = sourceGeneration
         resetPlaybackMetrics()
 
         // Clean up previous observers
@@ -1307,6 +1319,7 @@ class MacVideoPlayer {
 
         // Retrieve the video track to obtain the actual dimensions
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
+            guard sourceGeneration == generation else { return }
             guard let videoTrack = tracks?.first, error == nil else {
                 nativeVideoLog(
                     "Error loading video tracks: \(error?.localizedDescription ?? "Unknown")"
@@ -1317,7 +1330,7 @@ class MacVideoPlayer {
                     frameHeight = 1080
                     nativeVideoWidth = frameWidth
                     nativeVideoHeight = frameHeight
-                    setupVideoOutputAndPlayer(with: asset)
+                    setupVideoOutputAndPlayer(with: asset, generation: generation)
                 }
                 return
             }
@@ -1329,6 +1342,7 @@ class MacVideoPlayer {
                         // Use the modern API to load naturalSize and preferredTransform
                         let naturalSize = try await videoTrack.load(.naturalSize)
                         let transform = try await videoTrack.load(.preferredTransform)
+                        guard self.sourceGeneration == generation else { return }
 
                         let effectiveSize = naturalSize.applying(transform)
                         self.frameWidth = Int(abs(effectiveSize.width))
@@ -1344,14 +1358,23 @@ class MacVideoPlayer {
                             : (try? await AVVideoComposition.videoComposition(withPropertiesOf: asset))
 
                         // Continue with player setup
-                        self.setupVideoOutputAndPlayer(with: asset, videoComposition: videoComposition)
+                        self.setupVideoOutputAndPlayer(
+                            with: asset,
+                            videoComposition: videoComposition,
+                            generation: generation
+                        )
                     } catch {
+                        guard self.sourceGeneration == generation else { return }
                         nativeVideoLog("Error loading video track properties: \(error.localizedDescription)")
                         // Use default dimensions for HLS if loading fails
                         if self.isHLSStream {
                             self.frameWidth = 1920
                             self.frameHeight = 1080
-                            self.setupVideoOutputAndPlayer(with: asset, videoComposition: nil)
+                            self.setupVideoOutputAndPlayer(
+                                with: asset,
+                                videoComposition: nil,
+                                generation: generation
+                            )
                         }
                     }
                 }
@@ -1373,7 +1396,11 @@ class MacVideoPlayer {
                     : AVMutableVideoComposition(propertiesOf: asset)
 
                 // Continue with player setup
-                setupVideoOutputAndPlayer(with: asset, videoComposition: videoComposition)
+                setupVideoOutputAndPlayer(
+                    with: asset,
+                    videoComposition: videoComposition,
+                    generation: generation
+                )
             }
         }
     }
@@ -1427,7 +1454,23 @@ class MacVideoPlayer {
     }
 
     // Helper method to setup video output and player
-    private func setupVideoOutputAndPlayer(with asset: AVAsset, videoComposition: AVVideoComposition? = nil) {
+    private func setupVideoOutputAndPlayer(
+        with asset: AVAsset,
+        videoComposition: AVVideoComposition? = nil,
+        generation: UInt64
+    ) {
+        guard sourceGeneration == generation else { return }
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.setupVideoOutputAndPlayer(
+                    with: asset,
+                    videoComposition: videoComposition,
+                    generation: generation
+                )
+            }
+            return
+        }
+        guard sourceGeneration == generation else { return }
         let item = AVPlayerItem(asset: asset)
 
         // Apply the video composition (if any) so that pixel buffers delivered to
@@ -1458,6 +1501,11 @@ class MacVideoPlayer {
         configureVideoOutput(for: item)
 
         player = AVPlayer(playerItem: item)
+        playerItemStatusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            DispatchQueue.main.async {
+                self?.handlePlayerItemStatus(item, generation: generation)
+            }
+        }
         if prefersHdrMetalOutput, useHdrPlayerLayerForSurface {
             configureHdrPlayerLayer(with: player)
         }
@@ -1495,14 +1543,25 @@ class MacVideoPlayer {
             captureInitialFrame()
         }
 
-        // Mark as ready for playback
-        self.isReadyForPlayback = true
+    }
 
-        // If playback was pending, start playback
-        if self.pendingPlay {
-            DispatchQueue.main.async {
-                self.play()
+    private func handlePlayerItemStatus(_ item: AVPlayerItem, generation: UInt64) {
+        guard sourceGeneration == generation, player?.currentItem === item else { return }
+        switch item.status {
+        case .readyToPlay:
+            isReadyForPlayback = true
+            if pendingPlay {
+                pendingPlay = false
+                play()
             }
+        case .failed:
+            isReadyForPlayback = false
+            pendingPlay = false
+            nativeVideoLog("AVPlayerItem failed: \(item.error?.localizedDescription ?? "Unknown error")")
+        case .unknown:
+            isReadyForPlayback = false
+        @unknown default:
+            isReadyForPlayback = false
         }
     }
 
@@ -1718,6 +1777,9 @@ class MacVideoPlayer {
         if isReadyForPlayback {
             isPlaying = true
             player?.play()
+            // Replacing an AVPlayerItem creates a fresh AVPlayer whose rate starts at 1.0.
+            // Reapply the persisted user speed after every source/bridge restart.
+            player?.rate = playbackSpeed
             if videoOutput != nil {
                 configureDisplayLink()
             }
@@ -1999,6 +2061,8 @@ class MacVideoPlayer {
     /// Clean up observers
     private func cleanupObservers() {
         playerItemObserver?.invalidate()
+        playerItemStatusObserver?.invalidate()
+        playerItemStatusObserver = nil
         playerObserver?.invalidate()
         timeControlStatusObserver?.invalidate()
         bufferEmptyObserver?.invalidate()
@@ -2190,6 +2254,9 @@ public func openUri(_ context: UnsafeMutableRawPointer?, _ uri: UnsafePointer<CC
         return
     }
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.beginOpening()
+    }
     // Use a background queue for heavy operations to avoid blocking the main thread
     DispatchQueue.global(qos: .userInitiated).async {
         player.openUri(swiftUri)
@@ -2211,6 +2278,9 @@ public func openUriWithHeaders(
     }
     let requestHeaders = parseRequestHeadersJson(requestHeadersJson)
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.beginOpening()
+    }
     DispatchQueue.global(qos: .userInitiated).async {
         player.openUri(swiftUri, requestHeaders: requestHeaders)
     }
@@ -2405,6 +2475,15 @@ public func isHdrOutputReady(_ context: UnsafeMutableRawPointer?) -> Int32 {
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return syncOnMain {
         player.isHdrOutputReady() ? 1 : 0
+    }
+}
+
+@_cdecl("isReadyForPlayback")
+public func isReadyForPlayback(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        player.getIsReadyForPlayback() ? 1 : 0
     }
 }
 

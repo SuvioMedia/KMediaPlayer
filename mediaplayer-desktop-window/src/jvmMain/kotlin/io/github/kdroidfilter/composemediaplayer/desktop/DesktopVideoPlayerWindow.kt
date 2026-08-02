@@ -25,6 +25,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.awt.Window as AwtWindow
 
 /**
  * Opens the full-size player in an explicit independent desktop window.
@@ -110,62 +111,7 @@ public fun DesktopVideoPlayerWindow(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             val provider = player as? DesktopVideoWindowSurfaceProvider
-            val fullscreen = player.isFullscreen
-            var nativeTransitionTarget by
-                remember(provider, window) { mutableStateOf<Boolean?>(fullscreen) }
-            var nativeTransitionDeadlineNanos by
-                remember(provider, window) {
-                    mutableStateOf(System.nanoTime() + NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS)
-                }
-            var nativeWindowReady by
-                remember(provider, window) { mutableStateOf(provider == null) }
-            LaunchedEffect(provider, window) {
-                // AppKit owns the native NSWindow and can be busy inside a live-resize/Zoom
-                // animation. Never synchronously wait for its main queue from Compose's UI
-                // dispatcher: AppKit may itself be waiting for JBR to lay out the content view.
-                withContext(Dispatchers.IO) {
-                    provider?.configureNativeWindow(window)
-                }
-                nativeWindowReady = true
-                while (true) {
-                    val nativeFullscreen =
-                        withContext(Dispatchers.IO) {
-                            provider?.nativeWindowFullscreenState(window)
-                        }
-                    if (nativeFullscreen != null) {
-                        val transitionTarget = nativeTransitionTarget
-                        if (transitionTarget != null) {
-                            if (nativeFullscreen == transitionTarget) {
-                                nativeTransitionTarget = null
-                            } else if (System.nanoTime() >= nativeTransitionDeadlineNanos) {
-                                nativeTransitionTarget = null
-                                player.isFullscreen = nativeFullscreen
-                            }
-                        } else if (nativeFullscreen != player.isFullscreen) {
-                            player.isFullscreen = nativeFullscreen
-                        }
-                    }
-                    delay(NATIVE_WINDOW_STATE_POLL_MILLIS)
-                }
-            }
-            LaunchedEffect(provider, window, fullscreen, nativeWindowReady) {
-                if (provider != null && !nativeWindowReady) return@LaunchedEffect
-                nativeTransitionTarget = fullscreen
-                nativeTransitionDeadlineNanos =
-                    System.nanoTime() + NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS
-                val nativeWindowOwnsTransition =
-                    withContext(Dispatchers.IO) {
-                        provider?.requestWindowFullscreen(window, fullscreen) == true
-                    }
-                if (!nativeWindowOwnsTransition) {
-                    nativeTransitionTarget = null
-                    windowState.placement =
-                        if (fullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating
-                } else if (!fullscreen && windowState.placement != WindowPlacement.Floating) {
-                    // Do not leave a stale Compose full-screen placement after a native exit.
-                    windowState.placement = WindowPlacement.Floating
-                }
-            }
+            val nativeWindowReady = synchronizeNativeWindow(player, provider, window, windowState)
 
             if (provider != null && nativeWindowReady) {
                 provider.RenderDesktopVideoWindowSurface(
@@ -187,9 +133,73 @@ public fun DesktopVideoPlayerWindow(
                     onDispose { }
                 }
             }
-
         }
     }
+}
+
+@Composable
+private fun synchronizeNativeWindow(
+    player: VideoPlayerState,
+    provider: DesktopVideoWindowSurfaceProvider?,
+    window: AwtWindow,
+    windowState: WindowState,
+): Boolean {
+    val fullscreen = player.isFullscreen
+    var nativeTransitionTarget by
+        remember(provider, window) { mutableStateOf<Boolean?>(fullscreen) }
+    var nativeTransitionDeadlineNanos by
+        remember(provider, window) {
+            mutableStateOf(System.nanoTime() + NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS)
+        }
+    var nativeWindowReady by remember(provider, window) { mutableStateOf(provider == null) }
+
+    LaunchedEffect(provider, window) {
+        // AppKit owns the native NSWindow and can be busy inside a live-resize/Zoom animation.
+        // Never synchronously wait for its main queue from Compose's UI dispatcher: AppKit may
+        // itself be waiting for JBR to lay out the content view.
+        withContext(Dispatchers.IO) {
+            provider?.configureNativeWindow(window)
+        }
+        nativeWindowReady = true
+        while (true) {
+            val nativeFullscreen =
+                withContext(Dispatchers.IO) {
+                    provider?.nativeWindowFullscreenState(window)
+                }
+            if (nativeFullscreen != null) {
+                val transitionTarget = nativeTransitionTarget
+                if (transitionTarget != null) {
+                    if (nativeFullscreen == transitionTarget) {
+                        nativeTransitionTarget = null
+                    } else if (System.nanoTime() >= nativeTransitionDeadlineNanos) {
+                        nativeTransitionTarget = null
+                        player.isFullscreen = nativeFullscreen
+                    }
+                } else if (nativeFullscreen != player.isFullscreen) {
+                    player.isFullscreen = nativeFullscreen
+                }
+            }
+            delay(NATIVE_WINDOW_STATE_POLL_MILLIS)
+        }
+    }
+    LaunchedEffect(provider, window, fullscreen, nativeWindowReady) {
+        if (provider != null && !nativeWindowReady) return@LaunchedEffect
+        nativeTransitionTarget = fullscreen
+        nativeTransitionDeadlineNanos = System.nanoTime() + NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS
+        val nativeWindowOwnsTransition =
+            withContext(Dispatchers.IO) {
+                provider?.requestWindowFullscreen(window, fullscreen) == true
+            }
+        if (!nativeWindowOwnsTransition) {
+            nativeTransitionTarget = null
+            windowState.placement =
+                if (fullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating
+        } else if (!fullscreen && windowState.placement != WindowPlacement.Floating) {
+            // Do not leave a stale Compose full-screen placement after a native exit.
+            windowState.placement = WindowPlacement.Floating
+        }
+    }
+    return nativeWindowReady
 }
 
 private const val NATIVE_WINDOW_STATE_POLL_MILLIS = 100L

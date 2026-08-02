@@ -30,6 +30,7 @@ import io.github.kdroidfilter.composemediaplayer.EXTERNAL_VLC_AUDIO_TRACK_ID_PRE
 import io.github.kdroidfilter.composemediaplayer.EXTERNAL_VLC_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackBackend
 import io.github.kdroidfilter.composemediaplayer.ExternalHlsFallbackSupport
+import io.github.kdroidfilter.composemediaplayer.ExternalVlcHlsFallback
 import io.github.kdroidfilter.composemediaplayer.ExternalVlcLocator
 import io.github.kdroidfilter.composemediaplayer.HlsFallbackSource
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
@@ -118,6 +119,8 @@ private const val BGRA_BYTES_PER_PIXEL = 4
 private const val ASPECT_RATIO_CHANGE_EPSILON = 0.001f
 private const val PAUSED_SEEK_FRAME_ATTEMPTS = 10
 private const val PAUSED_SEEK_FRAME_RETRY_DELAY_MS = 25L
+private const val AVFOUNDATION_RELOAD_READY_ATTEMPTS = 600
+private const val AVFOUNDATION_RELOAD_READY_DELAY_MS = 50L
 
 private data class MacResolvedLibVlcBackend(
     val installation: JvmLibVlcInstallation,
@@ -1564,37 +1567,32 @@ class MacVideoPlayerState(
             },
         )
         updateFfmpegFallbackTracks(hlsSource)
-        updateExternalHlsRenderingInfo(backend = startedFallback.backend, hlsSource = hlsSource)
+        updateExternalHlsRenderingInfo(
+            backend = startedFallback.backend,
+            hlsSource = hlsSource,
+            usesMediaBridgeForVlcSeek = startedFallback.usesMediaBridgeForVlcSeek,
+            vlcBridgeAudioCodec = startedFallback.vlcBridgeAudioCodec,
+        )
         return hlsSource.playlistUrl
     }
 
     private suspend fun updateExternalHlsRenderingInfo(
         backend: ExternalHlsFallbackBackend,
         hlsSource: HlsFallbackSource,
+        usesMediaBridgeForVlcSeek: Boolean,
+        vlcBridgeAudioCodec: String?,
     ) {
         withContext(Dispatchers.Main) {
             renderingInfo.update(
                 backend =
-                    if (hlsSource.hdrCmafPassthrough) {
-                        "${backend.displayName} HDR CMAF bridge"
-                    } else {
-                        "${backend.displayName} CMAF bridge"
-                    },
-                container =
-                    when {
-                        hlsSource.videoCopiedWithoutReencoding ->
-                            "Matroska/WebM video samples copied to CMAF/fMP4"
-                        hlsSource.avFoundationCompatibleTranscode ->
-                            "AVI/ASF decoded to AVC/AAC CMAF/fMP4"
-                        else -> "Container adapted to HLS"
-                    },
-                videoDecoder =
-                    when {
-                        hlsSource.hdrCmafPassthrough -> "AVFoundation HEVC Main 10 from CMAF"
-                        hlsSource.avFoundationCompatibleTranscode ->
-                            "FFmpeg legacy decoder -> H.264 VideoToolbox -> AVFoundation"
-                        else -> "AVFoundation system decoder from CMAF"
-                    },
+                    externalHlsBackendLabel(
+                        backend = backend,
+                        source = hlsSource,
+                        usesMediaBridgeForVlcSeek = usesMediaBridgeForVlcSeek,
+                        vlcBridgeAudioCodec = vlcBridgeAudioCodec,
+                    ),
+                container = externalHlsContainerLabel(backend, hlsSource),
+                videoDecoder = externalHlsVideoDecoderLabel(backend, hlsSource),
                 videoRenderer = avFoundationVideoRenderer(),
                 audioRenderer = "AVFoundation / CoreAudio",
                 subtitleRenderer =
@@ -1604,6 +1602,13 @@ class MacVideoPlayerState(
                 subtitleSource = hlsSource.selectedSubtitleStreamIndex?.let { "embedded stream $it" },
                 notes =
                     when {
+                        vlcBridgeAudioCodec != null ->
+                            "The selected VLC 3.x runtime cannot decode $vlcBridgeAudioCodec. " +
+                                "KMediaBridge/FFmpeg provides AVC/AAC CMAF so AVFoundation receives both video " +
+                                "and audio."
+                        usesMediaBridgeForVlcSeek ->
+                            "VLC HLS handled the initial source. This timestamped restart uses KMediaBridge/FFmpeg " +
+                                "to provide monotonic AVC/AAC CMAF timestamps that AVFoundation can seek reliably."
                         hlsSource.usesMediaBridge && hlsSource.toneMappedHdrToSdr ->
                             "The selected KMediaBridge runtime uses dynamically linked FFmpeg. " +
                                 "The verified HDR source was " +
@@ -1623,6 +1628,43 @@ class MacVideoPlayerState(
             )
         }
     }
+
+    private fun externalHlsBackendLabel(
+        backend: ExternalHlsFallbackBackend,
+        source: HlsFallbackSource,
+        usesMediaBridgeForVlcSeek: Boolean,
+        vlcBridgeAudioCodec: String?,
+    ): String =
+        when {
+            vlcBridgeAudioCodec != null -> "VLC HLS + KMediaBridge $vlcBridgeAudioCodec fallback"
+            usesMediaBridgeForVlcSeek -> "VLC HLS + KMediaBridge seek adapter"
+            backend == ExternalHlsFallbackBackend.VLC -> "VLC HLS adapter"
+            source.hdrCmafPassthrough -> "${backend.displayName} HDR CMAF bridge"
+            else -> "${backend.displayName} CMAF bridge"
+        }
+
+    private fun externalHlsContainerLabel(
+        backend: ExternalHlsFallbackBackend,
+        source: HlsFallbackSource,
+    ): String =
+        when {
+            backend == ExternalHlsFallbackBackend.VLC -> "Source transcoded to AVC/AAC MPEG-TS HLS"
+            source.videoCopiedWithoutReencoding -> "Matroska/WebM video samples copied to CMAF/fMP4"
+            source.avFoundationCompatibleTranscode -> "AVI/ASF decoded to AVC/AAC CMAF/fMP4"
+            else -> "Container adapted to HLS"
+        }
+
+    private fun externalHlsVideoDecoderLabel(
+        backend: ExternalHlsFallbackBackend,
+        source: HlsFallbackSource,
+    ): String =
+        when {
+            backend == ExternalHlsFallbackBackend.VLC -> "VLC legacy decoder -> x264 H.264 -> AVFoundation"
+            source.hdrCmafPassthrough -> "AVFoundation HEVC Main 10 from CMAF"
+            source.avFoundationCompatibleTranscode ->
+                "FFmpeg legacy decoder -> H.264 VideoToolbox -> AVFoundation"
+            else -> "AVFoundation system decoder from CMAF"
+        }
 
     private suspend fun prepareUriForLibVlcPlayback(
         uri: String,
@@ -2121,6 +2163,13 @@ class MacVideoPlayerState(
         fallback?.close()
     }
 
+    private fun closeSupersededHlsFallback(fallback: Closeable?) {
+        runCatching { fallback?.close() }
+            .onFailure { closeError ->
+                macLogger.e { "Failed to close the superseded external HLS session: ${closeError.message}" }
+            }
+    }
+
     private fun closePreparedPipelineSource() {
         val source = preparedPipelineSource
         preparedPipelineSource = null
@@ -2285,6 +2334,7 @@ class MacVideoPlayerState(
     private suspend fun openMediaUri(
         uri: String,
         requestHeaders: Map<String, String>,
+        waitForAvFoundationReplacement: Boolean = false,
     ): Boolean {
         macLogger.d { "openMediaUri() - Opening URI: $uri" }
         val ptr = playerPtr
@@ -2310,6 +2360,10 @@ class MacVideoPlayerState(
                 MacNativeBridge.nOpenUriWithHeaders(ptr, uri, sanitizedHeaders.requestHeadersJsonObjectString())
             }
 
+            if (waitForAvFoundationReplacement && !nativeBackendUsesLibVlc) {
+                awaitAvFoundationReplacement(ptr)
+            }
+
             if (!shouldUseLibVlcNativeSurface()) {
                 // Instead of directly calling `updateMetadata()`,
                 // we poll until valid dimensions are available.
@@ -2330,6 +2384,15 @@ class MacVideoPlayerState(
             setPlayerError(VideoPlayerError.SourceError("Error opening media: ${e.message}"))
             false
         }
+    }
+
+    private suspend fun awaitAvFoundationReplacement(ptr: Long) {
+        repeat(AVFOUNDATION_RELOAD_READY_ATTEMPTS) {
+            if (ptr != playerPtr) throw CancellationException("The native AVFoundation player was replaced")
+            if (MacNativeBridge.nIsReadyForPlayback(ptr)) return
+            delay(AVFOUNDATION_RELOAD_READY_DELAY_MS.milliseconds)
+        }
+        throw IllegalStateException("AVFoundation timed out while replacing the adapted media source")
     }
 
     /**
@@ -2433,6 +2496,8 @@ class MacVideoPlayerState(
                 "Color-managed SDR bridge -> AVFoundation"
             hasBridgedColor && ffmpegHlsAvFoundationCompatibleTranscode ->
                 "FFmpeg legacy decode -> AVC/AAC -> AVFoundation"
+            hasBridgedColor && ffmpegHlsFallback is ExternalVlcHlsFallback ->
+                "VLC HLS transcode -> AVFoundation"
             hasBridgedColor -> "External color-managed bridge -> AVFoundation"
             nativeBackendUsesLibVlc -> "libVLC (unverified color path)"
             else -> "AVFoundation system decoder"
@@ -3032,8 +3097,10 @@ class MacVideoPlayerState(
 
         if (loop) {
             macLogger.d { "checkLoopingAsync() - Loop enabled, restarting video" }
-            seekToAsync(0f)
-            onRestart?.invoke()
+            lifecycle.launchSourceBoundControlOperation { generation ->
+                seekToAsync(0f, generation)
+                onRestart?.invoke()
+            }
         } else {
             macLogger.d { "checkLoopingAsync() - Video completed, updating state" }
             withContext(Dispatchers.Main) {
@@ -3265,6 +3332,8 @@ class MacVideoPlayerState(
         sourceGeneration: Long? = null,
     ) {
         val completionToken = seekCompletionToken.incrementAndGet()
+        val externalHlsSourceUri = externalHlsSeekSource(sourceGeneration)
+        val externalHlsSeek = externalHlsSourceUri != null
         if (!commitSeekStateOnMain(sourceGeneration) { isLoading = true }) return
 
         try {
@@ -3290,6 +3359,21 @@ class MacVideoPlayerState(
             }
 
             lastFrameUpdateTime = System.currentTimeMillis()
+
+            if (externalHlsSourceUri != null && sourceGeneration != null) {
+                restartMacExternalHlsPlayback(
+                    sourceUri = externalHlsSourceUri,
+                    restartPositionSeconds = seekTime,
+                    selectedAudioStreamIndex = ffmpegHlsSelectedAudioStreamIndex,
+                    selectedSubtitleStreamIndex = ffmpegHlsSelectedSubtitleStreamIndex,
+                    shouldResumePlayback = isPlaying,
+                    generation = sourceGeneration,
+                ) {
+                    seekInProgress = false
+                    targetSeekTime = null
+                }
+                return
+            }
 
             sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
             val ptr = playerPtr
@@ -3342,15 +3426,30 @@ class MacVideoPlayerState(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error in seekToAsync: ${e.message}" }
+            if (externalHlsSeek) {
+                closeFfmpegHlsFallback()
+                clearFfmpegFallbackTrackState()
+            }
             commitSeekStateOnMain(sourceGeneration) {
                 if (seekCompletionToken.get() == completionToken) {
                     isLoading = false
                     seekInProgress = false
                     targetSeekTime = null
+                    if (externalHlsSeek) {
+                        hasMedia = false
+                        isPlaying = false
+                        error =
+                            VideoPlayerError.SourceError(
+                                "Failed to seek the adapted media source: ${e.message}",
+                            )
+                    }
                 }
             }
         }
     }
+
+    private fun externalHlsSeekSource(sourceGeneration: Long?): String? =
+        ffmpegHlsSourceUri?.takeIf { sourceGeneration != null && ffmpegHlsFallback != null }
 
     private suspend fun refreshFrameAfterSeek(
         resumePlayback: Boolean,
@@ -3369,6 +3468,121 @@ class MacVideoPlayerState(
             sourceGeneration?.let { lifecycle.ensureCurrentSource(it) }
             updateFrameAsync()
         }
+    }
+
+    /**
+     * Replaces a bounded HLS adapter at an absolute source position without replacing the native
+     * AVFoundation player. Keeping the native context alive is essential: the dedicated AppKit
+     * window owns a layer obtained from that context and must not be detached for an ordinary seek.
+     */
+    private suspend fun restartMacExternalHlsPlayback(
+        sourceUri: String,
+        restartPositionSeconds: Double,
+        selectedAudioStreamIndex: Int?,
+        selectedSubtitleStreamIndex: Int?,
+        shouldResumePlayback: Boolean,
+        generation: Long,
+        onReady: () -> Unit = {},
+    ) {
+        val ptr = playerPtr
+        check(ptr != 0L) { "The native AVFoundation player is not available" }
+
+        videoReaderMutex.withLock {
+            ensureCurrentNativeAvFoundationPlayer(ptr, generation)
+            MacNativeBridge.nPause(ptr)
+            MacNativeBridge.nConsumeDidPlayToEnd(ptr)
+        }
+        stopFrameUpdates()
+        stopPositionUpdates()
+        stopBufferingCheck()
+
+        val fallbackToClose = ffmpegHlsFallback
+        val forceAvFoundationCompatibility = ffmpegHlsAvFoundationCompatibleTranscode
+        ffmpegHlsFallback = null
+
+        var restartCompleted = false
+        var supersededFallbackClosed = false
+        try {
+            lifecycle.ensureCurrentSource(generation)
+            ffmpegHlsSelectedAudioStreamIndex = selectedAudioStreamIndex
+            ffmpegHlsSelectedSubtitleStreamIndex = selectedSubtitleStreamIndex
+            ffmpegHlsPlaybackOffsetSeconds = restartPositionSeconds
+
+            val playableUri =
+                prepareUriForExternalHlsPlayback(
+                    uri = sourceUri,
+                    requestHeaders = lastRequestHeaders,
+                    forceAvFoundationCompatibility = forceAvFoundationCompatibility,
+                )
+            ensureCurrentNativeAvFoundationPlayer(ptr, generation)
+
+            val opened =
+                openMediaUri(
+                    uri = playableUri,
+                    requestHeaders = lastRequestHeaders,
+                    waitForAvFoundationReplacement = true,
+                )
+            lifecycle.ensureCurrentSource(generation)
+            check(opened) { "AVFoundation could not open the restarted HLS session" }
+            closeSupersededHlsFallback(fallbackToClose)
+            supersededFallbackClosed = true
+
+            coroutineScope {
+                launch { updateFrameRateInfo() }
+                launch { updateMetadata() }
+            }
+
+            if (surfaceWidth > 0 && surfaceHeight > 0) {
+                applyOutputScaling()
+            }
+
+            val durationSeconds = getDurationSafely()
+            val committed =
+                commitCurrentSourceOnMain(generation) {
+                    hasMedia = true
+                    isLoading = false
+                    isPlaying = shouldResumePlayback
+                    _currentTime.value = restartPositionSeconds.secondsAsDuration()
+                    _positionText.value = formatTime(_currentTime.value)
+                    if (durationSeconds > 0.0) {
+                        sliderPos =
+                            (restartPositionSeconds / durationSeconds * VideoPlayerState.SLIDER_SCALE)
+                                .toFloat()
+                                .coerceIn(0f, VideoPlayerState.SLIDER_SCALE)
+                    }
+                    onReady()
+                }
+            if (!committed) {
+                lifecycle.ensureCurrentSource(generation)
+                return
+            }
+
+            if (shouldResumePlayback) {
+                playInBackground()
+            } else {
+                videoReaderMutex.withLock {
+                    ensureCurrentNativeAvFoundationPlayer(ptr, generation)
+                    // A zero-relative seek asks AVPlayer to preroll and publish the first frame of
+                    // the newly generated timeline while the public position remains absolute.
+                    MacNativeBridge.nSeekTo(ptr, 0.0)
+                    MacNativeBridge.nConsumeDidPlayToEnd(ptr)
+                }
+                startPositionUpdates()
+                refreshFrameAfterSeek(resumePlayback = false, sourceGeneration = generation)
+            }
+            restartCompleted = true
+        } finally {
+            if (!supersededFallbackClosed) closeSupersededHlsFallback(fallbackToClose)
+            if (!restartCompleted) closeFfmpegHlsFallback()
+        }
+    }
+
+    private suspend fun ensureCurrentNativeAvFoundationPlayer(
+        ptr: Long,
+        generation: Long,
+    ) {
+        lifecycle.ensureCurrentSource(generation)
+        if (ptr != playerPtr) throw CancellationException("The native AVFoundation player was replaced")
     }
 
     private suspend fun commitSeekStateOnMain(
@@ -3725,62 +3939,15 @@ class MacVideoPlayerState(
                 return
             }
 
-            cleanupCurrentPlayback()
-            lifecycle.ensureCurrentSource(generation)
-            ensurePlayerInitialized()
-            lifecycle.ensureCurrentSource(generation)
-
-            ffmpegHlsSelectedAudioStreamIndex = streamIndex
-            ffmpegHlsSelectedSubtitleStreamIndex = selectedSubtitleStreamIndex
-            ffmpegHlsPlaybackOffsetSeconds = restartPositionSeconds
-            val playableUri = prepareUriForMacPlayback(sourceUri, lastRequestHeaders)
-            val opened = openMediaUri(playableUri, lastRequestHeaders)
-            lifecycle.ensureCurrentSource(generation)
-            if (!opened) {
-                closeFfmpegHlsFallback()
-                clearFfmpegFallbackTrackState()
-                commitCurrentSourceOnMain(generation) {
-                    isLoading = false
-                    error = VideoPlayerError.SourceError("Failed to switch audio track")
-                }
-                return
-            }
-
-            coroutineScope {
-                launch { updateFrameRateInfo() }
-                launch { updateMetadata() }
-            }
-
-            if (surfaceWidth > 0 && surfaceHeight > 0) {
-                applyOutputScaling()
-            }
-
-            val selectionCommitted =
-                commitCurrentSourceOnMain(generation) {
-                    currentAudioTrack = track
-                    hasMedia = true
-                    isLoading = false
-                    isPlaying = shouldResumePlayback
-                }
-            if (!selectionCommitted) {
-                return
-            }
-
-            if (shouldUseNativeVideoSurface()) {
-                stopFrameUpdates()
-            } else {
-                startFrameUpdates()
-            }
-            startPositionUpdates()
-            if (!shouldUseNativeVideoSurface()) {
-                updateFrameAsync()
-            }
-            if (!shouldUseNativeVideoSurface()) {
-                startBufferingCheck()
-            }
-
-            if (shouldResumePlayback) {
-                playInBackground()
+            restartMacExternalHlsPlayback(
+                sourceUri = sourceUri,
+                restartPositionSeconds = restartPositionSeconds,
+                selectedAudioStreamIndex = streamIndex,
+                selectedSubtitleStreamIndex = selectedSubtitleStreamIndex,
+                shouldResumePlayback = shouldResumePlayback,
+                generation = generation,
+            ) {
+                currentAudioTrack = track
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -3788,6 +3955,8 @@ class MacVideoPlayerState(
             closeFfmpegHlsFallback()
             clearFfmpegFallbackTrackState()
             commitCurrentSourceOnMain(generation) {
+                hasMedia = false
+                isPlaying = false
                 isLoading = false
                 error = errorForTrackOperation(e)
             }
@@ -4034,63 +4203,16 @@ class MacVideoPlayerState(
                 return
             }
 
-            cleanupCurrentPlayback()
-            lifecycle.ensureCurrentSource(generation)
-            ensurePlayerInitialized()
-            lifecycle.ensureCurrentSource(generation)
-
-            ffmpegHlsSelectedAudioStreamIndex = selectedAudioStreamIndex
-            ffmpegHlsSelectedSubtitleStreamIndex = streamIndex
-            ffmpegHlsPlaybackOffsetSeconds = restartPositionSeconds
-            val playableUri = prepareUriForMacPlayback(sourceUri, lastRequestHeaders)
-            val opened = openMediaUri(playableUri, lastRequestHeaders)
-            lifecycle.ensureCurrentSource(generation)
-            if (!opened) {
-                closeFfmpegHlsFallback()
-                clearFfmpegFallbackTrackState()
-                commitCurrentSourceOnMain(generation) {
-                    isLoading = false
-                    error = VideoPlayerError.SourceError(failureMessage)
-                }
-                return
-            }
-
-            coroutineScope {
-                launch { updateFrameRateInfo() }
-                launch { updateMetadata() }
-            }
-
-            if (surfaceWidth > 0 && surfaceHeight > 0) {
-                applyOutputScaling()
-            }
-
-            val selectionCommitted =
-                commitCurrentSourceOnMain(generation) {
-                    currentSubtitleTrack = track
-                    subtitlesEnabled = track != null
-                    hasMedia = true
-                    isLoading = false
-                    isPlaying = shouldResumePlayback
-                }
-            if (!selectionCommitted) {
-                return
-            }
-
-            if (shouldUseNativeVideoSurface()) {
-                stopFrameUpdates()
-            } else {
-                startFrameUpdates()
-            }
-            startPositionUpdates()
-            if (!shouldUseNativeVideoSurface()) {
-                updateFrameAsync()
-            }
-            if (!shouldUseNativeVideoSurface()) {
-                startBufferingCheck()
-            }
-
-            if (shouldResumePlayback) {
-                playInBackground()
+            restartMacExternalHlsPlayback(
+                sourceUri = sourceUri,
+                restartPositionSeconds = restartPositionSeconds,
+                selectedAudioStreamIndex = selectedAudioStreamIndex,
+                selectedSubtitleStreamIndex = streamIndex,
+                shouldResumePlayback = shouldResumePlayback,
+                generation = generation,
+            ) {
+                currentSubtitleTrack = track
+                subtitlesEnabled = track != null
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -4098,8 +4220,15 @@ class MacVideoPlayerState(
             closeFfmpegHlsFallback()
             clearFfmpegFallbackTrackState()
             commitCurrentSourceOnMain(generation) {
+                hasMedia = false
+                isPlaying = false
                 isLoading = false
-                error = errorForTrackOperation(e)
+                error =
+                    if (e.message == null) {
+                        VideoPlayerError.SourceError(failureMessage)
+                    } else {
+                        errorForTrackOperation(e)
+                    }
             }
         }
     }

@@ -92,6 +92,7 @@ internal object JvmLegacyVideoContainerSupport {
             videoHeight = accumulator.height?.takeIf { it > 0 },
             videoCodecName = codec?.codecName ?: accumulator.codecFourCc?.trim()?.lowercase(),
             videoColorInfo = codec?.knownSdrColorInfo ?: VideoColorInfo(),
+            audioStreams = accumulator.audioStreams.toLibVlcAudioStreams(),
         )
     }
 
@@ -161,7 +162,7 @@ internal object JvmLegacyVideoContainerSupport {
         accumulator: AviProbeAccumulator,
     ) {
         var cursor = start
-        val stream = AviStreamProbeAccumulator()
+        val stream = AviStreamProbeAccumulator(streamIndex = accumulator.nextStreamIndex++)
 
         while (cursor + CHUNK_HEADER_BYTES <= endExclusive) {
             val chunkId = bytes.ascii(cursor, FOUR_CC_BYTES) ?: return
@@ -182,7 +183,7 @@ internal object JvmLegacyVideoContainerSupport {
             cursor = paddedEnd.toInt()
         }
 
-        mergeAviVideoStream(stream, accumulator)
+        mergeAviStream(stream, accumulator)
     }
 
     private fun parseAviStreamHeader(
@@ -210,31 +211,66 @@ internal object JvmLegacyVideoContainerSupport {
         endExclusive: Int,
         stream: AviStreamProbeAccumulator,
     ) {
-        if (start + BITMAP_INFO_HEADER_MIN_BYTES > endExclusive) return
-        stream.width = bytes.leInt(start + 4)?.positiveMagnitude()
-        stream.height = bytes.leInt(start + 8)?.positiveMagnitude()
-        val bitmapBitCount = bytes.leUShort(start + 14)
-        stream.compression =
-            if (bytes.leUInt(start + 16) == 0L && bitmapBitCount in 1..32) {
-                RAW_AVI_CODEC
-            } else {
-                bytes.printableFourCc(start + 16)
+        when (stream.streamType) {
+            AVI_VIDEO_STREAM_TYPE -> {
+                if (start + BITMAP_INFO_HEADER_MIN_BYTES > endExclusive) return
+                stream.width = bytes.leInt(start + 4)?.positiveMagnitude()
+                stream.height = bytes.leInt(start + 8)?.positiveMagnitude()
+                val bitmapBitCount = bytes.leUShort(start + 14)
+                stream.compression =
+                    if (bytes.leUInt(start + 16) == 0L && bitmapBitCount in 1..32) {
+                        RAW_AVI_CODEC
+                    } else {
+                        bytes.printableFourCc(start + 16)
+                    }
             }
+
+            AVI_AUDIO_STREAM_TYPE -> parseWaveFormat(bytes, start, endExclusive, stream)
+        }
     }
 
-    private fun mergeAviVideoStream(
+    private fun parseWaveFormat(
+        bytes: ByteArray,
+        start: Int,
+        endExclusive: Int,
+        stream: AviStreamProbeAccumulator,
+    ) {
+        if (start + WAVE_FORMAT_MIN_BYTES > endExclusive) return
+        val formatTag = waveFormatCodecTag(bytes, start, endExclusive)
+        stream.audioCodecName = formatTag?.let(::waveFormatCodecName)
+        stream.audioCodecLabel = formatTag?.let(::waveFormatCodecLabel)
+        stream.audioChannels = bytes.leUShort(start + 2)?.takeIf { it > 0 }
+        stream.audioSampleRate = bytes.leUInt(start + 4).toPositiveIntOrNull()
+        stream.audioBitrate = bytes.leUInt(start + 8).bytesPerSecondToBitrate()
+    }
+
+    private fun mergeAviStream(
         stream: AviStreamProbeAccumulator,
         accumulator: AviProbeAccumulator,
     ) {
-        if (stream.streamType != AVI_VIDEO_STREAM_TYPE) return
-        val selectedCodec =
-            listOfNotNull(stream.compression, stream.handler).firstOrNull { knownEightBitCodec(it) != null }
-                ?: stream.compression
-                ?: stream.handler
-        accumulator.codecFourCc = accumulator.codecFourCc ?: selectedCodec
-        accumulator.width = accumulator.width ?: stream.width
-        accumulator.height = accumulator.height ?: stream.height
-        accumulator.durationSeconds = accumulator.durationSeconds ?: stream.durationSeconds
+        when (stream.streamType) {
+            AVI_VIDEO_STREAM_TYPE -> {
+                val selectedCodec =
+                    listOfNotNull(stream.compression, stream.handler).firstOrNull {
+                        knownEightBitCodec(it) != null
+                    } ?: stream.compression ?: stream.handler
+                accumulator.codecFourCc = accumulator.codecFourCc ?: selectedCodec
+                accumulator.width = accumulator.width ?: stream.width
+                accumulator.height = accumulator.height ?: stream.height
+                accumulator.durationSeconds = accumulator.durationSeconds ?: stream.durationSeconds
+            }
+
+            AVI_AUDIO_STREAM_TYPE ->
+                accumulator.audioStreams +=
+                    LegacyAudioStream(
+                        streamIndex = stream.streamIndex,
+                        codecName = stream.audioCodecName,
+                        label = stream.audioCodecLabel,
+                        channels = stream.audioChannels,
+                        sampleRate = stream.audioSampleRate,
+                        bitrate = stream.audioBitrate,
+                    )
+        }
     }
 
     private fun parseAsf(bytes: ByteArray): JvmLibVlcTrackInfo? {
@@ -260,6 +296,7 @@ internal object JvmLegacyVideoContainerSupport {
             videoHeight = accumulator.height?.takeIf { it > 0 },
             videoCodecName = codec?.codecName ?: accumulator.codecFourCc?.trim()?.lowercase(),
             videoColorInfo = codec?.knownSdrColorInfo ?: VideoColorInfo(),
+            audioStreams = accumulator.audioStreams.toLibVlcAudioStreams(),
         )
     }
 
@@ -285,9 +322,13 @@ internal object JvmLegacyVideoContainerSupport {
         when {
             bytes.matchesAt(objectStart, asfFilePropertiesGuid) ->
                 parseAsfFileProperties(bytes, payloadStart, accumulator)
-            bytes.matchesAt(objectStart, asfStreamPropertiesGuid) &&
-                bytes.matchesAt(payloadStart, asfVideoMediaGuid) ->
-                parseAsfVideoStreamProperties(bytes, payloadStart, objectEnd, accumulator)
+            bytes.matchesAt(objectStart, asfStreamPropertiesGuid) ->
+                when {
+                    bytes.matchesAt(payloadStart, asfVideoMediaGuid) ->
+                        parseAsfVideoStreamProperties(bytes, payloadStart, objectEnd, accumulator)
+                    bytes.matchesAt(payloadStart, asfAudioMediaGuid) ->
+                        parseAsfAudioStreamProperties(bytes, payloadStart, objectEnd, accumulator)
+                }
         }
     }
 
@@ -320,6 +361,101 @@ internal object JvmLegacyVideoContainerSupport {
         accumulator.codecFourCc =
             accumulator.codecFourCc ?: bytes.printableFourCc(typeDataStart + ASF_VIDEO_CODEC_OFFSET)
     }
+
+    private fun parseAsfAudioStreamProperties(
+        bytes: ByteArray,
+        payloadStart: Int,
+        objectEnd: Int,
+        accumulator: AsfProbeAccumulator,
+    ) {
+        val typeSpecificLength = bytes.leUInt(payloadStart + ASF_TYPE_SPECIFIC_LENGTH_OFFSET) ?: return
+        val typeDataStart = payloadStart + ASF_STREAM_PROPERTIES_FIXED_BYTES
+        val typeDataEnd = minOf(objectEnd.toLong(), typeDataStart.toLong() + typeSpecificLength).toInt()
+        if (typeDataStart + WAVE_FORMAT_MIN_BYTES > typeDataEnd) return
+        val streamNumber =
+            bytes
+                .leUShort(payloadStart + ASF_STREAM_FLAGS_OFFSET)
+                ?.and(ASF_STREAM_NUMBER_MASK)
+                ?.takeIf { it > 0 }
+                ?: return
+        val formatTag = waveFormatCodecTag(bytes, typeDataStart, typeDataEnd)
+        accumulator.audioStreams +=
+            LegacyAudioStream(
+                streamIndex = streamNumber - 1,
+                codecName = formatTag?.let(::waveFormatCodecName),
+                label = formatTag?.let(::waveFormatCodecLabel),
+                channels = bytes.leUShort(typeDataStart + 2)?.takeIf { it > 0 },
+                sampleRate = bytes.leUInt(typeDataStart + 4).toPositiveIntOrNull(),
+                bitrate = bytes.leUInt(typeDataStart + 8).bytesPerSecondToBitrate(),
+            )
+    }
+
+    private fun List<LegacyAudioStream>.toLibVlcAudioStreams(): List<JvmLibVlcAudioStream> =
+        distinctBy(LegacyAudioStream::streamIndex)
+            .sortedBy(LegacyAudioStream::streamIndex)
+            .mapIndexed { audioOrdinal, stream ->
+                JvmLibVlcAudioStream(
+                    streamIndex = stream.streamIndex,
+                    ordinal = audioOrdinal,
+                    codecName = stream.codecName,
+                    track =
+                        AudioTrack(
+                            id = "$LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX${stream.streamIndex}",
+                            label = stream.label ?: "Audio ${audioOrdinal + 1}",
+                            channels = stream.channels,
+                            sampleRate = stream.sampleRate,
+                            bitrate = stream.bitrate,
+                            isDefault = audioOrdinal == 0,
+                        ),
+                )
+            }
+
+    private fun waveFormatCodecName(formatTag: Int): String =
+        when (formatTag) {
+            0x0001 -> "pcm"
+            0x0050 -> "mp2"
+            0x0055 -> "mp3"
+            0x00FF -> "aac"
+            0x0160 -> "wmav1"
+            0x0161 -> "wmav2"
+            0x0162 -> "wmapro"
+            0x0163 -> "wmalossless"
+            0x2000 -> "ac3"
+            else -> "wave-0x${formatTag.toString(16).padStart(4, '0')}"
+        }
+
+    private fun waveFormatCodecTag(
+        bytes: ByteArray,
+        start: Int,
+        endExclusive: Int,
+    ): Int? {
+        val formatTag = bytes.leUShort(start) ?: return null
+        if (formatTag != WAVE_FORMAT_EXTENSIBLE) return formatTag
+        if (start + WAVE_FORMAT_EXTENSIBLE_MIN_BYTES > endExclusive) return formatTag
+        return bytes.leUShort(start + WAVE_SUBFORMAT_TAG_OFFSET) ?: formatTag
+    }
+
+    private fun waveFormatCodecLabel(formatTag: Int): String =
+        when (formatTag) {
+            0x0001 -> "PCM"
+            0x0050 -> "MPEG audio"
+            0x0055 -> "MP3"
+            0x00FF -> "AAC"
+            0x0160 -> "Windows Media Audio"
+            0x0161 -> "Windows Media Audio 2"
+            0x0162 -> "Windows Media Audio Pro"
+            0x0163 -> "Windows Media Audio Lossless"
+            0x2000 -> "AC-3"
+            else -> "Audio 0x${formatTag.toString(16).uppercase().padStart(4, '0')}"
+        }
+
+    private fun Long?.toPositiveIntOrNull(): Int? = this?.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt()
+
+    private fun Long?.bytesPerSecondToBitrate(): Int? =
+        this
+            ?.takeIf { it > 0 && it <= Int.MAX_VALUE.toLong() / BITS_PER_BYTE }
+            ?.times(BITS_PER_BYTE)
+            ?.toInt()
 
     private fun knownEightBitCodec(fourCc: String): KnownLegacyCodec? = KNOWN_EIGHT_BIT_CODECS[fourCc.uppercase()]
 
@@ -497,15 +633,23 @@ internal object JvmLegacyVideoContainerSupport {
         var width: Int? = null,
         var height: Int? = null,
         var codecFourCc: String? = null,
+        var nextStreamIndex: Int = 0,
+        val audioStreams: MutableList<LegacyAudioStream> = mutableListOf(),
     )
 
     private data class AviStreamProbeAccumulator(
+        val streamIndex: Int,
         var streamType: String? = null,
         var handler: String? = null,
         var compression: String? = null,
         var durationSeconds: Double? = null,
         var width: Int? = null,
         var height: Int? = null,
+        var audioCodecName: String? = null,
+        var audioCodecLabel: String? = null,
+        var audioChannels: Int? = null,
+        var audioSampleRate: Int? = null,
+        var audioBitrate: Int? = null,
     )
 
     private data class AsfProbeAccumulator(
@@ -513,6 +657,16 @@ internal object JvmLegacyVideoContainerSupport {
         var width: Int? = null,
         var height: Int? = null,
         var codecFourCc: String? = null,
+        val audioStreams: MutableList<LegacyAudioStream> = mutableListOf(),
+    )
+
+    private data class LegacyAudioStream(
+        val streamIndex: Int,
+        val codecName: String?,
+        val label: String?,
+        val channels: Int?,
+        val sampleRate: Int?,
+        val bitrate: Int?,
     )
 
     private data class KnownLegacyCodec(
@@ -556,9 +710,15 @@ internal object JvmLegacyVideoContainerSupport {
     private const val AVI_MAIN_HEADER_MIN_BYTES = 40
     private const val AVI_STREAM_HEADER_MIN_BYTES = 36
     private const val BITMAP_INFO_HEADER_MIN_BYTES = 20
+    private const val WAVE_FORMAT_MIN_BYTES = 16
+    private const val WAVE_FORMAT_EXTENSIBLE_MIN_BYTES = 40
+    private const val WAVE_FORMAT_EXTENSIBLE = 0xFFFE
+    private const val WAVE_SUBFORMAT_TAG_OFFSET = 24
     private const val AVI_VIDEO_STREAM_TYPE = "vids"
+    private const val AVI_AUDIO_STREAM_TYPE = "auds"
     private const val RAW_AVI_CODEC = "DIB "
     private const val MICROSECONDS_PER_SECOND = 1_000_000.0
+    private const val BITS_PER_BYTE = 8L
 
     private const val ASF_GUID_BYTES = 16
     private const val ASF_OBJECT_HEADER_BYTES = 24
@@ -566,6 +726,8 @@ internal object JvmLegacyVideoContainerSupport {
     private const val ASF_FILE_PLAY_DURATION_OFFSET = 40
     private const val ASF_FILE_PREROLL_OFFSET = 56
     private const val ASF_TYPE_SPECIFIC_LENGTH_OFFSET = 40
+    private const val ASF_STREAM_FLAGS_OFFSET = 48
+    private const val ASF_STREAM_NUMBER_MASK = 0x7F
     private const val ASF_STREAM_PROPERTIES_FIXED_BYTES = 54
     private const val ASF_VIDEO_CODEC_OFFSET = 27
     private const val ASF_VIDEO_TYPE_MIN_BYTES = 31
@@ -642,6 +804,25 @@ internal object JvmLegacyVideoContainerSupport {
             0xEF.toByte(),
             0x19,
             0xBC.toByte(),
+            0x4D,
+            0x5B,
+            0xCF.toByte(),
+            0x11,
+            0xA8.toByte(),
+            0xFD.toByte(),
+            0x00,
+            0x80.toByte(),
+            0x5F,
+            0x5C,
+            0x44,
+            0x2B,
+        )
+    private val asfAudioMediaGuid =
+        byteArrayOf(
+            0x40,
+            0x9E.toByte(),
+            0x69,
+            0xF8.toByte(),
             0x4D,
             0x5B,
             0xCF.toByte(),

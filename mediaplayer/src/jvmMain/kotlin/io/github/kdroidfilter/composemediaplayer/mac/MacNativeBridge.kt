@@ -44,6 +44,9 @@ internal object MacNativeBridge {
 
     @JvmStatic external fun nPause(handle: Long)
 
+    /** True after the most recently opened AVFoundation item has replaced the previous one. */
+    @JvmStatic external fun nIsReadyForPlayback(handle: Long): Boolean
+
     @JvmStatic external fun nSetVolume(
         handle: Long,
         volume: Float,

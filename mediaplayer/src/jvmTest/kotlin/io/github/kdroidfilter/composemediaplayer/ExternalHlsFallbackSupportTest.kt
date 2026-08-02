@@ -131,6 +131,80 @@ class ExternalHlsFallbackSupportTest {
         }
     }
 
+    @Test
+    fun macVlcSeekUsesBridgeWhenItCanNormalizeVideoAndAudio() {
+        assertEquals(
+            ExternalHlsFallbackBackend.KMEDIA_BRIDGE,
+            selectRuntimeHlsFallbackBackend(
+                requestedBackend = ExternalHlsFallbackBackend.VLC,
+                startTimeSeconds = 12.5,
+                selectedSubtitleStreamIndex = null,
+                bridgeCapabilities =
+                    DesktopPlaybackBridgeCapabilities(
+                        canTranscodeVideo = true,
+                        canTranscodeAudio = true,
+                    ),
+                isMacOs = true,
+            ),
+        )
+    }
+
+    @Test
+    fun initialMacVlcPlaybackRemainsOnVlc() {
+        assertEquals(
+            ExternalHlsFallbackBackend.VLC,
+            selectRuntimeHlsFallbackBackend(
+                requestedBackend = ExternalHlsFallbackBackend.VLC,
+                startTimeSeconds = 0.0,
+                selectedSubtitleStreamIndex = null,
+                bridgeCapabilities =
+                    DesktopPlaybackBridgeCapabilities(
+                        canTranscodeVideo = true,
+                        canTranscodeAudio = true,
+                    ),
+                isMacOs = true,
+            ),
+        )
+    }
+
+    @Test
+    fun macVlcUsesBridgeForUnsupportedAudioCodecAtInitialPlayback() {
+        assertEquals(
+            ExternalHlsFallbackBackend.KMEDIA_BRIDGE,
+            selectRuntimeHlsFallbackBackend(
+                requestedBackend = ExternalHlsFallbackBackend.VLC,
+                startTimeSeconds = 0.0,
+                selectedSubtitleStreamIndex = null,
+                bridgeCapabilities =
+                    DesktopPlaybackBridgeCapabilities(
+                        canTranscodeVideo = true,
+                        canTranscodeAudio = true,
+                    ),
+                isMacOs = true,
+                requiresVlcAudioCodecFallback = true,
+            ),
+        )
+    }
+
+    @Test
+    fun macVlcSeekKeepsVlcWhenBridgeCannotPreserveSelectedSubtitles() {
+        assertEquals(
+            ExternalHlsFallbackBackend.VLC,
+            selectRuntimeHlsFallbackBackend(
+                requestedBackend = ExternalHlsFallbackBackend.VLC,
+                startTimeSeconds = 12.5,
+                selectedSubtitleStreamIndex = 3,
+                bridgeCapabilities =
+                    DesktopPlaybackBridgeCapabilities(
+                        canTranscodeVideo = true,
+                        canTranscodeAudio = true,
+                        canBurnSubtitles = false,
+                    ),
+                isMacOs = true,
+            ),
+        )
+    }
+
     private fun withFakeVlc(block: (Path) -> Unit) {
         val vlcPath = Files.createTempFile("vlc", null)
         Files.writeString(vlcPath, "#!/bin/sh\nexit 0\n")

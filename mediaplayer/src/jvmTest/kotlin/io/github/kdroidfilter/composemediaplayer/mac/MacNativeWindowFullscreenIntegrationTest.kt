@@ -1,8 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
+import io.github.kdroidfilter.composemediaplayer.DefaultVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
-import io.github.kdroidfilter.composemediaplayer.DefaultVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopVideoWindowSurfaceProvider
