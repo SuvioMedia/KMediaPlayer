@@ -48,7 +48,7 @@ class VerifyMavenPomsTest(unittest.TestCase):
                     "<dependencies>"
                     "<dependency><groupId>io.github.shusek</groupId>"
                     "<artifactId>kmedia-mpv-runtime-android</artifactId>"
-                    "<version>0.3.0-rc.5</version></dependency>"
+                    "<version>0.3.0-rc.6</version></dependency>"
                     "</dependencies></project>",
                 ),
             )
@@ -63,7 +63,7 @@ class VerifyMavenPomsTest(unittest.TestCase):
             pom.write_text(
                 pom.read_text().replace(
                     "</project>",
-                    "<dependencies><dependency><groupId>io.github.shusek</groupId><artifactId>kmedia-bridge-ffmpeg-android</artifactId><version>0.5.0-rc.3</version></dependency></dependencies></project>",
+                    "<dependencies><dependency><groupId>io.github.shusek</groupId><artifactId>kmedia-bridge-ffmpeg-android</artifactId><version>0.5.0-rc.4</version></dependency></dependencies></project>",
                 ),
             )
             verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")

@@ -9,12 +9,12 @@ from pathlib import Path
 
 
 EXPECTED_BACKEND_DEPENDENCIES = {
-    "composemediaplayer-ass-android": ("kmedia-ass-runtime-android", "0.1.0-rc.4"),
-    "composemediaplayer-ass-jvm": ("kmedia-ass-runtime-desktop", "0.1.0-rc.4"),
-    "composemediaplayer-mpv-android": ("kmedia-mpv-runtime-android", "0.3.0-rc.5"),
-    "composemediaplayer-mpv-jvm": ("kmedia-mpv-runtime-desktop", "0.3.0-rc.5"),
-    "composemediaplayer-kmediabridge-android": ("kmedia-bridge-ffmpeg-android", "0.5.0-rc.3"),
-    "composemediaplayer-kmediabridge-jvm": ("kmedia-bridge-ffmpeg-jvm", "0.5.0-rc.3"),
+    "composemediaplayer-ass-android": ("kmedia-ass-runtime-android", "0.1.0-rc.5"),
+    "composemediaplayer-ass-jvm": ("kmedia-ass-runtime-desktop", "0.1.0-rc.5"),
+    "composemediaplayer-mpv-android": ("kmedia-mpv-runtime-android", "0.3.0-rc.6"),
+    "composemediaplayer-mpv-jvm": ("kmedia-mpv-runtime-desktop", "0.3.0-rc.6"),
+    "composemediaplayer-kmediabridge-android": ("kmedia-bridge-ffmpeg-android", "0.5.0-rc.4"),
+    "composemediaplayer-kmediabridge-jvm": ("kmedia-bridge-ffmpeg-jvm", "0.5.0-rc.4"),
 }
 EXPECTED_DESKTOP_WINDOW_DEPENDENCIES = {
     "composemediaplayer-jvm": "composemediaplayer-desktop-window-jvm",

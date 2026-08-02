@@ -4,6 +4,7 @@ import dev.detekt.gradle.Detekt
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -49,7 +50,18 @@ val projectVersion =
             ?.removePrefix("v")
         ?: "dev"
 val projectGroup = "io.github.shusek"
-val assRuntimeVersion = "0.1.0-rc.4"
+val assRuntimeVersion = "0.1.0-rc.5"
+val windowsAssRuntimeVerification =
+    configurations.create("windowsAssRuntimeVerification") {
+        description = "Resolves the published desktop ASS runtime for Windows DLL verification."
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        isTransitive = false
+    }
+dependencies.add(
+    windowsAssRuntimeVerification.name,
+    "io.github.shusek:kmedia-ass-runtime-desktop:$assRuntimeVersion",
+)
 val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val appleNativeDirectory = layout.projectDirectory.dir("native/apple")
 val assRuntimeAppleOutputs =
@@ -348,6 +360,16 @@ val verifyJvmDesktopNativeMatrix =
                 }
             }
         }
+    }
+
+val stageWindowsAssRuntimeForVerification =
+    tasks.register<Sync>("stageWindowsAssRuntimeForVerification") {
+        group = "verification"
+        description = "Stages the published desktop ASS runtime for Windows PE dependency verification."
+        from(windowsAssRuntimeVerification)
+        into(layout.buildDirectory.dir("runtime-verification/windows-ass"))
+        include("*.jar")
+        rename { "kmedia-ass-runtime-desktop.jar" }
     }
 
 tasks.matching { it.name.startsWith("link") && it.name.endsWith("IosArm64") }.configureEach {

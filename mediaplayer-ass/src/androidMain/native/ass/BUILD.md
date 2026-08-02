@@ -3,7 +3,7 @@
 `composemediaplayer-ass` contains only `libkmediaass.so`, a thin JNI renderer
 bridge. It does not build or package libass, FreeType, FriBidi, or HarfBuzz.
 
-Download the `KMediaAssRuntime 0.1.0-rc.4` SDKs for both Android ARM targets,
+Download the `KMediaAssRuntime 0.1.0-rc.5` SDKs for both Android ARM targets,
 arrange the extracted target outputs below one directory, then run:
 
 ```sh

@@ -994,7 +994,7 @@ when (val result = playerState.selectSubtitleTrack(track)) {
 
 #### Android ASS/SSA subtitles with libass
 
-The Android variant of the optional `composemediaplayer-ass` artifact contains one thin renderer bridge for `arm64-v8a` and `armeabi-v7a`; Intel Android ABIs are not published. Its exact transitive dependency supplies `KMediaAssRuntime` 0.1.0-rc.4 with libass 0.17.5, FreeType, FriBidi and HarfBuzz. Applications do not need another Maven repository or a manual `runtimeOnly` dependency. Add `AssSubtitleExtension()` to `VideoPlaybackOptions.extensions` to activate it. Media3 still owns playback and demuxing. The extension intercepts only the raw Matroska ASS/SSA packet format and renders it into a transparent screen-space overlay, while other Media3 subtitle formats keep their normal path.
+The Android variant of the optional `composemediaplayer-ass` artifact contains one thin renderer bridge for `arm64-v8a` and `armeabi-v7a`; Intel Android ABIs are not published. Its exact transitive dependency supplies `KMediaAssRuntime` 0.1.0-rc.5 with libass 0.17.5, FreeType, FriBidi and HarfBuzz. Applications do not need another Maven repository or a manual `runtimeOnly` dependency. Add `AssSubtitleExtension()` to `VideoPlaybackOptions.extensions` to activate it. Media3 still owns playback and demuxing. The extension intercepts only the raw Matroska ASS/SSA packet format and renders it into a transparent screen-space overlay, while other Media3 subtitle formats keep their normal path.
 
 The libass route supports:
 

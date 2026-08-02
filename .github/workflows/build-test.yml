@@ -55,6 +55,19 @@ jobs:
           distribution: temurin
           cache: gradle
 
+      - name: Stage Windows native runtimes for DLL closure verification
+        if: runner.os == 'Windows'
+        run: >-
+          .\gradlew.bat :mediaplayer-ass:stageWindowsAssRuntimeForVerification
+          :mediaplayer-mpv:stageWindowsMpvRuntimeForVerification
+          --refresh-dependencies --no-daemon
+
+      - name: Verify packaged Windows DLL dependency closure
+        if: runner.os == 'Windows'
+        run: |
+          python .github/scripts/verify_windows_dll_closure.py --jar mediaplayer-ass/build/runtime-verification/windows-ass/kmedia-ass-runtime-desktop.jar
+          python .github/scripts/verify_windows_dll_closure.py --jar mediaplayer-mpv/build/runtime-verification/windows-mpv/kmedia-mpv-runtime-desktop.jar --runtime-prefix META-INF/kmediampv/native/windows-x86_64/ --jar mediaplayer-mpv/build/runtime-verification/windows-mpv/kmedia-ffmpeg-runtime-desktop.jar --runtime-prefix META-INF/kmediaffmpeg/native/windows-x86_64/lib/ --jar mediaplayer-mpv/build/runtime-verification/windows-mpv/kmedia-ass-runtime-desktop.jar --runtime-prefix META-INF/kmediaass/native/windows-x86_64/lib/
+
       - name: Install GStreamer runtime dependencies
         if: runner.os == 'Linux'
         run: |

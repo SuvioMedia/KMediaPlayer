@@ -1,6 +1,7 @@
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.toolchain.JavaLanguageVersion
@@ -27,7 +28,18 @@ val projectVersion =
         ?: "dev"
 val projectGroup = "io.github.shusek"
 val kmediaMpvVersion = libs.versions.kmediaMpv.get()
-val kmediaFfmpegRuntimeVersion = "0.1.0-rc.4"
+val kmediaFfmpegRuntimeVersion = "0.1.0-rc.5"
+val windowsMpvRuntimeVerification =
+    configurations.create("windowsMpvRuntimeVerification") {
+        description = "Resolves the complete published MPV runtime graph for Windows DLL verification."
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        isTransitive = true
+    }
+dependencies.add(
+    windowsMpvRuntimeVerification.name,
+    "io.github.shusek:kmedia-mpv-runtime-desktop:$kmediaMpvVersion",
+)
 val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val releaseSigningEnabled =
     providers
@@ -431,6 +443,48 @@ val validateReleaseVersion =
                 )
             check(semver.matches(releaseVersion)) {
                 "Release version '$releaseVersion' is not a valid immutable SemVer version."
+            }
+        }
+    }
+
+val stageWindowsMpvRuntimeForVerification =
+    tasks.register<Sync>("stageWindowsMpvRuntimeForVerification") {
+        group = "verification"
+        description = "Stages the complete published MPV runtime graph for Windows PE verification."
+        from(windowsMpvRuntimeVerification)
+        into(layout.buildDirectory.dir("runtime-verification/windows-mpv"))
+        include(
+            "kmedia-mpv-runtime-desktop-*.jar",
+            "kmedia-ffmpeg-runtime-desktop-*.jar",
+            "kmedia-ass-runtime-desktop-*.jar",
+        )
+        rename { fileName ->
+            when {
+                fileName.startsWith("kmedia-mpv-runtime-desktop-") ->
+                    "kmedia-mpv-runtime-desktop.jar"
+                fileName.startsWith("kmedia-ffmpeg-runtime-desktop-") ->
+                    "kmedia-ffmpeg-runtime-desktop.jar"
+                fileName.startsWith("kmedia-ass-runtime-desktop-") ->
+                    "kmedia-ass-runtime-desktop.jar"
+                else -> fileName
+            }
+        }
+        doLast {
+            val expected =
+                setOf(
+                    "kmedia-mpv-runtime-desktop.jar",
+                    "kmedia-ffmpeg-runtime-desktop.jar",
+                    "kmedia-ass-runtime-desktop.jar",
+                )
+            val actual =
+                destinationDir
+                    .listFiles()
+                    ?.filter { it.isFile }
+                    ?.map { it.name }
+                    ?.toSet()
+                    .orEmpty()
+            check(actual == expected) {
+                "Staged Windows MPV runtime graph differs: expected=$expected, actual=$actual"
             }
         }
     }

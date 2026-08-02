@@ -80,7 +80,7 @@ jobs:
       - name: Download and verify the exact KMediaAssRuntime Apple SDKs
         env:
           GH_TOKEN: ${{ github.token }}
-          ASS_RUNTIME_VERSION: 0.1.0-rc.4
+          ASS_RUNTIME_VERSION: 0.1.0-rc.5
         run: |
           set -euo pipefail
           download="$RUNNER_TEMP/kmedia-ass-download"
@@ -103,7 +103,7 @@ jobs:
             tar -xzf "$download/$name" -C "$targets/$target"
             test -f "$targets/$target/sdk/$target/include/ass/ass.h"
             test "$(cat "$targets/$target/ass-runtime-id.txt")" = \
-              "kmediaass-0.17.5-36443523f0148567"
+              "kmediaass-0.17.5-132a1d9ab8838bbd"
           done
           apple_archive="kmedia-ass-runtime-$ASS_RUNTIME_VERSION-apple-xcframeworks.zip"
           for name in "$apple_archive" KMediaAssRuntime.podspec; do
@@ -130,8 +130,8 @@ jobs:
       - name: Download and verify the exact KMediaMpv Apple pod graph
         env:
           GH_TOKEN: ${{ github.token }}
-          MPV_VERSION: 0.3.0-rc.5
-          RUNTIME_VERSION: 0.1.0-rc.4
+          MPV_VERSION: 0.3.0-rc.6
+          RUNTIME_VERSION: 0.1.0-rc.5
         run: |
           set -euo pipefail
           mpv_download="$RUNNER_TEMP/kmedia-mpv-download"

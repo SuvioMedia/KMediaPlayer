@@ -116,5 +116,5 @@ internal object AndroidAssNativeBridge {
     }
 
     private const val MINIMUM_LIBASS_VERSION = 0x01705000
-    private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-36443523f0148567"
+    private const val REQUIRED_ASS_RUNTIME_ID = "kmediaass-0.17.5-132a1d9ab8838bbd"
 }

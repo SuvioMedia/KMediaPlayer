@@ -39,7 +39,7 @@ or `VideoPlaybackOptions` on every recomposition.
 ## Shared native runtime
 
 Android and desktop depend transitively on the exact matching
-`KMediaAssRuntime 0.1.0-rc.4`. That artifact owns the single process-wide
+`KMediaAssRuntime 0.1.0-rc.5`. That artifact owns the single process-wide
 libass 0.17.5, FreeType, FriBidi, and HarfBuzz stack.
 
 `composemediaplayer-ass` owns only renderer glue:
