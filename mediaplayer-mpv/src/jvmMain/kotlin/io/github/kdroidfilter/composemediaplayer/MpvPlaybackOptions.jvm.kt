@@ -1,5 +1,9 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopBackendAvailability
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopBackendRoutingTier
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.desktop.asDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.mpv.MpvLibrarySource
 import io.github.kdroidfilter.composemediaplayer.mpv.MpvRuntime
 import io.github.kdroidfilter.composemediaplayer.mpv.MpvRuntimeAvailability
@@ -69,6 +73,23 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
         }
     return createDesktopMpvVideoPlayerState(config)
 }
+
+/** Verified native MPV route for the explicit desktop playback-session API. */
+fun mpvDesktopPlaybackBackend(options: MpvPlaybackOptions = MpvPlaybackOptions()): DesktopPlaybackBackend =
+    MpvVideoPlayerBackend(options).asDesktopPlaybackBackend(
+        routingTier = DesktopBackendRoutingTier.MPV_NATIVE,
+        availabilityProbe = {
+            when (val availability = inspectMpvBackend(options)) {
+                is MpvBackendAvailability.Available ->
+                    DesktopBackendAvailability.Available(availability.backend)
+                is MpvBackendAvailability.Unavailable ->
+                    DesktopBackendAvailability.Unavailable(
+                        reason = availability.reason.name,
+                        guidance = availability.guidance,
+                    )
+            }
+        },
+    )
 
 private fun MpvPlaybackOptions.toDesktopRuntimeConfig(): MpvRuntimeConfig {
     val fontsDirectory =

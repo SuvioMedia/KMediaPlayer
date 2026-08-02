@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import java.awt.Color
@@ -63,6 +64,7 @@ class MacNativeWindowFullscreenIntegrationTest {
                 playbackOptions =
                     VideoPlaybackOptions(
                         desktopVideoBackend = DesktopVideoBackend.PLATFORM,
+                        desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
                     ),
             )
         var attached = false
@@ -126,8 +128,7 @@ class MacNativeWindowFullscreenIntegrationTest {
 
     private fun windowBounds(window: JFrame): Rectangle = onEdtResult { window.bounds }
 
-    private fun screenBounds(window: JFrame): Rectangle =
-        onEdtResult { window.graphicsConfiguration.bounds }
+    private fun screenBounds(window: JFrame): Rectangle = onEdtResult { window.graphicsConfiguration.bounds }
 
     private fun sameBounds(
         actual: Rectangle,

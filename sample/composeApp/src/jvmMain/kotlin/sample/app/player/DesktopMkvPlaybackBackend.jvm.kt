@@ -1,30 +1,40 @@
 package sample.app.player
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.key
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import io.github.kdroidfilter.composemediaplayer.JvmMediaToolAvailability
 import io.github.kdroidfilter.composemediaplayer.JvmMediaTools
+import io.github.kdroidfilter.composemediaplayer.MediaSourceSpec
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
+import io.github.kdroidfilter.composemediaplayer.PreviewableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.adaptedPlatformDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.inspectMpvBackend
-import io.github.kdroidfilter.composemediaplayer.rememberMpvVideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.kMediaBridgeDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.kMediaBridgeRemuxDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.kMediaBridgeTranscodeDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.libVlcDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.mpvDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.platformDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.vlcHlsDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackRequest
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackSession
+import io.github.kdroidfilter.composemediaplayer.desktop.JvmHttpSeekableMediaDataSourceFactory
+import io.github.vinceglb.filekit.path
+import kotlinx.coroutines.launch
 
 internal actual val desktopMkvPlaybackBackendSelectionAvailable: Boolean
     get() = true
 
-private const val FALLBACK_BACKEND_PROPERTY = "composemediaplayer.fallbackBackend"
-private const val HLS_BACKEND_PROPERTY = "composemediaplayer.hlsFallbackBackend"
 private const val MPV_LIBRARY_PATH_PROPERTY = "sample.app.mpvLibraryPath"
-
-private var capturedOriginalValues = false
-private var originalFallbackBackend: String? = null
-private var originalHlsBackend: String? = null
 
 internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackBackendOption> {
     if (!desktopMkvPlaybackBackendSelectionAvailable) return emptyList()
@@ -38,13 +48,8 @@ internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackB
             backend = DesktopMkvPlaybackBackend.AUTO,
             enabled = true,
             status =
-                if (hasLibVlcNative) {
-                    "Uses native libVLC for legacy AVI/WMV and KMediaBridge for bounded AVFoundation fallbacks."
-                } else if (hasKMediaBridge) {
-                    "Uses bundled FFmpeg through KMediaBridge; on macOS legacy AVI/WMV is transcoded for AVFoundation."
-                } else {
-                    "No MKV helper detected; native formats can still play."
-                },
+                "Route: platform direct → KMediaBridge remux → MPV → native libVLC → " +
+                    "KMediaBridge legacy transcode. Unavailable stages are skipped.",
             installHint =
                 if (hasLibVlcNative || hasKMediaBridge) {
                     null
@@ -54,99 +59,146 @@ internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackB
         ),
         platformOption(),
         libVlcNativeOption(tools),
-        kMediaBridgeHlsOption(tools),
-        vlcHlsOption(tools),
         mpvOption(),
     )
 }
 
+internal actual fun desktopMediaSourceAdapterOptions(): List<DesktopMediaSourceAdapterOption> {
+    val tools = JvmMediaTools.query(desktopPipelineExtensions)
+    return listOf(
+        DesktopMediaSourceAdapterOption(
+            adapter = DesktopMediaSourceAdapter.AUTO,
+            enabled = true,
+            status = "Chooses direct playback first, then a bounded adapter when required.",
+        ),
+        DesktopMediaSourceAdapterOption(
+            adapter = DesktopMediaSourceAdapter.DIRECT,
+            enabled = true,
+            status = "No remux or transcode. The selected renderer receives the original source.",
+        ),
+        kMediaBridgeHlsOption(tools),
+        vlcHlsOption(tools),
+    )
+}
+
 @Composable
-internal actual fun rememberSampleVideoPlayerState(
+internal actual fun rememberSampleVideoPlayer(
     backend: DesktopMkvPlaybackBackend,
+    sourceAdapter: DesktopMediaSourceAdapter,
     playbackOptions: VideoPlaybackOptions,
-): VideoPlayerState =
-    key(backend) {
-        if (backend == DesktopMkvPlaybackBackend.MPV) {
-            val options = remember { configuredMpvPlaybackOptions() }
-            rememberMpvVideoPlayerState(options)
-        } else {
-            val selectedOptions =
-                remember(playbackOptions, backend) {
-                    playbackOptions.copy(desktopVideoBackend = backend.toDesktopVideoBackend())
+): SampleVideoPlayerHandle {
+    val mpvOptions = remember { configuredMpvPlaybackOptions() }
+    val backends =
+        remember(playbackOptions, mpvOptions) {
+            listOf(
+                platformDesktopPlaybackBackend(playbackOptions = playbackOptions),
+                kMediaBridgeRemuxDesktopPlaybackBackend(playbackOptions = playbackOptions),
+                mpvDesktopPlaybackBackend(mpvOptions),
+                libVlcDesktopPlaybackBackend(playbackOptions = playbackOptions),
+                kMediaBridgeTranscodeDesktopPlaybackBackend(playbackOptions = playbackOptions),
+                adaptedPlatformDesktopPlaybackBackend(playbackOptions = playbackOptions),
+                kMediaBridgeDesktopPlaybackBackend(playbackOptions = playbackOptions),
+                vlcHlsDesktopPlaybackBackend(playbackOptions = playbackOptions),
+            )
+        }
+    val session =
+        remember(backends) {
+            DesktopPlaybackSession(
+                backends = backends,
+                seekableMediaDataSourceFactory = JvmHttpSeekableMediaDataSourceFactory(),
+            )
+        }
+    val scope = rememberCoroutineScope()
+    val selectedBackend by rememberUpdatedState(backend)
+    val selectedSourceAdapter by rememberUpdatedState(sourceAdapter)
+    val activePlayer by session.playerState.collectAsState()
+    val placeholder =
+        remember {
+            PreviewableVideoPlayerState(
+                hasMedia = false,
+                isPlaying = false,
+                isLoading = false,
+            )
+        }
+
+    DisposableEffect(session) {
+        onDispose(session::close)
+    }
+    LaunchedEffect(backend, sourceAdapter, session) {
+        applyDesktopPlaybackSelection(backend, sourceAdapter)
+        if (session.playerState.value != null) {
+            runCatching { session.switchBackend(backend.sessionBackendId(sourceAdapter)) }
+        }
+    }
+
+    val playerState = activePlayer ?: placeholder
+    return remember(playerState, session, scope) {
+        SampleVideoPlayerHandle(
+            playerState = playerState,
+            openUriAction = { uri, initial ->
+                scope.launch {
+                    applyDesktopPlaybackSelection(selectedBackend, selectedSourceAdapter)
+                    runCatching {
+                        session.open(
+                            request =
+                                DesktopPlaybackRequest(
+                                    source = MediaSourceSpec(uri),
+                                    initialPlayerState = initial,
+                                ),
+                            backendId = selectedBackend.sessionBackendId(selectedSourceAdapter),
+                        )
+                    }
                 }
-            rememberVideoPlayerState(playbackOptions = selectedOptions)
-        }
-    }
-
-internal actual fun applyDesktopMkvPlaybackBackend(backend: DesktopMkvPlaybackBackend) {
-    if (!desktopMkvPlaybackBackendSelectionAvailable) return
-    captureOriginalValues()
-
-    when (backend) {
-        DesktopMkvPlaybackBackend.AUTO -> {
-            System.setProperty(FALLBACK_BACKEND_PROPERTY, "auto")
-            System.setProperty(HLS_BACKEND_PROPERTY, "auto")
-        }
-        DesktopMkvPlaybackBackend.PLATFORM -> {
-            System.setProperty(FALLBACK_BACKEND_PROPERTY, "platform")
-            System.clearProperty(HLS_BACKEND_PROPERTY)
-        }
-        DesktopMkvPlaybackBackend.LIBVLC_NATIVE -> {
-            System.setProperty(FALLBACK_BACKEND_PROPERTY, "libvlc-native-view")
-            System.clearProperty(HLS_BACKEND_PROPERTY)
-        }
-        DesktopMkvPlaybackBackend.KMEDIA_BRIDGE_HLS -> {
-            System.setProperty(FALLBACK_BACKEND_PROPERTY, "kmediabridge")
-            System.setProperty(HLS_BACKEND_PROPERTY, "kmediabridge")
-        }
-        DesktopMkvPlaybackBackend.VLC_HLS -> {
-            System.setProperty(FALLBACK_BACKEND_PROPERTY, "vlc")
-            System.setProperty(HLS_BACKEND_PROPERTY, "vlc")
-        }
-        DesktopMkvPlaybackBackend.MPV -> {
-            System.clearProperty(FALLBACK_BACKEND_PROPERTY)
-            System.clearProperty(HLS_BACKEND_PROPERTY)
-        }
+            },
+            openFileAction = { file, initial ->
+                scope.launch {
+                    applyDesktopPlaybackSelection(selectedBackend, selectedSourceAdapter)
+                    runCatching {
+                        session.open(
+                            request =
+                                DesktopPlaybackRequest(
+                                    source = MediaSourceSpec(file.path),
+                                    initialPlayerState = initial,
+                                ),
+                            backendId = selectedBackend.sessionBackendId(selectedSourceAdapter),
+                        )
+                    }
+                }
+            },
+            surfaceAttachedAction = session::notifySurfaceAttached,
+        )
     }
 }
 
-internal actual fun restoreDesktopMkvPlaybackBackend() {
-    if (!capturedOriginalValues) return
-    restoreProperty(FALLBACK_BACKEND_PROPERTY, originalFallbackBackend)
-    restoreProperty(HLS_BACKEND_PROPERTY, originalHlsBackend)
-    capturedOriginalValues = false
-    originalFallbackBackend = null
-    originalHlsBackend = null
-}
-
-private fun captureOriginalValues() {
-    if (capturedOriginalValues) return
-    originalFallbackBackend = System.getProperty(FALLBACK_BACKEND_PROPERTY)
-    originalHlsBackend = System.getProperty(HLS_BACKEND_PROPERTY)
-    capturedOriginalValues = true
-}
-
-private fun restoreProperty(
-    key: String,
-    value: String?,
-) {
-    if (value == null) {
-        System.clearProperty(key)
-    } else {
-        System.setProperty(key, value)
-    }
-}
-
-private fun DesktopMkvPlaybackBackend.toDesktopVideoBackend(): DesktopVideoBackend =
+private fun DesktopMkvPlaybackBackend.sessionBackendId(sourceAdapter: DesktopMediaSourceAdapter): String? =
     when (this) {
-        DesktopMkvPlaybackBackend.AUTO,
-        DesktopMkvPlaybackBackend.KMEDIA_BRIDGE_HLS,
-        DesktopMkvPlaybackBackend.VLC_HLS,
-        -> DesktopVideoBackend.AUTO
-        DesktopMkvPlaybackBackend.PLATFORM -> DesktopVideoBackend.PLATFORM
-        DesktopMkvPlaybackBackend.LIBVLC_NATIVE -> DesktopVideoBackend.LIBVLC_NATIVE
-        DesktopMkvPlaybackBackend.MPV -> error("MPV uses its own player state.")
+        DesktopMkvPlaybackBackend.MPV -> "mpv"
+        DesktopMkvPlaybackBackend.LIBVLC_NATIVE -> "libvlc"
+        DesktopMkvPlaybackBackend.PLATFORM -> sourceAdapter.platformBackendId()
+        DesktopMkvPlaybackBackend.AUTO ->
+            when (sourceAdapter) {
+                DesktopMediaSourceAdapter.AUTO -> null
+                else -> sourceAdapter.platformBackendId()
+            }
     }
+
+private fun DesktopMediaSourceAdapter.platformBackendId(): String =
+    when (this) {
+        DesktopMediaSourceAdapter.AUTO -> "platform-adapted"
+        DesktopMediaSourceAdapter.DIRECT -> "platform"
+        DesktopMediaSourceAdapter.KMEDIA_BRIDGE -> "kmediabridge"
+        DesktopMediaSourceAdapter.VLC_HLS -> "vlc-hls"
+    }
+
+internal actual fun applyDesktopPlaybackSelection(
+    backend: DesktopMkvPlaybackBackend,
+    sourceAdapter: DesktopMediaSourceAdapter,
+) {
+    // Selection is carried by the backend's typed VideoPlaybackOptions. Process-wide properties
+    // would couple independent players and make a transactional switch race with the old state.
+}
+
+internal actual fun restoreDesktopMkvPlaybackBackend() = Unit
 
 private fun platformOption(): DesktopMkvPlaybackBackendOption =
     DesktopMkvPlaybackBackendOption(
@@ -154,9 +206,9 @@ private fun platformOption(): DesktopMkvPlaybackBackendOption =
         enabled = true,
         status =
             if (isMacOs()) {
-                "Forces AVFoundation without libVLC or container fallback. Legacy AVI/WMV may be rejected."
+                "Uses AVFoundation/AppKit as renderer. The separate source-adapter selection decides direct/remux/transcode."
             } else {
-                "Forces the native platform media framework without optional fallbacks."
+                "Uses the native platform framework as renderer; source adaptation is selected separately."
             },
     )
 
@@ -182,7 +234,7 @@ private fun libVlcNativeOption(tools: JvmMediaToolAvailability): DesktopMkvPlayb
     )
 }
 
-private fun kMediaBridgeHlsOption(tools: JvmMediaToolAvailability): DesktopMkvPlaybackBackendOption {
+private fun kMediaBridgeHlsOption(tools: JvmMediaToolAvailability): DesktopMediaSourceAdapterOption {
     val enabled = tools.kMediaBridge.available && tools.kMediaBridgeProbe.available
     val legacyMacDetail =
         if (isMacOs()) {
@@ -205,8 +257,8 @@ private fun kMediaBridgeHlsOption(tools: JvmMediaToolAvailability): DesktopMkvPl
             else -> "Ready for compatible MKV/WebM: bounded remux without external executables.$legacyMacDetail"
         }
 
-    return DesktopMkvPlaybackBackendOption(
-        backend = DesktopMkvPlaybackBackend.KMEDIA_BRIDGE_HLS,
+    return DesktopMediaSourceAdapterOption(
+        adapter = DesktopMediaSourceAdapter.KMEDIA_BRIDGE,
         enabled = enabled,
         status = status,
         installHint =
@@ -218,9 +270,9 @@ private fun kMediaBridgeHlsOption(tools: JvmMediaToolAvailability): DesktopMkvPl
     )
 }
 
-private fun vlcHlsOption(tools: JvmMediaToolAvailability): DesktopMkvPlaybackBackendOption =
-    DesktopMkvPlaybackBackendOption(
-        backend = DesktopMkvPlaybackBackend.VLC_HLS,
+private fun vlcHlsOption(tools: JvmMediaToolAvailability): DesktopMediaSourceAdapterOption =
+    DesktopMediaSourceAdapterOption(
+        adapter = DesktopMediaSourceAdapter.VLC_HLS,
         enabled = tools.vlc.available,
         status =
             if (tools.vlc.available) {

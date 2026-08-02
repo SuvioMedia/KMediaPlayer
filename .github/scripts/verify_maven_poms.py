@@ -11,10 +11,14 @@ from pathlib import Path
 EXPECTED_BACKEND_DEPENDENCIES = {
     "composemediaplayer-ass-android": ("kmedia-ass-runtime-android", "0.1.0-rc.3"),
     "composemediaplayer-ass-jvm": ("kmedia-ass-runtime-desktop", "0.1.0-rc.3"),
-    "composemediaplayer-mpv-android": ("kmedia-mpv-runtime-android", "0.3.0-rc.4"),
-    "composemediaplayer-mpv-jvm": ("kmedia-mpv-runtime-desktop", "0.3.0-rc.4"),
-    "composemediaplayer-kmediabridge-android": ("kmedia-bridge-ffmpeg-android", "0.5.0-rc.2"),
-    "composemediaplayer-kmediabridge-jvm": ("kmedia-bridge-ffmpeg-jvm", "0.5.0-rc.2"),
+    "composemediaplayer-mpv-android": ("kmedia-mpv-runtime-android", "0.3.0-rc.5"),
+    "composemediaplayer-mpv-jvm": ("kmedia-mpv-runtime-desktop", "0.3.0-rc.5"),
+    "composemediaplayer-kmediabridge-android": ("kmedia-bridge-ffmpeg-android", "0.5.0-rc.3"),
+    "composemediaplayer-kmediabridge-jvm": ("kmedia-bridge-ffmpeg-jvm", "0.5.0-rc.3"),
+}
+EXPECTED_DESKTOP_WINDOW_DEPENDENCIES = {
+    "composemediaplayer-jvm": "composemediaplayer-desktop-window-jvm",
+    "composemediaplayer-mpv-jvm": "composemediaplayer-desktop-window-jvm",
 }
 
 
@@ -67,23 +71,34 @@ def validate_pom(pom: Path, expected_version: str) -> None:
         _require_text(project, path, pom)
 
     artifact_id = (_child(project, "artifactId").text or "").strip()
+    dependencies = _child(project, "dependencies")
+    values = set()
+    if dependencies is not None:
+        for dependency in dependencies:
+            if _local_name(dependency.tag) != "dependency":
+                continue
+            group = _child(dependency, "groupId")
+            artifact = _child(dependency, "artifactId")
+            dependency_version = _child(dependency, "version")
+            if group is not None and artifact is not None and dependency_version is not None:
+                values.add(
+                    (
+                        (group.text or "").strip(),
+                        (artifact.text or "").strip(),
+                        (dependency_version.text or "").strip(),
+                    ),
+                )
     expected_dependency = EXPECTED_BACKEND_DEPENDENCIES.get(artifact_id)
     if expected_dependency is not None:
-        dependencies = _child(project, "dependencies")
-        values = set()
-        if dependencies is not None:
-            for dependency in dependencies:
-                if _local_name(dependency.tag) != "dependency":
-                    continue
-                group = _child(dependency, "groupId")
-                artifact = _child(dependency, "artifactId")
-                dependency_version = _child(dependency, "version")
-                if group is not None and artifact is not None and dependency_version is not None:
-                    values.add(((group.text or "").strip(), (artifact.text or "").strip(), (dependency_version.text or "").strip()))
         expected_artifact, expected_dependency_version = expected_dependency
         expected = ("io.github.shusek", expected_artifact, expected_dependency_version)
         if expected not in values:
             raise ValueError(f"{pom}: missing exact transitive backend dependency {expected}")
+    expected_desktop_window = EXPECTED_DESKTOP_WINDOW_DEPENDENCIES.get(artifact_id)
+    if expected_desktop_window is not None:
+        expected = ("io.github.shusek", expected_desktop_window, expected_version)
+        if expected not in values:
+            raise ValueError(f"{pom}: missing exact desktop-window dependency {expected}")
 
 
 def validate_repository(repository: Path, version: str) -> int:

@@ -16,6 +16,7 @@ import io.github.kdroidfilter.composemediaplayer.CacheClearResult
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
 import io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities
+import io.github.kdroidfilter.composemediaplayer.DesktopMediaSourcePolicy
 import io.github.kdroidfilter.composemediaplayer.DesktopPlayerLifecycle
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities
@@ -57,6 +58,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
 import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
+import io.github.kdroidfilter.composemediaplayer.allowsExternalSourceAdapter
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.externalHlsTrackStreamIndex
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
@@ -1274,7 +1276,7 @@ class WindowsVideoPlayerState(
         uri: String,
         requestHeaders: Map<String, String>,
     ): Boolean =
-        playbackOptions.desktopVideoBackend == DesktopVideoBackend.AUTO &&
+        playbackOptions.allowsExternalSourceAdapter() &&
             !ExternalHlsFallbackSupport.isDisabled() &&
             ExternalHlsFallbackSupport.needsContainerFallback(uri, requestHeaders)
 
@@ -1283,6 +1285,12 @@ class WindowsVideoPlayerState(
         requestHeaders: Map<String, String>,
     ): WindowsResolvedLibVlcBackend? {
         val forcedDesktopBackend = playbackOptions.forcedJvmDesktopBackend()
+        if (playbackOptions.desktopMediaSourcePolicy != DesktopMediaSourcePolicy.INHERIT &&
+            playbackOptions.desktopVideoBackend != DesktopVideoBackend.LIBVLC &&
+            playbackOptions.desktopVideoBackend != DesktopVideoBackend.LIBVLC_NATIVE
+        ) {
+            return null
+        }
         val shouldUsePlatformBackend =
             forcedDesktopBackend == null &&
                 !JvmExternalFallbackContainerSupport.needsContainerFallback(
@@ -1792,6 +1800,7 @@ class WindowsVideoPlayerState(
                 requireHdrCmafPassthrough = colorRequest.requireHdrCmafPassthrough,
                 forceSdrOutput = colorRequest.forceSdrOutput,
                 extensions = playbackOptions.extensions,
+                sourcePolicy = playbackOptions.desktopMediaSourcePolicy,
             )
         externalHlsFallback = started.fallback
         externalHlsFallbackDurationSeconds = started.source.durationSeconds

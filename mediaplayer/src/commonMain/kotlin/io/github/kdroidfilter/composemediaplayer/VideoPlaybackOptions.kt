@@ -55,13 +55,28 @@ enum class DesktopVideoBackend {
  * Selects how the default desktop platform backend presents video.
  *
  * [PREFER_NATIVE] uses the platform's direct video surface when it is compatible with the
- * requested color pipeline. On macOS this is the dedicated AVFoundation/AppKit player window.
+ * requested color pipeline and the state is hosted by the explicit desktop-window API.
  * [COMPOSE] copies decoded frames into Compose and is intended for thumbnails, feeds, and other
  * embedded mini players that must remain inside their parent layout.
  */
 enum class DesktopVideoSurfaceMode {
     PREFER_NATIVE,
     COMPOSE,
+}
+
+/**
+ * Selects how an unsupported desktop source is adapted before it reaches the renderer.
+ *
+ * [INHERIT] preserves the legacy backend/property policy. The remaining values are explicit and
+ * keep source adaptation independent from [DesktopVideoBackend], which lets an application use a
+ * platform-native output window without giving the adapter ownership of that window.
+ */
+enum class DesktopMediaSourcePolicy {
+    INHERIT,
+    AUTO,
+    DIRECT,
+    KMEDIA_BRIDGE,
+    VLC_HLS,
 }
 
 /**
@@ -146,7 +161,8 @@ data class VideoPlaybackOptions(
     val projectionDetectionMode: VideoProjectionDetectionMode = VideoProjectionDetectionMode.AUTO,
     val webDrmConfiguration: WebDrmConfiguration? = null,
     val webDecoderPreference: WebDecoderPreference = WebDecoderPreference.AUTO,
-    val desktopVideoSurfaceMode: DesktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+    val desktopVideoSurfaceMode: DesktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE,
+    val desktopMediaSourcePolicy: DesktopMediaSourcePolicy = DesktopMediaSourcePolicy.INHERIT,
 ) {
     init {
         val invalidIds = extensions.map(VideoPipelineExtension::id).filter(String::isBlank)

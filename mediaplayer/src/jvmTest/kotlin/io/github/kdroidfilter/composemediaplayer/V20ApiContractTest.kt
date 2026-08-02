@@ -8,12 +8,12 @@ import kotlin.test.assertNotNull
 
 class V20ApiContractTest {
     @Test
-    fun `playback options expose only 2_0 color policies`() {
+    fun `playback options keep embedded desktop surfaces in Compose by default`() {
         val options = VideoPlaybackOptions()
 
         assertEquals(DynamicRangePolicy.AUTO, options.dynamicRangePolicy)
         assertEquals(DolbyVisionPolicy.AUTO, options.dolbyVisionPolicy)
-        assertEquals(DesktopVideoSurfaceMode.PREFER_NATIVE, options.desktopVideoSurfaceMode)
+        assertEquals(DesktopVideoSurfaceMode.COMPOSE, options.desktopVideoSurfaceMode)
         assertEquals(
             DesktopVideoSurfaceMode.COMPOSE,
             options.copy(desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE).desktopVideoSurfaceMode,

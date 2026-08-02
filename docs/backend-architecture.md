@@ -9,7 +9,8 @@ application
 ├── composemediaplayer-ass ─────────────> composemediaplayer-extension-api ──┤
 ├── composemediaplayer-dolbyvision ─────> composemediaplayer-extension-api ──┤
 ├── composemediaplayer-kmediabridge ────> composemediaplayer-extension-api ──┤
-└── composemediaplayer-mpv ───────────────────────────────────────────────────┴──> composemediaplayer-core
+├── composemediaplayer-desktop-window ─────────────────────────────────> composemediaplayer-core
+└── composemediaplayer-mpv ──────────────────────────────────────────> desktop-window ──> core
 ```
 
 Backend and extension implementations never depend on the default player:
@@ -19,6 +20,9 @@ Backend and extension implementations never depend on the default player:
 - `composemediaplayer-extension-api` owns lightweight common and platform
   contracts for source, subtitle, color-conversion, and scoped desktop bridge
   extensions. It depends only on core.
+- `composemediaplayer-desktop-window` owns the explicit JVM full-player window,
+  ordered routing, single-session ownership, and transactional backend switching.
+  It depends only on core and never chooses a platform implementation itself.
 - `composemediaplayer` owns the default Media3, AVPlayer, browser, and desktop
   JNI implementations plus the public `VideoPlayerSurface`. It consumes
   extension contracts but contains no ASS, Dolby Vision, KMediaBridge, or
@@ -35,6 +39,65 @@ The `verifyBackendModuleBoundaries` Gradle task rejects a dependency from the
 default player to MPV or KMediaBridge/FFmpeg, from an extension implementation
 to the default player, from MPV to the default player, or from core and the
 extension API to implementation modules.
+
+## Full desktop playback
+
+Full playback on JVM desktop is explicit and belongs in a dedicated player
+window. `VideoPlayerSurface` remains an embedded surface for feeds, galleries,
+previews, and mini players; it never creates another OS window as a side effect.
+
+```kotlin
+val options = VideoPlaybackOptions(
+    extensions = listOf(KMediaBridgeDesktopExtension()),
+)
+val session = remember {
+    DesktopPlaybackSession(
+        listOf(
+            platformDesktopPlaybackBackend(options),
+            kMediaBridgeRemuxDesktopPlaybackBackend(options),
+            mpvDesktopPlaybackBackend(),
+            libVlcDesktopPlaybackBackend(options),
+            kMediaBridgeTranscodeDesktopPlaybackBackend(options),
+        ),
+    )
+}
+
+LaunchedEffect(uri) {
+    session.open(DesktopPlaybackRequest(MediaSourceSpec(uri)))
+}
+
+DesktopVideoPlayerWindow(
+    session = session,
+    visible = true,
+    onCloseRequest = { /* return to the catalog */ },
+)
+```
+
+The automatic order is platform direct, KMediaBridge bounded remux, native MPV,
+native libVLC, then KMediaBridge compatibility transcode. Unavailable or
+unsupported stages are skipped. A forced backend switch creates and restores a
+paused replacement first, preserves position, volume, rate, projection, audio
+and subtitle selection, and releases the old renderer only after the new surface
+is attached. If replacement fails, the previous backend resumes.
+
+Only one full desktop session may own playback in a process. Opening another
+session closes the previous one. Renderer selection and source adaptation are
+separate: `DesktopMediaSourcePolicy` controls direct/remux/transcode input while
+the backend controls the output surface.
+
+On macOS the explicit AWT window owns one `NSWindow`; AVFoundation/Metal,
+libVLC, and native MPV attach their native view below the transparent Compose
+control layer. Resize and fullscreen therefore stay inside one AppKit view tree.
+Windows and Linux use the same explicit window/session contract, but a route is
+called native only when its backend actually attaches an HWND or Wayland/X11
+surface. A software Skia route remains a valid SDR fallback and is never promoted
+to an HDR claim.
+
+Remote authenticated progressive input for MPV is read through the application's
+seekable data-source callback and materialized into a bounded private cache;
+headers are never passed to MPV. Adaptive HLS/DASH stays with an app-owned
+transport/backend instead of being materialized. Requests and failures redact
+the URI and all header values.
 
 ## Pipeline extensions
 

@@ -57,6 +57,30 @@ class ExternalHlsFallbackSupportTest {
     }
 
     @Test
+    fun typedSourcePolicyOverridesLegacyGlobalSelection() {
+        withFakeVlc { vlcPath ->
+            withBackendProperties(vlcPath = vlcPath, configuredBackend = "vlc") {
+                assertEquals(
+                    ExternalHlsFallbackBackend.KMEDIA_BRIDGE,
+                    ExternalHlsFallbackSupport.selectBackend(
+                        requiresSubtitleRendering = false,
+                        sourcePolicy = DesktopMediaSourcePolicy.KMEDIA_BRIDGE,
+                    ),
+                )
+            }
+            withBackendProperties(vlcPath = vlcPath, configuredBackend = "kmediabridge") {
+                assertEquals(
+                    ExternalHlsFallbackBackend.VLC,
+                    ExternalHlsFallbackSupport.selectBackend(
+                        requiresSubtitleRendering = false,
+                        sourcePolicy = DesktopMediaSourcePolicy.VLC_HLS,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
     fun unmanagedVlcIsNeverSelectedForHdr() {
         withFakeVlc { vlcPath ->
             withBackendProperties(vlcPath = vlcPath, configuredBackend = "auto") {

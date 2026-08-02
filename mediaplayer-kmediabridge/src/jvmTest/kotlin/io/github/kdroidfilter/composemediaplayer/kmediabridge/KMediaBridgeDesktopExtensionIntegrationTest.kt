@@ -154,7 +154,7 @@ class KMediaBridgeDesktopExtensionIntegrationTest {
             val configuredPath =
                 System.getProperty(LEGACY_TEST_MEDIA_PROPERTY)?.takeIf(String::isNotBlank) ?: return@runBlocking
             val configured = Path.of(configuredPath)
-            val input =
+            val inputs =
                 if (Files.isDirectory(configured)) {
                     Files.list(configured).use { paths ->
                         paths
@@ -165,39 +165,44 @@ class KMediaBridgeDesktopExtensionIntegrationTest {
                                     .substringAfterLast('.', "")
                                     .lowercase() in
                                     setOf("avi", "wmv", "asf")
-                            }.findFirst()
-                            .orElseThrow()
+                            }.sorted()
+                            .toList()
                     }
                 } else {
-                    configured
+                    listOf(configured)
                 }
+            require(inputs.isNotEmpty() && inputs.all(Files::isRegularFile)) {
+                "The configured legacy integration-test media does not exist."
+            }
             val extension = configuredTestExtension()
             assertTrue(extension.desktopCapabilities.canTranscodeVideo)
             assertTrue(extension.desktopCapabilities.canTranscodeAudio)
-            var fallback: DesktopPlaybackBridgeSession? = null
-            try {
-                fallback =
-                    extension.open(
-                        DesktopPlaybackBridgeRequest(
-                            uri = input.toUri().toString(),
-                            forceAvFoundationCompatibility = true,
-                        ),
-                    )
-                val source = fallback.source
+            inputs.forEach { input ->
+                var fallback: DesktopPlaybackBridgeSession? = null
+                try {
+                    fallback =
+                        extension.open(
+                            DesktopPlaybackBridgeRequest(
+                                uri = input.toUri().toString(),
+                                forceAvFoundationCompatibility = true,
+                            ),
+                        )
+                    val source = fallback.source
 
-                assertTrue(source.avFoundationCompatibleTranscode)
-                assertFalse(source.videoCopiedWithoutReencoding)
-                assertFalse(source.hdrCmafPassthrough)
-                assertEquals(VideoDynamicRange.SDR, source.outputColorInfo.dynamicRange)
-                assertTrue(
-                    URI
-                        .create(source.playlistUrl)
-                        .toURL()
-                        .readText()
-                        .contains("#EXT-X-MAP"),
-                )
-            } finally {
-                fallback?.close()
+                    assertTrue(source.avFoundationCompatibleTranscode)
+                    assertFalse(source.videoCopiedWithoutReencoding)
+                    assertFalse(source.hdrCmafPassthrough)
+                    assertEquals(VideoDynamicRange.SDR, source.outputColorInfo.dynamicRange)
+                    assertTrue(
+                        URI
+                            .create(source.playlistUrl)
+                            .toURL()
+                            .readText()
+                            .contains("#EXT-X-MAP"),
+                    )
+                } finally {
+                    fallback?.close()
+                }
             }
         }
 

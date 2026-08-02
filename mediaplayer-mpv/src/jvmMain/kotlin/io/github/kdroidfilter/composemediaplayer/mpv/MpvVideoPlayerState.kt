@@ -22,6 +22,7 @@ import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopVideoWindowSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvEngine
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.MpvLoadFailure
@@ -59,7 +60,8 @@ internal class MpvVideoPlayerState(
     internal val runtimeConfig: MpvRuntimeConfig,
     private val engine: LibMpvEngine,
 ) : AbstractMpvVideoPlayerState(),
-    VideoPlayerSurfaceProvider {
+    VideoPlayerSurfaceProvider,
+    DesktopVideoWindowSurfaceProvider {
     private val disposed = AtomicBoolean(false)
     private val renderLock = ReentrantLock()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -87,6 +89,24 @@ internal class MpvVideoPlayerState(
             modifier = modifier,
             contentScale = contentScale,
             overlay = overlay,
+        )
+    }
+
+    @Composable
+    override fun RenderDesktopVideoWindowSurface(
+        window: Window,
+        modifier: Modifier,
+        contentScale: ContentScale,
+        overlay: @Composable () -> Unit,
+        onSurfaceAttached: () -> Unit,
+    ) {
+        MpvVideoPlayerWindowSurface(
+            playerState = this,
+            window = window,
+            modifier = modifier,
+            contentScale = contentScale,
+            overlay = overlay,
+            onSurfaceAttached = onSurfaceAttached,
         )
     }
 

@@ -1,18 +1,9 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,10 +12,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -36,12 +23,8 @@ import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import java.awt.BorderLayout
 import java.awt.Dimension
-import java.awt.Frame
 import java.awt.Graphics
 import java.awt.IllegalComponentStateException
 import java.awt.Point
@@ -78,16 +61,10 @@ fun MacVideoPlayerSurface(
     overlay: @Composable () -> Unit = {},
     isInFullscreenWindow: Boolean = false,
 ) {
-    val useDedicatedNativeWindow =
-        !isInFullscreenWindow &&
-            (playerState.shouldUseHdrMetalSurface() || playerState.shouldUseLibVlcNativeSurface())
-
     Box(
         modifier =
             modifier.onSizeChanged { size ->
-                if (!useDedicatedNativeWindow) {
-                    playerState.onResized(size.width, size.height)
-                }
+                playerState.onResized(size.width, size.height)
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -99,18 +76,10 @@ fun MacVideoPlayerSurface(
                 libVlcNativeSurfaceRequested = playerState.libVlcNativeSurfaceRequested,
                 isFullscreen = playerState.isFullscreen,
                 isInFullscreenWindow = isInFullscreenWindow,
-                usesDedicatedNativeWindow = useDedicatedNativeWindow,
+                usesDedicatedNativeWindow = false,
             )
         if (shouldRenderVideo) {
-            if (useDedicatedNativeWindow) {
-                MacDedicatedNativeVideoWindow(
-                    playerState = playerState,
-                    contentScale = contentScale,
-                    overlay = {
-                        MacVideoOverlayContent(playerState, overlay)
-                    },
-                )
-            } else if (playerState.shouldUseHdrMetalSurface()) {
+            if (playerState.shouldUseHdrMetalSurface()) {
                 MacHdrMetalVideoHost(
                     playerState = playerState,
                     contentScale = contentScale,
@@ -167,10 +136,62 @@ fun MacVideoPlayerSurface(
     if (
         playerState.isFullscreen &&
         !isInFullscreenWindow &&
-        !playerState.libVlcNativeSurfaceRequested &&
-        !useDedicatedNativeWindow
+        !playerState.libVlcNativeSurfaceRequested
     ) {
         openFullscreenWindow(playerState, overlay = overlay, contentScale = contentScale)
+    }
+}
+
+/** Renders the native AppKit layer into the caller-owned dedicated player window. */
+@Composable
+internal fun MacVideoPlayerWindowSurface(
+    playerState: MacVideoPlayerState,
+    window: AwtWindow,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    overlay: @Composable () -> Unit = {},
+    onSurfaceAttached: () -> Unit = {},
+) {
+    val nativeKind =
+        when {
+            playerState.shouldUseLibVlcNativeSurface() -> MacDedicatedNativeSurfaceKind.LIBVLC
+            playerState.shouldUseHdrMetalSurface() -> MacDedicatedNativeSurfaceKind.HDR_METAL
+            else -> null
+        }
+    if (nativeKind == null) {
+        MacVideoPlayerSurface(
+            playerState = playerState,
+            modifier = modifier,
+            contentScale = contentScale,
+            overlay = overlay,
+            isInFullscreenWindow = true,
+        )
+        DisposableEffect(playerState, window) {
+            onSurfaceAttached()
+            onDispose { }
+        }
+        return
+    }
+
+    DisposableEffect(playerState, window, nativeKind, contentScale) {
+        val attachment =
+            MacDedicatedNativeWindowAttachment(
+                playerState = playerState,
+                window = window,
+                kind = nativeKind,
+                contentScaleMode = contentScale.toHdrMetalMode(),
+                onAttached = onSurfaceAttached,
+            )
+        attachment.start()
+        onDispose(attachment::close)
+    }
+    Box(
+        modifier =
+            modifier.onSizeChanged { size ->
+                playerState.onResized(size.width, size.height)
+            },
+    ) {
+        MacVideoOverlayContent(playerState, overlay)
     }
 }
 
@@ -190,217 +211,25 @@ internal fun shouldRenderMacVideoSurface(
                 usesDedicatedNativeWindow
         )
 
-/**
- * Hosts a macOS native video renderer in its own NSWindow-backed Compose window.
- *
- * The native NSView is attached once below Compose's transparent Skia layer. AppKit owns all
- * subsequent geometry changes, so interactive resize does not have to synchronize an AWT canvas,
- * a native child view, and a second overlay window frame-by-frame.
- */
-@Composable
-private fun MacDedicatedNativeVideoWindow(
-    playerState: MacVideoPlayerState,
-    contentScale: ContentScale,
-    overlay: @Composable () -> Unit,
-) {
-    var visible by remember(playerState) { mutableStateOf(true) }
-    val nativeKind =
-        if (playerState.shouldUseLibVlcNativeSurface()) {
-            MacDedicatedNativeSurfaceKind.LIBVLC
-        } else {
-            MacDedicatedNativeSurfaceKind.HDR_METAL
-        }
-    val windowState =
-        rememberWindowState(
-            position = WindowPosition.PlatformDefault,
-            width = DEDICATED_NATIVE_WINDOW_WIDTH_DP.dp,
-            height = DEDICATED_NATIVE_WINDOW_HEIGHT_DP.dp,
-        )
-
-    LaunchedEffect(playerState.isPlaying) {
-        // Closing the player window pauses playback. Starting playback from the controller left in
-        // the main application window brings the native window back without rebuilding the player.
-        if (playerState.isPlaying) visible = true
-    }
-
-    if (!visible) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            overlay()
-        }
-        return
-    }
-
-    val closeWindow = {
-        playerState.isFullscreen = false
-        playerState.pause()
-        visible = false
-    }
-
-    Window(
-        onCloseRequest = closeWindow,
-        state = windowState,
-        title = "Compose Media Player Native ${System.identityHashCode(playerState)}",
-        undecorated = true,
-        transparent = true,
-        resizable = true,
-        focusable = true,
-        alwaysOnTop = false,
-        onKeyEvent = { event ->
-            if (event.key == Key.Escape && event.type == KeyEventType.KeyDown && playerState.isFullscreen) {
-                playerState.isFullscreen = false
-                true
-            } else {
-                false
-            }
-        },
-    ) {
-        val nativeWindow = window
-        LaunchedEffect(playerState, nativeWindow) {
-            synchronizeNativeFullscreen(
-                requestedFullscreen = { playerState.isFullscreen },
-                publishFullscreen = { playerState.isFullscreen = it },
-                setNativeFullscreen = {
-                    MacNativeBridge.nSetWindowFullscreen(nativeWindow, it)
-                },
-                isNativeFullscreen = {
-                    MacNativeBridge.nIsWindowFullscreen(nativeWindow)
-                },
-            )
-        }
-        DisposableEffect(playerState, nativeWindow, nativeKind, contentScale) {
-            nativeWindow.minimumSize =
-                Dimension(
-                    DEDICATED_NATIVE_WINDOW_MIN_WIDTH,
-                    DEDICATED_NATIVE_WINDOW_MIN_HEIGHT,
-                )
-            val attachment =
-                MacDedicatedNativeWindowAttachment(
-                    playerState = playerState,
-                    window = nativeWindow,
-                    kind = nativeKind,
-                    contentScaleMode = contentScale.toHdrMetalMode(),
-                )
-            attachment.start()
-            onDispose {
-                attachment.close()
-            }
-        }
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            overlay()
-            MacDedicatedNativeWindowChrome(
-                window = nativeWindow,
-                fullscreen = playerState.isFullscreen,
-                onClose = closeWindow,
-                onToggleFullscreen = {
-                    playerState.isFullscreen = !playerState.isFullscreen
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun MacDedicatedNativeWindowChrome(
-    window: AwtWindow,
-    fullscreen: Boolean,
-    onClose: () -> Unit,
-    onToggleFullscreen: () -> Unit,
-) {
-    if (fullscreen) return
-
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .height(DEDICATED_NATIVE_WINDOW_DRAG_HEIGHT_DP.dp)
-                .background(Color.Black)
-                .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        MacWindowControlDot(
-            color = Color(0xFFFF5F57),
-            onClick = onClose,
-        )
-        MacWindowControlDot(
-            color = Color(0xFFFFBD2E),
-            onClick = {
-                (window as? Frame)?.extendedState = Frame.ICONIFIED
-            },
-        )
-        MacWindowControlDot(
-            color = Color(0xFF28C840),
-            onClick = onToggleFullscreen,
-        )
-    }
-}
-
-private suspend fun synchronizeNativeFullscreen(
-    requestedFullscreen: () -> Boolean,
-    publishFullscreen: (Boolean) -> Unit,
-    setNativeFullscreen: (Boolean) -> Boolean,
-    isNativeFullscreen: () -> Boolean,
-) {
-    var submittedRequest: Boolean? = null
-    var transitionDeadline = 0L
-    while (currentCoroutineContext().isActive) {
-        val requested = requestedFullscreen()
-        if (submittedRequest != requested) {
-            if (runCatching { setNativeFullscreen(requested) }.getOrDefault(false)) {
-                submittedRequest = requested
-                transitionDeadline =
-                    System.nanoTime() + NATIVE_FULLSCREEN_TRANSITION_TIMEOUT_NANOS
-            }
-        }
-        val actual = runCatching(isNativeFullscreen).getOrNull()
-        when {
-            actual == requested -> {
-                transitionDeadline = 0L
-            }
-            actual != null &&
-                submittedRequest == requested &&
-                (transitionDeadline == 0L || System.nanoTime() >= transitionDeadline) -> {
-                // Native Escape and macOS window controls do not necessarily reach Compose.
-                publishFullscreen(actual)
-                submittedRequest = actual
-                transitionDeadline = 0L
-            }
-        }
-        delay(NATIVE_FULLSCREEN_POLL_INTERVAL_MS)
-    }
-}
-
-@Composable
-private fun MacWindowControlDot(
-    color: Color,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier =
-            Modifier
-                .padding(end = 8.dp)
-                .size(12.dp)
-                .background(color, CircleShape)
-                .clickable(onClick = onClick),
-    )
-}
-
 private enum class MacDedicatedNativeSurfaceKind {
     HDR_METAL,
     LIBVLC,
 }
+
+private const val HDR_SCREEN_REFRESH_DELAY_MILLIS = 120
 
 private class MacDedicatedNativeWindowAttachment(
     private val playerState: MacVideoPlayerState,
     private val window: AwtWindow,
     private val kind: MacDedicatedNativeSurfaceKind,
     private val contentScaleMode: Int,
+    private val onAttached: () -> Unit = {},
 ) : ComponentAdapter() {
     private var disposed = false
     private var attached = false
     private var attachScheduled = false
     private val screenRefreshTimer =
-        Timer(120) {
+        Timer(HDR_SCREEN_REFRESH_DELAY_MILLIS) {
             if (!disposed && attached && kind == MacDedicatedNativeSurfaceKind.HDR_METAL) {
                 playerState.refreshAttachedHdrColorPipeline()
             }
@@ -458,6 +287,7 @@ private class MacDedicatedNativeWindowAttachment(
                     MacDedicatedNativeSurfaceKind.LIBVLC ->
                         playerState.attachLibVlcNativeWindow(window)
                 }
+            if (attached) onAttached()
         }
     }
 }
@@ -1150,10 +980,3 @@ private const val HDR_METAL_SCALE_FIT = 0
 private const val HDR_METAL_SCALE_CROP = 1
 private const val HDR_METAL_SCALE_FILL = 2
 private const val GEOMETRY_SETTLE_DELAY_MS = 450
-private const val DEDICATED_NATIVE_WINDOW_WIDTH_DP = 960
-private const val DEDICATED_NATIVE_WINDOW_HEIGHT_DP = 540
-private const val DEDICATED_NATIVE_WINDOW_MIN_WIDTH = 480
-private const val DEDICATED_NATIVE_WINDOW_MIN_HEIGHT = 270
-private const val DEDICATED_NATIVE_WINDOW_DRAG_HEIGHT_DP = 32
-private const val NATIVE_FULLSCREEN_POLL_INTERVAL_MS = 100L
-private const val NATIVE_FULLSCREEN_TRANSITION_TIMEOUT_NANOS = 3_000_000_000L

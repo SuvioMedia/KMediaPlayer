@@ -63,8 +63,6 @@ import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
-import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
@@ -78,13 +76,16 @@ import kotlin.time.Duration.Companion.seconds
 @Composable
 internal fun PlayerScreen(
     modifier: Modifier = Modifier,
-    playerState: VideoPlayerState = rememberRenderableVideoPlayerState(),
+    player: SampleVideoPlayerHandle,
     initialVideoUrl: String? = null,
     initialSubtitleUrl: String? = null,
     demoSubtitleEnabled: Boolean = true,
     selectedDesktopMkvBackend: DesktopMkvPlaybackBackend = DesktopMkvPlaybackBackend.AUTO,
     onDesktopMkvBackendChange: (DesktopMkvPlaybackBackend) -> Unit = {},
+    selectedDesktopSourceAdapter: DesktopMediaSourceAdapter = DesktopMediaSourceAdapter.AUTO,
+    onDesktopSourceAdapterChange: (DesktopMediaSourceAdapter) -> Unit = {},
 ) {
+    val playerState = player.playerState
     // The state owner releases backend resources when this player leaves composition.
     // Calling pause() here races with that release while switching backend instances.
     DisposableEffect(Unit) {
@@ -121,17 +122,16 @@ internal fun PlayerScreen(
     var pendingPickSubtitle by remember { mutableStateOf(false) }
     val demoSubtitleUrl = initialSubtitleUrl ?: DEFAULT_DEMO_ASS_SUBTITLE_URL
     var initializedPlayerState by remember { mutableStateOf<VideoPlayerState?>(null) }
-    var appliedDesktopBackend by remember { mutableStateOf<DesktopMkvPlaybackBackend?>(null) }
     var playbackEndedVisible by remember { mutableStateOf(false) }
 
     fun applyDesktopMkvBackend() {
-        applyDesktopMkvPlaybackBackend(selectedDesktopMkvBackend)
+        applyDesktopPlaybackSelection(selectedDesktopMkvBackend, selectedDesktopSourceAdapter)
     }
 
     fun openVideoUrl(url: String) {
         playbackEndedVisible = false
         applyDesktopMkvBackend()
-        playerState.openUri(url, initialPlayerState)
+        player.openUri(url, initialPlayerState)
     }
 
     val videoFileLauncher = rememberFilePickerLauncher(type = SAMPLE_VIDEO_FILE_TYPE) { file ->
@@ -139,7 +139,7 @@ internal fun PlayerScreen(
             playbackEndedVisible = false
             videoUrl = it.getUri()
             applyDesktopMkvBackend()
-            playerState.openFile(it, initialPlayerState)
+            player.openFile(it, initialPlayerState)
         }
     }
     val subtitleFileLauncher = rememberFilePickerLauncher(
@@ -158,21 +158,10 @@ internal fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(playerState, selectedDesktopMkvBackend) {
+    LaunchedEffect(playerState, selectedDesktopMkvBackend, selectedDesktopSourceAdapter) {
         val playerChanged = initializedPlayerState !== playerState
-        val backendChanged = appliedDesktopBackend != selectedDesktopMkvBackend
-        if (playerChanged || backendChanged) {
-            val previousPlayerState =
-                initializedPlayerState?.takeIf { previous -> previous !== playerState }
-            if (previousPlayerState != null) {
-                // A dedicated MPV surface lives in a nested Compose window, whose onDispose may
-                // finish one AppKit turn after the replacement state is created. Quiesce the old
-                // native player before opening media in AVFoundation/libVLC so their callbacks and
-                // surfaces never overlap during a dynamic backend handoff.
-                previousPlayerState.dispose()
-                delay(DESKTOP_BACKEND_HANDOFF_SETTLE_MS)
-            }
-            if (playerChanged && demoSubtitleEnabled && !playerState.hasMedia) {
+        if (playerChanged) {
+            if (demoSubtitleEnabled && playerState.currentSubtitleTrack?.src != demoSubtitleUrl) {
                 val track =
                     SubtitleTrack(
                         label = "ASS demo",
@@ -183,11 +172,10 @@ internal fun PlayerScreen(
                 playerState.addSubtitleTrack(track)
                 playerState.selectSubtitleTrack(track)
             }
-            if (!playerState.hasMedia || backendChanged) {
+            if (!playerState.hasMedia) {
                 openVideoUrl(videoUrl)
             }
             initializedPlayerState = playerState
-            appliedDesktopBackend = selectedDesktopMkvBackend
         }
     }
 
@@ -245,8 +233,8 @@ internal fun PlayerScreen(
     }
 
     Box(modifier = modifier.background(Color.Black)) {
-        VideoPlayerSurface(
-            playerState = playerState,
+        SampleVideoPlayerSurface(
+            player = player,
             modifier = Modifier.fillMaxSize(),
             contentScale = selectedContentScale,
         ) {
@@ -272,16 +260,23 @@ internal fun PlayerScreen(
 
             if (showSourceSheet) {
                 val desktopMkvBackendOptions = remember(showSourceSheet) { desktopMkvPlaybackBackendOptions() }
+                val desktopSourceAdapterOptions = remember(showSourceSheet) { desktopMediaSourceAdapterOptions() }
                 MediaSourceSheet(
                     videoUrl = videoUrl,
                     sampleVideos = availableSampleVideos,
                     desktopMkvBackendAvailable = desktopMkvPlaybackBackendSelectionAvailable,
                     desktopMkvBackendOptions = desktopMkvBackendOptions,
                     selectedDesktopMkvBackend = selectedDesktopMkvBackend,
+                    desktopSourceAdapterOptions = desktopSourceAdapterOptions,
+                    selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
                     onUrlChange = { videoUrl = it },
                     onDesktopMkvBackendChange = { backend ->
-                        applyDesktopMkvPlaybackBackend(backend)
+                        applyDesktopPlaybackSelection(backend, selectedDesktopSourceAdapter)
                         onDesktopMkvBackendChange(backend)
+                    },
+                    onDesktopSourceAdapterChange = { adapter ->
+                        applyDesktopPlaybackSelection(selectedDesktopMkvBackend, adapter)
+                        onDesktopSourceAdapterChange(adapter)
                     },
                     onLoadUrl = {
                         if (videoUrl.isNotEmpty()) {
@@ -435,7 +430,13 @@ internal fun PlayerScreen(
 }
 
 private val SAMPLE_VIDEO_FILE_TYPE =
-    FileKitType.File(
+    if (sampleVideoPickerUsesAllFiles) {
+        // macOS cannot derive a uniform type for every legacy extension (notably .wmv/.asf).
+        // The sample deliberately offers the native "all files" picker and validates the source
+        // with the selected backend after selection.
+        FileKitType.File()
+    } else {
+        FileKitType.File(
         "mp4",
         "m4v",
         "mov",
@@ -454,7 +455,8 @@ private val SAMPLE_VIDEO_FILE_TYPE =
         "ogv",
         "vob",
         "3gp",
-    )
+        )
+    }
 
 // region Overlay controls
 
@@ -708,4 +710,3 @@ internal val SAMPLE_VIDEOS = listOf(
 
 private const val DEFAULT_DEMO_ASS_SUBTITLE_URL =
     "https://raw.githubusercontent.com/Shusek/KMediaPlayer/refs/heads/master/assets/subtitles/en.ass"
-private const val DESKTOP_BACKEND_HANDOFF_SETTLE_MS = 75L
