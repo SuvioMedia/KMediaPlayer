@@ -9,7 +9,7 @@ Pod::Spec.new do |spec|
     spec.vendored_frameworks      = 'build/cocoapods/framework/ComposeMediaPlayerAss.framework'
     spec.libraries                = 'c++'
     spec.ios.deployment_target    = '16.2'
-    spec.dependency 'KMediaAssRuntime', '0.1.0-rc.3'
+    spec.dependency 'KMediaAssRuntime', '0.1.0-rc.4'
     if !Dir.exist?('build/cocoapods/framework/ComposeMediaPlayerAss.framework') || Dir.empty?('build/cocoapods/framework/ComposeMediaPlayerAss.framework')
         raise "
         Kotlin framework 'ComposeMediaPlayerAss' doesn't exist yet, so a proper Xcode project can't be generated.

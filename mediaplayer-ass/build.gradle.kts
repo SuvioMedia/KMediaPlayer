@@ -49,7 +49,7 @@ val projectVersion =
             ?.removePrefix("v")
         ?: "dev"
 val projectGroup = "io.github.shusek"
-val assRuntimeVersion = "0.1.0-rc.3"
+val assRuntimeVersion = "0.1.0-rc.4"
 val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val appleNativeDirectory = layout.projectDirectory.dir("native/apple")
 val assRuntimeAppleOutputs =

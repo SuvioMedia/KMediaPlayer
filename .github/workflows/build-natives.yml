@@ -80,7 +80,7 @@ jobs:
       - name: Download and verify the exact KMediaAssRuntime Apple SDKs
         env:
           GH_TOKEN: ${{ github.token }}
-          ASS_RUNTIME_VERSION: 0.1.0-rc.3
+          ASS_RUNTIME_VERSION: 0.1.0-rc.4
         run: |
           set -euo pipefail
           download="$RUNNER_TEMP/kmedia-ass-download"
@@ -131,7 +131,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MPV_VERSION: 0.3.0-rc.5
-          RUNTIME_VERSION: 0.1.0-rc.3
+          RUNTIME_VERSION: 0.1.0-rc.4
         run: |
           set -euo pipefail
           mpv_download="$RUNNER_TEMP/kmedia-mpv-download"

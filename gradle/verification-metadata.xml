@@ -4,7 +4,7 @@
       <verify-metadata>true</verify-metadata>
       <verify-signatures>false</verify-signatures>
       <trusted-artifacts>
-         <trust group="io[.]github[.]shusek" name="composemediaplayer(?:-(?:ass|core|dolbyvision|extension-api|kmediabridge|mpv))?(?:-(?:android|jvm))?" version="(?:dev|0[.]0[.]0-consumer[.][0-9A-Za-z._-]+)" regex="true" reason="Locally generated consumer-smoke fixtures cannot have stable checksums."/>
+         <trust group="io[.]github[.]shusek" name="composemediaplayer(?:-(?:ass|core|desktop-window|dolbyvision|extension-api|kmediabridge|mpv))?(?:-(?:android|jvm))?" version="(?:dev|0[.]0[.]0-consumer[.][0-9A-Za-z._-]+)" regex="true" reason="Locally generated consumer-smoke fixtures cannot have stable checksums."/>
       </trusted-artifacts>
    </configuration>
    <components>

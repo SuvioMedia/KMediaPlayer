@@ -88,6 +88,60 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertIn("pattern: apple-mpv-", workflow)
             self.assertIn("verify_apple_mpv_payload.sh", workflow)
 
+    def test_apple_mpv_graph_uses_the_runtime_required_by_kmedia_mpv(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        build_natives = (
+            repository_root / ".github/workflows/build-natives.yml"
+        ).read_text(encoding="utf-8")
+        verifier = (
+            repository_root / ".github/scripts/verify_apple_mpv_payload.sh"
+        ).read_text(encoding="utf-8")
+        mpv_build = (
+            repository_root / "mediaplayer-mpv/build.gradle.kts"
+        ).read_text(encoding="utf-8")
+        podspec = (
+            repository_root / "mediaplayer-mpv/ComposeMediaPlayerMpv.podspec"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("MPV_VERSION: 0.3.0-rc.5", build_natives)
+        self.assertIn("RUNTIME_VERSION: 0.1.0-rc.4", build_natives)
+        self.assertIn("KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.4", verifier)
+        self.assertIn('kmediaFfmpegRuntimeVersion = "0.1.0-rc.4"', mpv_build)
+        self.assertIn("KMediaAssRuntime', '0.1.0-rc.4'", podspec)
+        self.assertIn("KMediaFfmpegRuntime', '0.1.0-rc.4'", podspec)
+
+    def test_every_native_ass_consumer_uses_one_runtime_version(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        runtime_consumers = (
+            ".github/scripts/verify_apple_ass_payload.sh",
+            ".github/scripts/verify_apple_mpv_payload.sh",
+            ".github/scripts/verify_maven_poms.py",
+            ".github/workflows/build-natives.yml",
+            "mediaplayer-ass/ComposeMediaPlayerAss.podspec",
+            "mediaplayer-ass/build.gradle.kts",
+            "mediaplayer-mpv/ComposeMediaPlayerMpv.podspec",
+            "mediaplayer-mpv/build.gradle.kts",
+        )
+        source = "\n".join(
+            (repository_root / relative_path).read_text(encoding="utf-8")
+            for relative_path in runtime_consumers
+        )
+
+        self.assertIn("0.1.0-rc.4", source)
+        self.assertNotIn("0.1.0-rc.3", source)
+
+    def test_consumer_smoke_trusts_the_generated_desktop_window_fixtures(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        verification = (
+            repository_root / "gradle/verification-metadata.xml"
+        ).read_text(encoding="utf-8")
+        trusted_artifacts = verification.split("<trusted-artifacts>", 1)[1].split(
+            "</trusted-artifacts>", 1
+        )[0]
+
+        self.assertIn("desktop-window", trusted_artifacts)
+        self.assertIn("0[.]0[.]0-consumer", trusted_artifacts)
+
     def test_all_apple_release_downloads_are_authenticated(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         workflow = (
