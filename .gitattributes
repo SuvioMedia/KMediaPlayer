@@ -2,6 +2,7 @@
 gradlew text eol=lf
 
 mediaplayer/api/** whitespace=-blank-at-eof
+mediaplayer-desktop-window/api/** whitespace=-blank-at-eof
 mediaplayer-extension-api/api/** whitespace=-blank-at-eof
 mediaplayer-kmediabridge/api/** whitespace=-blank-at-eof
 mediaplayer-dolbyvision/api/** whitespace=-blank-at-eof

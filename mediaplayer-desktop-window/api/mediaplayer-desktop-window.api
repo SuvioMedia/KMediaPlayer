@@ -241,3 +241,4 @@ public abstract interface class io/github/kdroidfilter/composemediaplayer/deskto
 public abstract interface class io/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory {
 	public abstract fun open (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackRequest;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
+
