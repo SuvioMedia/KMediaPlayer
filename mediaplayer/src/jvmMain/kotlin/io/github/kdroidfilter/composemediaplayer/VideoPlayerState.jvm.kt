@@ -272,4 +272,25 @@ open class DefaultVideoPlayerState(
             onSurfaceAttached = onSurfaceAttached,
         )
     }
+
+    override fun requestWindowFullscreen(
+        window: Window,
+        fullscreen: Boolean,
+    ): Boolean =
+        when (val surfaceState = delegate.resolveJvmSurfaceState()) {
+            is MacVideoPlayerState -> surfaceState.requestDedicatedWindowFullscreen(window, fullscreen)
+            else -> false
+        }
+
+    override fun configureNativeWindow(window: Window): Boolean =
+        when (val surfaceState = delegate.resolveJvmSurfaceState()) {
+            is MacVideoPlayerState -> surfaceState.configureDedicatedWindow(window)
+            else -> false
+        }
+
+    override fun nativeWindowFullscreenState(window: Window): Boolean? =
+        when (val surfaceState = delegate.resolveJvmSurfaceState()) {
+            is MacVideoPlayerState -> surfaceState.dedicatedWindowFullscreenState(window)
+            else -> null
+        }
 }

@@ -214,35 +214,25 @@ static BOOL choose_pixel_format(
 - (void)requestFrame;
 @end
 
-@interface KMPMpvWindowDragView : NSView
-@end
-
 @interface KMPMpvVideoView : NSView {
     KMPMpvOpenGLLayer* _videoLayer;
-    KMPMpvWindowDragView* _windowDragView;
 }
 @property(nonatomic, retain) KMPMpvOpenGLLayer* videoLayer;
-- (void)setWindowDragView:(KMPMpvWindowDragView*)windowDragView;
 - (void)refreshNativeFrameAndGeometry;
 - (void)refreshNativeGeometry;
 @end
 
-static const CGFloat KMP_MPV_WINDOW_DRAG_HEIGHT = 34.0;
-static const CGFloat KMP_MPV_WINDOW_DRAG_LEADING_INSET = 96.0;
 static BOOL is_window_fullscreen(NSWindow* window);
 
 static NSRect mpv_video_frame_for_host_view(NSView* host_view) {
     if (!host_view) return NSZeroRect;
-    NSRect frame = [host_view bounds];
     NSWindow* window = [host_view window];
-    if (is_window_fullscreen(window)) {
-        return frame;
+    if (is_window_fullscreen(window)) return [host_view bounds];
+    NSView* content_view = [window contentView];
+    if (content_view && [content_view superview] == host_view) {
+        return [content_view frame];
     }
-
-    CGFloat top_inset = MIN(KMP_MPV_WINDOW_DRAG_HEIGHT, frame.size.height);
-    if ([host_view isFlipped]) frame.origin.y += top_inset;
-    frame.size.height = MAX(0.0, frame.size.height - top_inset);
-    return frame;
+    return [host_view bounds];
 }
 
 static CGColorSpaceRef create_output_color_space(KMPMpvNativeRenderer* renderer) {
@@ -418,63 +408,12 @@ static void renderer_update_callback(void* context) {
 
 @end
 
-@implementation KMPMpvWindowDragView
-
-- (BOOL)isOpaque {
-    return NO;
-}
-
-- (BOOL)acceptsFirstResponder {
-    return NO;
-}
-
-- (NSView*)hitTest:(NSPoint)point {
-    NSWindow* window = [self window];
-    if (is_window_fullscreen(window)) return nil;
-    return [super hitTest:point];
-}
-
-- (void)mouseDown:(NSEvent*)event {
-    NSWindow* window = [self window];
-    if (!window || [event type] != NSEventTypeLeftMouseDown) return;
-    [window performWindowDragWithEvent:event];
-}
-
-@end
-
-static KMPMpvWindowDragView* create_window_drag_view(
-    NSView* host_view,
-    NSView* compose_view
-) {
-    if (!host_view || !compose_view) return nil;
-    NSRect bounds = [host_view bounds];
-    CGFloat height = MIN(KMP_MPV_WINDOW_DRAG_HEIGHT, bounds.size.height);
-    CGFloat width = MAX(0.0, bounds.size.width - KMP_MPV_WINDOW_DRAG_LEADING_INSET);
-    CGFloat y = [host_view isFlipped] ? NSMinY(bounds) : NSMaxY(bounds) - height;
-    KMPMpvWindowDragView* drag_view = [[KMPMpvWindowDragView alloc] initWithFrame:NSMakeRect(
-        NSMinX(bounds) + KMP_MPV_WINDOW_DRAG_LEADING_INSET,
-        y,
-        width,
-        height
-    )];
-    NSAutoresizingMaskOptions vertical_margin =
-        [host_view isFlipped] ? NSViewMaxYMargin : NSViewMinYMargin;
-    [drag_view setAutoresizingMask:NSViewWidthSizable | vertical_margin];
-    [host_view
-        addSubview:drag_view
-        positioned:NSWindowAbove
-        relativeTo:(host_view == compose_view ? nil : compose_view)];
-    return drag_view;
-}
-
 @implementation KMPMpvVideoView
 
 @synthesize videoLayer = _videoLayer;
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [_windowDragView removeFromSuperview];
-    [_windowDragView release];
     [_videoLayer release];
     [super dealloc];
 }
@@ -495,13 +434,6 @@ static KMPMpvWindowDragView* create_window_drag_view(
     [self setWantsLayer:YES];
     [self setLayer:_videoLayer];
     [self refreshNativeGeometry];
-}
-
-- (void)setWindowDragView:(KMPMpvWindowDragView*)windowDragView {
-    if (_windowDragView == windowDragView) return;
-    [_windowDragView removeFromSuperview];
-    [_windowDragView release];
-    _windowDragView = [windowDragView retain];
 }
 
 - (void)viewDidMoveToWindow {
@@ -633,6 +565,13 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
     [window setTitlebarAppearsTransparent:YES];
 }
 
+static void set_standard_window_buttons_hidden(NSWindow* window, BOOL hidden) {
+    if (!window) return;
+    [[window standardWindowButton:NSWindowCloseButton] setHidden:hidden];
+    [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:hidden];
+    [[window standardWindowButton:NSWindowZoomButton] setHidden:hidden];
+}
+
 @interface KMPMpvWindowFullscreenCoordinator : NSObject {
     NSWindow* _window;
     NSString* _windowTitle;
@@ -643,12 +582,17 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
     NSWindowCollectionBehavior _windowedCollectionBehavior;
     NSApplicationPresentationOptions _windowedPresentationOptions;
     BOOL _windowedHasShadow;
+    BOOL _nativeTransitionInProgress;
+    BOOL _hasPendingNativeRequest;
+    BOOL _pendingNativeFullscreen;
 }
 - (instancetype)initWithWindow:(NSWindow*)window;
 - (NSWindow*)resolveLiveWindow;
 - (BOOL)enterManagedFullscreen:(NSWindow*)window;
 - (BOOL)leaveManagedFullscreen:(NSWindow*)window;
 - (BOOL)requestFullscreen:(BOOL)fullscreen;
+- (void)nativeWindowWillChangeFullscreen:(NSNotification*)notification;
+- (void)nativeWindowDidChangeFullscreen:(NSNotification*)notification;
 - (void)windowWillClose:(NSNotification*)notification;
 @end
 
@@ -663,6 +607,22 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
         [center addObserver:self
                    selector:@selector(windowWillClose:)
                        name:NSWindowWillCloseNotification
+                     object:window];
+        [center addObserver:self
+                   selector:@selector(nativeWindowWillChangeFullscreen:)
+                       name:NSWindowWillEnterFullScreenNotification
+                     object:window];
+        [center addObserver:self
+                   selector:@selector(nativeWindowWillChangeFullscreen:)
+                       name:NSWindowWillExitFullScreenNotification
+                     object:window];
+        [center addObserver:self
+                   selector:@selector(nativeWindowDidChangeFullscreen:)
+                       name:NSWindowDidEnterFullScreenNotification
+                     object:window];
+        [center addObserver:self
+                   selector:@selector(nativeWindowDidChangeFullscreen:)
+                       name:NSWindowDidExitFullScreenNotification
                      object:window];
     }
     return self;
@@ -702,6 +662,7 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
 
     @try {
         prepare_window_for_native_fullscreen(window);
+        set_standard_window_buttons_hidden(window, YES);
         objc_setAssociatedObject(
             window,
             &KMP_MPV_MANAGED_FULLSCREEN_KEY,
@@ -725,6 +686,7 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
                 OBJC_ASSOCIATION_ASSIGN
             );
             [NSApp setPresentationOptions:_windowedPresentationOptions];
+            set_standard_window_buttons_hidden(window, NO);
             [window setCollectionBehavior:_windowedCollectionBehavior];
             [window setLevel:_windowedLevel];
             [window setHasShadow:_windowedHasShadow];
@@ -744,6 +706,7 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
         );
         if (_hasWindowedState) {
             [NSApp setPresentationOptions:_windowedPresentationOptions];
+            set_standard_window_buttons_hidden(window, NO);
             [window setCollectionBehavior:_windowedCollectionBehavior];
             [window setLevel:_windowedLevel];
             [window setHasShadow:_windowedHasShadow];
@@ -766,6 +729,7 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
         );
         if (_hasWindowedState) {
             [NSApp setPresentationOptions:_windowedPresentationOptions];
+            set_standard_window_buttons_hidden(window, NO);
             [window setCollectionBehavior:_windowedCollectionBehavior];
             [window setLevel:_windowedLevel];
             [window setHasShadow:_windowedHasShadow];
@@ -784,9 +748,46 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
 - (BOOL)requestFullscreen:(BOOL)fullscreen {
     NSWindow* window = [self resolveLiveWindow];
     if (!window) return NO;
-    return fullscreen
-        ? [self enterManagedFullscreen:window]
-        : [self leaveManagedFullscreen:window];
+    BOOL appkit_native_fullscreen =
+        ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
+    if (_nativeTransitionInProgress || appkit_native_fullscreen) {
+        if (_nativeTransitionInProgress) {
+            _hasPendingNativeRequest = YES;
+            _pendingNativeFullscreen = fullscreen;
+            return YES;
+        }
+        if (is_window_fullscreen(window) == fullscreen) return YES;
+        @try {
+            prepare_window_for_native_fullscreen(window);
+            _nativeTransitionInProgress = YES;
+            [window toggleFullScreen:nil];
+            return YES;
+        } @catch (NSException* exception) {
+            (void)exception;
+            _nativeTransitionInProgress = NO;
+            return NO;
+        }
+    }
+    if (_managedFullscreen) {
+        return fullscreen ? YES : [self leaveManagedFullscreen:window];
+    }
+    return fullscreen ? [self enterManagedFullscreen:window] : YES;
+}
+
+- (void)nativeWindowWillChangeFullscreen:(NSNotification*)notification {
+    if ([notification object] != _window) return;
+    _nativeTransitionInProgress = YES;
+}
+
+- (void)nativeWindowDidChangeFullscreen:(NSNotification*)notification {
+    if ([notification object] != _window) return;
+    _nativeTransitionInProgress = NO;
+    if (!_hasPendingNativeRequest) return;
+    BOOL requested = _pendingNativeFullscreen;
+    _hasPendingNativeRequest = NO;
+    if (is_window_fullscreen(_window) != requested) {
+        [self requestFullscreen:requested];
+    }
 }
 
 - (void)windowWillClose:(NSNotification*)notification {
@@ -803,6 +804,8 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
     _window = nil;
     _managedFullscreen = NO;
     _hasWindowedState = NO;
+    _nativeTransitionInProgress = NO;
+    _hasPendingNativeRequest = NO;
 }
 
 @end
@@ -831,6 +834,160 @@ static KMPMpvWindowFullscreenCoordinator* fullscreen_coordinator_for_window(
     return coordinator;
 }
 
+static const void* mpv_window_zoom_coordinator_key(void) {
+    return (const void*)sel_registerName("KMPSharedNativeWindowZoomCoordinator");
+}
+
+@interface KMPMpvWindowZoomCoordinator : NSObject {
+    NSWindow* _window;
+    id _eventMonitor;
+    BOOL _zoomed;
+    BOOL _requestedZoomed;
+    BOOL _animationInProgress;
+    NSRect _restoreFrame;
+}
+- (instancetype)initWithWindow:(NSWindow*)window;
+- (NSEvent*)handleLocalMouseDown:(NSEvent*)event;
+- (BOOL)isTitleBarEvent:(NSEvent*)event;
+- (void)toggleZoom;
+- (void)startPendingZoomAnimation;
+- (void)removeEventMonitor;
+- (void)windowWillClose:(NSNotification*)notification;
+@end
+
+@implementation KMPMpvWindowZoomCoordinator
+
+- (instancetype)initWithWindow:(NSWindow*)window {
+    self = [super init];
+    if (self) {
+        _window = window;
+        __block KMPMpvWindowZoomCoordinator* unretained_self = self;
+        _eventMonitor = [[NSEvent
+            addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
+            handler:^NSEvent*(NSEvent* event) {
+                return [unretained_self handleLocalMouseDown:event];
+            }] retain];
+        [[NSNotificationCenter defaultCenter]
+            addObserver:self
+            selector:@selector(windowWillClose:)
+            name:NSWindowWillCloseNotification
+            object:window];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self removeEventMonitor];
+    _window = nil;
+    [super dealloc];
+}
+
+- (void)removeEventMonitor {
+    if (!_eventMonitor) return;
+    [NSEvent removeMonitor:_eventMonitor];
+    [_eventMonitor release];
+    _eventMonitor = nil;
+}
+
+- (void)windowWillClose:(NSNotification*)notification {
+    if ([notification object] != _window) return;
+    [self removeEventMonitor];
+    _window = nil;
+}
+
+- (BOOL)isTitleBarEvent:(NSEvent*)event {
+    NSWindow* window = _window;
+    if (!window || [event window] != window) return NO;
+    NSPoint window_point = [event locationInWindow];
+
+    for (NSWindowButton button_type = NSWindowCloseButton;
+         button_type <= NSWindowZoomButton;
+         button_type++) {
+        NSButton* button = [window standardWindowButton:button_type];
+        if (!button || [button isHidden]) continue;
+        NSPoint button_point = [button convertPoint:window_point fromView:nil];
+        if (NSPointInRect(button_point, [button bounds])) return NO;
+    }
+
+    NSView* content_view = [window contentView];
+    if (content_view) {
+        NSPoint content_point = [content_view convertPoint:window_point fromView:nil];
+        if (NSPointInRect(content_point, [content_view bounds])) return NO;
+    }
+    return window_point.y >= 0.0 && window_point.y <= [window frame].size.height;
+}
+
+- (NSEvent*)handleLocalMouseDown:(NSEvent*)event {
+    NSInteger click_count = [event clickCount];
+    if (click_count < 2 || (click_count % 2) != 0 || ![self isTitleBarEvent:event]) {
+        return event;
+    }
+    BOOL system_fullscreen = ([_window styleMask] & NSWindowStyleMaskFullScreen) != 0;
+    NSButton* zoom_button = [_window standardWindowButton:NSWindowZoomButton];
+    if (system_fullscreen || [zoom_button isHidden]) return event;
+    [self toggleZoom];
+    return nil;
+}
+
+- (void)toggleZoom {
+    NSWindow* window = _window;
+    if (!window) return;
+    _requestedZoomed = !_requestedZoomed;
+    if (_requestedZoomed && !_zoomed && !_animationInProgress) {
+        _restoreFrame = [window frame];
+    }
+    [self startPendingZoomAnimation];
+}
+
+- (void)startPendingZoomAnimation {
+    NSWindow* window = _window;
+    if (!window || _animationInProgress || _zoomed == _requestedZoomed) return;
+
+    BOOL target_zoomed = _requestedZoomed;
+    NSRect target_frame;
+    if (target_zoomed) {
+        NSScreen* screen = [window screen] ?: [NSScreen mainScreen];
+        if (!screen) return;
+        target_frame = [screen visibleFrame];
+    } else {
+        target_frame = _restoreFrame;
+    }
+    _animationInProgress = YES;
+
+    [window makeKeyAndOrderFront:nil];
+    KMPMpvWindowZoomCoordinator* retained_self = [self retain];
+    [NSAnimationContext
+        runAnimationGroup:^(NSAnimationContext* context) {
+            [context setDuration:0.22];
+            [context setTimingFunction:
+                [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]];
+            [[window animator] setFrame:target_frame display:YES];
+        }
+        completionHandler:^{
+            retained_self->_zoomed = target_zoomed;
+            retained_self->_animationInProgress = NO;
+            [retained_self startPendingZoomAnimation];
+            [retained_self release];
+        }];
+}
+
+@end
+
+static void install_mpv_window_zoom_coordinator(NSWindow* window) {
+    const void* key = mpv_window_zoom_coordinator_key();
+    if (!window || objc_getAssociatedObject(window, key)) return;
+    KMPMpvWindowZoomCoordinator* coordinator =
+        [[KMPMpvWindowZoomCoordinator alloc] initWithWindow:window];
+    objc_setAssociatedObject(
+        window,
+        key,
+        coordinator,
+        OBJC_ASSOCIATION_RETAIN_NONATOMIC
+    );
+    [coordinator release];
+}
+
 static void synchronize_window_fullscreen_on_main(void* raw_context) {
     KMPMpvWindowFullscreenContext* context =
         (KMPMpvWindowFullscreenContext*)raw_context;
@@ -849,6 +1006,43 @@ static void synchronize_window_fullscreen_on_main(void* raw_context) {
         context->accepted =
             coordinator &&
             [coordinator requestFullscreen:context->requested_fullscreen];
+    }
+}
+
+typedef struct {
+    NSString* window_title;
+    BOOL configured;
+} KMPMpvWindowConfigurationContext;
+
+static void configure_native_window_on_main(void* raw_context) {
+    KMPMpvWindowConfigurationContext* context =
+        (KMPMpvWindowConfigurationContext*)raw_context;
+    @autoreleasepool {
+        if (!context) return;
+        NSWindow* window = find_awt_window(context->window_title);
+        if (!window) return;
+
+        NSWindowStyleMask style_mask = [window styleMask];
+        NSWindowStyleMask native_style_mask =
+            (style_mask |
+                NSWindowStyleMaskTitled |
+                NSWindowStyleMaskClosable |
+                NSWindowStyleMaskMiniaturizable |
+                NSWindowStyleMaskResizable) &
+            ~NSWindowStyleMaskFullSizeContentView;
+        if (native_style_mask != style_mask) {
+            [window setStyleMask:native_style_mask];
+        }
+        [window setOpaque:YES];
+        [window setAlphaValue:1.0];
+        [window setBackgroundColor:[NSColor blackColor]];
+        [window setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]];
+        [window setTitleVisibility:NSWindowTitleHidden];
+        [window setTitlebarAppearsTransparent:YES];
+        [window setMovableByWindowBackground:NO];
+        [window setHasShadow:YES];
+        install_mpv_window_zoom_coordinator(window);
+        context->configured = YES;
     }
 }
 
@@ -900,9 +1094,6 @@ static void attach_renderer_on_main(void* raw_context) {
         [view setVideoLayer:layer];
         [view setWantsExtendedDynamicRangeOpenGLSurface:YES];
         [host_view addSubview:view positioned:NSWindowBelow relativeTo:compose_view];
-        KMPMpvWindowDragView* drag_view = create_window_drag_view(host_view, compose_view);
-        [view setWindowDragView:drag_view];
-        [drag_view release];
         apply_output_color_space(renderer);
         renderer->api.set_update_callback(
             renderer->render_context,
@@ -937,7 +1128,6 @@ static void detach_renderer_on_main(void* raw_renderer) {
         renderer->layer = nil;
         renderer->view = nil;
         [layer setRenderer:NULL];
-        [view setWindowDragView:nil];
         [view setVideoLayer:nil];
         [view removeFromSuperview];
 
@@ -1120,6 +1310,24 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nSetWindow
     run_on_appkit_main_sync(synchronize_window_fullscreen_on_main, &context);
     [title release];
     return context.found && context.accepted ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nConfigureNativeWindow(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jobject window
+) {
+    (void)bridge_class;
+    NSString* title = awt_window_title(environment, window);
+    if (!title) return JNI_FALSE;
+    KMPMpvWindowConfigurationContext context = {
+        .window_title = title,
+        .configured = NO,
+    };
+    run_on_appkit_main_sync(configure_native_window_on_main, &context);
+    [title release];
+    return context.configured ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL

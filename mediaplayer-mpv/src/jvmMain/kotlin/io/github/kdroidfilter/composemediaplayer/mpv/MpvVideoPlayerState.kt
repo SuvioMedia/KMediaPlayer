@@ -110,6 +110,24 @@ internal class MpvVideoPlayerState(
         )
     }
 
+    override fun requestWindowFullscreen(
+        window: Window,
+        fullscreen: Boolean,
+    ): Boolean =
+        canUseNativeMacSurface &&
+            runCatching { MpvMacNativeBridge.nSetWindowFullscreen(window, fullscreen) }.getOrDefault(false)
+
+    override fun configureNativeWindow(window: Window): Boolean =
+        canUseNativeMacSurface &&
+            runCatching { MpvMacNativeBridge.nConfigureNativeWindow(window) }.getOrDefault(false)
+
+    override fun nativeWindowFullscreenState(window: Window): Boolean? =
+        if (canUseNativeMacSurface) {
+            runCatching { MpvMacNativeBridge.nIsWindowFullscreen(window) }.getOrNull()
+        } else {
+            null
+        }
+
     override val renderingInfo =
         VideoRenderingInfo(
             backend = "libmpv",

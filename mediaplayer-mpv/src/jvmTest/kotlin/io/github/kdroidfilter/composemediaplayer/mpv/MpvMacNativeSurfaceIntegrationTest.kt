@@ -13,11 +13,8 @@ import io.github.kdroidfilter.composemediaplayer.createMpvVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.createVideoPlayerState
 import java.awt.Color
 import java.awt.GraphicsEnvironment
-import java.awt.MouseInfo
-import java.awt.Point
 import java.awt.Rectangle
 import java.awt.Robot
-import java.awt.event.InputEvent
 import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.JFrame
@@ -84,7 +81,6 @@ class MpvMacNativeSurfaceIntegrationTest {
             }
             assertTrue(player.attachNativeMacWindow(window), "The native macOS MPV surface did not attach.")
             assertContains(player.renderingInfo.videoRenderer.orEmpty(), "OpenGL")
-            dragWindowThroughNativeAppKitRegion(window)
 
             assertEquals(null, player.error)
             if (nativeSurfaceFixture != null) {
@@ -285,62 +281,6 @@ class MpvMacNativeSurfaceIntegrationTest {
             abs((first shr 8 and 0xff) - (second shr 8 and 0xff)) +
             abs((first and 0xff) - (second and 0xff))
 
-    private fun dragWindowThroughNativeAppKitRegion(window: JFrame) {
-        val origin = window.locationOnScreen
-        val pointerBeforeTest = MouseInfo.getPointerInfo()?.location
-        val start = Point(origin.x + NATIVE_DRAG_TEST_X, origin.y + NATIVE_DRAG_TEST_Y)
-        val expected = Point(origin.x + NATIVE_DRAG_DELTA_X, origin.y + NATIVE_DRAG_DELTA_Y)
-        val robot = Robot().apply { autoDelay = NATIVE_DRAG_STEP_DELAY_MILLIS }
-        try {
-            assertComposeChromeInsetDoesNotDragWindow(window, robot, origin)
-            robot.mouseMove(start.x, start.y)
-            robot.mousePress(InputEvent.BUTTON1_DOWN_MASK)
-            try {
-                repeat(NATIVE_DRAG_STEPS) { index ->
-                    val progress = index + 1
-                    robot.mouseMove(
-                        start.x + NATIVE_DRAG_DELTA_X * progress / NATIVE_DRAG_STEPS,
-                        start.y + NATIVE_DRAG_DELTA_Y * progress / NATIVE_DRAG_STEPS,
-                    )
-                }
-            } finally {
-                robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
-            }
-            await("AppKit did not move the native MPV window through its drag region.") {
-                val actual = window.locationOnScreen
-                abs(actual.x - expected.x) <= NATIVE_DRAG_TOLERANCE_PX &&
-                    abs(actual.y - expected.y) <= NATIVE_DRAG_TOLERANCE_PX
-            }
-        } finally {
-            pointerBeforeTest?.let { robot.mouseMove(it.x, it.y) }
-        }
-    }
-
-    private fun assertComposeChromeInsetDoesNotDragWindow(
-        window: JFrame,
-        robot: Robot,
-        origin: Point,
-    ) {
-        val iconArea = Point(origin.x + COMPOSE_CHROME_TEST_X, origin.y + NATIVE_DRAG_TEST_Y)
-        robot.mouseMove(iconArea.x, iconArea.y)
-        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK)
-        try {
-            robot.mouseMove(
-                iconArea.x + COMPOSE_CHROME_TEST_DELTA_X,
-                iconArea.y + COMPOSE_CHROME_TEST_DELTA_Y,
-            )
-        } finally {
-            robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
-        }
-        Thread.sleep(NATIVE_DRAG_SETTLE_MILLIS)
-        val actual = window.locationOnScreen
-        assertTrue(
-            abs(actual.x - origin.x) <= COMPOSE_CHROME_STATIONARY_TOLERANCE_PX &&
-                abs(actual.y - origin.y) <= COMPOSE_CHROME_STATIONARY_TOLERANCE_PX,
-            "The native AppKit drag region covered the Compose window icons.",
-        )
-    }
-
     private fun configuredLegacyDirectory(): Path? =
         System
             .getProperty(LEGACY_MEDIA_PROPERTY)
@@ -413,18 +353,6 @@ class MpvMacNativeSurfaceIntegrationTest {
         const val RENDER_WIDTH = 320
         const val RENDER_HEIGHT = 180
         const val RESIZE_SETTLE_MILLIS = 60L
-        const val NATIVE_DRAG_TEST_X = 180
-        const val NATIVE_DRAG_TEST_Y = 16
-        const val COMPOSE_CHROME_TEST_X = 48
-        const val COMPOSE_CHROME_TEST_DELTA_X = 50
-        const val COMPOSE_CHROME_TEST_DELTA_Y = 30
-        const val COMPOSE_CHROME_STATIONARY_TOLERANCE_PX = 2
-        const val NATIVE_DRAG_DELTA_X = 120
-        const val NATIVE_DRAG_DELTA_Y = 90
-        const val NATIVE_DRAG_STEPS = 6
-        const val NATIVE_DRAG_STEP_DELAY_MILLIS = 20
-        const val NATIVE_DRAG_SETTLE_MILLIS = 150L
-        const val NATIVE_DRAG_TOLERANCE_PX = 8
         const val NATIVE_FULLSCREEN_ROUND_TRIPS = 1
         const val WINDOW_BOUNDS_TOLERANCE_PX = 2
         const val VISUAL_CAPTURE_INSET_DIVISOR = 8

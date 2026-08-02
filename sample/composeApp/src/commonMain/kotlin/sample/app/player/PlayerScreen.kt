@@ -169,8 +169,10 @@ internal fun PlayerScreen(
                         src = demoSubtitleUrl,
                         format = SubtitleFormat.ASS,
                     )
-                playerState.addSubtitleTrack(track)
-                playerState.selectSubtitleTrack(track)
+                runCatching {
+                    playerState.addSubtitleTrack(track)
+                    playerState.selectSubtitleTrack(track)
+                }
             }
             if (!playerState.hasMedia) {
                 openVideoUrl(videoUrl)

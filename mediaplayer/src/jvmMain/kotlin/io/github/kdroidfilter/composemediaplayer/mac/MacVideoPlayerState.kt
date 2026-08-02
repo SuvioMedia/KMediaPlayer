@@ -1235,6 +1235,24 @@ class MacVideoPlayerState(
         }
     }
 
+    internal fun requestDedicatedWindowFullscreen(
+        window: Window,
+        fullscreen: Boolean,
+    ): Boolean =
+        runCatching { MacNativeBridge.nSetWindowFullscreen(window, fullscreen) }
+            .onFailure { error ->
+                macLogger.e { "Failed to change dedicated macOS window full-screen state: ${error.message}" }
+            }.getOrDefault(false)
+
+    internal fun configureDedicatedWindow(window: Window): Boolean =
+        runCatching { MacNativeBridge.nConfigureNativeWindow(window) }
+            .onFailure { error ->
+                macLogger.e { "Failed to configure dedicated macOS window chrome: ${error.message}" }
+            }.getOrDefault(false)
+
+    internal fun dedicatedWindowFullscreenState(window: Window): Boolean? =
+        runCatching { MacNativeBridge.nIsWindowFullscreen(window) }.getOrNull()
+
     /** Re-evaluates the NSScreen and frame readiness after attachment, fullscreen, or monitor movement. */
     internal fun refreshAttachedHdrColorPipeline() {
         synchronized(nativeInstanceLock) {

@@ -37,6 +37,7 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun clearCache ()Lio/github/kdroidfilter/composemediaplayer/CacheClearResult;
 	public fun clearError ()V
 	public fun clearExternalSubtitleTracks ()V
+	public fun configureNativeWindow (Ljava/awt/Window;)Z
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
 	public fun enterPip (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
@@ -97,6 +98,7 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun isPipSupported ()Z
 	public fun isPlaying ()Z
 	public fun isSeeking ()Z
+	public fun nativeWindowFullscreenState (Ljava/awt/Window;)Ljava/lang/Boolean;
 	public fun openAsset (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openFile (Lio/github/vinceglb/filekit/PlatformFile;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openSource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
@@ -109,6 +111,7 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun removeSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun removeSubtitleTrack (Ljava/lang/String;)V
 	public fun replaceExternalSubtitleTracks (Ljava/util/List;)V
+	public fun requestWindowFullscreen (Ljava/awt/Window;Z)Z
 	public fun restart ()V
 	public fun seekBy-LRDsOJo (J)V
 	public fun seekByMs (J)V

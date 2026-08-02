@@ -1,28 +1,19 @@
 package io.github.kdroidfilter.composemediaplayer.desktop
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -31,7 +22,9 @@ import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.rememberWindowState
 import io.github.kdroidfilter.composemediaplayer.BackendVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Opens the full-size player in an explicit independent desktop window.
@@ -94,14 +87,16 @@ public fun DesktopVideoPlayerWindow(
         },
         state = windowState,
         title = nativeWindowTitle,
+        // Compose Desktop only permits a transparent Skia surface on an undecorated AWT frame.
+        // The native provider promotes the underlying NSWindow to ordinary AppKit chrome before
+        // the video layer is attached, preserving both native controls and transparent overlays.
         undecorated = true,
         transparent = true,
         resizable = true,
         focusable = true,
         onKeyEvent = { event ->
             if (event.key == Key.Escape && event.type == KeyEventType.KeyDown) {
-                if (windowState.placement == WindowPlacement.Fullscreen) {
-                    windowState.placement = WindowPlacement.Floating
+                if (player.isFullscreen || windowState.placement == WindowPlacement.Fullscreen) {
                     player.isFullscreen = false
                 } else {
                     player.pause()
@@ -115,7 +110,64 @@ public fun DesktopVideoPlayerWindow(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             val provider = player as? DesktopVideoWindowSurfaceProvider
-            if (provider != null) {
+            val fullscreen = player.isFullscreen
+            var nativeTransitionTarget by
+                remember(provider, window) { mutableStateOf<Boolean?>(fullscreen) }
+            var nativeTransitionDeadlineNanos by
+                remember(provider, window) {
+                    mutableStateOf(System.nanoTime() + NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS)
+                }
+            var nativeWindowReady by
+                remember(provider, window) { mutableStateOf(provider == null) }
+            LaunchedEffect(provider, window) {
+                // AppKit owns the native NSWindow and can be busy inside a live-resize/Zoom
+                // animation. Never synchronously wait for its main queue from Compose's UI
+                // dispatcher: AppKit may itself be waiting for JBR to lay out the content view.
+                withContext(Dispatchers.IO) {
+                    provider?.configureNativeWindow(window)
+                }
+                nativeWindowReady = true
+                while (true) {
+                    val nativeFullscreen =
+                        withContext(Dispatchers.IO) {
+                            provider?.nativeWindowFullscreenState(window)
+                        }
+                    if (nativeFullscreen != null) {
+                        val transitionTarget = nativeTransitionTarget
+                        if (transitionTarget != null) {
+                            if (nativeFullscreen == transitionTarget) {
+                                nativeTransitionTarget = null
+                            } else if (System.nanoTime() >= nativeTransitionDeadlineNanos) {
+                                nativeTransitionTarget = null
+                                player.isFullscreen = nativeFullscreen
+                            }
+                        } else if (nativeFullscreen != player.isFullscreen) {
+                            player.isFullscreen = nativeFullscreen
+                        }
+                    }
+                    delay(NATIVE_WINDOW_STATE_POLL_MILLIS)
+                }
+            }
+            LaunchedEffect(provider, window, fullscreen, nativeWindowReady) {
+                if (provider != null && !nativeWindowReady) return@LaunchedEffect
+                nativeTransitionTarget = fullscreen
+                nativeTransitionDeadlineNanos =
+                    System.nanoTime() + NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS
+                val nativeWindowOwnsTransition =
+                    withContext(Dispatchers.IO) {
+                        provider?.requestWindowFullscreen(window, fullscreen) == true
+                    }
+                if (!nativeWindowOwnsTransition) {
+                    nativeTransitionTarget = null
+                    windowState.placement =
+                        if (fullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating
+                } else if (!fullscreen && windowState.placement != WindowPlacement.Floating) {
+                    // Do not leave a stale Compose full-screen placement after a native exit.
+                    windowState.placement = WindowPlacement.Floating
+                }
+            }
+
+            if (provider != null && nativeWindowReady) {
                 provider.RenderDesktopVideoWindowSurface(
                     window = window,
                     modifier = Modifier.fillMaxSize(),
@@ -123,7 +175,7 @@ public fun DesktopVideoPlayerWindow(
                     overlay = { overlay(player) },
                     onSurfaceAttached = { onSurfaceAttached(player) },
                 )
-            } else {
+            } else if (provider == null) {
                 BackendVideoPlayerSurface(
                     playerState = player,
                     modifier = Modifier.fillMaxSize(),
@@ -136,60 +188,9 @@ public fun DesktopVideoPlayerWindow(
                 }
             }
 
-            Row(
-                modifier =
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .height(32.dp)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .pointerInput(window) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                window.setLocation(
-                                    window.x + dragAmount.x.roundToInt(),
-                                    window.y + dragAmount.y.roundToInt(),
-                                )
-                            }
-                        }.padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                WindowControl(CLOSE_CONTROL_COLOR) {
-                    player.pause()
-                    onCloseRequest()
-                }
-                WindowControl(MINIMIZE_CONTROL_COLOR) {
-                    windowState.isMinimized = true
-                }
-                WindowControl(FULLSCREEN_CONTROL_COLOR) {
-                    val fullscreen = windowState.placement != WindowPlacement.Fullscreen
-                    windowState.placement =
-                        if (fullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating
-                    player.isFullscreen = fullscreen
-                }
-            }
         }
     }
 }
 
-private const val CLOSE_CONTROL_COLOR_ARGB = 0xFFFF5F57L
-private const val MINIMIZE_CONTROL_COLOR_ARGB = 0xFFFFBD2EL
-private const val FULLSCREEN_CONTROL_COLOR_ARGB = 0xFF28C840L
-private val CLOSE_CONTROL_COLOR = Color(CLOSE_CONTROL_COLOR_ARGB)
-private val MINIMIZE_CONTROL_COLOR = Color(MINIMIZE_CONTROL_COLOR_ARGB)
-private val FULLSCREEN_CONTROL_COLOR = Color(FULLSCREEN_CONTROL_COLOR_ARGB)
-
-@Composable
-private fun WindowControl(
-    color: Color,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier =
-            Modifier
-                .padding(end = 8.dp)
-                .size(12.dp)
-                .background(color, CircleShape)
-                .clickable(onClick = onClick),
-    )
-}
+private const val NATIVE_WINDOW_STATE_POLL_MILLIS = 100L
+private const val NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS = 3_000_000_000L

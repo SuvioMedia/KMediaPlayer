@@ -221,10 +221,19 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVide
 
 public abstract interface class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider {
 	public abstract fun RenderDesktopVideoWindowSurface (Ljava/awt/Window;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)V
+	public fun configureNativeWindow (Ljava/awt/Window;)Z
+	public fun nativeWindowFullscreenState (Ljava/awt/Window;)Ljava/lang/Boolean;
+	public fun requestWindowFullscreen (Ljava/awt/Window;Z)Z
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider$ComposeDefaultImpls {
 	public static final fun RenderDesktopVideoWindowSurface$default (Ljava/awt/Window;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Landroidx/compose/runtime/Composer;II)V
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider$DefaultImpls {
+	public static fun configureNativeWindow (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Ljava/awt/Window;)Z
+	public static fun nativeWindowFullscreenState (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Ljava/awt/Window;)Ljava/lang/Boolean;
+	public static fun requestWindowFullscreen (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Ljava/awt/Window;Z)Z
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/desktop/JvmHttpSeekableMediaDataSourceFactory : io/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory {

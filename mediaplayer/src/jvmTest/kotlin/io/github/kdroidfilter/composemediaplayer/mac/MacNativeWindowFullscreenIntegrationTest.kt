@@ -2,12 +2,16 @@ package io.github.kdroidfilter.composemediaplayer.mac
 
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
+import io.github.kdroidfilter.composemediaplayer.DefaultVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopVideoWindowSurfaceProvider
 import java.awt.Color
 import java.awt.GraphicsEnvironment
 import java.awt.Rectangle
 import java.awt.Robot
+import java.awt.Toolkit
+import java.awt.event.InputEvent
 import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.JFrame
@@ -15,10 +19,45 @@ import javax.swing.JPanel
 import javax.swing.SwingUtilities
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
 class MacNativeWindowFullscreenIntegrationTest {
+    @Test
+    fun desktopWindowProviderForwardsFullscreenToAppKit() {
+        if (!isMacArm64() || GraphicsEnvironment.isHeadless()) return
+        val window = createTransparentWindow()
+        val player =
+            DefaultVideoPlayerState(
+                VideoPlaybackOptions(desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE),
+            )
+        val provider = assertIs<DesktopVideoWindowSurfaceProvider>(player)
+        try {
+            assertTrue(provider.configureNativeWindow(window))
+            val windowedBounds = windowBounds(window)
+            assertEquals(false, provider.nativeWindowFullscreenState(window))
+            assertTrue(provider.requestWindowFullscreen(window, true))
+            await("The desktop-window provider did not enter AppKit full screen.") {
+                MacNativeBridge.nIsWindowFullscreen(window) &&
+                    sameBounds(windowBounds(window), screenBounds(window))
+            }
+            assertTrue(provider.requestWindowFullscreen(window, false))
+            await("The desktop-window provider did not leave AppKit full screen.") {
+                !MacNativeBridge.nIsWindowFullscreen(window)
+            }
+            val restoredBounds = windowBounds(window)
+            assertTrue(
+                sameBounds(restoredBounds, windowedBounds),
+                "The decorated AppKit window restored $restoredBounds instead of $windowedBounds.",
+            )
+        } finally {
+            restoreWindow(window)
+            player.dispose()
+            onEdt { window.dispose() }
+        }
+    }
+
     @Test
     fun entersAndLeavesAppKitFullscreen() {
         if (!isMacArm64() || GraphicsEnvironment.isHeadless()) return
@@ -58,7 +97,6 @@ class MacNativeWindowFullscreenIntegrationTest {
         if (!isMacArm64() || GraphicsEnvironment.isHeadless()) return
         val media = configuredMedia() ?: return
         val window = createTransparentWindow()
-        val windowedBounds = windowBounds(window)
         val player =
             MacVideoPlayerState(
                 playbackOptions =
@@ -69,6 +107,8 @@ class MacNativeWindowFullscreenIntegrationTest {
             )
         var attached = false
         try {
+            assertTrue(player.configureDedicatedWindow(window))
+            val windowedBounds = windowBounds(window)
             player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
             await("AVFoundation did not start the native-window fixture.") {
                 player.hasMedia &&
@@ -86,6 +126,64 @@ class MacNativeWindowFullscreenIntegrationTest {
             }
             await("AVFoundation playback stalled during native full-screen transitions.") {
                 player.currentTime >= timeBeforeFullscreen + 250.milliseconds
+            }
+            assertEquals(null, player.error)
+        } finally {
+            restoreWindow(window)
+            if (attached) runCatching { player.detachHdrMetalComponent(window) }
+            player.dispose()
+            onEdt { window.dispose() }
+        }
+    }
+
+    @Test
+    fun nativeTitleBarDoubleClickZoomsAndRestoresWhileVideoKeepsAdvancing() {
+        if (!isMacArm64() || GraphicsEnvironment.isHeadless()) return
+        val media = configuredMedia() ?: return
+        val window = createTransparentWindow()
+        val player =
+            MacVideoPlayerState(
+                playbackOptions =
+                    VideoPlaybackOptions(
+                        desktopVideoBackend = DesktopVideoBackend.PLATFORM,
+                        desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                    ),
+            )
+        var attached = false
+        try {
+            assertTrue(player.configureDedicatedWindow(window))
+            val windowedBounds = windowBounds(window)
+            player.loop = true
+            player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
+            await("AVFoundation did not start before the native title-bar Zoom test.") {
+                player.hasMedia &&
+                    player.isPlaying &&
+                    player.currentTime >= 250.milliseconds
+            }
+            attached = player.attachHdrMetalWindow(window, HDR_METAL_SCALE_FIT)
+            assertTrue(attached, "The AVFoundation layer did not attach before title-bar Zoom.")
+            activateWindowForRobot(window)
+
+            val timeBeforeZoom = player.currentTime
+            doubleClickNativeTitleBar(window)
+            await("A real double-click on the AppKit title bar did not Zoom the window.") {
+                !sameBounds(windowBounds(window), windowedBounds)
+            }
+            assertRenderedPixelsAdvanceInWindow(window, "after native title-bar Zoom")
+            await("AVFoundation playback stalled after native title-bar Zoom.") {
+                player.currentTime >= timeBeforeZoom + 250.milliseconds ||
+                    player.currentTime < timeBeforeZoom
+            }
+
+            val timeBeforeRestore = player.currentTime
+            doubleClickNativeTitleBar(window)
+            await("The second AppKit title-bar double-click did not restore the window frame.") {
+                sameBounds(windowBounds(window), windowedBounds)
+            }
+            assertRenderedPixelsAdvanceInWindow(window, "after restoring from title-bar Zoom")
+            await("AVFoundation playback stalled after restoring from native title-bar Zoom.") {
+                player.currentTime >= timeBeforeRestore + 250.milliseconds ||
+                    player.currentTime < timeBeforeRestore
             }
             assertEquals(null, player.error)
         } finally {
@@ -148,6 +246,31 @@ class MacNativeWindowFullscreenIntegrationTest {
                 screen.width - 2 * (screen.width / VISUAL_CAPTURE_INSET_DIVISOR),
                 screen.height - 2 * (screen.height / VISUAL_CAPTURE_INSET_DIVISOR),
             )
+        assertRenderedPixelsAdvance(window, captureBounds, "in native full screen")
+    }
+
+    private fun assertRenderedPixelsAdvanceInWindow(
+        window: JFrame,
+        label: String,
+    ) {
+        val bounds = windowBounds(window)
+        val horizontalInset = bounds.width / VISUAL_CAPTURE_INSET_DIVISOR
+        val verticalInset = bounds.height / VISUAL_CAPTURE_INSET_DIVISOR
+        val captureBounds =
+            Rectangle(
+                bounds.x + horizontalInset,
+                bounds.y + verticalInset,
+                bounds.width - 2 * horizontalInset,
+                bounds.height - 2 * verticalInset,
+            )
+        assertRenderedPixelsAdvance(window, captureBounds, label)
+    }
+
+    private fun assertRenderedPixelsAdvance(
+        window: JFrame,
+        captureBounds: Rectangle,
+        label: String,
+    ) {
         val robot = Robot(window.graphicsConfiguration.device)
         Thread.sleep(VISUAL_FRAME_SETTLE_MILLIS)
         val first = robot.createScreenCapture(captureBounds)
@@ -173,12 +296,33 @@ class MacNativeWindowFullscreenIntegrationTest {
         }
         assertTrue(
             spatiallyDifferent >= samples / VISUAL_MINIMUM_VARIATION_DIVISOR,
-            "The native full-screen surface did not contain a visible video frame.",
+            "The native surface did not contain a visible video frame $label.",
         )
         assertTrue(
             temporallyDifferent >= samples / VISUAL_MINIMUM_CHANGE_DIVISOR,
-            "The AVFoundation image froze after entering native full screen.",
+            "The AVFoundation image froze $label.",
         )
+    }
+
+    private fun activateWindowForRobot(window: JFrame) {
+        onEdt {
+            window.toFront()
+            window.requestFocus()
+        }
+        await("The native player window did not become active for the title-bar test.") {
+            onEdtResult { window.isActive }
+        }
+    }
+
+    private fun doubleClickNativeTitleBar(window: JFrame) {
+        val bounds = windowBounds(window)
+        val robot = Robot(window.graphicsConfiguration.device).apply { autoDelay = ROBOT_EVENT_DELAY_MILLIS }
+        robot.mouseMove(bounds.x + bounds.width / 2, bounds.y + TITLE_BAR_CLICK_Y_PX)
+        repeat(2) {
+            robot.mousePress(InputEvent.BUTTON1_DOWN_MASK)
+            robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK)
+        }
+        Toolkit.getDefaultToolkit().sync()
     }
 
     private fun colorDistance(
@@ -270,6 +414,8 @@ class MacNativeWindowFullscreenIntegrationTest {
         const val VISUAL_MINIMUM_CHANGE_DIVISOR = 500
         const val VISUAL_FRAME_SETTLE_MILLIS = 250L
         const val VISUAL_FRAME_ADVANCE_MILLIS = 350L
+        const val ROBOT_EVENT_DELAY_MILLIS = 35
+        const val TITLE_BAR_CLICK_Y_PX = 12
         const val DELAYED_RECONCILIATION_SURVIVAL_MILLIS = 1_600L
         const val POLL_INTERVAL_MILLIS = 25L
         const val TEST_TIMEOUT_NANOS = 15_000_000_000L

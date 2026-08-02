@@ -69,9 +69,6 @@ extern int32_t getAudioSampleRate(void* ctx);
 extern int32_t consumeDidPlayToEnd(void* ctx);
 
 #ifdef __OBJC__
-@interface KMPNativeWindowDragView : NSView
-@end
-
 /**
  * Full-window host used by the dedicated macOS player window. AppKit resizes this view directly;
  * the Swift renderer only receives the resulting drawable size and is never reattached during a
@@ -81,7 +78,6 @@ extern int32_t consumeDidPlayToEnd(void* ctx);
     void* _kmpHdrContext;
     BOOL _kmpFillsSuperview;
     NSView* _kmpObservedSuperview;
-    KMPNativeWindowDragView* _kmpWindowDragView;
 }
 - (void)setKmpHdrContext:(void*)context;
 - (void)setKmpFillsSuperview:(BOOL)fillsSuperview;
@@ -89,81 +85,27 @@ extern int32_t consumeDidPlayToEnd(void* ctx);
 - (void)kmpSuperviewGeometryDidChange:(NSNotification*)notification;
 - (void)kmpSynchronizeFrameToSuperview;
 - (void)updateKmpHostedLayerSize;
-- (void)setKmpWindowDragView:(KMPNativeWindowDragView*)windowDragView;
 @end
 
-static const CGFloat KMP_NATIVE_WINDOW_DRAG_HEIGHT = 32.0;
-static const CGFloat KMP_NATIVE_WINDOW_DRAG_LEADING_INSET = 96.0;
 static BOOL is_window_fullscreen(NSWindow* window);
 
 static NSRect native_window_video_frame_for_host_view(NSView* host_view) {
     if (!host_view) return NSZeroRect;
-    NSRect frame = [host_view bounds];
     NSWindow* window = [host_view window];
-    if (is_window_fullscreen(window)) {
-        return frame;
+    if (is_window_fullscreen(window)) return [host_view bounds];
+    NSView* content_view = [window contentView];
+    if (content_view && [content_view superview] == host_view) {
+        // The renderer is a sibling below JBR's content view. Using AppKit's real content frame
+        // keeps it out of the native title bar for every title-bar height and display scale, while
+        // automatically expanding to the whole screen during an AppKit full-screen transition.
+        return [content_view frame];
     }
-
-    CGFloat top_inset = MIN(KMP_NATIVE_WINDOW_DRAG_HEIGHT, frame.size.height);
-    if ([host_view isFlipped]) frame.origin.y += top_inset;
-    frame.size.height = MAX(0.0, frame.size.height - top_inset);
-    return frame;
-}
-
-@implementation KMPNativeWindowDragView
-
-- (BOOL)isOpaque {
-    return NO;
-}
-
-- (BOOL)acceptsFirstResponder {
-    return NO;
-}
-
-- (NSView*)hitTest:(NSPoint)point {
-    NSWindow* window = [self window];
-    if (is_window_fullscreen(window)) return nil;
-    return [super hitTest:point];
-}
-
-- (void)mouseDown:(NSEvent*)event {
-    NSWindow* window = [self window];
-    if (!window || [event type] != NSEventTypeLeftMouseDown) return;
-    [window performWindowDragWithEvent:event];
-}
-
-@end
-
-static KMPNativeWindowDragView* create_native_window_drag_view(
-    NSView* host_view,
-    NSView* compose_view
-) {
-    if (!host_view || !compose_view) return nil;
-    NSRect bounds = [host_view bounds];
-    CGFloat height = MIN(KMP_NATIVE_WINDOW_DRAG_HEIGHT, bounds.size.height);
-    CGFloat width = MAX(0.0, bounds.size.width - KMP_NATIVE_WINDOW_DRAG_LEADING_INSET);
-    CGFloat y = [host_view isFlipped] ? NSMinY(bounds) : NSMaxY(bounds) - height;
-    KMPNativeWindowDragView* drag_view = [[KMPNativeWindowDragView alloc] initWithFrame:NSMakeRect(
-        NSMinX(bounds) + KMP_NATIVE_WINDOW_DRAG_LEADING_INSET,
-        y,
-        width,
-        height
-    )];
-    NSAutoresizingMaskOptions vertical_margin =
-        [host_view isFlipped] ? NSViewMaxYMargin : NSViewMinYMargin;
-    [drag_view setAutoresizingMask:NSViewWidthSizable | vertical_margin];
-    [host_view
-        addSubview:drag_view
-        positioned:NSWindowAbove
-        relativeTo:(host_view == compose_view ? nil : compose_view)];
-    return drag_view;
+    return [host_view bounds];
 }
 
 @implementation KMPNativeVideoView
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [_kmpWindowDragView removeFromSuperview];
-    [_kmpWindowDragView release];
     [super dealloc];
 }
 
@@ -176,13 +118,6 @@ static KMPNativeWindowDragView* create_native_window_drag_view(
 
 - (BOOL)acceptsFirstResponder {
     return NO;
-}
-
-- (void)setKmpWindowDragView:(KMPNativeWindowDragView*)windowDragView {
-    if (_kmpWindowDragView == windowDragView) return;
-    [_kmpWindowDragView removeFromSuperview];
-    [_kmpWindowDragView release];
-    _kmpWindowDragView = [windowDragView retain];
 }
 
 - (void)setKmpHdrContext:(void*)context {
@@ -707,6 +642,13 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
     [window setTitlebarAppearsTransparent:YES];
 }
 
+static void set_standard_window_buttons_hidden(NSWindow* window, BOOL hidden) {
+    if (!window) return;
+    [[window standardWindowButton:NSWindowCloseButton] setHidden:hidden];
+    [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:hidden];
+    [[window standardWindowButton:NSWindowZoomButton] setHidden:hidden];
+}
+
 @interface KMPNativeWindowFullscreenCoordinator : NSObject {
     NSWindow* _window;
     NSString* _windowTitle;
@@ -717,12 +659,17 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
     NSWindowCollectionBehavior _windowedCollectionBehavior;
     NSApplicationPresentationOptions _windowedPresentationOptions;
     BOOL _windowedHasShadow;
+    BOOL _nativeTransitionInProgress;
+    BOOL _hasPendingNativeRequest;
+    BOOL _pendingNativeFullscreen;
 }
 - (instancetype)initWithWindow:(NSWindow*)window;
 - (NSWindow*)resolveLiveWindow;
 - (BOOL)enterManagedFullscreen:(NSWindow*)window;
 - (BOOL)leaveManagedFullscreen:(NSWindow*)window;
 - (BOOL)requestFullscreen:(BOOL)fullscreen;
+- (void)nativeWindowWillChangeFullscreen:(NSNotification*)notification;
+- (void)nativeWindowDidChangeFullscreen:(NSNotification*)notification;
 - (void)windowWillClose:(NSNotification*)notification;
 @end
 
@@ -737,6 +684,22 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
         [center addObserver:self
                    selector:@selector(windowWillClose:)
                        name:NSWindowWillCloseNotification
+                     object:window];
+        [center addObserver:self
+                   selector:@selector(nativeWindowWillChangeFullscreen:)
+                       name:NSWindowWillEnterFullScreenNotification
+                     object:window];
+        [center addObserver:self
+                   selector:@selector(nativeWindowWillChangeFullscreen:)
+                       name:NSWindowWillExitFullScreenNotification
+                     object:window];
+        [center addObserver:self
+                   selector:@selector(nativeWindowDidChangeFullscreen:)
+                       name:NSWindowDidEnterFullScreenNotification
+                     object:window];
+        [center addObserver:self
+                   selector:@selector(nativeWindowDidChangeFullscreen:)
+                       name:NSWindowDidExitFullScreenNotification
                      object:window];
     }
     return self;
@@ -776,6 +739,7 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
 
     @try {
         prepare_window_for_native_fullscreen(window);
+        set_standard_window_buttons_hidden(window, YES);
         objc_setAssociatedObject(
             window,
             &KMP_NATIVE_MANAGED_FULLSCREEN_KEY,
@@ -799,6 +763,7 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
                 OBJC_ASSOCIATION_ASSIGN
             );
             [NSApp setPresentationOptions:_windowedPresentationOptions];
+            set_standard_window_buttons_hidden(window, NO);
             [window setCollectionBehavior:_windowedCollectionBehavior];
             [window setLevel:_windowedLevel];
             [window setHasShadow:_windowedHasShadow];
@@ -818,6 +783,7 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
         );
         if (_hasWindowedState) {
             [NSApp setPresentationOptions:_windowedPresentationOptions];
+            set_standard_window_buttons_hidden(window, NO);
             [window setCollectionBehavior:_windowedCollectionBehavior];
             [window setLevel:_windowedLevel];
             [window setHasShadow:_windowedHasShadow];
@@ -840,6 +806,7 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
         );
         if (_hasWindowedState) {
             [NSApp setPresentationOptions:_windowedPresentationOptions];
+            set_standard_window_buttons_hidden(window, NO);
             [window setCollectionBehavior:_windowedCollectionBehavior];
             [window setLevel:_windowedLevel];
             [window setHasShadow:_windowedHasShadow];
@@ -858,9 +825,46 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
 - (BOOL)requestFullscreen:(BOOL)fullscreen {
     NSWindow* window = [self resolveLiveWindow];
     if (!window) return NO;
-    return fullscreen
-        ? [self enterManagedFullscreen:window]
-        : [self leaveManagedFullscreen:window];
+    BOOL appkit_native_fullscreen =
+        ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
+    if (_nativeTransitionInProgress || appkit_native_fullscreen) {
+        if (_nativeTransitionInProgress) {
+            _hasPendingNativeRequest = YES;
+            _pendingNativeFullscreen = fullscreen;
+            return YES;
+        }
+        if (is_window_fullscreen(window) == fullscreen) return YES;
+        @try {
+            prepare_window_for_native_fullscreen(window);
+            _nativeTransitionInProgress = YES;
+            [window toggleFullScreen:nil];
+            return YES;
+        } @catch (NSException* exception) {
+            (void)exception;
+            _nativeTransitionInProgress = NO;
+            return NO;
+        }
+    }
+    if (_managedFullscreen) {
+        return fullscreen ? YES : [self leaveManagedFullscreen:window];
+    }
+    return fullscreen ? [self enterManagedFullscreen:window] : YES;
+}
+
+- (void)nativeWindowWillChangeFullscreen:(NSNotification*)notification {
+    if ([notification object] != _window) return;
+    _nativeTransitionInProgress = YES;
+}
+
+- (void)nativeWindowDidChangeFullscreen:(NSNotification*)notification {
+    if ([notification object] != _window) return;
+    _nativeTransitionInProgress = NO;
+    if (!_hasPendingNativeRequest) return;
+    BOOL requested = _pendingNativeFullscreen;
+    _hasPendingNativeRequest = NO;
+    if (is_window_fullscreen(_window) != requested) {
+        [self requestFullscreen:requested];
+    }
 }
 
 - (void)windowWillClose:(NSNotification*)notification {
@@ -877,6 +881,8 @@ static void prepare_window_for_native_fullscreen(NSWindow* window) {
     _window = nil;
     _managedFullscreen = NO;
     _hasWindowedState = NO;
+    _nativeTransitionInProgress = NO;
+    _hasPendingNativeRequest = NO;
 }
 
 @end
@@ -905,6 +911,165 @@ static KMPNativeWindowFullscreenCoordinator* fullscreen_coordinator_for_window(
     return coordinator;
 }
 
+static const void* native_window_zoom_coordinator_key(void) {
+    // SEL identities are process-wide, unlike addresses of static variables in separate dylibs.
+    // AVFoundation, libVLC, and MPV therefore share one coordinator when a Compose window is
+    // retained across a dynamic backend switch.
+    return (const void*)sel_registerName("KMPSharedNativeWindowZoomCoordinator");
+}
+
+@interface KMPNativeWindowZoomCoordinator : NSObject {
+    NSWindow* _window;
+    id _eventMonitor;
+    BOOL _zoomed;
+    BOOL _requestedZoomed;
+    BOOL _animationInProgress;
+    NSRect _restoreFrame;
+}
+- (instancetype)initWithWindow:(NSWindow*)window;
+- (NSEvent*)handleLocalMouseDown:(NSEvent*)event;
+- (BOOL)isTitleBarEvent:(NSEvent*)event;
+- (void)toggleZoom;
+- (void)startPendingZoomAnimation;
+- (void)removeEventMonitor;
+- (void)windowWillClose:(NSNotification*)notification;
+@end
+
+@implementation KMPNativeWindowZoomCoordinator
+
+- (instancetype)initWithWindow:(NSWindow*)window {
+    self = [super init];
+    if (self) {
+        _window = window;
+        __block KMPNativeWindowZoomCoordinator* unretained_self = self;
+        _eventMonitor = [[NSEvent
+            addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
+            handler:^NSEvent*(NSEvent* event) {
+                return [unretained_self handleLocalMouseDown:event];
+            }] retain];
+        [[NSNotificationCenter defaultCenter]
+            addObserver:self
+            selector:@selector(windowWillClose:)
+            name:NSWindowWillCloseNotification
+            object:window];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self removeEventMonitor];
+    _window = nil;
+    [super dealloc];
+}
+
+- (void)removeEventMonitor {
+    if (!_eventMonitor) return;
+    [NSEvent removeMonitor:_eventMonitor];
+    [_eventMonitor release];
+    _eventMonitor = nil;
+}
+
+- (void)windowWillClose:(NSNotification*)notification {
+    if ([notification object] != _window) return;
+    [self removeEventMonitor];
+    _window = nil;
+}
+
+- (BOOL)isTitleBarEvent:(NSEvent*)event {
+    NSWindow* window = _window;
+    if (!window || [event window] != window) return NO;
+    NSPoint window_point = [event locationInWindow];
+
+    for (NSWindowButton button_type = NSWindowCloseButton;
+         button_type <= NSWindowZoomButton;
+         button_type++) {
+        NSButton* button = [window standardWindowButton:button_type];
+        if (!button || [button isHidden]) continue;
+        NSPoint button_point = [button convertPoint:window_point fromView:nil];
+        if (NSPointInRect(button_point, [button bounds])) return NO;
+    }
+
+    NSView* content_view = [window contentView];
+    if (content_view) {
+        NSPoint content_point = [content_view convertPoint:window_point fromView:nil];
+        if (NSPointInRect(content_point, [content_view bounds])) return NO;
+    }
+    return window_point.y >= 0.0 && window_point.y <= [window frame].size.height;
+}
+
+- (NSEvent*)handleLocalMouseDown:(NSEvent*)event {
+    NSInteger click_count = [event clickCount];
+    // macOS reports two rapid double-clicks as click counts 1, 2, 3, 4. Treat every even
+    // click as a complete title-bar double-click so the restore request is never discarded.
+    if (click_count < 2 || (click_count % 2) != 0 || ![self isTitleBarEvent:event]) {
+        return event;
+    }
+    BOOL system_fullscreen = ([_window styleMask] & NSWindowStyleMaskFullScreen) != 0;
+    NSButton* zoom_button = [_window standardWindowButton:NSWindowZoomButton];
+    if (system_fullscreen || [zoom_button isHidden]) return event;
+    [self toggleZoom];
+    return nil;
+}
+
+- (void)toggleZoom {
+    NSWindow* window = _window;
+    if (!window) return;
+    _requestedZoomed = !_requestedZoomed;
+    if (_requestedZoomed && !_zoomed && !_animationInProgress) {
+        _restoreFrame = [window frame];
+    }
+    [self startPendingZoomAnimation];
+}
+
+- (void)startPendingZoomAnimation {
+    NSWindow* window = _window;
+    if (!window || _animationInProgress || _zoomed == _requestedZoomed) return;
+
+    BOOL target_zoomed = _requestedZoomed;
+    NSRect target_frame;
+    if (target_zoomed) {
+        NSScreen* screen = [window screen] ?: [NSScreen mainScreen];
+        if (!screen) return;
+        target_frame = [screen visibleFrame];
+    } else {
+        target_frame = _restoreFrame;
+    }
+    _animationInProgress = YES;
+
+    [window makeKeyAndOrderFront:nil];
+    KMPNativeWindowZoomCoordinator* retained_self = [self retain];
+    [NSAnimationContext
+        runAnimationGroup:^(NSAnimationContext* context) {
+            [context setDuration:0.22];
+            [context setTimingFunction:
+                [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]];
+            [[window animator] setFrame:target_frame display:YES];
+        }
+        completionHandler:^{
+            retained_self->_zoomed = target_zoomed;
+            retained_self->_animationInProgress = NO;
+            [retained_self startPendingZoomAnimation];
+            [retained_self release];
+        }];
+}
+
+@end
+
+static void install_native_window_zoom_coordinator(NSWindow* window) {
+    const void* key = native_window_zoom_coordinator_key();
+    if (!window || objc_getAssociatedObject(window, key)) return;
+    KMPNativeWindowZoomCoordinator* coordinator =
+        [[KMPNativeWindowZoomCoordinator alloc] initWithWindow:window];
+    objc_setAssociatedObject(
+        window,
+        key,
+        coordinator,
+        OBJC_ASSOCIATION_RETAIN_NONATOMIC
+    );
+    [coordinator release];
+}
+
 static void synchronize_window_fullscreen_on_appkit_main(void* raw_context) {
     KMPWindowFullscreenContext* context = (KMPWindowFullscreenContext*)raw_context;
     @autoreleasepool {
@@ -922,6 +1087,45 @@ static void synchronize_window_fullscreen_on_appkit_main(void* raw_context) {
         context->accepted =
             coordinator &&
             [coordinator requestFullscreen:context->requested_fullscreen];
+    }
+}
+
+typedef struct {
+    NSString* window_title;
+    BOOL configured;
+} KMPNativeWindowConfigurationContext;
+
+static void configure_native_window_on_appkit_main(void* raw_context) {
+    KMPNativeWindowConfigurationContext* context =
+        (KMPNativeWindowConfigurationContext*)raw_context;
+    @autoreleasepool {
+        if (!context) return;
+        NSWindow* window = find_awt_window_exact(context->window_title);
+        if (!window) return;
+
+        NSWindowStyleMask style_mask = [window styleMask];
+        NSWindowStyleMask native_style_mask =
+            (style_mask |
+                NSWindowStyleMaskTitled |
+                NSWindowStyleMaskClosable |
+                NSWindowStyleMaskMiniaturizable |
+                NSWindowStyleMaskResizable) &
+            ~NSWindowStyleMaskFullSizeContentView;
+        if (native_style_mask != style_mask) {
+            [window setStyleMask:native_style_mask];
+        }
+        [window setOpaque:YES];
+        [window setAlphaValue:1.0];
+        [window setBackgroundColor:[NSColor blackColor]];
+        [window setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]];
+        [window setTitleVisibility:NSWindowTitleHidden];
+        // The title bar reveals only the window's fixed black background. The content view remains
+        // below it, so neither AVPlayerLayer nor Compose can bleed through the native chrome.
+        [window setTitlebarAppearsTransparent:YES];
+        [window setMovableByWindowBackground:NO];
+        [window setHasShadow:YES];
+        install_native_window_zoom_coordinator(window);
+        context->configured = YES;
     }
 }
 
@@ -995,14 +1199,6 @@ static void attach_awt_native_view_on_appkit_main(void* raw_context) {
                         ? content_view
                         : nil];
         }
-        if (context->fills_content_view) {
-            KMPNativeWindowDragView* drag_view =
-                create_native_window_drag_view(host_view, content_view);
-            [native_view setKmpWindowDragView:drag_view];
-            [drag_view release];
-        } else {
-            [native_view setKmpWindowDragView:nil];
-        }
         [native_view setKmpFillsSuperview:context->fills_content_view];
         [native_view updateKmpHostedLayerSize];
         context->attached = JNI_TRUE;
@@ -1017,7 +1213,6 @@ static void detach_awt_native_view_on_appkit_main(void* raw_native_view_slot) {
         if ([*native_view_slot isKindOfClass:[KMPNativeVideoView class]]) {
             [(KMPNativeVideoView*)*native_view_slot setKmpHdrContext:NULL];
             [(KMPNativeVideoView*)*native_view_slot setKmpFillsSuperview:NO];
-            [(KMPNativeVideoView*)*native_view_slot setKmpWindowDragView:nil];
         }
         [*native_view_slot removeFromSuperview];
         [*native_view_slot setLayer:nil];
@@ -1276,6 +1471,29 @@ static jboolean JNICALL jni_SetWindowFullscreen(
     (void)env;
     (void)window;
     (void)fullscreen;
+    return JNI_FALSE;
+#endif
+}
+
+static jboolean JNICALL jni_ConfigureNativeWindow(
+    JNIEnv* env,
+    jclass cls,
+    jobject window
+) {
+    (void)cls;
+#ifdef __OBJC__
+    NSString* title = copy_awt_window_title(env, window);
+    if (!title) return JNI_FALSE;
+    KMPNativeWindowConfigurationContext context = {
+        .window_title = title,
+        .configured = NO,
+    };
+    run_on_appkit_main_sync(configure_native_window_on_appkit_main, &context);
+    [title release];
+    return context.configured ? JNI_TRUE : JNI_FALSE;
+#else
+    (void)env;
+    (void)window;
     return JNI_FALSE;
 #endif
 }
@@ -2656,6 +2874,7 @@ static const JNINativeMethod g_methods[] = {
     { "nDetachLibVlcNativeView", "(JLjava/awt/Component;)V",    (void*)jni_DetachLibVlcNativeView },
     { "nAttachLibVlcNativeWindow", "(JLjava/awt/Window;)Z",     (void*)jni_AttachLibVlcNativeWindow },
     { "nSetWindowFullscreen",    "(Ljava/awt/Window;Z)Z",       (void*)jni_SetWindowFullscreen },
+    { "nConfigureNativeWindow",  "(Ljava/awt/Window;)Z",        (void*)jni_ConfigureNativeWindow },
     { "nIsWindowFullscreen",     "(Ljava/awt/Window;)Z",        (void*)jni_IsWindowFullscreen },
     { "nSetHdrMetalContentScaleMode", "(JI)V",                  (void*)jni_SetHdrMetalContentScaleMode },
     { "nIsHdrMetalAvailable",    "(J)Z",                        (void*)jni_IsHdrMetalAvailable },

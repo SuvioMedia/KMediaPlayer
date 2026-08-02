@@ -151,6 +151,9 @@ internal object MacNativeBridge {
         fullscreen: Boolean,
     ): Boolean
 
+    /** Configures opaque standard AppKit chrome for the dedicated video window. */
+    @JvmStatic external fun nConfigureNativeWindow(window: Window): Boolean
+
     /** Returns the current AppKit NSWindow full-screen style state. */
     @JvmStatic external fun nIsWindowFullscreen(window: Window): Boolean
 

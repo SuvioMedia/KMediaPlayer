@@ -56,6 +56,12 @@ tasks.withType<JavaExec>().configureEach {
     }
 }
 
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    providers.gradleProperty("kmediaPlayerHdrTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.test.hdrMedia", mediaPath)
+    }
+}
+
 kotlin {
     jvmToolchain(25)
 
@@ -124,6 +130,11 @@ kotlin {
             implementation(project(":mediaplayer-ass"))
             implementation(project(":mediaplayer-kmediabridge"))
             implementation(project(":mediaplayer-mpv"))
+        }
+        jvmTest.dependencies {
+            implementation(compose.desktop.currentOs)
+            implementation(kotlin("test"))
+            implementation(kotlin("test-junit"))
         }
         iosMain.dependencies {
             implementation(project(":mediaplayer-ass"))

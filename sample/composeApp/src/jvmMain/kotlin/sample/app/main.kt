@@ -7,6 +7,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
 import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
@@ -25,7 +26,7 @@ fun main(args: Array<String>) {
     val demoSubtitleEnabled =
         System.getProperty("sample.app.demoSubtitle")
             ?.toBooleanStrictOrNull()
-            ?: (initialVideoUrl == null)
+            ?: false
     val windowX = System.getProperty("sample.app.windowX")?.toIntOrNull()
     val windowY = System.getProperty("sample.app.windowY")?.toIntOrNull()
     val windowWidth = System.getProperty("sample.app.windowWidth")?.toIntOrNull() ?: 720
@@ -57,6 +58,7 @@ fun main(args: Array<String>) {
                     ?.uppercase()
                     ?.let { runCatching { DesktopVideoBackend.valueOf(it) }.getOrNull() }
                     ?: DesktopVideoBackend.AUTO,
+            desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
             extensions = desktopPipelineExtensions,
         )
     val colorSelfTestSeconds =
