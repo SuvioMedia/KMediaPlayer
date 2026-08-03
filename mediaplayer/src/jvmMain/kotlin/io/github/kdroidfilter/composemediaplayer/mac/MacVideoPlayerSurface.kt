@@ -231,7 +231,7 @@ private class MacDedicatedNativeWindowAttachment(
     private val screenRefreshTimer =
         Timer(HDR_SCREEN_REFRESH_DELAY_MILLIS) {
             if (!disposed && attached && kind == MacDedicatedNativeSurfaceKind.HDR_METAL) {
-                playerState.refreshAttachedHdrColorPipeline()
+                playerState.requestAttachedHdrColorPipelineRefresh()
             }
         }.apply {
             isRepeats = false
@@ -714,7 +714,7 @@ private class MacHdrMetalPanel(
         if (!awtCanvas.isDisplayable || awtCanvas.width <= 0 || awtCanvas.height <= 0) return
         val wasAttached = attached
         attached = playerState.attachHdrMetalComponent(awtCanvas, contentScaleMode) || wasAttached
-        if (attached) playerState.refreshAttachedHdrColorPipeline()
+        if (attached) playerState.requestAttachedHdrColorPipelineRefresh()
     }
 
     private fun updateTrackedWindow() {

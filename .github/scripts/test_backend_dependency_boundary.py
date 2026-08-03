@@ -47,26 +47,40 @@ class BackendDependencyBoundaryTest(unittest.TestCase):
         self.assertNotIn("kmedia-ffmpeg-runtime", source)
         self.assertNotIn("kmedia-ass-runtime", source)
 
-    def test_mpv_client_version_is_pinned_consistently(self) -> None:
+    def test_backend_client_versions_are_sourced_from_the_catalog(self) -> None:
         catalog = (ROOT / "gradle/libs.versions.toml").read_text()
-        match = re.search(r'^kmediaMpv = "([^"]+)"$', catalog, re.MULTILINE)
-        self.assertIsNotNone(match)
-        version = match.group(1)
+        mpv_match = re.search(
+            r'^kmediaMpv = "([^"]+)"$',
+            catalog,
+            re.MULTILINE,
+        )
+        bridge_match = re.search(
+            r'^kmediaBridge = "([^"]+)"$',
+            catalog,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(mpv_match)
+        self.assertIsNotNone(bridge_match)
+        mpv_version = mpv_match.group(1)
+        bridge_version = bridge_match.group(1)
 
         self.assertIn(
-            f"spec.dependency 'KMediaMpv', '{version}'",
+            f"spec.dependency 'KMediaMpv', '{mpv_version}'",
             (ROOT / "mediaplayer-mpv/ComposeMediaPlayerMpv.podspec").read_text(),
         )
         self.assertIn(
-            f'KMEDIA_MPV_VERSION:-{version}',
+            f'KMEDIA_MPV_VERSION:-{mpv_version}',
             (ROOT / ".github/scripts/verify_apple_mpv_payload.sh").read_text(),
         )
         self.assertIn(
-            f"MPV_VERSION: {version}",
+            f"MPV_VERSION: {mpv_version}",
             (ROOT / ".github/workflows/build-natives.yml").read_text(),
         )
         pom_verifier = (ROOT / ".github/scripts/verify_maven_poms.py").read_text()
-        self.assertEqual(2, pom_verifier.count(f'"{version}"'))
+        self.assertEqual(2, pom_verifier.count('_catalog_version("kmediaMpv")'))
+        self.assertEqual(2, pom_verifier.count('_catalog_version("kmediaBridge")'))
+        self.assertNotIn(f'"{mpv_version}"', pom_verifier)
+        self.assertNotIn(f'"{bridge_version}"', pom_verifier)
 
     def test_apple_ass_tests_link_the_exact_shared_runtime_payload(self) -> None:
         source = (ROOT / "mediaplayer-ass/build.gradle.kts").read_text()

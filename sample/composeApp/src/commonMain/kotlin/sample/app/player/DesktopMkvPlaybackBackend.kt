@@ -58,6 +58,7 @@ internal expect fun rememberSampleVideoPlayer(
 @Stable
 internal class SampleVideoPlayerHandle(
     val playerState: VideoPlayerState,
+    val isPlaybackTransitioning: Boolean = false,
     private val openUriAction: (String, InitialPlayerState) -> Unit,
     private val openFileAction: (PlatformFile, InitialPlayerState) -> Unit,
     private val surfaceAttachedAction: (VideoPlayerState) -> Unit = {},

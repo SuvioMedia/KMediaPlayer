@@ -42,13 +42,16 @@ class VerifyMavenPomsTest(unittest.TestCase):
             pom = self._write_pom(repository, "composemediaplayer-mpv-android", "3.0.0-rc.1")
             with self.assertRaisesRegex(ValueError, "exact transitive"):
                 verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
+            runtime_version = verify_maven_poms.EXPECTED_BACKEND_DEPENDENCIES[
+                "composemediaplayer-mpv-android"
+            ][1]
             pom.write_text(
                 pom.read_text().replace(
                     "</project>",
                     "<dependencies>"
                     "<dependency><groupId>io.github.shusek</groupId>"
                     "<artifactId>kmedia-mpv-runtime-android</artifactId>"
-                    "<version>0.3.0-rc.6</version></dependency>"
+                    f"<version>{runtime_version}</version></dependency>"
                     "</dependencies></project>",
                 ),
             )
@@ -60,10 +63,16 @@ class VerifyMavenPomsTest(unittest.TestCase):
             pom = self._write_pom(repository, "composemediaplayer-kmediabridge-android", "3.0.0-rc.1")
             with self.assertRaisesRegex(ValueError, "kmedia-bridge-ffmpeg-android"):
                 verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
+            bridge_version = verify_maven_poms.EXPECTED_BACKEND_DEPENDENCIES[
+                "composemediaplayer-kmediabridge-android"
+            ][1]
             pom.write_text(
                 pom.read_text().replace(
                     "</project>",
-                    "<dependencies><dependency><groupId>io.github.shusek</groupId><artifactId>kmedia-bridge-ffmpeg-android</artifactId><version>0.5.0-rc.4</version></dependency></dependencies></project>",
+                    "<dependencies><dependency><groupId>io.github.shusek</groupId>"
+                    "<artifactId>kmedia-bridge-ffmpeg-android</artifactId>"
+                    f"<version>{bridge_version}</version>"
+                    "</dependency></dependencies></project>",
                 ),
             )
             verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")

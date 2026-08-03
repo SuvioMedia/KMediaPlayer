@@ -96,6 +96,7 @@ kotlin {
             }
         }
         jvmTest.dependencies {
+            implementation(project(":mediaplayer"))
             implementation(kotlin("test"))
             implementation(kotlin("test-junit"))
             implementation(libs.kotlinx.coroutines.test)

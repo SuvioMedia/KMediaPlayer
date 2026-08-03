@@ -852,6 +852,7 @@ static const void* mpv_window_zoom_coordinator_key(void) {
 - (void)toggleZoom;
 - (void)startPendingZoomAnimation;
 - (void)removeEventMonitor;
+- (void)windowDidResize:(NSNotification*)notification;
 - (void)windowWillClose:(NSNotification*)notification;
 @end
 
@@ -871,6 +872,11 @@ static const void* mpv_window_zoom_coordinator_key(void) {
             addObserver:self
             selector:@selector(windowWillClose:)
             name:NSWindowWillCloseNotification
+            object:window];
+        [[NSNotificationCenter defaultCenter]
+            addObserver:self
+            selector:@selector(windowDidResize:)
+            name:NSWindowDidResizeNotification
             object:window];
     }
     return self;
@@ -894,6 +900,21 @@ static const void* mpv_window_zoom_coordinator_key(void) {
     if ([notification object] != _window) return;
     [self removeEventMonitor];
     _window = nil;
+}
+
+- (void)windowDidResize:(NSNotification*)notification {
+    NSWindow* window = _window;
+    if ([notification object] != window ||
+        (!_animationInProgress && ![window inLiveResize])) {
+        return;
+    }
+    NSView* compose_view = [window contentView];
+    if (!compose_view) return;
+    [compose_view setNeedsLayout:YES];
+    [compose_view layoutSubtreeIfNeeded];
+    [compose_view setNeedsDisplay:YES];
+    [window setViewsNeedDisplay:YES];
+    [window displayIfNeeded];
 }
 
 - (BOOL)isTitleBarEvent:(NSEvent*)event {

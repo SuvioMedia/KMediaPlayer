@@ -86,6 +86,7 @@ internal fun PlayerScreen(
     onDesktopSourceAdapterChange: (DesktopMediaSourceAdapter) -> Unit = {},
 ) {
     val playerState = player.playerState
+    val loadingVisible = playerState.isLoading || player.isPlaybackTransitioning
     // The state owner releases backend resources when this player leaves composition.
     // Calling pause() here races with that release while switching backend instances.
     DisposableEffect(Unit) {
@@ -251,6 +252,7 @@ internal fun PlayerScreen(
                     ) {
                         ControlsOverlay(
                             playerState = playerState,
+                            loadingVisible = loadingVisible,
                             onSourceClick = { showSourceSheet = true },
                             onSubtitlesClick = { showSubtitleSheet = true },
                             onSettingsClick = { showSettingsSheet = true },
@@ -315,7 +317,7 @@ internal fun PlayerScreen(
                 SubtitleSheet(
                     audioTracks = playerState.availableAudioTracks,
                     selectedAudioTrack = playerState.currentAudioTrack,
-                    controlsEnabled = !playerState.isLoading,
+                    controlsEnabled = !loadingVisible,
                     onAudioTrackSelected = { track ->
                         playerState.selectAudioTrack(track)
                     },
@@ -338,10 +340,18 @@ internal fun PlayerScreen(
                     onDismiss = { showSubtitleSheet = false },
                 )
             }
+
+            AnimatedVisibility(
+                visible = !playerState.isPipActive && playerState.hasMedia && loadingVisible,
+                enter = fadeIn(tween(120)),
+                exit = fadeOut(tween(180)),
+            ) {
+                PlaybackLoadingOverlay()
+            }
         }
 
         // Empty state placeholder
-        if (!playerState.isPipActive && !playerState.hasMedia && !playerState.isLoading) {
+        if (!playerState.isPipActive && !playerState.hasMedia && !loadingVisible) {
             Column(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -370,13 +380,14 @@ internal fun PlayerScreen(
             }
         }
 
-        // Loading
-        if (!playerState.isPipActive && playerState.isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center),
-                color = Color.White.copy(alpha = 0.8f),
-                strokeWidth = 3.dp,
-            )
+        // Before a dedicated native playback window exists, keep the same progress affordance in
+        // the Compose host window. Once media is attached, it is rendered in the native overlay.
+        AnimatedVisibility(
+            visible = !playerState.isPipActive && !playerState.hasMedia && loadingVisible,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(180)),
+        ) {
+            PlaybackLoadingOverlay()
         }
 
         // Error snackbar
@@ -440,6 +451,38 @@ internal fun PlayerScreen(
 
 }
 
+@Composable
+private fun PlaybackLoadingOverlay() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .background(
+                        color = Color.Black.copy(alpha = 0.78f),
+                        shape = MaterialTheme.shapes.extraLarge,
+                    )
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 2.5.dp,
+            )
+            Text(
+                text = "Loading…",
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
+}
+
 private val SAMPLE_VIDEO_FILE_TYPE =
     if (sampleVideoPickerUsesAllFiles) {
         // macOS cannot derive a uniform type for every legacy extension (notably .wmv/.asf).
@@ -474,6 +517,7 @@ private val SAMPLE_VIDEO_FILE_TYPE =
 @Composable
 private fun ControlsOverlay(
     playerState: VideoPlayerState,
+    loadingVisible: Boolean,
     onSourceClick: () -> Unit,
     onSubtitlesClick: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -523,7 +567,7 @@ private fun ControlsOverlay(
         }
 
         // Center: large play/pause (only when media is loaded)
-        if (playerState.hasMedia) {
+        if (playerState.hasMedia && !loadingVisible) {
             FilledIconButton(
                 onClick = {
                     if (playerState.isPlaying) playerState.pause() else playerState.play()

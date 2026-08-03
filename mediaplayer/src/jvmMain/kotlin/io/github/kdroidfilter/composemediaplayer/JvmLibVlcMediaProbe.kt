@@ -119,6 +119,7 @@ internal object JvmLibVlcMediaProbe {
                     JvmLibVlcAudioStream(
                         streamIndex = track.streamIndex,
                         ordinal = audioOrdinal,
+                        codecName = track.codecId.takeIf(String::isNotBlank)?.lowercase(),
                         track =
                             AudioTrack(
                                 id = "$LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX${track.streamIndex}",
@@ -194,6 +195,7 @@ internal object JvmLibVlcMediaProbe {
                     JvmLibVlcAudioStream(
                         streamIndex = stream.index,
                         ordinal = audioOrdinal,
+                        codecName = stream.codecName,
                         track =
                             AudioTrack(
                                 id = "$LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX${stream.index}",
@@ -511,6 +513,7 @@ internal data class JvmLibVlcTrackInfo(
 internal data class JvmLibVlcAudioStream(
     val streamIndex: Int,
     val ordinal: Int,
+    val codecName: String? = null,
     val track: AudioTrack,
 )
 

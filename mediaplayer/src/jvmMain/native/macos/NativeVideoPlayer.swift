@@ -327,6 +327,56 @@ private func colorInfoString(from attributes: AVAssetVariant.VideoAttributes) ->
     return fields.joined(separator: ";")
 }
 
+/**
+ * A replacement player prepared beside the active player.
+ *
+ * The active AVPlayer and its AVPlayerLayer stay untouched until this candidate has decoded a
+ * real video frame. All fields are accessed on AppKit's main thread.
+ */
+private final class PreparedPlaybackReplacement {
+    let token: UInt64
+    let asset: AVURLAsset
+    let isHLS: Bool
+    let item: AVPlayerItem
+    let player: AVPlayer
+    var warmupOutput: AVPlayerItemVideoOutput?
+    var statusObserver: NSKeyValueObservation?
+    var framePollTimer: Timer?
+    var firstFrame: CVPixelBuffer?
+    var status: Int32 = 0
+    var errorMessage: String?
+    var warmupStartRequested = false
+    var warmupOriginTime: CMTime = .zero
+
+    init(
+        token: UInt64,
+        asset: AVURLAsset,
+        isHLS: Bool,
+        item: AVPlayerItem,
+        player: AVPlayer,
+        warmupOutput: AVPlayerItemVideoOutput
+    ) {
+        self.token = token
+        self.asset = asset
+        self.isHLS = isHLS
+        self.item = item
+        self.player = player
+        self.warmupOutput = warmupOutput
+    }
+
+    func stopWarmup(removeOutput: Bool) {
+        framePollTimer?.invalidate()
+        framePollTimer = nil
+        statusObserver?.invalidate()
+        statusObserver = nil
+        player.pause()
+        if removeOutput, let output = warmupOutput {
+            item.remove(output)
+        }
+        warmupOutput = nil
+    }
+}
+
 /// Class that manages video playback and frame capture into an optimized shared buffer.
 /// Frame capture rate adapts to the lower of screen refresh rate and video frame rate.
 /// Includes full HLS (HTTP Live Streaming) support with adaptive bitrate streaming.
@@ -377,6 +427,8 @@ class MacVideoPlayer {
     private var isPlaying: Bool = false
     private var isReadyForPlayback = false
     private var pendingPlay = false
+    private var replacementSequence: UInt64 = 0
+    private var pendingReplacement: PreparedPlaybackReplacement?
 
     // Playback speed control (1.0 is normal speed)
     private var playbackSpeed: Float = 1.0
@@ -415,6 +467,7 @@ class MacVideoPlayer {
 
     // Observers for HLS monitoring
     private var playerItemObserver: NSKeyValueObservation?
+    private var playerItemStatusObserver: NSKeyValueObservation?
     private var playerObserver: NSKeyValueObservation?
     private var timeControlStatusObserver: NSKeyValueObservation?
     private var bufferEmptyObserver: NSKeyValueObservation?
@@ -1259,11 +1312,304 @@ class MacVideoPlayer {
         openUri(uri, requestHeaders: [:])
     }
 
+    /// Invalidates readiness synchronously before an asynchronous source replacement starts.
+    /// Without this edge, a JVM poll can observe the previous item as ready and resume playback
+    /// before the replacement AVPlayer has been installed.
+    func beginOpening() {
+        cancelPendingReplacement()
+        isReadyForPlayback = false
+        pendingPlay = false
+    }
+
+    func getIsReadyForPlayback() -> Bool { return isReadyForPlayback }
+
+    /** Starts warming a second AVPlayer without touching the active player or its layer. */
+    func prepareUriReplacement(_ uri: String, requestHeaders: [String: String]) -> UInt64 {
+        cancelPendingReplacement()
+        replacementSequence &+= 1
+        if replacementSequence == 0 { replacementSequence = 1 }
+        let token = replacementSequence
+
+        let url: URL = {
+            if let parsedURL = URL(string: uri), parsedURL.scheme != nil {
+                return parsedURL
+            }
+            return URL(fileURLWithPath: uri)
+        }()
+        let replacementIsHLS = isHLSUrl(url)
+        var assetOptions: [String: Any] = [:]
+        if let mimeType = detectMimeType(at: url) {
+            assetOptions["AVURLAssetOutOfBandMIMETypeKey"] = mimeType
+        }
+        if !requestHeaders.isEmpty {
+            assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = requestHeaders
+        }
+        var asset = AVURLAsset(url: url, options: assetOptions.isEmpty ? nil : assetOptions)
+        if replacementIsHLS {
+            asset = configureHLSAsset(asset, requestHeaders: requestHeaders)
+        }
+
+        let item = AVPlayerItem(asset: asset)
+        if replacementIsHLS {
+            item.preferredForwardBufferDuration = 5.0
+            if preferredPeakBitRate > 0 {
+                item.preferredPeakBitRate = preferredPeakBitRate
+            }
+            if #available(macOS 13.0, *) {
+                item.automaticallyPreservesTimeOffsetFromLive = true
+            }
+        }
+
+        // This output is only a readiness probe. It proves that the candidate has decoded a real
+        // frame before the visible AVPlayerLayer is switched. The final HDR/SDR output is attached
+        // by configureVideoOutput only after commit.
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+        ]
+        let warmupOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: attributes)
+        warmupOutput.suppressesPlayerRendering = false
+        warmupOutput.requestNotificationOfMediaDataChange(withAdvanceInterval: 0.03)
+        item.add(warmupOutput)
+
+        let candidatePlayer = AVPlayer(playerItem: item)
+        candidatePlayer.volume = 0
+        candidatePlayer.automaticallyWaitsToMinimizeStalling = true
+        let replacement = PreparedPlaybackReplacement(
+            token: token,
+            asset: asset,
+            isHLS: replacementIsHLS,
+            item: item,
+            player: candidatePlayer,
+            warmupOutput: warmupOutput
+        )
+        pendingReplacement = replacement
+        replacement.statusObserver = item.observe(\.status, options: [.initial, .new]) {
+            [weak self, weak replacement] item, _ in
+            DispatchQueue.main.async {
+                guard let self = self, let replacement = replacement else { return }
+                self.handleReplacementItemStatus(item, replacement: replacement)
+            }
+        }
+        return token
+    }
+
+    private func handleReplacementItemStatus(
+        _ item: AVPlayerItem,
+        replacement: PreparedPlaybackReplacement
+    ) {
+        guard pendingReplacement === replacement, replacement.status == 0 else { return }
+        switch item.status {
+        case .readyToPlay:
+            guard !replacement.warmupStartRequested else { return }
+            replacement.warmupStartRequested = true
+            if replacement.isHLS {
+                // A growing bounded playlist looks live to AVPlayer. Without this explicit seek,
+                // the invisible candidate may warm up at its temporary live edge and commit
+                // several seconds past the requested source position.
+                let earliestTime = replacement.item.seekableTimeRanges
+                    .compactMap { $0.timeRangeValue.start }
+                    .first ?? .zero
+                replacement.warmupOriginTime = earliestTime
+                replacement.player.seek(
+                    to: earliestTime,
+                    toleranceBefore: .zero,
+                    toleranceAfter: .zero
+                ) { [weak self, weak replacement] _ in
+                    DispatchQueue.main.async {
+                        guard let self = self, let replacement = replacement else { return }
+                        self.beginReplacementFramePolling(replacement)
+                    }
+                }
+            } else {
+                beginReplacementFramePolling(replacement)
+            }
+        case .failed:
+            failReplacement(
+                replacement,
+                message: item.error?.localizedDescription ?? "The replacement AVPlayerItem failed"
+            )
+        case .unknown:
+            break
+        @unknown default:
+            failReplacement(replacement, message: "The replacement AVPlayerItem has an unknown status")
+        }
+    }
+
+    private func beginReplacementFramePolling(_ replacement: PreparedPlaybackReplacement) {
+        guard pendingReplacement === replacement,
+              replacement.status == 0,
+              replacement.framePollTimer == nil
+        else {
+            return
+        }
+        replacement.player.playImmediately(atRate: max(playbackSpeed, 0.5))
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self, weak replacement] _ in
+            guard let self = self, let replacement = replacement else { return }
+            self.pollReplacementFrame(replacement)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        replacement.framePollTimer = timer
+        pollReplacementFrame(replacement)
+    }
+
+    private func pollReplacementFrame(_ replacement: PreparedPlaybackReplacement) {
+        guard pendingReplacement === replacement, replacement.status == 0 else { return }
+        if replacement.item.status == .failed {
+            failReplacement(
+                replacement,
+                message: replacement.item.error?.localizedDescription ?? "The replacement AVPlayerItem failed"
+            )
+            return
+        }
+        guard let output = replacement.warmupOutput else {
+            failReplacement(replacement, message: "The replacement frame probe was detached")
+            return
+        }
+
+        let hostTime = CACurrentMediaTime()
+        let hostMappedTime = output.itemTime(forHostTime: hostTime)
+        let itemTime = replacement.item.currentTime()
+        let candidateTimes = [hostMappedTime, itemTime]
+        for time in candidateTimes {
+            guard output.hasNewPixelBuffer(forItemTime: time),
+                  let pixelBuffer = output.copyPixelBuffer(
+                      forItemTime: time,
+                      itemTimeForDisplay: nil
+                  )
+            else {
+                continue
+            }
+            replacement.firstFrame = pixelBuffer
+            replacement.player.pause()
+            replacement.framePollTimer?.invalidate()
+            replacement.framePollTimer = nil
+            // Playing the invisible HLS candidate is the most reliable way to prove that
+            // AVFoundation can decode it, but the probe can advance several seconds before the
+            // first frame becomes observable. Rewind to the candidate's original timeline point
+            // before publishing readiness so a paused bridge seek commits at the requested source
+            // position instead of inheriting warm-up drift.
+            replacement.player.seek(
+                to: replacement.warmupOriginTime,
+                toleranceBefore: .zero,
+                toleranceAfter: .zero
+            ) { [weak self, weak replacement] finished in
+                DispatchQueue.main.async {
+                    guard let self = self,
+                          let replacement = replacement,
+                          self.pendingReplacement === replacement,
+                          replacement.status == 0
+                    else {
+                        return
+                    }
+                    if finished {
+                        replacement.status = 1
+                    } else {
+                        self.failReplacement(
+                            replacement,
+                            message: "AVFoundation could not rewind the decoded replacement frame"
+                        )
+                    }
+                }
+            }
+            return
+        }
+    }
+
+    private func failReplacement(_ replacement: PreparedPlaybackReplacement, message: String) {
+        guard pendingReplacement === replacement else { return }
+        replacement.player.pause()
+        replacement.framePollTimer?.invalidate()
+        replacement.framePollTimer = nil
+        replacement.status = -1
+        replacement.errorMessage = message
+    }
+
+    func getUriReplacementStatus(_ token: UInt64) -> Int32 {
+        guard let replacement = pendingReplacement, replacement.token == token else { return -2 }
+        return replacement.status
+    }
+
+    func getUriReplacementError(_ token: UInt64) -> String? {
+        guard let replacement = pendingReplacement, replacement.token == token else {
+            return "The prepared replacement was superseded"
+        }
+        return replacement.errorMessage
+    }
+
+    /** Atomically points the existing native surface at the already-decoded replacement player. */
+    func commitUriReplacement(_ token: UInt64) -> Bool {
+        guard let replacement = pendingReplacement,
+              replacement.token == token,
+              replacement.status == 1,
+              let firstFrame = replacement.firstFrame
+        else {
+            return false
+        }
+
+        replacement.stopWarmup(removeOutput: true)
+
+        // Keep the old AVPlayerLayer content visible until all candidate preparation has finished.
+        // Everything below executes in one AppKit-main-queue turn.
+        stopDisplayLink()
+        player?.pause()
+        cleanupObservers()
+        detachHdr10PlusProbe()
+        hdrMetalRenderer?.detachFromItem()
+        if let oldOutput = videoOutput, let oldItem = player?.currentItem {
+            oldItem.remove(oldOutput)
+        }
+        videoOutput = nil
+
+        sourceGeneration &+= 1
+        let generation = sourceGeneration
+        isHLSStream = replacement.isHLS
+        let presentationSize = replacement.item.presentationSize
+        let decodedWidth = CVPixelBufferGetWidth(firstFrame)
+        let decodedHeight = CVPixelBufferGetHeight(firstFrame)
+        frameWidth = presentationSize.width > 0 ? Int(presentationSize.width.rounded()) : decodedWidth
+        frameHeight = presentationSize.height > 0 ? Int(presentationSize.height.rounded()) : decodedHeight
+        nativeVideoWidth = frameWidth
+        nativeVideoHeight = frameHeight
+        resetPlaybackMetrics()
+        extractMetadata(from: replacement.asset)
+        detectVideoFrameRate(from: replacement.asset)
+        installActivePlayer(
+            replacement.player,
+            item: replacement.item,
+            generation: generation
+        )
+        retainLatestPixelBuffer(firstFrame)
+        hdrMetalRenderer?.renderCurrentFrame()
+        isReadyForPlayback = true
+        isPlaying = false
+        pendingPlay = false
+        pendingReplacement = nil
+        return true
+    }
+
+    func cancelUriReplacement(_ token: UInt64) {
+        guard let replacement = pendingReplacement,
+              token == 0 || replacement.token == token
+        else {
+            return
+        }
+        replacement.stopWarmup(removeOutput: true)
+        pendingReplacement = nil
+    }
+
+    private func cancelPendingReplacement() {
+        guard let replacement = pendingReplacement else { return }
+        replacement.stopWarmup(removeOutput: true)
+        pendingReplacement = nil
+    }
+
     /// Opens the video from the given URI (local or network) with HTTP headers for remote assets.
     func openUri(_ uri: String, requestHeaders: [String: String]) {
         isReadyForPlayback = false
         pendingPlay = false
         sourceGeneration &+= 1
+        let generation = sourceGeneration
         resetPlaybackMetrics()
 
         // Clean up previous observers
@@ -1307,6 +1653,7 @@ class MacVideoPlayer {
 
         // Retrieve the video track to obtain the actual dimensions
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
+            guard sourceGeneration == generation else { return }
             guard let videoTrack = tracks?.first, error == nil else {
                 nativeVideoLog(
                     "Error loading video tracks: \(error?.localizedDescription ?? "Unknown")"
@@ -1317,7 +1664,7 @@ class MacVideoPlayer {
                     frameHeight = 1080
                     nativeVideoWidth = frameWidth
                     nativeVideoHeight = frameHeight
-                    setupVideoOutputAndPlayer(with: asset)
+                    setupVideoOutputAndPlayer(with: asset, generation: generation)
                 }
                 return
             }
@@ -1329,6 +1676,7 @@ class MacVideoPlayer {
                         // Use the modern API to load naturalSize and preferredTransform
                         let naturalSize = try await videoTrack.load(.naturalSize)
                         let transform = try await videoTrack.load(.preferredTransform)
+                        guard self.sourceGeneration == generation else { return }
 
                         let effectiveSize = naturalSize.applying(transform)
                         self.frameWidth = Int(abs(effectiveSize.width))
@@ -1344,14 +1692,23 @@ class MacVideoPlayer {
                             : (try? await AVVideoComposition.videoComposition(withPropertiesOf: asset))
 
                         // Continue with player setup
-                        self.setupVideoOutputAndPlayer(with: asset, videoComposition: videoComposition)
+                        self.setupVideoOutputAndPlayer(
+                            with: asset,
+                            videoComposition: videoComposition,
+                            generation: generation
+                        )
                     } catch {
+                        guard self.sourceGeneration == generation else { return }
                         nativeVideoLog("Error loading video track properties: \(error.localizedDescription)")
                         // Use default dimensions for HLS if loading fails
                         if self.isHLSStream {
                             self.frameWidth = 1920
                             self.frameHeight = 1080
-                            self.setupVideoOutputAndPlayer(with: asset, videoComposition: nil)
+                            self.setupVideoOutputAndPlayer(
+                                with: asset,
+                                videoComposition: nil,
+                                generation: generation
+                            )
                         }
                     }
                 }
@@ -1373,7 +1730,11 @@ class MacVideoPlayer {
                     : AVMutableVideoComposition(propertiesOf: asset)
 
                 // Continue with player setup
-                setupVideoOutputAndPlayer(with: asset, videoComposition: videoComposition)
+                setupVideoOutputAndPlayer(
+                    with: asset,
+                    videoComposition: videoComposition,
+                    generation: generation
+                )
             }
         }
     }
@@ -1427,7 +1788,23 @@ class MacVideoPlayer {
     }
 
     // Helper method to setup video output and player
-    private func setupVideoOutputAndPlayer(with asset: AVAsset, videoComposition: AVVideoComposition? = nil) {
+    private func setupVideoOutputAndPlayer(
+        with asset: AVAsset,
+        videoComposition: AVVideoComposition? = nil,
+        generation: UInt64
+    ) {
+        guard sourceGeneration == generation else { return }
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.setupVideoOutputAndPlayer(
+                    with: asset,
+                    videoComposition: videoComposition,
+                    generation: generation
+                )
+            }
+            return
+        }
+        guard sourceGeneration == generation else { return }
         let item = AVPlayerItem(asset: asset)
 
         // Apply the video composition (if any) so that pixel buffers delivered to
@@ -1436,28 +1813,39 @@ class MacVideoPlayer {
             item.videoComposition = videoComposition
         }
 
-        // Configure for HLS if needed
+        configureItemForActivePlayback(item)
+        installActivePlayer(AVPlayer(playerItem: item), item: item, generation: generation)
+    }
+
+    private func configureItemForActivePlayback(_ item: AVPlayerItem) {
+        guard isHLSStream else { return }
+        item.preferredForwardBufferDuration = 5.0
+        if preferredPeakBitRate > 0 {
+            item.preferredPeakBitRate = preferredPeakBitRate
+        }
+        if #available(macOS 13.0, *) {
+            item.automaticallyPreservesTimeOffsetFromLive = true
+        }
+    }
+
+    /** Installs an already-created player into the existing renderer and observer graph. */
+    private func installActivePlayer(
+        _ newPlayer: AVPlayer,
+        item: AVPlayerItem,
+        generation: UInt64
+    ) {
+        configureItemForActivePlayback(item)
         if isHLSStream {
-            // Set buffer duration for HLS
-            item.preferredForwardBufferDuration = 5.0  // 5 seconds of buffer
-
-            // Set initial preferred peak bitrate if specified
-            if preferredPeakBitRate > 0 {
-                item.preferredPeakBitRate = preferredPeakBitRate
-            }
-
-            // Enable automatic waiting behavior for HLS
-            if #available(macOS 13.0, *) {
-                item.automaticallyPreservesTimeOffsetFromLive = true
-            }
-
-            // Setup HLS monitoring
             setupHLSMonitoring(for: item)
         }
-
         configureVideoOutput(for: item)
-
-        player = AVPlayer(playerItem: item)
+        player = newPlayer
+        isReadyForPlayback = item.status == .readyToPlay
+        playerItemStatusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            DispatchQueue.main.async {
+                self?.handlePlayerItemStatus(item, generation: generation)
+            }
+        }
         if prefersHdrMetalOutput, useHdrPlayerLayerForSurface {
             configureHdrPlayerLayer(with: player)
         }
@@ -1494,22 +1882,32 @@ class MacVideoPlayer {
         if !isHLSStream {
             captureInitialFrame()
         }
+    }
 
-        // Mark as ready for playback
-        self.isReadyForPlayback = true
-
-        // If playback was pending, start playback
-        if self.pendingPlay {
-            DispatchQueue.main.async {
-                self.play()
+    private func handlePlayerItemStatus(_ item: AVPlayerItem, generation: UInt64) {
+        guard sourceGeneration == generation, player?.currentItem === item else { return }
+        switch item.status {
+        case .readyToPlay:
+            isReadyForPlayback = true
+            if pendingPlay {
+                pendingPlay = false
+                play()
             }
+        case .failed:
+            isReadyForPlayback = false
+            pendingPlay = false
+            nativeVideoLog("AVPlayerItem failed: \(item.error?.localizedDescription ?? "Unknown error")")
+        case .unknown:
+            isReadyForPlayback = false
+        @unknown default:
+            isReadyForPlayback = false
         }
     }
 
     /** Reconfigures the current item when the requested native-HDR/SDR route changes at runtime. */
     private func configureVideoOutput(for item: AVPlayerItem) {
         if let previousOutput = videoOutput {
-            item.remove(previousOutput)
+            player?.currentItem?.remove(previousOutput)
             videoOutput = nil
         }
 
@@ -1718,6 +2116,9 @@ class MacVideoPlayer {
         if isReadyForPlayback {
             isPlaying = true
             player?.play()
+            // Replacing an AVPlayerItem creates a fresh AVPlayer whose rate starts at 1.0.
+            // Reapply the persisted user speed after every source/bridge restart.
+            player?.rate = playbackSpeed
             if videoOutput != nil {
                 configureDisplayLink()
             }
@@ -1999,6 +2400,8 @@ class MacVideoPlayer {
     /// Clean up observers
     private func cleanupObservers() {
         playerItemObserver?.invalidate()
+        playerItemStatusObserver?.invalidate()
+        playerItemStatusObserver = nil
         playerObserver?.invalidate()
         timeControlStatusObserver?.invalidate()
         bufferEmptyObserver?.invalidate()
@@ -2022,6 +2425,7 @@ class MacVideoPlayer {
 
     /// Disposes of the video player and releases resources.
     func dispose() {
+        cancelPendingReplacement()
         pause()
         cleanupObservers()
         detachHdr10PlusProbe()
@@ -2190,6 +2594,9 @@ public func openUri(_ context: UnsafeMutableRawPointer?, _ uri: UnsafePointer<CC
         return
     }
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.beginOpening()
+    }
     // Use a background queue for heavy operations to avoid blocking the main thread
     DispatchQueue.global(qos: .userInitiated).async {
         player.openUri(swiftUri)
@@ -2211,9 +2618,74 @@ public func openUriWithHeaders(
     }
     let requestHeaders = parseRequestHeadersJson(requestHeadersJson)
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.beginOpening()
+    }
     DispatchQueue.global(qos: .userInitiated).async {
         player.openUri(swiftUri, requestHeaders: requestHeaders)
     }
+}
+
+@_cdecl("prepareUriReplacement")
+public func prepareUriReplacement(
+    _ context: UnsafeMutableRawPointer?,
+    _ uri: UnsafePointer<CChar>?,
+    _ requestHeadersJson: UnsafePointer<CChar>?
+) -> UInt64 {
+    guard let context = context,
+          let uriCStr = uri,
+          let swiftUri = String(validatingUTF8: uriCStr)
+    else {
+        return 0
+    }
+    let requestHeaders = parseRequestHeadersJson(requestHeadersJson)
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        player.prepareUriReplacement(swiftUri, requestHeaders: requestHeaders)
+    }
+}
+
+@_cdecl("getUriReplacementStatus")
+public func getUriReplacementStatus(
+    _ context: UnsafeMutableRawPointer?,
+    _ token: UInt64
+) -> Int32 {
+    guard let context = context else { return -2 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain { player.getUriReplacementStatus(token) }
+}
+
+@_cdecl("getUriReplacementError")
+public func getUriReplacementError(
+    _ context: UnsafeMutableRawPointer?,
+    _ token: UInt64
+) -> UnsafePointer<CChar>? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        guard let message = player.getUriReplacementError(token) else { return nil }
+        return UnsafePointer<CChar>(strdup(message))
+    }
+}
+
+@_cdecl("commitUriReplacement")
+public func commitUriReplacement(
+    _ context: UnsafeMutableRawPointer?,
+    _ token: UInt64
+) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain { player.commitUriReplacement(token) ? 1 : 0 }
+}
+
+@_cdecl("cancelUriReplacement")
+public func cancelUriReplacement(
+    _ context: UnsafeMutableRawPointer?,
+    _ token: UInt64
+) {
+    guard let context = context else { return }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain { player.cancelUriReplacement(token) }
 }
 
 private func parseRequestHeadersJson(_ requestHeadersJson: UnsafePointer<CChar>?) -> [String: String] {
@@ -2405,6 +2877,15 @@ public func isHdrOutputReady(_ context: UnsafeMutableRawPointer?) -> Int32 {
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return syncOnMain {
         player.isHdrOutputReady() ? 1 : 0
+    }
+}
+
+@_cdecl("isReadyForPlayback")
+public func isReadyForPlayback(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        player.getIsReadyForPlayback() ? 1 : 0
     }
 }
 
