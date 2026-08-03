@@ -9,12 +9,12 @@ existing embedded platform surfaces.
 Keep every KMediaPlayer artifact on the same immutable version:
 
 ```kotlin
-implementation("io.github.shusek:composemediaplayer:4.0.0")
-implementation("io.github.shusek:composemediaplayer-desktop-window:4.0.0")
+implementation("io.github.shusek:composemediaplayer:4.0.1")
+implementation("io.github.shusek:composemediaplayer-desktop-window:4.0.1")
 
 // Optional backends; add only those selected by the application.
-implementation("io.github.shusek:composemediaplayer-mpv:4.0.0")
-implementation("io.github.shusek:composemediaplayer-kmediabridge:4.0.0")
+implementation("io.github.shusek:composemediaplayer-mpv:4.0.1")
+implementation("io.github.shusek:composemediaplayer-kmediabridge:4.0.1")
 ```
 
 The default player and MPV JVM artifacts already expose the desktop-window
