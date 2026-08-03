@@ -30,6 +30,11 @@
 extern void*  createVideoPlayer(void);
 extern void   openUri(void* ctx, const char* uri);
 extern void   openUriWithHeaders(void* ctx, const char* uri, const char* headersJson);
+extern uint64_t prepareUriReplacement(void* ctx, const char* uri, const char* headersJson);
+extern int32_t getUriReplacementStatus(void* ctx, uint64_t token);
+extern const char* getUriReplacementError(void* ctx, uint64_t token);
+extern int32_t commitUriReplacement(void* ctx, uint64_t token);
+extern void cancelUriReplacement(void* ctx, uint64_t token);
 extern void   playVideo(void* ctx);
 extern void   pauseVideo(void* ctx);
 extern int32_t isReadyForPlayback(void* ctx);
@@ -2268,6 +2273,83 @@ static void JNICALL jni_OpenUriWithHeaderLines(
     (*env)->ReleaseStringUTFChars(env, uri, cUri);
 }
 
+static jlong JNICALL jni_PrepareUriReplacement(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jstring uri,
+    jstring requestHeadersJson
+) {
+    (void)cls;
+    if (!handle || !uri) return 0L;
+    NativePlayerHandle* native = toHandle(handle);
+    void* ctx = avCtx(native);
+    if (!ctx) return 0L;
+    const char* cUri = (*env)->GetStringUTFChars(env, uri, NULL);
+    if (!cUri) return 0L;
+    const char* cHeaders = requestHeadersJson
+        ? (*env)->GetStringUTFChars(env, requestHeadersJson, NULL)
+        : NULL;
+    uint64_t token = prepareUriReplacement(ctx, cUri, cHeaders ? cHeaders : "{}");
+    if (cHeaders) {
+        (*env)->ReleaseStringUTFChars(env, requestHeadersJson, cHeaders);
+    }
+    (*env)->ReleaseStringUTFChars(env, uri, cUri);
+    return (jlong)token;
+}
+
+static jint JNICALL jni_GetUriReplacementStatus(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jlong token
+) {
+    (void)env;
+    (void)cls;
+    void* ctx = avCtx(toHandle(handle));
+    return ctx ? (jint)getUriReplacementStatus(ctx, (uint64_t)token) : (jint)-2;
+}
+
+static jstring JNICALL jni_GetUriReplacementError(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jlong token
+) {
+    (void)cls;
+    void* ctx = avCtx(toHandle(handle));
+    if (!ctx) return NULL;
+    const char* message = getUriReplacementError(ctx, (uint64_t)token);
+    if (!message) return NULL;
+    jstring result = (*env)->NewStringUTF(env, message);
+    free((void*)message);
+    return result;
+}
+
+static jboolean JNICALL jni_CommitUriReplacement(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jlong token
+) {
+    (void)env;
+    (void)cls;
+    void* ctx = avCtx(toHandle(handle));
+    return ctx && commitUriReplacement(ctx, (uint64_t)token) ? JNI_TRUE : JNI_FALSE;
+}
+
+static void JNICALL jni_CancelUriReplacement(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jlong token
+) {
+    (void)env;
+    (void)cls;
+    void* ctx = avCtx(toHandle(handle));
+    if (ctx) cancelUriReplacement(ctx, (uint64_t)token);
+}
+
 static void JNICALL jni_Play(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     LibVlcPlayer* vlc = vlcCtx(native);
@@ -2881,6 +2963,11 @@ static const JNINativeMethod g_methods[] = {
     { "nOpenUri",                "(JLjava/lang/String;)V",      (void*)jni_OpenUri },
     { "nOpenUriWithHeaders",     "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaders },
     { "nOpenUriWithHeaderLines", "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaderLines },
+    { "nPrepareUriReplacement",  "(JLjava/lang/String;Ljava/lang/String;)J", (void*)jni_PrepareUriReplacement },
+    { "nGetUriReplacementStatus", "(JJ)I",                       (void*)jni_GetUriReplacementStatus },
+    { "nGetUriReplacementError", "(JJ)Ljava/lang/String;",       (void*)jni_GetUriReplacementError },
+    { "nCommitUriReplacement",   "(JJ)Z",                        (void*)jni_CommitUriReplacement },
+    { "nCancelUriReplacement",   "(JJ)V",                        (void*)jni_CancelUriReplacement },
     { "nPlay",                   "(J)V",                        (void*)jni_Play },
     { "nPause",                  "(J)V",                        (void*)jni_Pause },
     { "nIsReadyForPlayback",     "(J)Z",                        (void*)jni_IsReadyForPlayback },
