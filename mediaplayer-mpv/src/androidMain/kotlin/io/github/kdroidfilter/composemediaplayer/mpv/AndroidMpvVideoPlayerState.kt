@@ -7,7 +7,6 @@ import android.os.ParcelFileDescriptor
 import android.view.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
@@ -317,7 +316,7 @@ internal class AndroidMpvVideoPlayerState(
             loading = snapshot.isBufferingStateKnown.takeIf { it }?.let { snapshot.isBuffering },
             seeking = snapshot.isSeekingStateKnown.takeIf { it }?.let { snapshot.isSeeking },
         )
-        Snapshot.withMutableSnapshot {
+        mutateSnapshotState {
             renderingInfo.videoRenderer =
                 listOfNotNull(snapshot.currentVideoOutput, snapshot.currentGpuContext)
                     .joinToString(" / ")

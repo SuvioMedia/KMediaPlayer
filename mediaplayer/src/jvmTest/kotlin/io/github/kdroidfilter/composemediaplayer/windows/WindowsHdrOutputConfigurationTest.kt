@@ -40,7 +40,7 @@ class WindowsHdrOutputConfigurationTest {
                         masteringDisplay = masteringDisplay(),
                         contentLightLevel = ContentLightLevelMetadata(4_000, 600),
                     ),
-                dolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+                dolbyVisionBaseLayerOutput = null,
                 projection =
                     VideoProjectionSettings(
                         projectionType = VideoProjectionType.Equirect360,
@@ -72,7 +72,7 @@ class WindowsHdrOutputConfigurationTest {
                         primaries = VideoColorPrimaries.BT2020,
                         matrix = VideoColorMatrix.BT2020_CL,
                     ),
-                dolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+                dolbyVisionBaseLayerOutput = null,
                 projection = VideoProjectionSettings(),
                 projectionView = VideoProjectionViewSettings(),
                 textureCrop = VideoTextureCrop(),
@@ -85,7 +85,7 @@ class WindowsHdrOutputConfigurationTest {
         val configuration =
             buildWindowsHdrNativeConfiguration(
                 source = VideoColorInfo(dynamicRange = VideoDynamicRange.HLG),
-                dolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+                dolbyVisionBaseLayerOutput = null,
                 projection = VideoProjectionSettings(),
                 projectionView = VideoProjectionViewSettings(),
                 textureCrop = VideoTextureCrop(),
@@ -102,7 +102,7 @@ class WindowsHdrOutputConfigurationTest {
         val applied =
             buildWindowsHdrNativeConfiguration(
                 source = source,
-                dolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+                dolbyVisionBaseLayerOutput = null,
                 projection = VideoProjectionSettings(),
                 projectionView = VideoProjectionViewSettings(),
                 textureCrop = VideoTextureCrop(),
@@ -111,7 +111,7 @@ class WindowsHdrOutputConfigurationTest {
         val dropped =
             buildWindowsHdrNativeConfiguration(
                 source = source,
-                dolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+                dolbyVisionBaseLayerOutput = null,
                 projection = VideoProjectionSettings(),
                 projectionView = VideoProjectionViewSettings(),
                 textureCrop = VideoTextureCrop(),
@@ -129,7 +129,7 @@ class WindowsHdrOutputConfigurationTest {
         val configuration =
             buildWindowsHdrNativeConfiguration(
                 source = VideoColorInfo(dynamicRange = VideoDynamicRange.HDR10),
-                dolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+                dolbyVisionBaseLayerOutput = null,
                 projection = VideoProjectionSettings(),
                 projectionView = VideoProjectionViewSettings(),
                 textureCrop = VideoTextureCrop(),
@@ -141,7 +141,7 @@ class WindowsHdrOutputConfigurationTest {
     }
 
     @Test
-    fun `Dolby Vision only exposes verified HDR10 base layer policy`() {
+    fun `Dolby Vision only exposes a verified requested compatibility base layer`() {
         val source =
             VideoColorInfo(
                 dynamicRange = VideoDynamicRange.DOLBY_VISION,
@@ -156,21 +156,101 @@ class WindowsHdrOutputConfigurationTest {
 
         assertNull(
             buildWindowsHdrNativeConfiguration(
-                source,
-                DolbyVisionPolicy.AUTO,
-                VideoProjectionSettings(),
-                VideoProjectionViewSettings(),
-                VideoTextureCrop(),
+                source = source,
+                dolbyVisionBaseLayerOutput = null,
+                projection = VideoProjectionSettings(),
+                projectionView = VideoProjectionViewSettings(),
+                textureCrop = VideoTextureCrop(),
             ),
         )
         assertNotNull(
             buildWindowsHdrNativeConfiguration(
-                source,
-                DolbyVisionPolicy.PREFER_HDR10_BASE_LAYER,
-                VideoProjectionSettings(),
-                VideoProjectionViewSettings(),
-                VideoTextureCrop(),
+                source = source,
+                dolbyVisionBaseLayerOutput = VideoDynamicRange.HDR10,
+                projection = VideoProjectionSettings(),
+                projectionView = VideoProjectionViewSettings(),
+                textureCrop = VideoTextureCrop(),
             ),
+        )
+    }
+
+    @Test
+    fun `Windows selects the exact compatible Dolby Vision base signal`() {
+        val profile8Source =
+            VideoColorInfo(
+                dynamicRange = VideoDynamicRange.DOLBY_VISION,
+                dolbyVision = DolbyVisionInfo(profile = 8, hasHdr10CompatibleBaseLayer = true),
+            )
+
+        assertEquals(
+            VideoDynamicRange.HDR10,
+            windowsDolbyVisionBaseLayerOutput(
+                source = profile8Source,
+                requestedPolicy = DolbyVisionPolicy.AUTO,
+                profile7To81MappingApplied = false,
+            ),
+        )
+        assertEquals(
+            VideoDynamicRange.HDR10,
+            windowsDolbyVisionBaseLayerOutput(
+                source = profile8Source,
+                requestedPolicy = DolbyVisionPolicy.CONVERT_PROFILE_7_TO_8_1,
+                profile7To81MappingApplied = true,
+            ),
+        )
+        assertNull(
+            windowsDolbyVisionBaseLayerOutput(
+                source = profile8Source,
+                requestedPolicy = DolbyVisionPolicy.REQUIRE_NATIVE,
+                profile7To81MappingApplied = false,
+            ),
+        )
+
+        val profile84Source =
+            VideoColorInfo(
+                dynamicRange = VideoDynamicRange.DOLBY_VISION,
+                dolbyVision = DolbyVisionInfo(profile = 8, hasHlgCompatibleBaseLayer = true),
+            )
+        assertEquals(
+            VideoDynamicRange.HLG,
+            windowsDolbyVisionBaseLayerOutput(
+                source = profile84Source,
+                requestedPolicy = DolbyVisionPolicy.AUTO,
+                profile7To81MappingApplied = false,
+            ),
+        )
+        assertNull(
+            windowsDolbyVisionBaseLayerOutput(
+                source = profile84Source,
+                requestedPolicy = DolbyVisionPolicy.PREFER_HDR10_BASE_LAYER,
+                profile7To81MappingApplied = false,
+            ),
+        )
+        val hlgConfiguration =
+            buildWindowsHdrNativeConfiguration(
+                source = profile84Source,
+                dolbyVisionBaseLayerOutput = VideoDynamicRange.HLG,
+                projection = VideoProjectionSettings(),
+                projectionView = VideoProjectionViewSettings(),
+                textureCrop = VideoTextureCrop(),
+            )
+        assertNotNull(hlgConfiguration)
+        assertEquals(1, hlgConfiguration.integers[0])
+        assertEquals(
+            setOf(VideoDynamicRange.HLG),
+            windowsConfirmedHdrDecoderDynamicRanges(profile84Source),
+        )
+        assertEquals(
+            setOf(VideoDynamicRange.HDR10),
+            windowsConfirmedHdrDecoderDynamicRanges(profile8Source),
+        )
+        assertTrue(
+            windowsConfirmedHdrDecoderDynamicRanges(
+                VideoColorInfo(
+                    dynamicRange = VideoDynamicRange.DOLBY_VISION,
+                    dolbyVision = DolbyVisionInfo(profile = 5),
+                ),
+            ).isEmpty(),
         )
     }
 
@@ -179,6 +259,20 @@ class WindowsHdrOutputConfigurationTest {
         val base = nativeStatus(firstFramePresented = false)
         assertFalse(base.isConfirmedHdrOutput)
         assertTrue(base.copy(firstFramePresented = true).isConfirmedHdrOutput)
+        assertTrue(
+            base
+                .copy(
+                    firstFramePresented = true,
+                    swapChainColorSpace = 1,
+                ).isConfirmedHdrOutput,
+        )
+        assertFalse(
+            base
+                .copy(
+                    firstFramePresented = true,
+                    swapChainColorSpace = 0,
+                ).isConfirmedHdrOutput,
+        )
         assertFalse(base.copy(firstFramePresented = true).isConfirmedSdrOutput)
         assertTrue(
             base

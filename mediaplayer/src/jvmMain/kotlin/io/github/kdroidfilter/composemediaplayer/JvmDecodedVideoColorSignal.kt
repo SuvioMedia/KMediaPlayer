@@ -16,12 +16,21 @@ internal data class JvmDecodedVideoColorSignal(
     val range: VideoColorRange = VideoColorRange.UNKNOWN,
     /** A previously known native field disappeared at a media-type boundary. */
     val authoritativeUnknowns: Boolean = false,
+    /** Native compressed-stream validation observed HDR10+ Application 4 Version 1 metadata. */
+    val hasValidatedHdr10PlusMetadata: Boolean = false,
 ) {
     fun mergeInto(source: VideoColorInfo): VideoColorInfo {
         val resolvedDynamicRange = resolvedDynamicRange(source)
+        val promotesHdr10Plus =
+            resolvedDynamicRange == VideoDynamicRange.HDR10_PLUS &&
+                source.dynamicRange == VideoDynamicRange.HDR10
         val keepsSourceSignal =
             !authoritativeUnknowns &&
-                (transfer == VideoColorTransfer.UNKNOWN || resolvedDynamicRange == source.dynamicRange)
+                (
+                    transfer == VideoColorTransfer.UNKNOWN ||
+                        resolvedDynamicRange == source.dynamicRange ||
+                        promotesHdr10Plus
+                )
 
         return source.copy(
             dynamicRange = resolvedDynamicRange,
@@ -32,7 +41,17 @@ internal data class JvmDecodedVideoColorSignal(
             range = range.orPrevious(source.range, keepsSourceSignal),
             masteringDisplay = source.masteringDisplay.takeIf { keepsSourceSignal },
             contentLightLevel = source.contentLightLevel.takeIf { keepsSourceSignal },
-            hdr10Plus = source.hdr10Plus.takeIf { keepsSourceSignal },
+            hdr10Plus =
+                if (resolvedDynamicRange == VideoDynamicRange.HDR10_PLUS && hasValidatedHdr10PlusMetadata) {
+                    source.hdr10Plus
+                        ?: Hdr10PlusInfo(
+                            applicationIdentifier = 4,
+                            applicationVersion = 1,
+                            hasPerFrameMetadata = true,
+                        )
+                } else {
+                    source.hdr10Plus.takeIf { keepsSourceSignal }
+                },
             dolbyVision = source.dolbyVision.takeIf { keepsSourceSignal },
         )
     }
@@ -41,12 +60,25 @@ internal data class JvmDecodedVideoColorSignal(
         when (transfer) {
             VideoColorTransfer.PQ ->
                 when (source.dynamicRange) {
-                    VideoDynamicRange.HDR10_PLUS,
                     VideoDynamicRange.DOLBY_VISION,
                     -> source.dynamicRange
-                    else -> VideoDynamicRange.HDR10
+                    VideoDynamicRange.HDR10_PLUS -> source.dynamicRange
+                    else ->
+                        if (hasValidatedHdr10PlusMetadata) {
+                            VideoDynamicRange.HDR10_PLUS
+                        } else {
+                            VideoDynamicRange.HDR10
+                        }
                 }
-            VideoColorTransfer.HLG -> VideoDynamicRange.HLG
+            VideoColorTransfer.HLG ->
+                if (
+                    source.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
+                    source.dolbyVision?.hasHlgCompatibleBaseLayer == true
+                ) {
+                    VideoDynamicRange.DOLBY_VISION
+                } else {
+                    VideoDynamicRange.HLG
+                }
             VideoColorTransfer.SDR,
             VideoColorTransfer.SRGB,
             -> VideoDynamicRange.SDR
@@ -89,9 +121,13 @@ internal object JvmDecodedVideoColorSignalCodec {
             transfer = values[3].toVideoColorTransfer(),
             matrix = values[4].toVideoColorMatrix(),
             range = values[5].toVideoColorRange(),
-            authoritativeUnknowns = values[6] != 0,
+            authoritativeUnknowns = values[6] and FLAG_AUTHORITATIVE_UNKNOWNS != 0,
+            hasValidatedHdr10PlusMetadata = values[6] and FLAG_VALIDATED_HDR10_PLUS != 0,
         )
     }
+
+    private const val FLAG_AUTHORITATIVE_UNKNOWNS = 1 shl 0
+    private const val FLAG_VALIDATED_HDR10_PLUS = 1 shl 1
 }
 
 private fun Int.toVideoColorPrimaries(): VideoColorPrimaries =

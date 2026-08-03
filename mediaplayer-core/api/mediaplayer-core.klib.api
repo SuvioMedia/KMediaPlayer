@@ -814,12 +814,16 @@ final class io.github.kdroidfilter.composemediaplayer/DisplayColorCapabilities {
 }
 
 final class io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo { // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo|null[0]
-    constructor <init>(kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean? = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer = ..., kotlin/Boolean = ...) // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.<init>|<init>(kotlin.Int?;kotlin.Int?;kotlin.Boolean?;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Boolean){}[0]
+    constructor <init>(kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean? = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer = ..., kotlin/Boolean = ..., kotlin/Boolean = ...) // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.<init>|<init>(kotlin.Int?;kotlin.Int?;kotlin.Boolean?;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Boolean;kotlin.Boolean){}[0]
 
+    final val compatibleBaseLayerDynamicRange // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.compatibleBaseLayerDynamicRange|{}compatibleBaseLayerDynamicRange[0]
+        final fun <get-compatibleBaseLayerDynamicRange>(): io.github.kdroidfilter.composemediaplayer/VideoDynamicRange? // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.compatibleBaseLayerDynamicRange.<get-compatibleBaseLayerDynamicRange>|<get-compatibleBaseLayerDynamicRange>(){}[0]
     final val enhancementLayer // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.enhancementLayer|{}enhancementLayer[0]
         final fun <get-enhancementLayer>(): io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.enhancementLayer.<get-enhancementLayer>|<get-enhancementLayer>(){}[0]
     final val hasHdr10CompatibleBaseLayer // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.hasHdr10CompatibleBaseLayer|{}hasHdr10CompatibleBaseLayer[0]
         final fun <get-hasHdr10CompatibleBaseLayer>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.hasHdr10CompatibleBaseLayer.<get-hasHdr10CompatibleBaseLayer>|<get-hasHdr10CompatibleBaseLayer>(){}[0]
+    final val hasHlgCompatibleBaseLayer // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.hasHlgCompatibleBaseLayer|{}hasHlgCompatibleBaseLayer[0]
+        final fun <get-hasHlgCompatibleBaseLayer>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.hasHlgCompatibleBaseLayer.<get-hasHlgCompatibleBaseLayer>|<get-hasHlgCompatibleBaseLayer>(){}[0]
     final val hasRpu // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.hasRpu|{}hasRpu[0]
         final fun <get-hasRpu>(): kotlin/Boolean? // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.hasRpu.<get-hasRpu>|<get-hasRpu>(){}[0]
     final val level // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.level|{}level[0]
@@ -832,7 +836,8 @@ final class io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo { // io.gi
     final fun component3(): kotlin/Boolean? // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.component3|component3(){}[0]
     final fun component4(): io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.component4|component4(){}[0]
     final fun component5(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.component5|component5(){}[0]
-    final fun copy(kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean? = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.copy|copy(kotlin.Int?;kotlin.Int?;kotlin.Boolean?;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Boolean){}[0]
+    final fun component6(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.component6|component6(){}[0]
+    final fun copy(kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean? = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer = ..., kotlin/Boolean = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.copy|copy(kotlin.Int?;kotlin.Int?;kotlin.Boolean?;io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer;kotlin.Boolean;kotlin.Boolean){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/DolbyVisionInfo.toString|toString(){}[0]

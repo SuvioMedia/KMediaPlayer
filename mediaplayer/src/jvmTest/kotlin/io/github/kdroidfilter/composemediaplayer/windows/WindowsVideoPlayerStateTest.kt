@@ -1,8 +1,10 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
+import io.github.kdroidfilter.composemediaplayer.DolbyVisionInfo
 import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
 import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
+import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
@@ -28,6 +30,28 @@ import kotlin.time.Duration.Companion.milliseconds
  * the tests will be skipped.
  */
 class WindowsVideoPlayerStateTest {
+    @Test
+    fun `platform audio metadata exposes selected default track`() {
+        val track =
+            windowsPlatformAudioTrack(
+                VideoMetadata(
+                    audioChannels = 2,
+                    audioSampleRate = 48_000,
+                ),
+            )
+
+        assertNotNull(track)
+        assertEquals("windows:media-foundation:audio:default", track.id)
+        assertEquals(2, track.channels)
+        assertEquals(48_000, track.sampleRate)
+        assertTrue(track.isDefault)
+    }
+
+    @Test
+    fun `platform source without audio metadata exposes no audio track`() {
+        assertNull(windowsPlatformAudioTrack(VideoMetadata()))
+    }
+
     private fun assumeWindows() {
         Assume.assumeTrue(
             "Skipping Windows-specific test on non-Windows platform",
@@ -145,6 +169,45 @@ class WindowsVideoPlayerStateTest {
         assertFalse(request.forceSdrOutput)
         assertTrue(request.allowHdrCmafPassthrough)
         assertTrue(request.requireHdrCmafPassthrough)
+    }
+
+    @Test
+    fun profile5FailsClosedBeforeTheGenericHdrToSdrBridge() {
+        val profile5 =
+            VideoColorInfo(
+                dynamicRange = VideoDynamicRange.DOLBY_VISION,
+                dolbyVision = DolbyVisionInfo(profile = 5, hasRpu = true),
+            )
+
+        assertTrue(
+            shouldFailClosedForUnsupportedWindowsDolbyVision(
+                source = profile5,
+                nativeHdrRouteAvailable = false,
+                hasColorPipelineError = true,
+            ),
+        )
+    }
+
+    @Test
+    fun compatibleDolbyVisionBaseLayerMayUseTheWindowsHdrFallback() {
+        val profile81 =
+            VideoColorInfo(
+                dynamicRange = VideoDynamicRange.DOLBY_VISION,
+                dolbyVision =
+                    DolbyVisionInfo(
+                        profile = 8,
+                        hasRpu = true,
+                        hasHdr10CompatibleBaseLayer = true,
+                    ),
+            )
+
+        assertFalse(
+            shouldFailClosedForUnsupportedWindowsDolbyVision(
+                source = profile81,
+                nativeHdrRouteAvailable = false,
+                hasColorPipelineError = true,
+            ),
+        )
     }
 
     /**

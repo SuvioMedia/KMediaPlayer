@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineRenderer
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
 import io.github.kdroidfilter.composemediaplayer.DynamicMetadataHandling
@@ -12,6 +13,7 @@ import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineStatus
 import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.allowComposeMediaPlayerLogging
@@ -28,9 +30,19 @@ private const val PERFORMANCE_SAMPLE_WINDOW_MS = 5_000L
 private const val MINIMUM_PERFORMANCE_SAMPLE_WINDOW_SECONDS = 4.0
 private const val MINIMUM_AVERAGE_FPS = 59.0
 private const val MINIMUM_WINDOW_FPS = 55.0
+private const val MAXIMUM_EXPECTED_RENDER_FPS = 60.0
+private const val STRICT_HIGH_FRAME_RATE_FLOOR = 59.0
+private const val MINIMUM_SOURCE_FPS_RATIO = 0.94
+private const val MINIMUM_WINDOW_SOURCE_FPS_RATIO = 0.85
+private const val MAXIMUM_DROPPED_FRAME_RATIO = 0.15
 private const val MAXIMUM_AV_SYNC_OFFSET_MS = 45.0f
 private const val MAXIMUM_RESIDENT_SET_GROWTH_KIB = 256L * 1_024L
-private const val SELF_TEST_START_TIMEOUT_MS = 90_000L
+private val selfTestStartTimeoutMs =
+    System.getProperty("sample.app.colorSelfTestStartTimeoutSeconds")
+        ?.toLongOrNull()
+        ?.takeIf { it in 1L..600L }
+        ?.times(1_000L)
+        ?: 90_000L
 private const val STABLE_OUTPUT_WINDOW_MS = 1_500L
 
 @Composable
@@ -53,17 +65,30 @@ internal fun DesktopColorPipelineSelfTest(
             runCatching {
                 playerState.loop = true
                 playerState.openUri(inputUri, InitialPlayerState.PLAY)
-                withTimeout(SELF_TEST_START_TIMEOUT_MS) {
+                withTimeout(selfTestStartTimeoutMs) {
                     while (true) {
                         val status = playerState.colorPipelineStatus.value
                         lastStatus = status
+                        val startupError = playerState.error
+                        val startupFailureIsFinal =
+                            startupError != null &&
+                                (
+                                    startupError !is VideoPlayerError.ColorPipelineError ||
+                                    status.source.dynamicRange != VideoDynamicRange.UNKNOWN ||
+                                        status.outputDynamicRange != VideoDynamicRange.UNKNOWN
+                                )
+                        check(!startupFailureIsFinal) {
+                            "Playback failed before color output was confirmed: $startupError"
+                        }
                         if (status.matchesExpectedDesktopColorOutput(expectedSource, expectedOutput)) break
                         delay(100L)
                     }
                 }
-                withTimeout(SELF_TEST_START_TIMEOUT_MS) {
+                withTimeout(selfTestStartTimeoutMs) {
                     while (!playerState.isPlaying || playerState.isLoading) {
-                        check(playerState.error == null) { "Playback failed before the sustained run: ${playerState.error}" }
+                        check(playerState.error == null) {
+                            "Playback failed before the sustained run: ${playerState.error}"
+                        }
                         delay(50L)
                     }
                 }
@@ -86,7 +111,14 @@ internal fun DesktopColorPipelineSelfTest(
                 onSuccess = DesktopSustainedPlaybackResult::summary,
                 onFailure = { failure ->
                     val detail =
-                        listOfNotNull(failure.message, lastStatus?.compactDiagnostic())
+                        listOfNotNull(
+                            failure.message,
+                            lastStatus?.compactDiagnostic(),
+                            "playing=${playerState.isPlaying} loading=${playerState.isLoading} " +
+                                "error=${playerState.error} " +
+                                "rendered=${playerState.diagnostics.renderedVideoFrames} " +
+                                "dropped=${playerState.diagnostics.droppedVideoFrames}",
+                        )
                             .joinToString("; ")
                             .replace(inputUri, "<input>")
                             .take(500)
@@ -115,13 +147,16 @@ private suspend fun runDesktopSustainedPlaybackCheck(
     requireAudioSync: Boolean,
     durationSeconds: Long,
 ): DesktopSustainedPlaybackResult {
+    val frameRateThresholds = desktopFrameRateThresholds(playerState.metadata.frameRate?.toDouble())
     val started = TimeSource.Monotonic.markNow()
-    val baselineFrames =
+    val baselineRenderedFrames =
         checkNotNull(playerState.diagnostics.renderedVideoFrames) { "Rendered frame telemetry unavailable." }
+    val baselineDroppedFrames =
+        checkNotNull(playerState.diagnostics.droppedVideoFrames) { "Dropped-frame telemetry unavailable." }
     val initialResidentSetKib = checkNotNull(currentResidentSetKib()) { "Resident-set telemetry unavailable." }
-    var previousFrames = baselineFrames
+    var previousProcessedFrames = baselineRenderedFrames + baselineDroppedFrames
     var previousElapsedSeconds = 0.0
-    var minimumFps = Float.POSITIVE_INFINITY
+    var minimumProcessedFps = Double.POSITIVE_INFINITY
     var peakResidentSetKib = initialResidentSetKib
 
     while (started.elapsedNow().inWholeMilliseconds < durationSeconds * 1_000L) {
@@ -132,11 +167,15 @@ private suspend fun runDesktopSustainedPlaybackCheck(
         val diagnostics = playerState.diagnostics
         val renderedFrames =
             checkNotNull(diagnostics.renderedVideoFrames) { "Rendered frame telemetry disappeared." }
+        val droppedFrames =
+            checkNotNull(diagnostics.droppedVideoFrames) { "Dropped-frame telemetry disappeared." }
+        val processedFrames = renderedFrames + droppedFrames
         val windowSeconds = elapsedSeconds - previousElapsedSeconds
         if (windowSeconds >= MINIMUM_PERFORMANCE_SAMPLE_WINDOW_SECONDS) {
-            minimumFps = minOf(minimumFps, ((renderedFrames - previousFrames) / windowSeconds).toFloat())
+            minimumProcessedFps =
+                minOf(minimumProcessedFps, (processedFrames - previousProcessedFrames) / windowSeconds)
         }
-        previousFrames = renderedFrames
+        previousProcessedFrames = processedFrames
         previousElapsedSeconds = elapsedSeconds
         currentResidentSetKib()?.let { peakResidentSetKib = maxOf(peakResidentSetKib, it) }
         check(playerState.colorPipelineStatus.value.matchesExpectedDesktopColorOutput(expectedSource, expectedOutput)) {
@@ -152,20 +191,31 @@ private suspend fun runDesktopSustainedPlaybackCheck(
     val actualDurationSeconds = started.elapsedNow().inWholeNanoseconds / 1_000_000_000.0
     val diagnostics = playerState.diagnostics
     val renderedFrames =
-        checkNotNull(diagnostics.renderedVideoFrames) { "Rendered frame telemetry disappeared." } - baselineFrames
-    val droppedFrames = checkNotNull(diagnostics.droppedVideoFrames) { "Dropped-frame telemetry unavailable." }
+        checkNotNull(diagnostics.renderedVideoFrames) { "Rendered frame telemetry disappeared." } -
+            baselineRenderedFrames
+    val droppedFrames =
+        checkNotNull(diagnostics.droppedVideoFrames) { "Dropped-frame telemetry unavailable." } -
+            baselineDroppedFrames
     val maximumAvSyncOffsetMs = diagnostics.maximumAvSyncOffsetMs
-    val averageFps = renderedFrames / actualDurationSeconds
-    val sampledMinimumFps = minimumFps.takeIf(Float::isFinite) ?: 0f
+    val framePerformance = desktopFramePerformance(renderedFrames, droppedFrames, actualDurationSeconds)
+    val sampledMinimumProcessedFps = minimumProcessedFps.takeIf(Double::isFinite) ?: 0.0
     val residentSetGrowthKib = (peakResidentSetKib - initialResidentSetKib).coerceAtLeast(0L)
 
-    check(averageFps >= MINIMUM_AVERAGE_FPS) {
-        "Average frame rate $averageFps is below $MINIMUM_AVERAGE_FPS " +
+    check(framePerformance.processedAverageFps >= frameRateThresholds.minimumAverageFps) {
+        "Average processed frame rate ${framePerformance.processedAverageFps} is below " +
+            "${frameRateThresholds.minimumAverageFps} " +
             "(rendered=$renderedFrames, dropped=$droppedFrames, duration=$actualDurationSeconds, " +
-            "minimumWindowFps=$sampledMinimumFps)."
+            "minimumProcessedWindowFps=$sampledMinimumProcessedFps, " +
+            "sourceFps=${frameRateThresholds.sourceFrameRate})."
     }
-    check(sampledMinimumFps >= MINIMUM_WINDOW_FPS) {
-        "Minimum sampled frame rate $sampledMinimumFps is below $MINIMUM_WINDOW_FPS."
+    check(sampledMinimumProcessedFps >= frameRateThresholds.minimumWindowFps) {
+        "Minimum sampled processed frame rate $sampledMinimumProcessedFps is below " +
+            "${frameRateThresholds.minimumWindowFps} " +
+            "for sourceFps=${frameRateThresholds.sourceFrameRate}."
+    }
+    check(framePerformance.droppedFrameRatio <= MAXIMUM_DROPPED_FRAME_RATIO) {
+        "Dropped-frame ratio ${framePerformance.droppedFrameRatio} exceeds $MAXIMUM_DROPPED_FRAME_RATIO " +
+            "(rendered=$renderedFrames, dropped=$droppedFrames)."
     }
     if (requireAudioSync) {
         checkNotNull(maximumAvSyncOffsetMs) {
@@ -185,8 +235,14 @@ private suspend fun runDesktopSustainedPlaybackCheck(
         durationSeconds = actualDurationSeconds,
         renderedFrames = renderedFrames,
         droppedFrames = droppedFrames,
-        averageFps = averageFps,
-        minimumFps = sampledMinimumFps,
+        renderedAverageFps = framePerformance.renderedAverageFps,
+        processedAverageFps = framePerformance.processedAverageFps,
+        minimumProcessedFps = sampledMinimumProcessedFps,
+        droppedFrameRatio = framePerformance.droppedFrameRatio,
+        maximumDroppedFrameRatio = MAXIMUM_DROPPED_FRAME_RATIO,
+        sourceFrameRate = frameRateThresholds.sourceFrameRate,
+        requiredAverageFps = frameRateThresholds.minimumAverageFps,
+        requiredWindowFps = frameRateThresholds.minimumWindowFps,
         maximumAvSyncOffsetMs = maximumAvSyncOffsetMs,
         initialResidentSetMib = initialResidentSetKib / 1_024.0,
         peakResidentSetMib = peakResidentSetKib / 1_024.0,
@@ -199,8 +255,14 @@ private data class DesktopSustainedPlaybackResult(
     val durationSeconds: Double,
     val renderedFrames: Long,
     val droppedFrames: Long,
-    val averageFps: Double,
-    val minimumFps: Float,
+    val renderedAverageFps: Double,
+    val processedAverageFps: Double,
+    val minimumProcessedFps: Double,
+    val droppedFrameRatio: Double,
+    val maximumDroppedFrameRatio: Double,
+    val sourceFrameRate: Double?,
+    val requiredAverageFps: Double,
+    val requiredWindowFps: Double,
     val maximumAvSyncOffsetMs: Float?,
     val initialResidentSetMib: Double,
     val peakResidentSetMib: Double,
@@ -210,8 +272,11 @@ private data class DesktopSustainedPlaybackResult(
         String.format(
             Locale.US,
             "PASS source=%s output=%s renderer=%s verification=%s decoder=%s " +
-                "durationSeconds=%.3f renderedFrames=%d droppedFrames=%d averageFps=%.3f " +
-                "minimumFps=%.3f maxAvSyncMs=%s initialRssMiB=%.3f peakRssMiB=%.3f " +
+                "durationSeconds=%.3f renderedFrames=%d droppedFrames=%d renderedFps=%.3f " +
+                "processedFps=%.3f minimumProcessedFps=%.3f droppedFrameRatio=%.4f " +
+                "maximumDroppedFrameRatio=%.4f sourceFps=%s requiredAverageFps=%.3f " +
+                "requiredWindowFps=%.3f " +
+                "maxAvSyncMs=%s initialRssMiB=%.3f peakRssMiB=%.3f " +
                 "residentSetGrowthMiB=%.3f boundedMemory=true",
             status.source.dynamicRange,
             status.outputDynamicRange,
@@ -221,13 +286,65 @@ private data class DesktopSustainedPlaybackResult(
             durationSeconds,
             renderedFrames,
             droppedFrames,
-            averageFps,
-            minimumFps,
+            renderedAverageFps,
+            processedAverageFps,
+            minimumProcessedFps,
+            droppedFrameRatio,
+            maximumDroppedFrameRatio,
+            sourceFrameRate?.let { String.format(Locale.US, "%.3f", it) } ?: "unknown",
+            requiredAverageFps,
+            requiredWindowFps,
             maximumAvSyncOffsetMs?.let { String.format(Locale.US, "%.3f", it) } ?: "unavailable",
             initialResidentSetMib,
             peakResidentSetMib,
             residentSetGrowthMib,
         )
+}
+
+internal data class DesktopFrameRateThresholds(
+    val sourceFrameRate: Double?,
+    val minimumAverageFps: Double,
+    val minimumWindowFps: Double,
+)
+
+internal data class DesktopFramePerformance(
+    val renderedAverageFps: Double,
+    val processedAverageFps: Double,
+    val droppedFrameRatio: Double,
+)
+
+internal fun desktopFramePerformance(
+    renderedFrames: Long,
+    droppedFrames: Long,
+    durationSeconds: Double,
+): DesktopFramePerformance {
+    require(renderedFrames >= 0L) { "Rendered-frame count must not decrease." }
+    require(droppedFrames >= 0L) { "Dropped-frame count must not decrease." }
+    require(durationSeconds.isFinite() && durationSeconds > 0.0) { "Duration must be positive and finite." }
+    val processedFrames = renderedFrames + droppedFrames
+    require(processedFrames >= renderedFrames) { "Processed-frame count overflowed." }
+    return DesktopFramePerformance(
+        renderedAverageFps = renderedFrames / durationSeconds,
+        processedAverageFps = processedFrames / durationSeconds,
+        droppedFrameRatio = if (processedFrames == 0L) 0.0 else droppedFrames.toDouble() / processedFrames,
+    )
+}
+
+internal fun desktopFrameRateThresholds(sourceFrameRate: Double?): DesktopFrameRateThresholds {
+    val normalizedSourceRate = sourceFrameRate?.takeIf { it.isFinite() && it > 0.0 }
+    val expectedRenderRate = normalizedSourceRate?.coerceAtMost(MAXIMUM_EXPECTED_RENDER_FPS)
+    val ordinarySourceRate = expectedRenderRate?.takeIf { it < STRICT_HIGH_FRAME_RATE_FLOOR }
+    return DesktopFrameRateThresholds(
+        sourceFrameRate = normalizedSourceRate,
+        minimumAverageFps =
+            ordinarySourceRate
+                ?.let { minOf(MINIMUM_AVERAGE_FPS, it * MINIMUM_SOURCE_FPS_RATIO) }
+                ?: MINIMUM_AVERAGE_FPS,
+        minimumWindowFps =
+            ordinarySourceRate
+                ?.let { minOf(MINIMUM_WINDOW_FPS, it * MINIMUM_WINDOW_SOURCE_FPS_RATIO) }
+                ?: MINIMUM_WINDOW_FPS,
+    )
 }
 
 private fun VideoColorPipelineStatus.matchesExpectedDesktopColorOutput(
@@ -252,10 +369,18 @@ private fun VideoColorPipelineStatus.matchesExpectedDesktopColorOutput(
 
             ColorPipelineRenderer.CONTROLLED_HDR ->
                 verification == ColorPipelineVerification.RENDERER_CONFIGURED &&
-                    if (source.dynamicRange == VideoDynamicRange.HDR10_PLUS) {
-                        metadataHandling == DynamicMetadataHandling.APPLIED_BY_RENDERER
-                    } else {
-                        metadataHandling == DynamicMetadataHandling.PASSTHROUGH
+                    when (source.dynamicRange) {
+                        VideoDynamicRange.HDR10_PLUS ->
+                            metadataHandling == DynamicMetadataHandling.APPLIED_BY_RENDERER
+
+                        VideoDynamicRange.DOLBY_VISION ->
+                            metadataHandling == DynamicMetadataHandling.PASSTHROUGH ||
+                                (
+                                    metadataHandling == DynamicMetadataHandling.DROPPED &&
+                                        fallbackReason == ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_USED
+                                )
+
+                        else -> metadataHandling == DynamicMetadataHandling.PASSTHROUGH
                     }
 
             else -> false

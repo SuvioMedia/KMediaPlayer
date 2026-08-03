@@ -362,6 +362,52 @@ class VideoColorPipelinePlannerTest {
     }
 
     @Test
+    fun `installed P8_1 bridge may use a controlled HDR10 base layer route`() {
+        val source = profile7Source(DolbyVisionEnhancementLayer.MEL)
+        val output =
+            source.copy(
+                dolbyVision =
+                    source.dolbyVision?.copy(
+                        profile = 8,
+                        enhancementLayer = DolbyVisionEnhancementLayer.NONE,
+                        hasHdr10CompatibleBaseLayer = true,
+                    ),
+            )
+        val mapping = requireNotNull(source.profile7To81MappingOrNull(output))
+
+        val plan =
+            VideoColorPipelinePlanner.plan(
+                request(VideoDynamicRange.DOLBY_VISION).copy(
+                    source = source,
+                    decoderInput = output,
+                    appliedDolbyVisionProfileMapping = mapping,
+                    display = HDR10_ONLY_DISPLAY,
+                    decoder =
+                        DecoderColorCapabilities(
+                            isKnown = true,
+                            supportedDynamicRanges = setOf(VideoDynamicRange.HDR10),
+                            maxBitDepth = 10,
+                        ),
+                    renderer =
+                        RendererColorCapabilities(
+                            controlledHdrDynamicRanges = setOf(VideoDynamicRange.HDR10),
+                        ),
+                    nativeSurfaceAvailable = false,
+                    surfaceKind = VideoSurfaceKind.CONTROLLED_GPU_SURFACE,
+                    dolbyVisionPolicy = DolbyVisionPolicy.CONVERT_PROFILE_7_TO_8_1,
+                    conversion = DV_CONVERSION,
+                ),
+            )
+
+        assertEquals(ColorPipelineRoute.CONTROLLED_HDR_RENDERER, plan.route)
+        assertEquals(VideoDynamicRange.HDR10, plan.outputDynamicRange)
+        assertEquals(DynamicMetadataHandling.DROPPED, plan.metadataHandling)
+        assertEquals(ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_USED, plan.fallbackReason)
+        assertEquals(mapping, plan.dolbyVisionProfileMapping)
+        assertTrue(plan.requestHonored)
+    }
+
+    @Test
     fun `unknown RPU signalling may be probed by the conversion bridge`() {
         val source =
             profile7Source(DolbyVisionEnhancementLayer.UNKNOWN).copy(
@@ -408,6 +454,51 @@ class VideoColorPipelinePlannerTest {
         assertEquals(VideoDynamicRange.HDR10, plan.outputDynamicRange)
         assertEquals(ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_USED, plan.fallbackReason)
         assertEquals(DynamicMetadataHandling.DROPPED, plan.metadataHandling)
+    }
+
+    @Test
+    fun `AUTO uses a verified Profile 8_4 HLG base layer without claiming Dolby Vision output`() {
+        val source =
+            VideoColorInfo(
+                dynamicRange = VideoDynamicRange.DOLBY_VISION,
+                transfer = VideoColorTransfer.HLG,
+                dolbyVision =
+                    DolbyVisionInfo(
+                        profile = 8,
+                        hasRpu = true,
+                        hasHlgCompatibleBaseLayer = true,
+                    ),
+            )
+        val plan =
+            VideoColorPipelinePlanner.plan(
+                request(VideoDynamicRange.DOLBY_VISION).copy(
+                    source = source,
+                    display =
+                        DisplayColorCapabilities(
+                            isKnown = true,
+                            supportedDynamicRanges = setOf(VideoDynamicRange.SDR, VideoDynamicRange.HLG),
+                        ),
+                    decoder =
+                        DecoderColorCapabilities(
+                            isKnown = true,
+                            supportedDynamicRanges = setOf(VideoDynamicRange.HLG),
+                            maxBitDepth = 10,
+                        ),
+                    renderer =
+                        RendererColorCapabilities(
+                            controlledHdrDynamicRanges = setOf(VideoDynamicRange.HLG),
+                        ),
+                    nativeSurfaceAvailable = false,
+                    surfaceKind = VideoSurfaceKind.CONTROLLED_GPU_SURFACE,
+                    dolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+                ),
+            )
+
+        assertEquals(ColorPipelineRoute.CONTROLLED_HDR_RENDERER, plan.route)
+        assertEquals(VideoDynamicRange.HLG, plan.outputDynamicRange)
+        assertEquals(DynamicMetadataHandling.DROPPED, plan.metadataHandling)
+        assertEquals(ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_USED, plan.fallbackReason)
+        assertTrue(plan.requestHonored)
     }
 
     @Test

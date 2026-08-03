@@ -62,6 +62,16 @@ class Hdr10PlusMetadataTest {
     }
 
     @Test
+    fun `parser accepts rbsp style byte alignment used by HEVC HDR10 plus streams`() {
+        assertIs<Hdr10PlusParseResult.Success>(
+            Hdr10PlusMetadataParser.parse(
+                singleWindowPayload(rbspAlignmentMarker = true),
+                timestampUs = 0,
+            ),
+        )
+    }
+
+    @Test
     fun `parser rejects wrong registration and truncation without throwing`() {
         val payload = singleWindowPayload()
         assertIs<Hdr10PlusParseResult.Invalid>(
@@ -251,6 +261,7 @@ class Hdr10PlusMetadataTest {
     private fun singleWindowPayload(
         colorSaturationWeight: Int? = null,
         bezierAnchors: List<Int> = listOf(320, 700),
+        rbspAlignmentMarker: Boolean = false,
     ): ByteArray =
         BitWriter()
             .write(0xb5, 8)
@@ -276,6 +287,7 @@ class Hdr10PlusMetadataTest {
             .apply { bezierAnchors.forEach { write(it, 10) } }
             .write(if (colorSaturationWeight == null) 0 else 1, 1)
             .apply { colorSaturationWeight?.let { write(it, 6) } }
+            .apply { if (rbspAlignmentMarker) write(1, 1) }
             .toByteArray()
 
     private class BitWriter {

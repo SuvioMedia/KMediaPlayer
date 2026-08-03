@@ -106,6 +106,9 @@ internal fun String?.toMacVideoColorInfo(): VideoColorInfo {
                                 dolbyVisionProfile == DOLBY_VISION_PROFILE_7 ||
                                     dolbyVisionCompatibilityId == HDR10_DOVI_COMPATIBILITY_ID
                             ),
+                    hasHlgCompatibleBaseLayer =
+                        values["dvHasBase"] == "1" &&
+                            dolbyVisionCompatibilityId == HLG_DOVI_COMPATIBILITY_ID,
                 )
             } else {
                 null
@@ -155,5 +158,6 @@ private fun String?.nonNegativeIntOrNull(): Int? = this?.toIntOrNull()?.takeIf {
 
 private const val DOLBY_VISION_PROFILE_7 = 7
 private const val HDR10_DOVI_COMPATIBILITY_ID = 1
+private const val HLG_DOVI_COMPATIBILITY_ID = 4
 private const val HDR10_PLUS_APPLICATION_IDENTIFIER = 4
 private const val MAX_COMPONENT_BIT_DEPTH = 16

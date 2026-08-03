@@ -111,8 +111,8 @@ NATIVEVIDEOPLAYER_API void    DetachHdrOutput(VideoPlayerInstance* pInstance);
 NATIVEVIDEOPLAYER_API HRESULT RenderHdrFrame(VideoPlayerInstance* pInstance);
 NATIVEVIDEOPLAYER_API HRESULT GetHdrOutputStatus(VideoPlayerInstance* pInstance, HdrOutputStatus* status);
 // Active decoded color snapshot: generation, bit depth, primaries, transfer,
-// matrix, range and authoritative-unknown marker. Values follow
-// JvmDecodedVideoColorSignalCodec.
+// matrix, range and flags (authoritative unknowns / validated HDR10+).
+// Values follow JvmDecodedVideoColorSignalCodec.
 NATIVEVIDEOPLAYER_API void    GetDecodedVideoColorInfo(
     const VideoPlayerInstance* pInstance,
     int32_t outInfo[7]);

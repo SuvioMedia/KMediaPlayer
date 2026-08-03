@@ -1,7 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities
-import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
 import io.github.kdroidfilter.composemediaplayer.DynamicMetadataHandling
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
 import io.github.kdroidfilter.composemediaplayer.VideoColorMatrix
@@ -42,7 +41,10 @@ internal data class WindowsNativeHdrOutputStatus(
                 swapChainConfigured &&
                 firstFramePresented &&
                 p010InputConfirmed &&
-                swapChainColorSpace == WINDOWS_HDR_SWAP_CHAIN_COLOR_SPACE &&
+                (
+                    swapChainColorSpace == WINDOWS_HDR10_SWAP_CHAIN_COLOR_SPACE ||
+                        swapChainColorSpace == WINDOWS_SCRGB_SWAP_CHAIN_COLOR_SPACE
+                ) &&
                 lastError >= 0
 
     val isConfirmedSdrOutput: Boolean
@@ -77,7 +79,7 @@ internal data class WindowsNativeHdrOutputStatus(
 @Suppress("CyclomaticComplexMethod")
 internal fun buildWindowsHdrNativeConfiguration(
     source: VideoColorInfo,
-    dolbyVisionPolicy: DolbyVisionPolicy,
+    dolbyVisionBaseLayerOutput: VideoDynamicRange? = null,
     projection: VideoProjectionSettings,
     projectionView: VideoProjectionViewSettings,
     textureCrop: VideoTextureCrop,
@@ -92,10 +94,9 @@ internal fun buildWindowsHdrNativeConfiguration(
 
             VideoDynamicRange.HLG -> WINDOWS_HDR_TRANSFER_HLG
             VideoDynamicRange.DOLBY_VISION ->
-                WINDOWS_HDR_TRANSFER_PQ.takeIf {
-                    dolbyVisionPolicy == DolbyVisionPolicy.PREFER_HDR10_BASE_LAYER &&
-                        source.dolbyVision?.hasHdr10CompatibleBaseLayer == true
-                }
+                dolbyVisionBaseLayerOutput
+                    .takeIf { it == source.dolbyVision?.compatibleBaseLayerDynamicRange }
+                    ?.windowsHdrTransfer()
 
             VideoDynamicRange.UNKNOWN,
             VideoDynamicRange.SDR,
@@ -192,6 +193,15 @@ internal fun buildWindowsHdrNativeConfiguration(
     )
 }
 
+private fun VideoDynamicRange.windowsHdrTransfer(): Int? =
+    when (this) {
+        VideoDynamicRange.HDR10,
+        VideoDynamicRange.HDR10_PLUS,
+        -> WINDOWS_HDR_TRANSFER_PQ
+        VideoDynamicRange.HLG -> WINDOWS_HDR_TRANSFER_HLG
+        else -> null
+    }
+
 private val VideoStereoLayout.nativeCode: Int
     get() =
         when (this) {
@@ -220,7 +230,8 @@ private const val WINDOWS_HDR_MATRIX_BT601 = 2
 private const val WINDOWS_HDR_PRIMARIES_BT2020 = 0
 private const val WINDOWS_HDR_PRIMARIES_BT709 = 1
 private const val WINDOWS_HDR_PRIMARIES_DISPLAY_P3 = 2
-private const val WINDOWS_HDR_SWAP_CHAIN_COLOR_SPACE = 12
+private const val WINDOWS_HDR10_SWAP_CHAIN_COLOR_SPACE = 12
+private const val WINDOWS_SCRGB_SWAP_CHAIN_COLOR_SPACE = 1
 private const val WINDOWS_SDR_SWAP_CHAIN_COLOR_SPACE = 0
 private const val DEFAULT_HDR_SOURCE_PEAK_NITS = 1_000f
 private const val WINDOWS_SCRGB_REFERENCE_WHITE_NITS = 80f

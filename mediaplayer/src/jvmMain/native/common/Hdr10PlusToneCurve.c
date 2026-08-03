@@ -78,7 +78,10 @@ static int kmp_has_only_alignment_padding(KmpBitReader* reader) {
     size_t index;
     if (reader->failed || remaining > 7) return 0;
     for (index = 0; index < remaining; ++index) {
-        if (kmp_read_bits(reader, 1) != 0) return 0;
+        const uint32_t bit = kmp_read_bits(reader, 1);
+        /* Real HEVC HDR10+ streams exist with either zero-fill or an RBSP-style
+         * one-bit marker followed by zero-fill inside the registered payload. */
+        if (bit != 0 && index != 0) return 0;
     }
     return !reader->failed;
 }

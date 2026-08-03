@@ -8,7 +8,9 @@
 #include "NativeLogging.h"
 #include "WindowsHdrPresenter.h"
 #include "Hdr10PlusHevcParser.h"
+#include "Hdr10PlusToneCurve.h"
 #include <algorithm>
+#include <codecapi.h>
 #include <cstring>
 #include <cstdint>
 #include <limits>
@@ -41,10 +43,15 @@ using namespace AudioManager;
 // ---------------------------------------------------------------------------
 static constexpr UINT   kDefaultFrameRateNum    = 30;
 static constexpr UINT   kDefaultFrameRateDenom  = 1;
-static constexpr double kFrameSkipThreshold     = 3.0; // frame intervals
+// A frame that is more than a quarter of a frame interval late cannot be
+// copied into the Compose surface inside the 45 ms lip-sync budget. Drop it
+// here and let the decoder catch up.
+static constexpr double kFrameSkipThreshold     = 0.25; // frame intervals
 static constexpr double kFrameAheadMinMs        = 1.0;
 static constexpr LONGLONG kHdrMetadataTimestampTolerance = 10000; // 1 ms in MF ticks.
 static constexpr int kHdrMetadataMaximumReadIterations = 128;
+static constexpr int kHdr10PlusProbeMaximumReadIterations = 32;
+static constexpr int32_t kDecodedColorFlagValidatedHdr10Plus = 1 << 1;
 
 // ---------------------------------------------------------------------------
 // Debug printing
@@ -222,14 +229,13 @@ static void ResetHdrMetadataReaderState(VideoPlayerInstance* inst) {
     inst->llHdrMetadataLastTimestamp = (std::numeric_limits<LONGLONG>::min)();
 }
 
-static void UpdateHdrNalLengthSize(VideoPlayerInstance* inst, IMFMediaType* mediaType) {
-    if (!inst || !mediaType) return;
-    inst->hdrNalLengthSize = 4;
+static UINT32 HdrNalLengthSize(IMFMediaType* mediaType) {
+    if (!mediaType) return 4;
 
     UINT32 sequenceHeaderSize = 0;
     if (FAILED(mediaType->GetBlobSize(MF_MT_MPEG_SEQUENCE_HEADER, &sequenceHeaderSize)) ||
         sequenceHeaderSize < 22 || sequenceHeaderSize > 1024 * 1024) {
-        return;
+        return 4;
     }
     std::vector<BYTE> sequenceHeader(sequenceHeaderSize);
     UINT32 copied = 0;
@@ -239,9 +245,93 @@ static void UpdateHdrNalLengthSize(VideoPlayerInstance* inst, IMFMediaType* medi
             sequenceHeaderSize,
             &copied)) ||
         copied < 22 || sequenceHeader[0] != 1) {
-        return;
+        return 4;
     }
-    inst->hdrNalLengthSize = (sequenceHeader[21] & 0x03u) + 1u;
+    return (sequenceHeader[21] & 0x03u) + 1u;
+}
+
+static void UpdateHdrNalLengthSize(VideoPlayerInstance* inst, IMFMediaType* mediaType) {
+    if (!inst || !mediaType) return;
+    inst->hdrNalLengthSize = HdrNalLengthSize(mediaType);
+}
+
+static bool IsValidatedHdr10PlusPayload(const std::vector<uint8_t>& payload) {
+    if (payload.empty()) return false;
+    float sourcePeakNits = 0.0f;
+    float curve[KMP_HDR10_PLUS_TONE_CURVE_SAMPLE_COUNT] = {};
+    char error[256] = {};
+    return kmp_hdr10_plus_parse_tone_curve(
+               payload.data(),
+               payload.size(),
+               1000.0,
+               &sourcePeakNits,
+               curve,
+               error,
+               sizeof(error)) != 0;
+}
+
+/**
+ * Reads a bounded number of compressed HEVC access units and promotes the
+ * source only after both the SEI extractor and the complete ST 2094-40 parser
+ * accept a payload. PQ signalling alone is deliberately insufficient.
+ */
+static bool ProbeValidatedHdr10PlusMetadata(
+    IMFSourceReader* reader,
+    IMFMediaType* selectedType
+) {
+    if (!reader || !selectedType) return false;
+    GUID subtype = GUID_NULL;
+    if (FAILED(selectedType->GetGUID(MF_MT_SUBTYPE, &subtype)) ||
+        (subtype != MFVideoFormat_HEVC && subtype != MFVideoFormat_HEVC_ES)) {
+        return false;
+    }
+    if (FAILED(reader->SetCurrentMediaType(
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+            nullptr,
+            selectedType))) {
+        return false;
+    }
+
+    UINT32 nalLengthSize = HdrNalLengthSize(selectedType);
+    for (int iteration = 0; iteration < kHdr10PlusProbeMaximumReadIterations; ++iteration) {
+        DWORD streamIndex = 0;
+        DWORD flags = 0;
+        LONGLONG timestamp = 0;
+        ComPtr<IMFSample> sample;
+        const HRESULT hr = reader->ReadSample(
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+            0,
+            &streamIndex,
+            &flags,
+            &timestamp,
+            sample.GetAddressOf());
+        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) return false;
+        if (flags & (MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED |
+                     MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)) {
+            ComPtr<IMFMediaType> currentType;
+            if (SUCCEEDED(reader->GetCurrentMediaType(
+                    MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                    currentType.GetAddressOf()))) {
+                nalLengthSize = HdrNalLengthSize(currentType.Get());
+            }
+        }
+        if (!sample) continue;
+
+        ComPtr<IMFMediaBuffer> contiguousBuffer;
+        if (FAILED(sample->ConvertToContiguousBuffer(contiguousBuffer.GetAddressOf()))) continue;
+        BYTE* bytes = nullptr;
+        DWORD currentLength = 0;
+        if (FAILED(contiguousBuffer->Lock(&bytes, nullptr, &currentLength))) continue;
+        std::vector<uint8_t> payload;
+        const bool found = Hdr10PlusHevc::ExtractPayload(
+            bytes,
+            currentLength,
+            static_cast<uint8_t>(nalLengthSize),
+            payload);
+        contiguousBuffer->Unlock();
+        if (found && IsValidatedHdr10PlusPayload(payload)) return true;
+    }
+    return false;
 }
 
 /**
@@ -295,7 +385,8 @@ static HRESULT OpenHdrMetadataReader(
         GUID subtype = GUID_NULL;
         if (SUCCEEDED(candidate->GetGUID(MF_MT_MAJOR_TYPE, &majorType)) &&
             SUCCEEDED(candidate->GetGUID(MF_MT_SUBTYPE, &subtype)) &&
-            majorType == MFMediaType_Video && subtype == MFVideoFormat_HEVC) {
+            majorType == MFMediaType_Video &&
+            (subtype == MFVideoFormat_HEVC || subtype == MFVideoFormat_HEVC_ES)) {
             hevcType = candidate;
             break;
         }
@@ -425,13 +516,41 @@ static int32_t EncodedBitDepth(IMFMediaType* mediaType) {
     if (decodedBitDepth > 0) return decodedBitDepth;
 
     GUID subtype = GUID_NULL;
-    UINT32 profile = 0;
     if (!mediaType ||
-        FAILED(mediaType->GetGUID(MF_MT_SUBTYPE, &subtype)) ||
-        FAILED(mediaType->GetUINT32(MF_MT_VIDEO_PROFILE, &profile))) {
+        FAILED(mediaType->GetGUID(MF_MT_SUBTYPE, &subtype))) {
         return 0;
     }
+
+    UINT32 profile = 0;
+    const bool hasProfile = SUCCEEDED(mediaType->GetUINT32(MF_MT_VIDEO_PROFILE, &profile));
+    if (subtype == MFVideoFormat_H264 || subtype == MFVideoFormat_H264_ES) {
+        // Media Foundation commonly omits MF_MT_VIDEO_PROFILE for H.264 files.
+        // Its built-in H.264 decoder supports the ordinary 8-bit profiles below;
+        // an omitted profile is therefore a safe 8-bit SDR fallback. Explicit
+        // High10/4:2:2/4:4:4 profiles stay unknown so they cannot accidentally
+        // bypass the managed colour pipeline.
+        if (!hasProfile) return 8;
+        switch (profile) {
+        case eAVEncH264VProfile_Simple:
+        case eAVEncH264VProfile_Main:
+        case eAVEncH264VProfile_High:
+        case eAVEncH264VProfile_Extended:
+        case eAVEncH264VProfile_ScalableBase:
+        case eAVEncH264VProfile_ScalableHigh:
+        case eAVEncH264VProfile_MultiviewHigh:
+        case eAVEncH264VProfile_StereoHigh:
+        case eAVEncH264VProfile_ConstrainedBase:
+        case eAVEncH264VProfile_UCConstrainedHigh:
+        case eAVEncH264VProfile_UCScalableConstrainedBase:
+        case eAVEncH264VProfile_UCScalableConstrainedHigh:
+            return 8;
+        default:
+            return 0;
+        }
+    }
+
     if (subtype != MFVideoFormat_HEVC && subtype != MFVideoFormat_HEVC_ES) return 0;
+    if (!hasProfile) return 0;
 
     // Values follow eAVEncH265VProfile. The source reader exposes the same
     // profile identifiers on compressed HEVC media types.
@@ -513,6 +632,22 @@ static int32_t DecodedTransfer(IMFMediaType* mediaType) {
     default:
         return 0;
     }
+}
+
+static int32_t EncodedTransfer(IMFMediaType* mediaType) {
+    const int32_t declaredTransfer = DecodedTransfer(mediaType);
+    if (declaredTransfer > 0) return declaredTransfer;
+
+    GUID subtype = GUID_NULL;
+    if (!mediaType || FAILED(mediaType->GetGUID(MF_MT_SUBTYPE, &subtype))) return 0;
+    if ((subtype == MFVideoFormat_H264 || subtype == MFVideoFormat_H264_ES) &&
+        EncodedBitDepth(mediaType) == 8) {
+        // Match Media Foundation's playback convention for AVC with no VUI
+        // transfer tag. Explicit PQ/HLG wins above, while High10/4:2:2/4:4:4
+        // remains unknown because EncodedBitDepth deliberately rejects it.
+        return 1;
+    }
+    return 0;
 }
 
 static int32_t DecodedMatrix(IMFMediaType* mediaType) {
@@ -639,10 +774,13 @@ NATIVEVIDEOPLAYER_API HRESULT ProbeVideoColorInfoWithHeaders(
     outInfo[0] = 1;
     outInfo[1] = EncodedBitDepth(selectedType.Get());
     outInfo[2] = DecodedPrimaries(selectedType.Get());
-    outInfo[3] = DecodedTransfer(selectedType.Get());
+    outInfo[3] = EncodedTransfer(selectedType.Get());
     outInfo[4] = DecodedMatrix(selectedType.Get());
     outInfo[5] = DecodedRange(selectedType.Get());
-    outInfo[6] = 0;
+    outInfo[6] =
+        ProbeValidatedHdr10PlusMetadata(reader.Get(), selectedType.Get())
+            ? kDecodedColorFlagValidatedHdr10Plus
+            : 0;
     return S_OK;
 }
 
@@ -879,6 +1017,20 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
                 &streamIndex, &flags, &sampleTs, s.GetAddressOf());
             if (FAILED(hr)) return hr;
 
+            // A synchronous SourceReader can report a terminal stream error
+            // through the flag while returning a null sample. Treat it as a
+            // failure immediately; otherwise the render loop retries forever
+            // and turns the real decoder error into a misleading timeout.
+            if (flags & MF_SOURCE_READERF_ERROR) {
+                ComposeMediaPlayer::NativeLogging::Logf(
+                    "[Video] SourceReader signaled a stream error "
+                    "(stream=%lu, flags=0x%08lx, timestamp=%lld).\n",
+                    static_cast<unsigned long>(streamIndex),
+                    static_cast<unsigned long>(flags),
+                    static_cast<long long>(sampleTs));
+                return E_FAIL;
+            }
+
             if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
                 inst->bEOF.store(true);
                 return S_FALSE;
@@ -887,9 +1039,22 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
             HandleMediaTypeChanges(inst, flags);
 
             if (!s) {
+                const uint32_t emptyReads =
+                    inst->consecutiveEmptyVideoReads.fetch_add(1, std::memory_order_relaxed) + 1;
+                if (emptyReads <= 3 || emptyReads % 5000 == 0) {
+                    ComposeMediaPlayer::NativeLogging::Logf(
+                        "[Video] SourceReader returned no sample "
+                        "(count=%u, stream=%lu, flags=0x%08lx, timestamp=%lld).\n",
+                        emptyReads,
+                        static_cast<unsigned long>(streamIndex),
+                        static_cast<unsigned long>(flags),
+                        static_cast<long long>(sampleTs));
+                }
                 // Decoder starved — yield back to the caller.
                 return S_OK;
             }
+
+            inst->consecutiveEmptyVideoReads.store(0, std::memory_order_relaxed);
 
             // Paused path: cache the first frame for initial display.
             inst->totalVideoFrames.fetch_add(1, std::memory_order_relaxed);
@@ -910,8 +1075,9 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
                 inst->llCurrentPosition.store(sampleTs, std::memory_order_relaxed);
             }
 
-            // No timestamp → hand it over unconditionally.
-            if (sampleTs <= 0) {
+            // Zero is a valid timestamp for the first frame and must still go
+            // through A/V scheduling. A negative value has no usable PTS.
+            if (sampleTs < 0) {
                 sample = std::move(s);
                 break;
             }
@@ -1005,6 +1171,7 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
     pInstance->decodedMatrix.store(0, std::memory_order_relaxed);
     pInstance->decodedRange.store(0, std::memory_order_relaxed);
     pInstance->decodedAuthoritativeUnknowns.store(0, std::memory_order_relaxed);
+    pInstance->consecutiveEmptyVideoReads.store(0, std::memory_order_relaxed);
     const int32_t previousGeneration =
         pInstance->decodedColorGeneration.load(std::memory_order_relaxed);
     const int32_t resetGeneration =
@@ -1040,7 +1207,14 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
     IMFDXGIDeviceManager* dxgiManager = GetDXGIDeviceManager();
     if (SUCCEEDED(hr) && !dxgiManager) hr = MF_E_NOT_INITIALIZED;
     if (SUCCEEDED(hr)) hr = attrs->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, dxgiManager);
-    if (SUCCEEDED(hr)) hr = attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+    if (SUCCEEDED(hr) && !pInstance->bHdrOutputRequested) {
+        // The Compose/BGRA route needs Media Foundation's video processor.
+        // The controlled color renderer instead requests P010 directly from
+        // the HEVC decoder and owns all transfer, gamut and tone-mapping work.
+        // Inserting XVP into that route can consume HLG input without ever
+        // producing a sample for the custom presenter.
+        hr = attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+    }
     if (SUCCEEDED(hr) && isNetwork) hr = attrs->SetUINT32(MF_LOW_LATENCY, TRUE);
     if (FAILED(hr)) return hr;
     if (isNetwork) {
@@ -1270,8 +1444,14 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYT
     // P010 HDR frames must never fall through to the JVM BGRA canvas.
     if (pInstance->bHdrOutputRequested) return MF_E_INVALIDREQUEST;
 
-    if (pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->ReadFrame(pData, pDataSize);
+    if (pInstance->pHLSPlayer) {
+        const HRESULT hlsHr = pInstance->pHLSPlayer->ReadFrame(pData, pDataSize);
+        if (SUCCEEDED(hlsHr) && *pData != nullptr && *pDataSize > 0) {
+            pInstance->totalVideoFrames.fetch_add(1, std::memory_order_relaxed);
+            pInstance->renderedVideoFrames.fetch_add(1, std::memory_order_relaxed);
+        }
+        return hlsHr;
+    }
 
     if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
     if (pInstance->pLockedBuffer) UnlockVideoFrame(pInstance);
@@ -1803,7 +1983,7 @@ NATIVEVIDEOPLAYER_API HRESULT GetPlaybackSpeed(const VideoPlayerInstance* pInsta
 // ---------------------------------------------------------------------------
 static const wchar_t* MimeTypeForSubtype(const GUID& s) {
     if (s == MFVideoFormat_H264)  return L"video/h264";
-    if (s == MFVideoFormat_HEVC)  return L"video/hevc";
+    if (s == MFVideoFormat_HEVC || s == MFVideoFormat_HEVC_ES) return L"video/hevc";
     if (s == MFVideoFormat_MPEG2) return L"video/mpeg2";
     if (s == MFVideoFormat_WMV3 || s == MFVideoFormat_WMV2 || s == MFVideoFormat_WMV1)
         return L"video/x-ms-wmv";

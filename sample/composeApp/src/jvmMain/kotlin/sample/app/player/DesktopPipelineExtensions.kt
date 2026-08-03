@@ -2,6 +2,7 @@ package sample.app.player
 
 import io.github.kdroidfilter.composemediaplayer.VideoPipelineExtension
 import io.github.kdroidfilter.composemediaplayer.ass.AssSubtitleExtension
+import io.github.kdroidfilter.composemediaplayer.dolbyvision.DolbyVisionExtension
 import io.github.kdroidfilter.composemediaplayer.kmediabridge.KMediaBridgeDesktopExtension
 import io.github.kdroidfilter.composemediaplayer.kmediabridge.KMediaBridgeDesktopRuntimeSelection
 import java.nio.file.Path
@@ -9,6 +10,7 @@ import java.nio.file.Path
 internal val desktopPipelineExtensions: List<VideoPipelineExtension> by lazy {
     listOf(
         AssSubtitleExtension(),
+        DolbyVisionExtension(),
         KMediaBridgeDesktopExtension(configuredKMediaBridgeRuntime()),
     )
 }

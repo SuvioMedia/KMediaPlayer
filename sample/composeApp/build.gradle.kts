@@ -42,6 +42,7 @@ val desktopSampleSystemProperties =
         "sample.app.mpvLibraryPath",
         "sample.app.projectionType",
         "sample.app.colorSelfTestSeconds",
+        "sample.app.colorSelfTestStartTimeoutSeconds",
         "sample.app.colorSelfTestResultFile",
         "sample.app.colorSelfTestExpectedSource",
         "sample.app.colorSelfTestExpectedOutput",
@@ -49,6 +50,8 @@ val desktopSampleSystemProperties =
     )
 
 tasks.withType<JavaExec>().configureEach {
+    // libdovi is loaded through JNA by the desktop Dolby Vision source extension.
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
     desktopSampleSystemProperties.forEach { propertyName ->
         providers.systemProperty(propertyName).orNull?.let { propertyValue ->
             systemProperty(propertyName, propertyValue)
@@ -128,6 +131,7 @@ kotlin {
             implementation(compose.desktop.currentOs)
             implementation(libs.nucleus.graalvm.runtime)
             implementation(project(":mediaplayer-ass"))
+            implementation(project(":mediaplayer-dolbyvision"))
             implementation(project(":mediaplayer-kmediabridge"))
             implementation(project(":mediaplayer-mpv"))
         }

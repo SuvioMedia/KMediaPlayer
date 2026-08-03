@@ -59,7 +59,7 @@ internal object JvmLibVlcMediaProbe {
         uri: String,
         requestHeaders: Map<String, String>,
     ): JvmLibVlcTrackInfo {
-        val containerInfo =
+        var containerInfo =
             runCatching {
                 JvmLegacyVideoContainerSupport.probe(uri, requestHeaders)
             }.getOrNull()
@@ -67,6 +67,12 @@ internal object JvmLibVlcMediaProbe {
                     MacMatroskaAssExtractor.probe(uri, requestHeaders)?.toLibVlcTrackInfo()
                 }.getOrNull()
                 ?: JvmLibVlcTrackInfo()
+        JvmIsoBmffDolbyVisionProbe.probe(uri, requestHeaders)?.let { dolbyVisionColor ->
+            containerInfo =
+                containerInfo.copy(
+                    videoColorInfo = containerInfo.videoColorInfo.mergeDolbyVision(dolbyVisionColor),
+                )
+        }
         val fallback =
             runCatching {
                 JvmMediaChapterProbe.probe(uri, requestHeaders)
@@ -91,6 +97,12 @@ internal object JvmLibVlcMediaProbe {
             chapters = containerInfo.chapters.ifEmpty { fallbackChapters },
         )
     }
+
+    private fun VideoColorInfo.mergeDolbyVision(dolbyVisionColor: VideoColorInfo): VideoColorInfo =
+        copy(
+            dynamicRange = VideoDynamicRange.DOLBY_VISION,
+            dolbyVision = dolbyVisionColor.dolbyVision,
+        )
 
     private fun MacMatroskaProbeInfo.toLibVlcTrackInfo(): JvmLibVlcTrackInfo {
         val audioTracks = tracks.filter { it.isAudio() }
@@ -339,6 +351,8 @@ internal object JvmLibVlcMediaProbe {
                                 dvProfile == DOLBY_VISION_PROFILE_7 ||
                                     compatibilityId == HDR10_DOVI_COMPATIBILITY_ID
                             ),
+                    hasHlgCompatibleBaseLayer =
+                        baseLayerPresent && compatibilityId == HLG_DOVI_COMPATIBILITY_ID,
                 ).takeIf { hasDolbyVision },
         )
     }
@@ -478,6 +492,7 @@ internal object JvmLibVlcMediaProbe {
     private val DOLBY_VISION_CODEC_TAGS = setOf("dvh1", "dvhe", "dva1", "dvav")
     private const val DOLBY_VISION_PROFILE_7 = 7
     private const val HDR10_DOVI_COMPATIBILITY_ID = 1
+    private const val HLG_DOVI_COMPATIBILITY_ID = 4
     private const val FIRST_FRAME_FLAT_PREFIX = "frames.frame.0."
     private val PIXEL_FORMAT_BIT_DEPTH = Regex("(?:p|yuv\\d*p)(10|12|14|16)(?:le|be)?")
 }

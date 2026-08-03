@@ -64,7 +64,17 @@ data class DolbyVisionInfo(
     val hasRpu: Boolean? = null,
     val enhancementLayer: DolbyVisionEnhancementLayer = DolbyVisionEnhancementLayer.UNKNOWN,
     val hasHdr10CompatibleBaseLayer: Boolean = false,
-)
+    val hasHlgCompatibleBaseLayer: Boolean = false,
+) {
+    /** The independently decodable compatibility signal carried by the Dolby Vision base layer. */
+    val compatibleBaseLayerDynamicRange: VideoDynamicRange?
+        get() =
+            when {
+                hasHdr10CompatibleBaseLayer -> VideoDynamicRange.HDR10
+                hasHlgCompatibleBaseLayer -> VideoDynamicRange.HLG
+                else -> null
+            }
+}
 
 /**
  * A compressed-stream Dolby Vision profile rewrite performed before the platform decoder.
@@ -399,8 +409,9 @@ object VideoColorPipelinePlanner {
 
         val canDecodeDolbyVisionBaseLayer =
             sourceRange == VideoDynamicRange.DOLBY_VISION &&
-                request.source.dolbyVision?.hasHdr10CompatibleBaseLayer == true &&
-                request.decoder.supports(VideoDynamicRange.HDR10)
+                request.source.dolbyVision
+                    ?.compatibleBaseLayerDynamicRange
+                    ?.let(request.decoder::supports) == true
         val canDecodeConvertedDolbyVision =
             sourceRange == VideoDynamicRange.DOLBY_VISION &&
                 request.source.dolbyVision?.profile == DOLBY_VISION_PROFILE_7 &&
@@ -544,14 +555,15 @@ object VideoColorPipelinePlanner {
                     "The installed source bridge did not expose a valid Profile 7 to Profile 8.1 mapping.",
                 )
             }
-            if (!dolbyVisionConversionTargetAvailable(request, appliedMapping.outputProfile)) {
-                return unsupported(
-                    ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
-                    "The Profile 8.1 source is prepared, but no confirmed Dolby Vision " +
-                        "decoder/display route is available.",
-                )
+            if (dolbyVisionConversionTargetAvailable(request, appliedMapping.outputProfile)) {
+                return dolbyVisionConversionPlan(dolbyVision, appliedMapping)
             }
-            return dolbyVisionConversionPlan(dolbyVision, appliedMapping)
+            convertedDolbyVisionBaseLayerPlan(request, appliedMapping)?.let { return it }
+            return unsupported(
+                ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
+                "The Profile 8.1 source is prepared, but neither a confirmed Dolby Vision route " +
+                    "nor a controlled HDR10-compatible base-layer route is available.",
+            )
         }
 
         val nativeAvailable =
@@ -685,6 +697,7 @@ object VideoColorPipelinePlanner {
                 hasRpu = true,
                 enhancementLayer = DolbyVisionEnhancementLayer.NONE,
                 hasHdr10CompatibleBaseLayer = true,
+                hasHlgCompatibleBaseLayer = false,
             )
         return VideoColorPipelinePlan(
             route = ColorPipelineRoute.DOLBY_VISION_CONVERSION,
@@ -698,12 +711,52 @@ object VideoColorPipelinePlanner {
     }
 
     private fun dolbyVisionBaseLayerPlan(request: VideoColorPipelineRequest): VideoColorPipelinePlan? {
+        val baseLayerDynamicRange =
+            request.source.dolbyVision?.compatibleBaseLayerDynamicRange ?: return null
+        if (
+            request.dolbyVisionPolicy == DolbyVisionPolicy.PREFER_HDR10_BASE_LAYER &&
+            baseLayerDynamicRange != VideoDynamicRange.HDR10
+        ) {
+            return null
+        }
         val canDecodeBaseLayer =
-            request.source.dolbyVision?.hasHdr10CompatibleBaseLayer == true &&
-                request.display.supports(VideoDynamicRange.HDR10) &&
-                request.decoder.supports(VideoDynamicRange.HDR10)
+            request.display.supports(baseLayerDynamicRange) &&
+                request.decoder.supports(baseLayerDynamicRange)
         if (!canDecodeBaseLayer) return null
 
+        val route =
+            when {
+                request.nativeSurfaceAvailable &&
+                    !request.isProjection &&
+                    request.renderer.supportsNative(baseLayerDynamicRange) -> ColorPipelineRoute.SYSTEM_NATIVE_SURFACE
+                request.renderer.supportsControlled(baseLayerDynamicRange, request.isProjection) ->
+                    ColorPipelineRoute.CONTROLLED_HDR_RENDERER
+                else -> return null
+            }
+        return VideoColorPipelinePlan(
+            route = route,
+            outputDynamicRange = baseLayerDynamicRange,
+            metadataHandling = DynamicMetadataHandling.DROPPED,
+            requestHonored = true,
+            fallbackReason = ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_USED,
+            detail =
+                "Dolby Vision metadata is dropped and the verified " +
+                    "${baseLayerDynamicRange.baseLayerLabel()}-compatible base layer is used.",
+        )
+    }
+
+    /** A platform may parse converted Profile 8.1 while exposing only its HDR10 base layer. */
+    private fun convertedDolbyVisionBaseLayerPlan(
+        request: VideoColorPipelineRequest,
+        mapping: DolbyVisionProfileMapping,
+    ): VideoColorPipelinePlan? {
+        if (
+            !mapping.outputHasHdr10CompatibleBaseLayer ||
+            !request.display.supports(VideoDynamicRange.HDR10) ||
+            !request.decoder.supports(VideoDynamicRange.HDR10)
+        ) {
+            return null
+        }
         val route =
             when {
                 request.nativeSurfaceAvailable &&
@@ -717,9 +770,13 @@ object VideoColorPipelinePlanner {
             route = route,
             outputDynamicRange = VideoDynamicRange.HDR10,
             metadataHandling = DynamicMetadataHandling.DROPPED,
-            requestHonored = false,
+            requestHonored = true,
+            dolbyVisionProfileMapping = mapping,
             fallbackReason = ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_USED,
-            detail = "Dolby Vision metadata is dropped and the verified HDR10-compatible base layer is used.",
+            detail =
+                mapping.profile7To81Detail() +
+                    " The converted Profile 8.1 signal is decoded through its verified " +
+                    "HDR10-compatible base layer; Dolby Vision display metadata is not presented.",
         )
     }
 
@@ -745,7 +802,7 @@ object VideoColorPipelinePlanner {
     private val VideoColorPipelineRequest.requiresUnavailableDolbyVisionToneMapper: Boolean
         get() =
             source.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
-                source.dolbyVision?.hasHdr10CompatibleBaseLayer != true &&
+                source.dolbyVision?.compatibleBaseLayerDynamicRange == null &&
                 !renderer.supportsDolbyVisionToneMappingToSdr
 
     private val VideoColorPipelineRequest.needsHdrToSdrToneMapper: Boolean
@@ -901,6 +958,13 @@ object VideoColorPipelinePlanner {
             detail = detail,
         )
 }
+
+private fun VideoDynamicRange.baseLayerLabel(): String =
+    when (this) {
+        VideoDynamicRange.HDR10 -> "HDR10"
+        VideoDynamicRange.HLG -> "HLG"
+        else -> name
+    }
 
 private val DynamicRangePolicy.acceptsSdrFallback: Boolean
     get() = this == DynamicRangePolicy.AUTO || this == DynamicRangePolicy.FORCE_SDR
