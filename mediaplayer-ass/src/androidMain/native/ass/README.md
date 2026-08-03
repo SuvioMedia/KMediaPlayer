@@ -2,7 +2,7 @@
 
 The Android module keeps the existing JNI renderer API but dynamically links
 to `libkmediaffmpeg_ass.so` supplied by
-`io.github.shusek:kmedia-ass-runtime-android:0.1.0-rc.5`.
+`io.github.shusek:kmedia-ass-runtime-android:0.1.0-rc.6`.
 
 The adapter AAR contains one client library per supported ARM ABI:
 
