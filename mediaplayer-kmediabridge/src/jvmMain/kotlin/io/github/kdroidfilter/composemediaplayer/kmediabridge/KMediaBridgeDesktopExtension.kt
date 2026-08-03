@@ -190,6 +190,11 @@ private class KMediaBridgeDesktopSession(
                                     else -> FfmpegHlsVideoOutputPolicy.PRESERVE_SOURCE
                                 },
                             startTimeUs = startTimeUs,
+                            // AVFoundation treats this growing VOD playlist as live. Keep a deep
+                            // but byte-bounded history so the position selected by the user cannot
+                            // be evicted while the bridge runs ahead to maintain its prebuffer.
+                            maxBufferedFragments = DESKTOP_HLS_MAX_BUFFERED_FRAGMENTS,
+                            maxBufferedBytes = DESKTOP_HLS_MAX_BUFFERED_BYTES,
                         ),
                     driver = BundledFfmpegNativeDriver.load(runtimeSelection),
                 )
@@ -242,6 +247,9 @@ private class KMediaBridgeDesktopSession(
                 )
             }
         }
+
+        private const val DESKTOP_HLS_MAX_BUFFERED_FRAGMENTS: Int = 256
+        private const val DESKTOP_HLS_MAX_BUFFERED_BYTES: Long = 256L * 1024L * 1024L
     }
 }
 

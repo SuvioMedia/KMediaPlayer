@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.Closeable
@@ -263,6 +264,7 @@ internal object ExternalHlsFallbackSupport {
             )
         }.getOrElse { error ->
             fallback.close()
+            if (error is CancellationException) throw error
             externalHlsFallbackFailed(backend, error)
         }
     }

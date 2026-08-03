@@ -79,6 +79,7 @@ dependencyResolutionManagement {
                 }
                 filter {
                     includeModuleByRegex("io\\.github\\.shusek", "kmedia-bridge-api(?:-.*)?")
+                    includeModuleByRegex("io\\.github\\.shusek", "kmedia-bridge-client(?:-.*)?")
                     includeModuleByRegex("io\\.github\\.shusek", "kmedia-bridge-ffmpeg(?:-.*)?")
                 }
             }

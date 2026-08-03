@@ -40,11 +40,40 @@ internal object MacNativeBridge {
         requestHeaders: String,
     )
 
+    /** Warms a second AVPlayer while the current item and native layer remain untouched. */
+    @JvmStatic external fun nPrepareUriReplacement(
+        handle: Long,
+        uri: String,
+        requestHeadersJson: String,
+    ): Long
+
+    /** 0 = preparing, 1 = first frame decoded, negative = failed or superseded. */
+    @JvmStatic external fun nGetUriReplacementStatus(
+        handle: Long,
+        token: Long,
+    ): Int
+
+    @JvmStatic external fun nGetUriReplacementError(
+        handle: Long,
+        token: Long,
+    ): String?
+
+    /** Switches the existing AVPlayerLayer to the prepared player in one AppKit transaction. */
+    @JvmStatic external fun nCommitUriReplacement(
+        handle: Long,
+        token: Long,
+    ): Boolean
+
+    @JvmStatic external fun nCancelUriReplacement(
+        handle: Long,
+        token: Long,
+    )
+
     @JvmStatic external fun nPlay(handle: Long)
 
     @JvmStatic external fun nPause(handle: Long)
 
-    /** True after the most recently opened AVFoundation item has replaced the previous one. */
+    /** True after the active AVFoundation item is ready for playback. */
     @JvmStatic external fun nIsReadyForPlayback(handle: Long): Boolean
 
     @JvmStatic external fun nSetVolume(

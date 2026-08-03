@@ -1,6 +1,9 @@
 package io.github.kdroidfilter.composemediaplayer.kmediabridge
 
 import io.github.kdroidfilter.composemediaplayer.DesktopMediaSourcePolicy
+import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeExtension
+import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeRequest
+import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSession
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
@@ -68,7 +71,7 @@ class MacKMediaBridgeSeekIntegrationTest {
     }
 
     @Test
-    fun seeksWmvByRestartingTheBridgeWithoutReplacingAvFoundation() {
+    fun seeksWmvByRestartingTheBridgeWithoutDetachingTheNativeSurface() {
         if (!isMacArm64() || GraphicsEnvironment.isHeadless()) return
         val media = configuredWmv() ?: return
         val extension = configuredTestExtension()
@@ -99,24 +102,114 @@ class MacKMediaBridgeSeekIntegrationTest {
             val forwardTargetMs =
                 (durationMs * FORWARD_SEEK_NUMERATOR / FORWARD_SEEK_DENOMINATOR)
                     .coerceIn(MINIMUM_FORWARD_TARGET_MS, durationMs - END_GUARD_MS)
+            val supersedingTargetMs =
+                (durationMs / 2L).coerceIn(MINIMUM_FORWARD_TARGET_MS, durationMs - END_GUARD_MS)
 
             player.seekTo(forwardTargetMs.milliseconds)
-            await("Forward WMV seek did not restart the bridge at the requested source position.") {
+            await("The first WMV bridge replacement did not start preparing.") { player.isLoading }
+            Thread.sleep(FROZEN_SEEK_OBSERVATION_MS)
+            if (player.isLoading) {
+                assertTrue(
+                    abs(player.currentTime.inWholeMilliseconds - forwardTargetMs) <=
+                        FROZEN_SEEK_POSITION_TOLERANCE_MS,
+                    "The active WMV kept advancing while its seek replacement was loading.",
+                )
+            }
+            Thread.sleep(SUPERSEDING_SEEK_DELAY_MS)
+            player.seekTo(supersedingTargetMs.milliseconds)
+            await("The latest WMV seek did not supersede the bridge candidate already being prepared.") {
                 !player.isLoading &&
-                    abs(player.currentTime.inWholeMilliseconds - forwardTargetMs) <= PLAYING_SEEK_TOLERANCE_MS
+                    abs(player.currentTime.inWholeMilliseconds - supersedingTargetMs) <= PLAYING_SEEK_TOLERANCE_MS
             }
             assertTrue(player.isPlaying, "A playing WMV must remain playing after bridge seek.")
+
+            val stabilityWindowMs =
+                minOf(
+                    PLAYING_STABILITY_WINDOW_MS,
+                    durationMs - supersedingTargetMs - END_GUARD_MS,
+                ).coerceAtLeast(0L)
+            if (stabilityWindowMs >= MINIMUM_STABILITY_WINDOW_MS) {
+                Thread.sleep(stabilityWindowMs)
+                val advanceMs = player.currentTime.inWholeMilliseconds - supersedingTargetMs
+                val minimumAdvanceMs = stabilityWindowMs - PLAYING_STABILITY_TOLERANCE_MS
+                val maximumAdvanceMs = stabilityWindowMs + PLAYING_STABILITY_TOLERANCE_MS
+                assertTrue(
+                    advanceMs in minimumAdvanceMs..maximumAdvanceMs,
+                    "Playing WMV seek left its retained HLS window: " +
+                        "targetMs=$supersedingTargetMs, currentMs=${player.currentTime.inWholeMilliseconds}, " +
+                        "elapsedMs=$stabilityWindowMs.",
+                )
+            }
 
             player.pause()
             await("WMV did not pause before the backward seek.") { !player.isPlaying }
             player.seekTo(PAUSED_BACKWARD_TARGET_MS.milliseconds)
-            await("Paused backward WMV seek did not publish the restarted timeline position.") {
-                !player.isLoading &&
-                    abs(player.currentTime.inWholeMilliseconds - PAUSED_BACKWARD_TARGET_MS) <=
-                    PAUSED_SEEK_TOLERANCE_MS
+            await(
+                message = "Paused backward WMV seek did not publish the restarted timeline position.",
+                diagnostics = {
+                    "loading=${player.isLoading}, seeking=${player.isSeeking}, " +
+                        "currentMs=${player.currentTime.inWholeMilliseconds}, error=${player.error}"
+                },
+            ) {
+                player.error != null ||
+                    (
+                        !player.isLoading &&
+                            abs(player.currentTime.inWholeMilliseconds - PAUSED_BACKWARD_TARGET_MS) <=
+                            PAUSED_SEEK_TOLERANCE_MS
+                    )
             }
-            assertFalse(player.isPlaying, "A paused WMV must remain paused after bridge seek.")
             assertNull(player.error)
+            assertFalse(player.isPlaying, "A paused WMV must remain paused after bridge seek.")
+        } finally {
+            player.dispose()
+        }
+    }
+
+    @Test
+    fun failedNativeCandidateKeepsTheActiveWmvBridgePlaying() {
+        if (!isMacArm64() || GraphicsEnvironment.isHeadless()) return
+        val media = configuredWmv() ?: return
+        val extension = InvalidSeekPlaylistBridgeExtension(configuredTestExtension())
+        val player =
+            MacVideoPlayerState(
+                playbackOptions =
+                    VideoPlaybackOptions(
+                        desktopVideoBackend = DesktopVideoBackend.PLATFORM,
+                        desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                        desktopMediaSourcePolicy = DesktopMediaSourcePolicy.KMEDIA_BRIDGE,
+                        extensions = listOf(extension),
+                    ),
+            )
+
+        try {
+            player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
+            await("WMV did not start before the rollback test.") {
+                player.error != null ||
+                    (player.hasMedia && player.isPlaying && !player.isLoading && player.currentTime >= 500.milliseconds)
+            }
+            assertNull(player.error)
+            val positionBeforeFailure = player.currentTime.inWholeMilliseconds
+            val durationMs = player.duration.inWholeMilliseconds
+            val failedTargetMs =
+                (durationMs * FORWARD_SEEK_NUMERATOR / FORWARD_SEEK_DENOMINATOR)
+                    .coerceIn(MINIMUM_FORWARD_TARGET_MS, durationMs - END_GUARD_MS)
+
+            player.seekTo(failedTargetMs.milliseconds)
+            await("The intentionally invalid replacement playlist did not fail.") {
+                player.error != null && !player.isLoading
+            }
+
+            assertTrue(player.hasMedia, "A failed candidate must not clear the active media.")
+            assertTrue(player.isPlaying, "A failed candidate must not pause the active AVPlayer.")
+            val positionAfterFailure = player.currentTime.inWholeMilliseconds
+            assertTrue(
+                positionAfterFailure < failedTargetMs - PLAYING_SEEK_TOLERANCE_MS,
+                "Rollback must restore the active timeline instead of publishing the failed target.",
+            )
+            await("The old WMV bridge stopped advancing after candidate rollback.") {
+                player.currentTime.inWholeMilliseconds >=
+                    maxOf(positionBeforeFailure, positionAfterFailure) + ROLLBACK_ADVANCE_MS
+            }
         } finally {
             player.dispose()
         }
@@ -143,17 +236,54 @@ class MacKMediaBridgeSeekIntegrationTest {
         }
     }
 
-    private fun configuredTestExtension(): KMediaBridgeDesktopExtension =
-        System
-            .getProperty(KMEDIA_BRIDGE_RUNTIME_PROPERTY)
-            ?.takeIf(String::isNotBlank)
-            ?.let(Path::of)
-            ?.let(KMediaBridgeDesktopRuntimeSelection::fromExternalDirectory)
-            ?.let(::KMediaBridgeDesktopExtension)
-            ?: KMediaBridgeDesktopExtension()
+    private fun configuredTestExtension(): KMediaBridgeDesktopExtension {
+        val extension =
+            System
+                .getProperty(KMEDIA_BRIDGE_RUNTIME_PROPERTY)
+                ?.takeIf(String::isNotBlank)
+                ?.let(Path::of)
+                ?.let(KMediaBridgeDesktopRuntimeSelection::fromExternalDirectory)
+                ?.let(::KMediaBridgeDesktopExtension)
+                ?: KMediaBridgeDesktopExtension()
+        assertTrue(
+            extension.availability.canContribute,
+            extension.availability.detail ?: "The configured KMediaBridge runtime is unavailable.",
+        )
+        return extension
+    }
+
+    /** Returns a valid initial bridge but an AVFoundation-unopenable candidate for timestamped restarts. */
+    private class InvalidSeekPlaylistBridgeExtension(
+        private val delegate: DesktopPlaybackBridgeExtension,
+    ) : DesktopPlaybackBridgeExtension {
+        override val id
+            get() = delegate.id
+
+        override val availability
+            get() = delegate.availability
+
+        override val desktopCapabilities
+            get() = delegate.desktopCapabilities
+
+        override suspend fun open(request: DesktopPlaybackBridgeRequest): DesktopPlaybackBridgeSession {
+            val session = delegate.open(request)
+            if (request.startPositionMs == 0L) return session
+            return object : DesktopPlaybackBridgeSession {
+                override val source =
+                    session.source.copy(
+                        playlistUrl =
+                            session.source.playlistUrl.substringBeforeLast('/') +
+                                "/compose-media-player-missing-replacement.m3u8",
+                    )
+
+                override fun close() = session.close()
+            }
+        }
+    }
 
     private fun await(
         message: String,
+        diagnostics: () -> String = { "" },
         condition: () -> Boolean,
     ) {
         val deadline = System.nanoTime() + TEST_TIMEOUT_NANOS
@@ -161,7 +291,7 @@ class MacKMediaBridgeSeekIntegrationTest {
             if (condition()) return
             Thread.sleep(POLL_INTERVAL_MS)
         }
-        assertTrue(condition(), message)
+        assertTrue(condition(), listOf(message, diagnostics()).filter(String::isNotBlank).joinToString(" "))
     }
 
     private fun isMacArm64(): Boolean {
@@ -181,6 +311,13 @@ class MacKMediaBridgeSeekIntegrationTest {
         const val FORWARD_SEEK_NUMERATOR = 2L
         const val FORWARD_SEEK_DENOMINATOR = 3L
         const val PAUSED_BACKWARD_TARGET_MS = 2_000L
+        const val FROZEN_SEEK_OBSERVATION_MS = 400L
+        const val FROZEN_SEEK_POSITION_TOLERANCE_MS = 100L
+        const val SUPERSEDING_SEEK_DELAY_MS = 100L
+        const val ROLLBACK_ADVANCE_MS = 250L
+        const val PLAYING_STABILITY_WINDOW_MS = 25_000L
+        const val MINIMUM_STABILITY_WINDOW_MS = 5_000L
+        const val PLAYING_STABILITY_TOLERANCE_MS = 5_000L
         const val PLAYING_SEEK_TOLERANCE_MS = 2_500L
         const val PAUSED_SEEK_TOLERANCE_MS = 1_000L
         const val POLL_INTERVAL_MS = 50L
