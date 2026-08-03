@@ -101,8 +101,6 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
-import java.awt.Component
-import java.awt.Window
 import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -248,8 +246,12 @@ class MacVideoPlayerState(
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
 
-    /** Serializes native-player replacement/destruction with AWT surface attachment. */
+    /** Serializes native-player replacement/destruction with native-view attachment. */
     private val nativeInstanceLock = Any()
+    private val nativeVideoViewOwners = mutableMapOf<Long, Long>()
+    private val nativePlayersPendingDisposal = mutableSetOf<Long>()
+    internal var nativeSurfaceGeneration: Long by mutableStateOf(0L)
+        private set
 
     // Serial dispatcher for frame processing — ensures only one frame is processed at a time.
     private val frameDispatcher = Dispatchers.Default.limitedParallelism(1)
@@ -583,6 +585,7 @@ class MacVideoPlayerState(
                             false
                         } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
                             nativeBackendUsesLibVlc = false
+                            nativeSurfaceGeneration += 1L
                             true
                         } else {
                             false
@@ -921,7 +924,7 @@ class MacVideoPlayerState(
                 synchronized(nativeInstanceLock) {
                     val ptrToDispose = playerPtrAtomic.getAndSet(0L)
                     if (ptrToDispose != 0L) {
-                        MacNativeBridge.nDisposePlayer(ptrToDispose)
+                        retireNativePlayerLocked(ptrToDispose)
                     }
                 }
             } catch (e: Exception) {
@@ -1130,7 +1133,7 @@ class MacVideoPlayerState(
             hdrMetalSurfaceAllowed &&
             !nativeHdrSurfaceAttached
         ) {
-            // The AWT/NSView host attaches after source preparation for every policy. Missing
+            // The Tao/NSView host attaches after source preparation for every policy. Missing
             // display capabilities are a pending state until that attempt succeeds or explicitly
             // disables the native surface; reporting an error here races normal Compose layout.
             return
@@ -1161,34 +1164,37 @@ class MacVideoPlayerState(
 
     private fun shouldUseNativeVideoSurface(): Boolean = shouldUseHdrMetalSurface() || shouldUseLibVlcNativeSurface()
 
-    internal fun attachHdrMetalComponent(
-        component: Component,
-        contentScaleMode: Int,
-    ): Boolean {
+    internal fun createNativeVideoView(contentScaleMode: Int): Long {
         synchronized(nativeInstanceLock) {
-            if (!shouldUseHdrMetalSurface()) return false
             val ptr = playerPtr
-            if (ptr == 0L || !MacNativeBridge.nIsHdrMetalAvailable(ptr)) return false
+            if (ptr == 0L) return 0L
+            val usesHdrSurface = shouldUseHdrMetalSurface()
+            val usesLibVlcSurface = shouldUseLibVlcNativeSurface()
+            if (!usesHdrSurface && !usesLibVlcSurface) return 0L
+            if (usesHdrSurface && !MacNativeBridge.nIsHdrMetalAvailable(ptr)) return 0L
 
-            val attached =
+            val nativeView =
                 runCatching {
-                    MacNativeBridge.nAttachHdrMetalView(ptr, component).also { attached ->
-                        if (attached) {
+                    MacNativeBridge.nCreateNativeVideoView(ptr).also { view ->
+                        if (view != 0L) {
+                            nativeVideoViewOwners[view] = ptr
+                        }
+                        if (view != 0L && usesHdrSurface) {
                             MacNativeBridge.nSetHdrMetalContentScaleMode(ptr, contentScaleMode)
                             nativeHdrSurfaceAttached = true
                             requestAttachedHdrColorPipelineRefresh()
                         }
                     }
                 }.getOrElse { e ->
-                    macLogger.e { "Failed to attach HDR Metal surface: ${e.message}" }
-                    false
+                    macLogger.e { "Failed to create the AppKit video surface: ${e.message}" }
+                    0L
                 }
-            if (!attached) {
+            if (nativeView == 0L && usesHdrSurface) {
                 handleNativeHdrAttachmentFailure(
-                    "The macOS Metal projection layer could not be attached to the JBR/AWT host.",
+                    "The macOS Metal projection view could not be created for the Tao host.",
                 )
             }
-            return attached
+            return nativeView
         }
     }
 
@@ -1209,76 +1215,44 @@ class MacVideoPlayerState(
         }
     }
 
-    internal fun detachHdrMetalComponent(component: Component) {
+    internal fun disposeNativeVideoView(nativeView: Long) {
+        if (nativeView == 0L) return
         synchronized(nativeInstanceLock) {
-            val ptr = playerPtr
-            if (ptr == 0L) return
+            val owner = nativeVideoViewOwners.remove(nativeView) ?: return
+            if (owner == 0L || (owner != playerPtr && owner !in nativePlayersPendingDisposal)) return
             runCatching {
-                MacNativeBridge.nDetachHdrMetalView(ptr, component)
-                nativeHdrSurfaceAttached = false
-                activeDisplayColorCapabilities = DisplayColorCapabilities()
-                refreshColorPipelineOutput(ColorPipelineVerification.NONE)
-            }.onFailure { e ->
-                macLogger.e { "Failed to detach HDR Metal surface: ${e.message}" }
-            }
-        }
-    }
-
-    internal fun attachHdrMetalWindow(
-        window: Window,
-        contentScaleMode: Int,
-    ): Boolean {
-        synchronized(nativeInstanceLock) {
-            if (!shouldUseHdrMetalSurface()) return false
-            val ptr = playerPtr
-            if (ptr == 0L || !MacNativeBridge.nIsHdrMetalAvailable(ptr)) return false
-
-            val attached =
-                runCatching {
-                    MacNativeBridge.nAttachHdrMetalWindow(ptr, window).also { didAttach ->
-                        if (didAttach) {
-                            MacNativeBridge.nSetHdrMetalContentScaleMode(ptr, contentScaleMode)
-                            nativeHdrSurfaceAttached = true
-                            requestAttachedHdrColorPipelineRefresh()
-                        }
-                    }
-                }.getOrElse { error ->
-                    macLogger.e { "Failed to attach the dedicated HDR/Metal window: ${error.message}" }
-                    false
+                MacNativeBridge.nDisposeNativeVideoView(owner, nativeView)
+                if (owner == playerPtr) {
+                    nativeHdrSurfaceAttached = false
+                    activeDisplayColorCapabilities = DisplayColorCapabilities()
+                    refreshColorPipelineOutput(ColorPipelineVerification.NONE)
                 }
-            if (!attached) {
-                handleNativeHdrAttachmentFailure(
-                    "The macOS Metal layer could not be attached below the dedicated Compose window.",
-                )
+            }.onFailure { e ->
+                macLogger.e { "Failed to dispose the AppKit video surface: ${e.message}" }
             }
-            return attached
+            finalizeRetiredNativePlayerIfUnownedLocked(owner)
         }
     }
 
-    internal fun requestDedicatedWindowFullscreen(
-        window: Window,
-        fullscreen: Boolean,
-    ): Boolean =
-        runCatching { MacNativeBridge.nSetWindowFullscreen(window, fullscreen) }
-            .onFailure { error ->
-                macLogger.e { "Failed to change dedicated macOS window full-screen state: ${error.message}" }
-            }.getOrDefault(false)
+    private fun retireNativePlayerLocked(ptr: Long) {
+        if (nativeVideoViewOwners.containsValue(ptr)) {
+            nativePlayersPendingDisposal += ptr
+        } else {
+            MacNativeBridge.nDisposePlayer(ptr)
+        }
+    }
 
-    internal fun configureDedicatedWindow(window: Window): Boolean =
-        runCatching { MacNativeBridge.nConfigureNativeWindow(window) }
-            .onFailure { error ->
-                macLogger.e { "Failed to configure dedicated macOS window chrome: ${error.message}" }
-            }.getOrDefault(false)
-
-    internal fun dedicatedWindowFullscreenState(window: Window): Boolean? =
-        runCatching { MacNativeBridge.nIsWindowFullscreen(window) }.getOrNull()
+    private fun finalizeRetiredNativePlayerIfUnownedLocked(ptr: Long) {
+        if (nativeVideoViewOwners.containsValue(ptr) || !nativePlayersPendingDisposal.remove(ptr)) return
+        MacNativeBridge.nDisposePlayer(ptr)
+    }
 
     /**
      * Coalesces display/readiness refreshes onto the I/O dispatcher.
      *
      * Native macOS readiness queries synchronously enter the AppKit main queue. Calling them from
-     * Swing's EDT while AppKit is delivering a live move/resize event can deadlock the two UI
-     * loops. Surface/window callbacks must therefore only enqueue a refresh here.
+     * another UI callback while AppKit is delivering a live move/resize event can deadlock the
+     * caller and AppKit. Surface/window callbacks therefore only enqueue a refresh here.
      */
     internal fun requestAttachedHdrColorPipelineRefresh() {
         if (lifecycle.isDisposed) return
@@ -1347,48 +1321,6 @@ class MacVideoPlayerState(
         if (hdrToneMappingRequested) {
             startFrameUpdates()
             playerScope.launch { updateFrameAsync() }
-        }
-    }
-
-    internal fun attachLibVlcNativeComponent(component: Component): Boolean {
-        synchronized(nativeInstanceLock) {
-            if (!shouldUseLibVlcNativeSurface()) return false
-            val ptr = playerPtr
-            if (ptr == 0L) return false
-
-            return runCatching {
-                MacNativeBridge.nAttachLibVlcNativeView(ptr, component)
-            }.getOrElse { e ->
-                macLogger.e { "Failed to attach libVLC native surface: ${e.message}" }
-                false
-            }
-        }
-    }
-
-    internal fun detachLibVlcNativeComponent(component: Component) {
-        synchronized(nativeInstanceLock) {
-            val ptr = playerPtr
-            if (ptr == 0L) return
-            runCatching {
-                MacNativeBridge.nDetachLibVlcNativeView(ptr, component)
-            }.onFailure { e ->
-                macLogger.e { "Failed to detach libVLC native surface: ${e.message}" }
-            }
-        }
-    }
-
-    internal fun attachLibVlcNativeWindow(window: Window): Boolean {
-        synchronized(nativeInstanceLock) {
-            if (!shouldUseLibVlcNativeSurface()) return false
-            val ptr = playerPtr
-            if (ptr == 0L) return false
-
-            return runCatching {
-                MacNativeBridge.nAttachLibVlcNativeWindow(ptr, window)
-            }.getOrElse { error ->
-                macLogger.e { "Failed to attach the dedicated libVLC window: ${error.message}" }
-                false
-            }
         }
     }
 
@@ -2356,7 +2288,7 @@ class MacVideoPlayerState(
                 synchronized(nativeInstanceLock) {
                     val ptrToDispose = playerPtrAtomic.getAndSet(0L)
                     if (ptrToDispose != 0L) {
-                        MacNativeBridge.nDisposePlayer(ptrToDispose)
+                        retireNativePlayerLocked(ptrToDispose)
                     }
                     nativeBackendUsesLibVlc = false
                 }
@@ -2382,6 +2314,7 @@ class MacVideoPlayerState(
                             false
                         } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
                             nativeBackendUsesLibVlc = wantsLibVlc
+                            nativeSurfaceGeneration += 1L
                             true
                         } else {
                             false
@@ -3834,7 +3767,7 @@ class MacVideoPlayerState(
                     macLogger.d { "dispose() - Disposing native player" }
                     try {
                         synchronized(nativeInstanceLock) {
-                            MacNativeBridge.nDisposePlayer(ptrToDispose)
+                            retireNativePlayerLocked(ptrToDispose)
                         }
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e

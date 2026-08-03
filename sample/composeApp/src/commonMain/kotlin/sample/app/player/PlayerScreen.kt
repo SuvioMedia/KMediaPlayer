@@ -5,7 +5,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,12 +50,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
@@ -70,6 +71,7 @@ import io.github.vinceglb.filekit.name
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -241,9 +243,23 @@ internal fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
             contentScale = selectedContentScale,
         ) {
+            // Desktop NativeView renders this lambda in Nucleus' separate overlay ComposeScene.
+            // Read the modal flags here so clicks invalidate that scene directly. Computing this
+            // in PlayerScreen's outer scene left the overlay with a captured `false` until some
+            // unrelated window/fullscreen recomposition happened.
+            val playerModalVisible = showSourceSheet || showSettingsSheet || showSubtitleSheet
             when {
                 playerState.isPipActive -> Unit
-                playerState.isFullscreen -> FullscreenOverlay(playerState)
+                playerState.isFullscreen ->
+                    FullscreenOverlay(
+                        playerState = playerState,
+                        loadingVisible = loadingVisible,
+                        controlsPinned = playerModalVisible,
+                        onSourceClick = { showSourceSheet = true },
+                        onSubtitlesClick = { showSubtitleSheet = true },
+                        onSettingsClick = { showSettingsSheet = true },
+                        onPipClick = { scope.launch { playerState.enterPip() } },
+                    )
                 else -> {
                     AnimatedVisibility(
                         visible = controlsVisible,
@@ -262,83 +278,98 @@ internal fun PlayerScreen(
                 }
             }
 
-            if (showSourceSheet) {
-                val desktopMkvBackendOptions = remember(showSourceSheet) { desktopMkvPlaybackBackendOptions() }
-                val desktopSourceAdapterOptions = remember(showSourceSheet) { desktopMediaSourceAdapterOptions() }
-                MediaSourceSheet(
-                    videoUrl = videoUrl,
-                    sampleVideos = availableSampleVideos,
-                    desktopMkvBackendAvailable = desktopMkvPlaybackBackendSelectionAvailable,
-                    desktopMkvBackendOptions = desktopMkvBackendOptions,
-                    selectedDesktopMkvBackend = selectedDesktopMkvBackend,
-                    desktopSourceAdapterOptions = desktopSourceAdapterOptions,
-                    selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
-                    onUrlChange = { videoUrl = it },
-                    onDesktopMkvBackendChange = { backend ->
-                        applyDesktopPlaybackSelection(backend, selectedDesktopSourceAdapter)
-                        onDesktopMkvBackendChange(backend)
-                    },
-                    onDesktopSourceAdapterChange = { adapter ->
-                        applyDesktopPlaybackSelection(selectedDesktopMkvBackend, adapter)
-                        onDesktopSourceAdapterChange(adapter)
-                    },
-                    onLoadUrl = {
-                        if (videoUrl.isNotEmpty()) {
-                            disableDemoSubtitleForNewSource()
-                            openVideoUrl(videoUrl)
+            if (playerModalVisible) {
+                Box(
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .zIndex(1_000f),
+                ) {
+                    when {
+                        showSourceSheet -> {
+                            val desktopMkvBackendOptions =
+                                remember(showSourceSheet) { desktopMkvPlaybackBackendOptions() }
+                            val desktopSourceAdapterOptions =
+                                remember(showSourceSheet) { desktopMediaSourceAdapterOptions() }
+                            MediaSourceSheet(
+                                videoUrl = videoUrl,
+                                sampleVideos = availableSampleVideos,
+                                desktopMkvBackendAvailable = desktopMkvPlaybackBackendSelectionAvailable,
+                                desktopMkvBackendOptions = desktopMkvBackendOptions,
+                                selectedDesktopMkvBackend = selectedDesktopMkvBackend,
+                                desktopSourceAdapterOptions = desktopSourceAdapterOptions,
+                                selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
+                                onUrlChange = { videoUrl = it },
+                                onDesktopMkvBackendChange = { backend ->
+                                    applyDesktopPlaybackSelection(backend, selectedDesktopSourceAdapter)
+                                    onDesktopMkvBackendChange(backend)
+                                },
+                                onDesktopSourceAdapterChange = { adapter ->
+                                    applyDesktopPlaybackSelection(selectedDesktopMkvBackend, adapter)
+                                    onDesktopSourceAdapterChange(adapter)
+                                },
+                                onLoadUrl = {
+                                    if (videoUrl.isNotEmpty()) {
+                                        disableDemoSubtitleForNewSource()
+                                        openVideoUrl(videoUrl)
+                                    }
+                                    showSourceSheet = false
+                                },
+                                onPickFile = {
+                                    disableDemoSubtitleForNewSource()
+                                    pendingPickVideo = true
+                                    showSourceSheet = false
+                                },
+                                onSelectPreset = { url ->
+                                    videoUrl = url
+                                    disableDemoSubtitleForNewSource()
+                                    openVideoUrl(url)
+                                    showSourceSheet = false
+                                },
+                                onDismiss = { showSourceSheet = false },
+                            )
                         }
-                        showSourceSheet = false
-                    },
-                    onPickFile = {
-                        disableDemoSubtitleForNewSource()
-                        pendingPickVideo = true
-                        showSourceSheet = false
-                    },
-                    onSelectPreset = { url ->
-                        videoUrl = url
-                        disableDemoSubtitleForNewSource()
-                        openVideoUrl(url)
-                        showSourceSheet = false
-                    },
-                    onDismiss = { showSourceSheet = false },
-                )
-            }
-            if (showSettingsSheet) {
-                SettingsSheet(
-                    playerState = playerState,
-                    selectedContentScale = selectedContentScale,
-                    onContentScaleChange = { selectedContentScale = it },
-                    initialPlayerState = initialPlayerState,
-                    onInitialPlayerStateChange = { initialPlayerState = it },
-                    onDismiss = { showSettingsSheet = false },
-                )
-            }
-            if (showSubtitleSheet) {
-                SubtitleSheet(
-                    audioTracks = playerState.availableAudioTracks,
-                    selectedAudioTrack = playerState.currentAudioTrack,
-                    controlsEnabled = !loadingVisible,
-                    onAudioTrackSelected = { track ->
-                        playerState.selectAudioTrack(track)
-                    },
-                    subtitleTracks = playerState.availableSubtitleTracks,
-                    selectedSubtitleTrack = playerState.currentSubtitleTrack,
-                    onSubtitleTrackSelected = { track ->
-                        playerState.selectSubtitleTrack(track)
-                    },
-                    onDisableSubtitles = {
-                        playerState.disableSubtitles()
-                    },
-                    onPickFile = {
-                        pendingPickSubtitle = true
-                        showSubtitleSheet = false
-                    },
-                    onAddTrack = { track ->
-                        playerState.addSubtitleTrack(track)
-                        playerState.selectSubtitleTrack(track)
-                    },
-                    onDismiss = { showSubtitleSheet = false },
-                )
+
+                        showSettingsSheet ->
+                            SettingsSheet(
+                                playerState = playerState,
+                                selectedContentScale = selectedContentScale,
+                                onContentScaleChange = { selectedContentScale = it },
+                                initialPlayerState = initialPlayerState,
+                                onInitialPlayerStateChange = { initialPlayerState = it },
+                                onDismiss = { showSettingsSheet = false },
+                            )
+
+                        showSubtitleSheet ->
+                            SubtitleSheet(
+                                audioTracks = playerState.availableAudioTracks,
+                                selectedAudioTrack = playerState.currentAudioTrack,
+                                controlsEnabled = !loadingVisible,
+                                onAudioTrackSelected = { track ->
+                                    playerState.selectAudioTrack(track)
+                                },
+                                subtitleTracks = playerState.availableSubtitleTracks,
+                                selectedSubtitleTrack = playerState.currentSubtitleTrack,
+                                onSubtitleTrackSelected = { track ->
+                                    playerState.selectSubtitleTrack(track)
+                                },
+                                onDisableSubtitles = {
+                                    playerState.disableSubtitles()
+                                },
+                                onPickFile = {
+                                    pendingPickSubtitle = true
+                                    showSubtitleSheet = false
+                                },
+                                onAddTrack = { track ->
+                                    playerState.addSubtitleTrack(track)
+                                    playerState.selectSubtitleTrack(track)
+                                },
+                                onDismiss = { showSubtitleSheet = false },
+                            )
+
+                        else -> Unit
+                    }
+                }
             }
 
             AnimatedVisibility(
@@ -348,6 +379,20 @@ internal fun PlayerScreen(
             ) {
                 PlaybackLoadingOverlay()
             }
+
+            player.playbackTransitionError
+                ?.takeIf { playerState.error == null }
+                ?.let { message ->
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.BottomCenter,
+                    ) {
+                        PlaybackTransitionErrorSnackbar(
+                            message = message,
+                            onDismiss = player::clearPlaybackTransitionError,
+                        )
+                    }
+                }
         }
 
         // Empty state placeholder
@@ -389,6 +434,16 @@ internal fun PlayerScreen(
         ) {
             PlaybackLoadingOverlay()
         }
+
+        player.playbackTransitionError
+            ?.takeIf { playerState.error == null }
+            ?.let { message ->
+                PlaybackTransitionErrorSnackbar(
+                    message = message,
+                    onDismiss = player::clearPlaybackTransitionError,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
 
         // Error snackbar
         playerState.error?.takeUnless { playerState.isPipActive }?.let { error ->
@@ -449,6 +504,24 @@ internal fun PlayerScreen(
         }
     }
 
+}
+
+@Composable
+private fun PlaybackTransitionErrorSnackbar(
+    message: String,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Snackbar(
+        modifier = modifier.padding(16.dp),
+        action = {
+            TextButton(onClick = onDismiss) { Text("Dismiss") }
+        },
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Text(message, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
 }
 
 @Composable
@@ -615,6 +688,7 @@ private fun PlayerBottomControls(
     modifier: Modifier = Modifier,
 ) {
     val subtitlesActive = playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null
+    val controlScope = rememberCoroutineScope()
 
     Column(
         modifier = modifier,
@@ -672,8 +746,32 @@ private fun PlayerBottomControls(
                         modifier = Modifier.size(20.dp),
                     )
                 }
-                OverlayIconButton(onClick = { playerState.toggleFullscreen() }) {
-                    Icon(Icons.Default.Fullscreen, "Fullscreen", tint = Color.White, modifier = Modifier.size(20.dp))
+                OverlayIconButton(
+                    onClick = {
+                        // Let Tao finish dispatching the pointer release before AppKit starts the
+                        // fullscreen resize transaction for the window containing this overlay.
+                        controlScope.launch {
+                            yield()
+                            playerState.toggleFullscreen()
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector =
+                            if (playerState.isFullscreen) {
+                                Icons.Default.FullscreenExit
+                            } else {
+                                Icons.Default.Fullscreen
+                            },
+                        contentDescription =
+                            if (playerState.isFullscreen) {
+                                "Exit fullscreen"
+                            } else {
+                                "Fullscreen"
+                            },
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
                 OverlayIconButton(onClick = onPipClick) {
                     Icon(Icons.Default.PictureInPicture, "PiP", tint = Color.White, modifier = Modifier.size(20.dp))
@@ -688,7 +786,7 @@ private fun PlayerBottomControls(
 
 @Composable
 private fun OverlayIconButton(onClick: () -> Unit, content: @Composable () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+    IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
         content()
     }
 }
@@ -698,60 +796,69 @@ private fun OverlayIconButton(onClick: () -> Unit, content: @Composable () -> Un
 // region Fullscreen overlay
 
 @Composable
-private fun FullscreenOverlay(playerState: VideoPlayerState) {
-    var visible by remember { mutableStateOf(false) }
+private fun FullscreenOverlay(
+    playerState: VideoPlayerState,
+    loadingVisible: Boolean,
+    controlsPinned: Boolean,
+    onSourceClick: () -> Unit,
+    onSubtitlesClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    onPipClick: () -> Unit,
+) {
+    var visible by remember { mutableStateOf(true) }
+    var interactionRevision by remember { mutableStateOf(0L) }
+    var pointerOverControls by remember { mutableStateOf(false) }
 
-    LaunchedEffect(visible) {
-        if (visible) {
-            delay(3.seconds)
-            visible = false
-        }
+    LaunchedEffect(interactionRevision, controlsPinned, pointerOverControls) {
+        visible = true
+        if (controlsPinned || pointerOverControls) return@LaunchedEffect
+        delay(3.seconds)
+        visible = false
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clickable { visible = true }
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
-                        val event = awaitPointerEvent()
-                        if (event.type == PointerEventType.Move) visible = true
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val pointerY = event.changes.firstOrNull()?.position?.y
+                        val overControls =
+                            event.type != PointerEventType.Exit &&
+                                pointerY != null &&
+                                pointerY >= size.height * FULLSCREEN_CONTROLS_BAND_START
+                        if (pointerOverControls != overControls) {
+                            pointerOverControls = overControls
+                        }
+                        if (event.type == PointerEventType.Move ||
+                            event.type == PointerEventType.Press
+                        ) {
+                            interactionRevision++
+                        }
                     }
                 }
             },
-        contentAlignment = Alignment.Center,
     ) {
-        AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(32.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.6f), MaterialTheme.shapes.large)
-                    .padding(horizontal = 32.dp, vertical = 16.dp),
-            ) {
-                IconButton(onClick = {
-                    if (playerState.isPlaying) playerState.pause() else playerState.play()
-                }) {
-                    Icon(
-                        imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (playerState.isPlaying) "Pause" else "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(48.dp),
-                    )
-                }
-                IconButton(onClick = { playerState.toggleFullscreen() }) {
-                    Icon(
-                        Icons.Default.FullscreenExit,
-                        contentDescription = "Exit fullscreen",
-                        tint = Color.White,
-                        modifier = Modifier.size(48.dp),
-                    )
-                }
-            }
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            ControlsOverlay(
+                playerState = playerState,
+                loadingVisible = loadingVisible,
+                onSourceClick = onSourceClick,
+                onSubtitlesClick = onSubtitlesClick,
+                onSettingsClick = onSettingsClick,
+                onPipClick = onPipClick,
+            )
         }
     }
 }
+
+private const val FULLSCREEN_CONTROLS_BAND_START = 0.72f
 
 // endregion
 

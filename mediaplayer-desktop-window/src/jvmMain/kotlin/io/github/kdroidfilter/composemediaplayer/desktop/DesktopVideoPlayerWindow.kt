@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.desktop
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -16,21 +17,15 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.rememberWindowState
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.window.tao.LocalTaoWindow
 import io.github.kdroidfilter.composemediaplayer.BackendVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import java.awt.Window as AwtWindow
 
-/**
- * Opens the full-size player in an explicit independent desktop window.
- * The catalog/application window remains untouched and no surface API opens a hidden window.
- */
+/** Opens playback in an independent, fully native Tao window. */
 @Composable
 public fun DesktopVideoPlayerWindow(
     session: DesktopPlaybackSession,
@@ -61,7 +56,6 @@ public fun DesktopVideoPlayerWindow(
 }
 
 /** Explicit dedicated window for callers that already own a single backend state. */
-@Suppress("CyclomaticComplexMethod")
 @Composable
 public fun DesktopVideoPlayerWindow(
     playerState: VideoPlayerState,
@@ -74,31 +68,27 @@ public fun DesktopVideoPlayerWindow(
     onSurfaceAttached: (VideoPlayerState) -> Unit = {},
 ) {
     if (!visible) return
-    val player = playerState
-    // Native macOS renderers resolve the caller-owned NSWindow through its AWT title. Keep the
-    // underlying identifier unique even when the catalog and player use the same visible title.
-    val nativeWindowTitle =
-        remember(player, title) {
-            "$title — native-player-${System.identityHashCode(player).toUInt().toString(16)}"
+    val applicationScope =
+        checkNotNull(LocalDesktopVideoApplicationScope.current) {
+            "DesktopVideoPlayerWindow requires nucleusApplication and " +
+                "ProvideDesktopVideoApplicationScope."
         }
+    val player = playerState
 
-    Window(
+    applicationScope.DecoratedWindow(
         onCloseRequest = {
             player.pause()
             onCloseRequest()
         },
         state = windowState,
-        title = nativeWindowTitle,
-        // Compose Desktop only permits a transparent Skia surface on an undecorated AWT frame.
-        // The native provider promotes the underlying NSWindow to ordinary AppKit chrome before
-        // the video layer is attached, preserving both native controls and transparent overlays.
-        undecorated = true,
-        transparent = true,
+        visible = true,
+        title = title,
         resizable = true,
         focusable = true,
+        nativePopupLayers = true,
         onKeyEvent = { event ->
             if (event.key == Key.Escape && event.type == KeyEventType.KeyDown) {
-                if (player.isFullscreen || windowState.placement == WindowPlacement.Fullscreen) {
+                if (player.isFullscreen) {
                     player.isFullscreen = false
                 } else {
                     player.pause()
@@ -110,26 +100,60 @@ public fun DesktopVideoPlayerWindow(
             }
         },
     ) {
+        val taoWindow = LocalTaoWindow.current
+        var pendingFullscreen by remember(taoWindow) { mutableStateOf<Boolean?>(null) }
+
+        // Do not pre-write WindowState.placement here. On macOS Nucleus observes an intermediate
+        // resize before AppKit marks the window fullscreen and otherwise cancels its own request.
+        // The native window owns the transition; WindowState is only the confirmed echo.
+        LaunchedEffect(player.isFullscreen, taoWindow) {
+            val window = taoWindow ?: return@LaunchedEffect
+            val requested = player.isFullscreen
+            if (window.isFullscreen != requested) {
+                pendingFullscreen = requested
+                window.setFullscreen(requested)
+            } else {
+                pendingFullscreen = null
+            }
+        }
+        LaunchedEffect(windowState.placement, taoWindow) {
+            val nativeFullscreen = windowState.placement == WindowPlacement.Fullscreen
+            when (val pending = pendingFullscreen) {
+                nativeFullscreen -> pendingFullscreen = null
+                null -> if (player.isFullscreen != nativeFullscreen) player.isFullscreen = nativeFullscreen
+                else -> Unit
+            }
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             val provider = player as? DesktopVideoWindowSurfaceProvider
-            val nativeWindowReady = synchronizeNativeWindow(player, provider, window, windowState)
-
-            if (provider != null && nativeWindowReady) {
+            if (provider != null) {
                 provider.RenderDesktopVideoWindowSurface(
-                    window = window,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = contentScale,
-                    overlay = { overlay(player) },
+                    overlay = {
+                        // NativeView overlays are hit-test transparent unless their interactive
+                        // regions opt in. A video player's Compose controls own the whole viewport;
+                        // native decoders do not need direct pointer input.
+                        Box(
+                            modifier =
+                                Modifier
+                                    .fillMaxSize()
+                                    .consumeNativeVideoOverlayPointerEvents(),
+                        ) {
+                            overlay(player)
+                        }
+                    },
                     onSurfaceAttached = { onSurfaceAttached(player) },
                 )
-            } else if (provider == null) {
+            } else {
                 BackendVideoPlayerSurface(
                     playerState = player,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = contentScale,
                     overlay = { overlay(player) },
                 )
-                androidx.compose.runtime.DisposableEffect(player, window) {
+                DisposableEffect(player) {
                     onSurfaceAttached(player)
                     onDispose { }
                 }
@@ -137,71 +161,3 @@ public fun DesktopVideoPlayerWindow(
         }
     }
 }
-
-@Composable
-private fun synchronizeNativeWindow(
-    player: VideoPlayerState,
-    provider: DesktopVideoWindowSurfaceProvider?,
-    window: AwtWindow,
-    windowState: WindowState,
-): Boolean {
-    val fullscreen = player.isFullscreen
-    var nativeTransitionTarget by
-        remember(provider, window) { mutableStateOf<Boolean?>(fullscreen) }
-    var nativeTransitionDeadlineNanos by
-        remember(provider, window) {
-            mutableStateOf(System.nanoTime() + NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS)
-        }
-    var nativeWindowReady by remember(provider, window) { mutableStateOf(provider == null) }
-
-    LaunchedEffect(provider, window) {
-        // AppKit owns the native NSWindow and can be busy inside a live-resize/Zoom animation.
-        // Never synchronously wait for its main queue from Compose's UI dispatcher: AppKit may
-        // itself be waiting for JBR to lay out the content view.
-        withContext(Dispatchers.IO) {
-            provider?.configureNativeWindow(window)
-        }
-        nativeWindowReady = true
-        while (true) {
-            val nativeFullscreen =
-                withContext(Dispatchers.IO) {
-                    provider?.nativeWindowFullscreenState(window)
-                }
-            if (nativeFullscreen != null) {
-                val transitionTarget = nativeTransitionTarget
-                if (transitionTarget != null) {
-                    if (nativeFullscreen == transitionTarget) {
-                        nativeTransitionTarget = null
-                    } else if (System.nanoTime() >= nativeTransitionDeadlineNanos) {
-                        nativeTransitionTarget = null
-                        player.isFullscreen = nativeFullscreen
-                    }
-                } else if (nativeFullscreen != player.isFullscreen) {
-                    player.isFullscreen = nativeFullscreen
-                }
-            }
-            delay(NATIVE_WINDOW_STATE_POLL_MILLIS)
-        }
-    }
-    LaunchedEffect(provider, window, fullscreen, nativeWindowReady) {
-        if (provider != null && !nativeWindowReady) return@LaunchedEffect
-        nativeTransitionTarget = fullscreen
-        nativeTransitionDeadlineNanos = System.nanoTime() + NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS
-        val nativeWindowOwnsTransition =
-            withContext(Dispatchers.IO) {
-                provider?.requestWindowFullscreen(window, fullscreen) == true
-            }
-        if (!nativeWindowOwnsTransition) {
-            nativeTransitionTarget = null
-            windowState.placement =
-                if (fullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating
-        } else if (!fullscreen && windowState.placement != WindowPlacement.Floating) {
-            // Do not leave a stale Compose full-screen placement after a native exit.
-            windowState.placement = WindowPlacement.Floating
-        }
-    }
-    return nativeWindowReady
-}
-
-private const val NATIVE_WINDOW_STATE_POLL_MILLIS = 100L
-private const val NATIVE_WINDOW_TRANSITION_TIMEOUT_NANOS = 3_000_000_000L

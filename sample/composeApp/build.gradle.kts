@@ -1,7 +1,7 @@
 @file:OptIn(ExperimentalWasmDsl::class, ExperimentalKotlinGradlePluginApi::class)
 
-import io.github.kdroidfilter.nucleus.desktop.application.dsl.CompressionLevel
-import io.github.kdroidfilter.nucleus.desktop.application.dsl.TargetFormat
+import dev.nucleusframework.desktop.application.dsl.CompressionLevel
+import dev.nucleusframework.desktop.application.dsl.TargetFormat
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.tasks.JavaExec
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
@@ -15,6 +15,10 @@ plugins {
     alias(libs.plugins.compose)
     alias(libs.plugins.android.multiplatform.library)
     alias(libs.plugins.nucleus)
+}
+
+configurations.configureEach {
+    exclude(group = "dev.nucleusframework", module = "nucleus.decorated-window-awt")
 }
 
 val desktopSampleMainClass = "sample.app.MainKt"
@@ -62,6 +66,9 @@ tasks.withType<JavaExec>().configureEach {
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     providers.gradleProperty("kmediaPlayerHdrTestMedia").orNull?.let { mediaPath ->
         systemProperty("composemediaplayer.test.hdrMedia", mediaPath)
+    }
+    providers.gradleProperty("composeMediaPlayerWmaProTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.test.wmaProMedia", mediaPath)
     }
 }
 
@@ -129,6 +136,9 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
+            implementation(libs.nucleus.application)
+            implementation(libs.nucleus.decorated.window.core)
+            implementation(libs.nucleus.decorated.window.tao)
             implementation(libs.nucleus.graalvm.runtime)
             implementation(project(":mediaplayer-ass"))
             implementation(project(":mediaplayer-dolbyvision"))
@@ -173,7 +183,6 @@ nucleus.application {
         jvmVendor = JvmVendorSpec.BELLSOFT
         buildArgs.addAll(
             "-H:+AddAllCharsets",
-            "-Djava.awt.headless=false",
             "--enable-url-protocols=http,https"
         )
     }

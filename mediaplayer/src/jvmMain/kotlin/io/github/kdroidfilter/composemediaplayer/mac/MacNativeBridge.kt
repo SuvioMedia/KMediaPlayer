@@ -1,8 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
-import java.awt.Component
-import java.awt.Window
 import java.nio.ByteBuffer
 
 /**
@@ -145,49 +143,20 @@ internal object MacNativeBridge {
     /** Capabilities of the screen currently hosting this player's native layer. */
     @JvmStatic external fun nGetDisplayColorCapabilities(handle: Long): String?
 
-    @JvmStatic external fun nAttachHdrMetalView(
-        handle: Long,
-        component: Component,
-    ): Boolean
+    /** Creates an owned AppKit child view for Nucleus `NativeView` embedding. */
+    @JvmStatic external fun nCreateNativeVideoView(handle: Long): Long
 
-    @JvmStatic external fun nDetachHdrMetalView(
+    /** Disconnects the renderer and releases the AppKit child created above. */
+    @JvmStatic external fun nDisposeNativeVideoView(
         handle: Long,
-        component: Component,
+        nativeView: Long,
     )
 
-    /** Attaches the native AVPlayer/Metal layer below a transparent Compose layer in a full window. */
-    @JvmStatic external fun nAttachHdrMetalWindow(
-        handle: Long,
-        window: Window,
-    ): Boolean
-
-    @JvmStatic external fun nAttachLibVlcNativeView(
-        handle: Long,
-        component: Component,
-    ): Boolean
-
-    @JvmStatic external fun nDetachLibVlcNativeView(
-        handle: Long,
-        component: Component,
-    )
-
-    /** Attaches libVLC below a transparent Compose layer and lets AppKit own window resizing. */
-    @JvmStatic external fun nAttachLibVlcNativeWindow(
-        handle: Long,
-        window: Window,
-    ): Boolean
-
-    /** Requests AppKit's native full-screen transition for a dedicated native video window. */
-    @JvmStatic external fun nSetWindowFullscreen(
-        window: Window,
+    /** Resizes the owning NSWindow in place without AppKit's fullscreen-Space reparenting. */
+    @JvmStatic external fun nSetNativeWindowFullscreen(
+        nativeView: Long,
         fullscreen: Boolean,
     ): Boolean
-
-    /** Configures opaque standard AppKit chrome for the dedicated video window. */
-    @JvmStatic external fun nConfigureNativeWindow(window: Window): Boolean
-
-    /** Returns the current AppKit NSWindow full-screen style state. */
-    @JvmStatic external fun nIsWindowFullscreen(window: Window): Boolean
 
     @JvmStatic external fun nSetHdrMetalContentScaleMode(
         handle: Long,

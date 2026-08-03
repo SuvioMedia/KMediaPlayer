@@ -31,7 +31,7 @@ PQ/HLG → linear-light color transform. HDR10/HLG targets an extended-linear BT
 `CAMetalLayer`; SDR applies the controlled tone/gamut mapping path and targets extended-linear
 BT.709. The renderer is not confirmed until its first command buffer completes.
 
-If P010, Metal, EDR, the current monitor, or JAWT layer attachment fails, `AUTO`/`PREFER_HDR`
+If P010, Metal, EDR, the current monitor, or Tao/AppKit native-view attachment fails, `AUTO`/`PREFER_HDR`
 replans to the verified AVFoundation-to-BT.709 canvas path. `REQUIRE_HDR` reports the runtime reason
 instead of displaying an unmanaged frame. Dolby Vision is intentionally excluded from the custom
 projection renderer until a base-layer/conversion path is independently verified.

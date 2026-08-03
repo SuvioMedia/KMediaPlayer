@@ -14,6 +14,10 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
+configurations.configureEach {
+    exclude(group = "dev.nucleusframework", module = "nucleus.decorated-window-awt")
+}
+
 detekt {
     config.setFrom(files(rootProject.file("config/detekt/detekt.yml")))
     baseline = rootProject.file("config/detekt/baseline.xml")
@@ -59,9 +63,11 @@ kotlin {
         jvmMain.dependencies {
             api(project(":mediaplayer-core"))
             api(libs.compose.ui)
+            api(libs.nucleus.application)
+            api(libs.nucleus.decorated.window.core)
+            api(libs.nucleus.decorated.window.tao)
             implementation(libs.compose.foundation)
             implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.coroutines.swing)
         }
         jvmTest.dependencies {
             implementation(compose.desktop.currentOs)
@@ -183,6 +189,9 @@ val validateReleaseVersion =
                 )
             check(semver.matches(releaseVersion)) {
                 "Release version '$releaseVersion' is not a valid immutable SemVer version."
+            }
+            check(releaseVersion.substringBefore('.').toInt() >= 4) {
+                "The Tao desktop-window API belongs to KMediaPlayer 4.x and cannot be published as $releaseVersion."
             }
         }
     }

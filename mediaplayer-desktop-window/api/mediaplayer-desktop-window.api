@@ -1,3 +1,9 @@
+public final class io/github/kdroidfilter/composemediaplayer/desktop/ComposableSingletons$DesktopNativeVideoSurfaceKt {
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/desktop/ComposableSingletons$DesktopNativeVideoSurfaceKt;
+	public fun <init> ()V
+	public final fun getLambda$-254891698$io_github_shusek_mediaplayer_desktop_window ()Lkotlin/jvm/functions/Function2;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/desktop/ComposableSingletons$DesktopVideoPlayerWindowKt {
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/desktop/ComposableSingletons$DesktopVideoPlayerWindowKt;
 	public fun <init> ()V
@@ -8,7 +14,7 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/ComposableS
 public final class io/github/kdroidfilter/composemediaplayer/desktop/ComposableSingletons$DesktopVideoWindowSurfaceProviderKt {
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/desktop/ComposableSingletons$DesktopVideoWindowSurfaceProviderKt;
 	public fun <init> ()V
-	public final fun getLambda$-1789824394$io_github_shusek_mediaplayer_desktop_window ()Lkotlin/jvm/functions/Function2;
+	public final fun getLambda$2010477934$io_github_shusek_mediaplayer_desktop_window ()Lkotlin/jvm/functions/Function2;
 }
 
 public abstract interface class io/github/kdroidfilter/composemediaplayer/desktop/DesktopBackendAvailability {
@@ -82,6 +88,26 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopBack
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopBackendRoutingTier;
 	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopBackendRoutingTier;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurface {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function5;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function5;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getKind ()Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind : java/lang/Enum {
+	public static final field LINUX_GTK_WIDGET Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind;
+	public static final field MACOS_NS_VIEW Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind;
+	public static final field WINDOWS_HWND Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKind;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurfaceKt {
+	public static final fun DesktopNativeVideoView (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopNativeVideoSurface;Landroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;II)V
 }
 
 public abstract interface class io/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend : io/github/kdroidfilter/composemediaplayer/VideoPlayerBackend {
@@ -214,26 +240,22 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopPlay
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoApplicationScopeKt {
+	public static final fun ProvideDesktopVideoApplicationScope (Ldev/nucleusframework/application/NucleusApplicationScope;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;I)V
+	public static final fun getLocalDesktopVideoApplicationScope ()Landroidx/compose/runtime/ProvidableCompositionLocal;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoPlayerWindowKt {
 	public static final fun DesktopVideoPlayerWindow (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;ZLkotlin/jvm/functions/Function0;Ljava/lang/String;Landroidx/compose/ui/window/WindowState;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;II)V
 	public static final fun DesktopVideoPlayerWindow (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackSession;ZLkotlin/jvm/functions/Function0;Ljava/lang/String;Landroidx/compose/ui/window/WindowState;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function3;Landroidx/compose/runtime/Composer;II)V
 }
 
 public abstract interface class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider {
-	public abstract fun RenderDesktopVideoWindowSurface (Ljava/awt/Window;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)V
-	public fun configureNativeWindow (Ljava/awt/Window;)Z
-	public fun nativeWindowFullscreenState (Ljava/awt/Window;)Ljava/lang/Boolean;
-	public fun requestWindowFullscreen (Ljava/awt/Window;Z)Z
+	public abstract fun RenderDesktopVideoWindowSurface (Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)V
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider$ComposeDefaultImpls {
-	public static final fun RenderDesktopVideoWindowSurface$default (Ljava/awt/Window;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Landroidx/compose/runtime/Composer;II)V
-}
-
-public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider$DefaultImpls {
-	public static fun configureNativeWindow (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Ljava/awt/Window;)Z
-	public static fun nativeWindowFullscreenState (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Ljava/awt/Window;)Ljava/lang/Boolean;
-	public static fun requestWindowFullscreen (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Ljava/awt/Window;Z)Z
+	public static final fun RenderDesktopVideoWindowSurface$default (Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopVideoWindowSurfaceProvider;Landroidx/compose/runtime/Composer;II)V
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/desktop/JvmHttpSeekableMediaDataSourceFactory : io/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory {
@@ -249,5 +271,10 @@ public abstract interface class io/github/kdroidfilter/composemediaplayer/deskto
 
 public abstract interface class io/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory {
 	public abstract fun open (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackRequest;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/NucleusNativeViewOverlayViewportKt {
+	public static final fun consumeNativeVideoOverlayPointerEvents (Landroidx/compose/ui/Modifier;Landroidx/compose/ui/input/pointer/PointerIcon;)Landroidx/compose/ui/Modifier;
+	public static synthetic fun consumeNativeVideoOverlayPointerEvents$default (Landroidx/compose/ui/Modifier;Landroidx/compose/ui/input/pointer/PointerIcon;ILjava/lang/Object;)Landroidx/compose/ui/Modifier;
 }
 

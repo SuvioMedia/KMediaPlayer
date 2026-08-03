@@ -13,7 +13,7 @@
 #include <cstdint>
 
 // Native API version — bump when the exported API changes.
-#define NATIVE_VIDEO_PLAYER_VERSION 12
+#define NATIVE_VIDEO_PLAYER_VERSION 13
 
 // Playback speed bounds — kept in sync with
 // io.github.kdroidfilter.composemediaplayer.VideoPlayerState.{MIN,MAX}_PLAYBACK_SPEED.

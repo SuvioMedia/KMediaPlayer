@@ -16,17 +16,14 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,7 +43,6 @@ private const val DEFAULT_SUBTITLE_URL =
 private const val DEFAULT_ASS_SUBTITLE_URL =
     "https://raw.githubusercontent.com/Shusek/KMediaPlayer/refs/heads/master/assets/subtitles/en.ass"
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubtitleSheet(
     audioTracks: List<AudioTrack>,
@@ -62,12 +58,7 @@ internal fun SubtitleSheet(
     onDismiss: () -> Unit,
 ) {
     var subtitleUrl by remember { mutableStateOf(DEFAULT_SUBTITLE_URL) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-    ) {
+    PlayerModalBottomSheet(onDismiss = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

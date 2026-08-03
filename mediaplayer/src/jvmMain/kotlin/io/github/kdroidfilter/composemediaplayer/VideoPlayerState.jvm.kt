@@ -14,7 +14,6 @@ import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.awt.Window
 import kotlin.time.Duration
 
 actual fun createVideoPlayerState(
@@ -257,7 +256,6 @@ open class DefaultVideoPlayerState(
 
     @Composable
     override fun RenderDesktopVideoWindowSurface(
-        window: Window,
         modifier: Modifier,
         contentScale: ContentScale,
         overlay: @Composable () -> Unit,
@@ -265,32 +263,10 @@ open class DefaultVideoPlayerState(
     ) {
         JvmDesktopVideoWindowSurface(
             playerState = delegate,
-            window = window,
             modifier = modifier,
             contentScale = contentScale,
             overlay = overlay,
             onSurfaceAttached = onSurfaceAttached,
         )
     }
-
-    override fun requestWindowFullscreen(
-        window: Window,
-        fullscreen: Boolean,
-    ): Boolean =
-        when (val surfaceState = delegate.resolveJvmSurfaceState()) {
-            is MacVideoPlayerState -> surfaceState.requestDedicatedWindowFullscreen(window, fullscreen)
-            else -> false
-        }
-
-    override fun configureNativeWindow(window: Window): Boolean =
-        when (val surfaceState = delegate.resolveJvmSurfaceState()) {
-            is MacVideoPlayerState -> surfaceState.configureDedicatedWindow(window)
-            else -> false
-        }
-
-    override fun nativeWindowFullscreenState(window: Window): Boolean? =
-        when (val surfaceState = delegate.resolveJvmSurfaceState()) {
-            is MacVideoPlayerState -> surfaceState.dedicatedWindowFullscreenState(window)
-            else -> null
-        }
 }

@@ -8,6 +8,8 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 
 internal actual val sampleVideoPickerUsesAllFiles: Boolean = false
 
+internal actual val samplePlayerSheetsUseInlineHost: Boolean = false
+
 @Composable
 internal actual fun SampleVideoPlayerSurface(
     player: SampleVideoPlayerHandle,

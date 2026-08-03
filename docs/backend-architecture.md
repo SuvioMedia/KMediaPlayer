@@ -85,13 +85,13 @@ session closes the previous one. Renderer selection and source adaptation are
 separate: `DesktopMediaSourcePolicy` controls direct/remux/transcode input while
 the backend controls the output surface.
 
-On macOS the explicit AWT window owns one `NSWindow`; AVFoundation/Metal,
-libVLC, and native MPV attach their native view below the transparent Compose
-control layer. Resize and fullscreen therefore stay inside one AppKit view tree.
-Windows and Linux use the same explicit window/session contract, but a route is
-called native only when its backend actually attaches an HWND or Wayland/X11
-surface. A software Skia route remains a valid SDR fallback and is never promoted
-to an HDR claim.
+The application and player windows use the Nucleus Tao backend. On macOS Tao owns
+the `NSWindow`; AVFoundation/Metal, libVLC, and native MPV provide a direct `NSView`
+below the Compose control layer. Windows embeds a renderer-owned child `HWND`, and
+Linux embeds a renderer-owned `GtkWidget` for Wayland HDR or X11/XWayland libVLC.
+Resize and fullscreen stay inside one native hierarchy on every platform. No
+AWT/Swing/JAWT/JBR window peer is initialized. A software Skia route remains a
+valid SDR fallback and is never promoted to an HDR claim.
 
 Remote authenticated progressive input for MPV is read through the application's
 seekable data-source callback and materialized into a bounded private cache;

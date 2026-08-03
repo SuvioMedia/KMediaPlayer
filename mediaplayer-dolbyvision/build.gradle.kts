@@ -546,18 +546,18 @@ mavenPublishing {
     }
 }
 
-val hdrPipelineMajorVersion = 2
+val desktopTaoMajorVersion = 4
 
 val validateReleaseVersion =
     tasks.register("validateReleaseVersion") {
         group = "verification"
         description = "Rejects mutable or non-SemVer versions before publishing a remote release."
         inputs.property("releaseVersion", projectVersion)
-        inputs.property("hdrPipelineMajorVersion", hdrPipelineMajorVersion)
+        inputs.property("desktopTaoMajorVersion", desktopTaoMajorVersion)
 
         doLast {
             val releaseVersion = inputs.properties.getValue("releaseVersion") as String
-            val hdrPipelineMajorVersion = inputs.properties.getValue("hdrPipelineMajorVersion") as Int
+            val desktopTaoMajorVersion = inputs.properties.getValue("desktopTaoMajorVersion") as Int
             val semverRegex =
                 Regex(
                     "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
@@ -569,8 +569,8 @@ val validateReleaseVersion =
                 "Release version '$releaseVersion' is not valid immutable SemVer."
             }
             val releaseMajorVersion = releaseVersion.substringBefore('.').toInt()
-            check(releaseMajorVersion >= hdrPipelineMajorVersion) {
-                "This branch contains the breaking KMediaPlayer 2.0 API and cannot be published as $releaseVersion."
+            check(releaseMajorVersion >= desktopTaoMajorVersion) {
+                "This branch belongs to the KMediaPlayer 4.0 line and cannot be published as $releaseVersion."
             }
         }
     }

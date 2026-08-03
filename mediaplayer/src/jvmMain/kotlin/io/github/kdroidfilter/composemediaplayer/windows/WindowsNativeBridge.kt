@@ -3,12 +3,11 @@ package io.github.kdroidfilter.composemediaplayer.windows
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
 import io.github.kdroidfilter.composemediaplayer.util.hundredNanosecondsAsDuration
-import java.awt.Component
 import java.nio.ByteBuffer
 
 internal object WindowsNativeBridge {
     /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the DLL. */
-    private const val EXPECTED_NATIVE_VERSION = 12
+    private const val EXPECTED_NATIVE_VERSION = 13
 
     init {
         NativeLibraryLoader.load("NativeVideoPlayer", WindowsNativeBridge::class.java)
@@ -164,14 +163,15 @@ internal object WindowsNativeBridge {
         floatingConfiguration: FloatArray,
     ): Int
 
-    @JvmStatic external fun nAttachHdrOutput(
+    @JvmStatic external fun nCreateNativeVideoWindow(
         handle: Long,
-        component: Component,
-    ): Boolean
+        libVlc: Boolean,
+    ): Long
 
-    @JvmStatic external fun nDetachHdrOutput(
+    @JvmStatic external fun nDisposeNativeVideoWindow(
         handle: Long,
-        component: Component,
+        hwnd: Long,
+        libVlc: Boolean,
     )
 
     @JvmStatic external fun nRenderHdrFrame(handle: Long): Int
@@ -280,16 +280,6 @@ internal object WindowsNativeBridge {
     @JvmStatic external fun nGetLibVlcAudioTrackDescriptions(handle: Long): String?
 
     @JvmStatic external fun nGetLibVlcSubtitleTrackDescriptions(handle: Long): String?
-
-    @JvmStatic external fun nAttachLibVlcNativeView(
-        handle: Long,
-        component: Component,
-    ): Boolean
-
-    @JvmStatic external fun nDetachLibVlcNativeView(
-        handle: Long,
-        component: Component,
-    )
 
     @JvmStatic private external fun nGetVideoMetadata(
         handle: Long,

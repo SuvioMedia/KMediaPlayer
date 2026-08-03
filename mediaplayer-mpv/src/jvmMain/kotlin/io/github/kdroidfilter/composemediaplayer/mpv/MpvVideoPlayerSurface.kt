@@ -10,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -17,20 +18,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurface
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurfaceKind
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
-import java.awt.event.ComponentAdapter
-import java.awt.event.ComponentEvent
-import javax.swing.SwingUtilities
-import javax.swing.Timer
-import java.awt.Window as AwtWindow
 
-/**
- * Uses a native macOS OpenGL/EDR layer whenever both the bridge and libmpv GPU renderer are
- * available. The existing BGR0/Skia renderer remains the automatic fallback on every platform.
- */
+/** Uses a Tao-hosted native macOS OpenGL/EDR view, with Skia as the portable fallback. */
 @Composable
 internal fun MpvVideoPlayerSurface(
     playerState: MpvVideoPlayerState,
@@ -38,121 +34,74 @@ internal fun MpvVideoPlayerSurface(
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable () -> Unit = {},
 ) {
-    LaunchedEffect(playerState, contentScale) {
-        playerState.setCropMode(contentScale == ContentScale.Crop)
-    }
-    MpvSoftwareVideoPlayerSurface(
+    MpvVideoSurfaceContent(
         playerState = playerState,
         modifier = modifier,
+        contentScale = contentScale,
         overlay = overlay,
     )
 }
 
-/** Uses the caller-owned player window for native MPV output instead of opening one implicitly. */
+/** Full-player variant that reports when Tao has obtained its native child. */
 @Composable
 internal fun MpvVideoPlayerWindowSurface(
     playerState: MpvVideoPlayerState,
-    window: AwtWindow,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable () -> Unit = {},
     onSurfaceAttached: () -> Unit = {},
 ) {
-    var nativeAttachFailed by remember(playerState, window) { mutableStateOf(false) }
+    MpvVideoSurfaceContent(
+        playerState = playerState,
+        modifier = modifier,
+        contentScale = contentScale,
+        overlay = overlay,
+        onSurfaceAttached = onSurfaceAttached,
+    )
+}
+
+@Composable
+private fun MpvVideoSurfaceContent(
+    playerState: MpvVideoPlayerState,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit,
+    onSurfaceAttached: () -> Unit = {},
+) {
+    val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
+    var nativeAttachFailed by remember(playerState) { mutableStateOf(false) }
     val useNativeMacSurface =
         playerState.hasMedia && playerState.canUseNativeMacSurface && !nativeAttachFailed
 
     LaunchedEffect(playerState, contentScale) {
         playerState.setCropMode(contentScale == ContentScale.Crop)
     }
-    if (!useNativeMacSurface) {
+    LaunchedEffect(playerState.hasMedia) {
+        if (playerState.hasMedia) nativeAttachFailed = false
+    }
+
+    if (useNativeMacSurface) {
+        val surface =
+            remember(playerState, useNativeMacSurface) {
+                DesktopNativeVideoSurface(
+                    kind = DesktopNativeVideoSurfaceKind.MACOS_NS_VIEW,
+                    createHandle = playerState::createNativeMacView,
+                    disposeHandle = playerState::disposeNativeMacView,
+                )
+            }
+        DesktopNativeVideoView(
+            surface = surface,
+            modifier = modifier.background(Color.Black),
+            overlay = overlay,
+            onAttached = { latestOnSurfaceAttached() },
+            onUnavailable = { nativeAttachFailed = true },
+        )
+    } else {
         MpvSoftwareVideoPlayerSurface(playerState, modifier, overlay)
-        DisposableEffect(playerState, window) {
-            onSurfaceAttached()
+        DisposableEffect(playerState) {
+            latestOnSurfaceAttached()
             onDispose { }
         }
-        return
-    }
-
-    DisposableEffect(playerState, window) {
-        val attachment =
-            MpvNativeMacWindowAttachment(
-                playerState = playerState,
-                window = window,
-                onAttachFailed = { nativeAttachFailed = true },
-                onAttached = onSurfaceAttached,
-            )
-        attachment.start()
-        onDispose(attachment::close)
-    }
-    Box(modifier = modifier) {
-        overlay()
-    }
-}
-
-private class MpvNativeMacWindowAttachment(
-    private val playerState: MpvVideoPlayerState,
-    private val window: AwtWindow,
-    private val onAttachFailed: () -> Unit,
-    private val onAttached: () -> Unit = {},
-) : ComponentAdapter() {
-    private var disposed = false
-    private var attached = false
-    private var attachScheduled = false
-    private var attachAttempts = 0
-    private var retryTimer: Timer? = null
-
-    fun start() {
-        window.addComponentListener(this)
-        scheduleAttach()
-    }
-
-    fun close() {
-        disposed = true
-        retryTimer?.stop()
-        retryTimer = null
-        window.removeComponentListener(this)
-        detachNativeWindow()
-    }
-
-    override fun componentShown(event: ComponentEvent?) {
-        attachAttempts = 0
-        scheduleAttach()
-    }
-
-    override fun componentHidden(event: ComponentEvent?) = detachNativeWindow()
-
-    private fun scheduleAttach() {
-        if (disposed || attached || attachScheduled) return
-        attachScheduled = true
-        SwingUtilities.invokeLater {
-            attachScheduled = false
-            if (disposed || attached || !window.isDisplayable || !window.isShowing) return@invokeLater
-            attached = playerState.attachNativeMacWindow(window)
-            if (attached) onAttached()
-            if (!attached && !disposed) {
-                attachAttempts++
-                if (attachAttempts >= NATIVE_ATTACH_MAX_ATTEMPTS) {
-                    onAttachFailed()
-                } else {
-                    retryTimer?.stop()
-                    retryTimer =
-                        Timer(NATIVE_ATTACH_RETRY_MS) {
-                            retryTimer = null
-                            scheduleAttach()
-                        }.apply {
-                            isRepeats = false
-                            start()
-                        }
-                }
-            }
-        }
-    }
-
-    private fun detachNativeWindow() {
-        if (!attached) return
-        playerState.detachNativeMacWindow()
-        attached = false
     }
 }
 
@@ -203,5 +152,3 @@ private fun MpvSoftwareVideoPlayerSurface(
 
 private const val PAUSED_REFRESH_INTERVAL_MS = 250L
 private const val IDLE_REFRESH_INTERVAL_MS = 100L
-private const val NATIVE_ATTACH_MAX_ATTEMPTS = 4
-private const val NATIVE_ATTACH_RETRY_MS = 75

@@ -110,7 +110,7 @@ struct VideoPlayer {
     pthread_mutex_t headers_lock;
     char*   request_headers;
 
-    // Direct Wayland output. The wl_display and parent wl_surface are owned by JBR.
+    // Direct Wayland output. The wl_display and parent wl_surface are owned by GTK/Tao.
     pthread_mutex_t output_lock;
     uintptr_t wayland_display;
     uintptr_t wayland_parent_surface;
@@ -572,7 +572,7 @@ void nvp_destroy(VideoPlayer* p) {
 }
 
 // ---------------------------------------------------------------------------
-// Direct JBR Wayland output
+// Direct GTK/Tao Wayland output
 // ---------------------------------------------------------------------------
 
 static int is_ten_bit_format_name(const gchar* format) {

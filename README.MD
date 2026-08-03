@@ -110,7 +110,7 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
 
 > Flat Android video follows the platform-recommended MediaCodec + `SurfaceView` path; KMediaPlayer does not overwrite decoder buffers with a guessed dataspace. On Android 9+, a small read-only JNI bridge compares `ANativeWindow_getBuffersDataSpace()` with the decoded HDR10/HDR10+/HLG signal after the first frame. An exact match is `RENDERER_CONFIGURED`; Android 14+'s active HDR/SDR composition report is independent `SYSTEM_REPORTED` evidence and is retained only for the current decoded output signal, source, surface and display. Dolby Vision remains vendor-managed. If neither public signal confirms the route, `AUTO` uses a verified controlled or source-bridge SDR fallback when available, while `REQUIRE_HDR` fails instead of labeling inferred playback as HDR.
 
-> Full macOS JVM playback uses the explicit `DesktopVideoPlayerWindow`: AVFoundation/Metal, native MPV, or libVLC attaches below its Compose controls in one caller-owned `NSWindow`. Embedded `VideoPlayerSurface` stays on the Compose frame-copy path for feeds, galleries, and mini players. Runtime selection is controlled by the color policy; see [macOS color pipeline](docs/macos-color-pipeline.md) for the current behavior.
+> Full macOS JVM playback uses the explicit `DesktopVideoPlayerWindow`: Nucleus Tao owns the `NSWindow`, while AVFoundation/Metal, native MPV, or libVLC supplies a direct `NSView` below the Compose controls. No AWT/JBR peer participates in this route. Embedded `VideoPlayerSurface` can stay on the Compose frame-copy path for feeds, galleries, and mini players. Runtime selection is controlled by the color policy; see [macOS color pipeline](docs/macos-color-pipeline.md) for the current behavior.
 
 > Linux `libvlc-native-view` currently embeds VLC through an X11/XWayland xwindow. Native Wayland needs a separate `wl_surface` backend and is not implemented by this path.
 
@@ -201,6 +201,28 @@ transactionally with rollback. `DesktopVideoPlayerWindow` keeps the catalog
 window untouched and hosts native video below Compose controls. Embedded
 `VideoPlayerSurface` remains the right API for feed/gallery/mini players.
 
+The desktop application root must use Nucleus Tao. `ProvideDesktopVideoApplicationScope`
+makes the application scope available when the player opens its independent native window:
+
+```kotlin
+fun main(args: Array<String>) = nucleusApplication(args, backend = NucleusBackend.Tao) {
+    val app = this
+    app.ProvideDesktopVideoApplicationScope {
+        app.DecoratedWindow(
+            onCloseRequest = app::exitApplication,
+            title = "My app",
+            nativePopupLayers = true,
+        ) {
+            App()
+        }
+    }
+}
+```
+
+The current `4.0.x` desktop line is verified with Nucleus `2.2.0` and Compose Multiplatform `1.11.1`.
+It deliberately does not initialize AWT, Swing, JAWT, or a JetBrains Runtime window toolkit.
+See [Migrating from 3.x to 4.0](docs/migration-4.0.md) for the required desktop bootstrap and API changes.
+
 Normal applications receive `composemediaplayer-extension-api` transitively. Add it directly only
 when authoring an extension. An optional artifact has no effect until its stable extension instance
 is registered in `VideoPlaybackOptions.extensions`; `extensionStatuses` exposes its typed
@@ -277,8 +299,8 @@ discontinuity timestamp mapping, and a non-independent seek restarts only from a
 
 - **Build JDK and desktop runtime:** Java 25 or newer. Desktop JVM classes are intentionally published as Java 25 bytecode; Java 17/21 are not supported.
 - **Gradle:** use the checked-in Gradle 9.6.1 wrapper, whose distribution checksum is verified.
-- **Kotlin/Compose:** Kotlin 2.4.0 and Compose Multiplatform 1.11.1 for the current `3.0.x` line.
-- **Android:** the library is built and verified for `arm64-v8a` and `armeabi-v7a` with AGP 9.2.1, `compileSdk = 37`, and `minSdk = 23`. Android x86/x86_64 is unsupported. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`; HDR still depends on the device and active display.
+- **Kotlin/Compose:** Kotlin 2.4.10 and Compose Multiplatform 1.11.1 for the current `4.0.x` line.
+- **Android:** the library is built and verified for `arm64-v8a` and `armeabi-v7a` with AGP 9.3.1, `compileSdk = 37`, and `minSdk = 23`. Android x86/x86_64 is unsupported. Consumer projects should use the same or a newer compatible Android toolchain and must have `compileSdk >= 37`; HDR still depends on the device and active display.
 - **Android MPV adapter:** `composemediaplayer-mpv` uses `minSdk = 28` and publishes ARM runtimes only.
 - **iOS MPV adapter:** publishes `iosArm64` and `iosSimulatorArm64`. Its generated CocoaPod has an
   exact dependency on the code-signed KMediaMpv client pod, which in turn pins the shared runtime;
@@ -288,8 +310,8 @@ discontinuity timestamp mapping, and a non-independent seek restarts only from a
 - **iOS:** iOS 16.2 or newer is required. Published targets are `iosArm64` and `iosSimulatorArm64` only; Intel simulators are unsupported. An Apple Silicon macOS host and a current Xcode/iOS Simulator are required for native compilation and tests.
 - **macOS JVM:** Apple Silicon and macOS 14 or newer are required by the native AVFoundation/Metal bridge.
 - **Windows JVM:** Windows 10 1809 (build 17763) or newer is required; confirmed HDR additionally requires an active Advanced Color output and the packaged P010/D3D11 presenter.
-- **Linux desktop runtime:** ordinary SDR playback uses system GStreamer 1.x core, base libraries, and the plugins required by the media formats you use. On Debian/Ubuntu the CI baseline is `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-base`, and `gstreamer1.0-plugins-good`. Confirmed HDR additionally requires JBR 25.0.3+, GStreamer 1.28.5+, `WLToolkit`, Wayland `color-management-v1`, and the advertised Vulkan/DMABuf/output capabilities. X11/XWayland is not a confirmed HDR route.
-- **Building the Linux JNI bridge:** additionally install CMake, `pkg-config`, a C compiler, full JDK 25 JNI headers, `libgstreamer1.0-dev`, and `libgstreamer-plugins-base1.0-dev`.
+- **Linux desktop runtime:** Nucleus Tao owns the GTK3 window. Ordinary SDR playback uses system GStreamer 1.x core, base libraries, and the plugins required by the media formats you use. On Debian/Ubuntu the CI baseline is `libgtk-3-0`, `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-base`, and `gstreamer1.0-plugins-good`. Confirmed HDR additionally requires GStreamer 1.28.5+, a native Wayland session, `color-management-v1`, and the advertised Vulkan/DMABuf/output capabilities. X11/XWayland is not a confirmed HDR route.
+- **Building the Linux JNI bridge:** additionally install CMake, `pkg-config`, a C compiler, full JDK 25 JNI headers, `libgtk-3-dev`, `libgstreamer1.0-dev`, and `libgstreamer-plugins-base1.0-dev`.
 - **Building the macOS/Windows bridges:** use full JDK 25 JNI headers plus Xcode/Swift on macOS or Visual Studio with CMake on Windows.
 
 ### Optional MPV backend
@@ -420,6 +442,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 
 | Library Version | Kotlin Version | Compose Version | Java | Android toolchain |
 |-----------------|----------------|-----------------|------|-------------------|
+| 4.0.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 3.0.x           | 2.4.10         | 1.12.0-beta03   | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 2.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 1.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23 |
@@ -666,10 +689,10 @@ route is confirmed only after the active `IDXGIOutput6`, requested swapchain col
 and first successful `Present` agree. Linux flat HDR uses GStreamer `waylandsink`; projection uses
 the optional Vulkan renderer with an exact 10-bit PQ/HLG WSI colorspace. Its current linear P010
 DMA-BUF path maps the buffer before the Vulkan upload, so it is bounded but not advertised as
-zero-copy. Supported JBR Wayland sessions use sibling video and bounded `wl_shm` Compose overlay
-subsurfaces with input and semantics retained on the parent Compose surface. Missing JBR/WLToolkit,
-GStreamer, Wayland color management, DMA-BUF, Vulkan, overlay, or output support replans to verified
-SDR; `FORCE_SDR` explicitly bypasses the HDR Wayland surface.
+zero-copy. Nucleus Tao mounts the renderer-owned `GtkWidget` directly in its GTK hierarchy and
+keeps Compose controls and native popup layers above it. Missing GTK/Wayland integration,
+GStreamer, Wayland color management, DMA-BUF, Vulkan, or output support replans to verified SDR;
+`FORCE_SDR` explicitly bypasses the HDR Wayland surface.
 
 Web attempts HDR projection only when WebGPU configuration readback and an HDR display are present. It imports a bounded set of current `VideoFrame` objects, asks the browser to color-manage tagged PQ/HLG into an extended Display-P3 working encoding, and projects them into an `rgba16float` canvas with extended tone mapping. HDR is confirmed only after the display still reports high dynamic range, the configuration is retained, and the first GPU submission completes; this confirms an HDR canvas element rather than claiming a raw PQ/HLG display transport. If an HDR canvas is rejected, `AUTO`/`PREFER_HDR` recreates the route as WebGPU controlled SDR: the extended sRGB texture is converted to linear light, tone-mapped with BT.2390, gamut-mapped through the common ICtCp LUT, dithered, and written to an FP16 standard sRGB canvas. WebGL is reserved for browser-managed SDR projection and is never reported as an HDR-to-SDR converter; without WebGPU the controlled HDR fallback fails closed. `REQUIRE_HDR` fails instead of falling back. Flat HDR normally stays browser-managed and keeps output status unknown, while `FORCE_SDR` switches its visible output to the same controlled WebGPU SDR canvas because a native `<video>` cannot be forced to SDR on an HDR display. Remote web videos must be served with CORS headers whenever a canvas renderer is active, because browsers block cross-origin video texture sampling otherwise. Some mobile browsers, especially iOS Safari, require a user permission gesture before device orientation events are delivered. A libVLC native view is never used as proof of HDR output.
 

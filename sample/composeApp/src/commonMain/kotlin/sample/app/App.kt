@@ -22,6 +22,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -30,6 +32,7 @@ import androidx.compose.ui.zIndex
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import sample.app.feed.FeedScreen
 import sample.app.gallery.GalleryScreen
 import sample.app.player.DesktopMediaSourceAdapter
@@ -53,6 +56,8 @@ fun App(
     initialMuted: Boolean = false,
     initialLoop: Boolean = false,
     initialFullscreen: Boolean = false,
+    nativeFullscreen: Boolean? = null,
+    onNativeFullscreenRequest: (Boolean) -> Unit = {},
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
     initialProjection: VideoProjectionSettings = VideoProjectionSettings(),
     initialDesktopBackendName: String? = null,
@@ -83,6 +88,8 @@ fun App(
                 playbackOptions,
             )
         val playerState = player.playerState
+        val latestNativeFullscreen by rememberUpdatedState(nativeFullscreen)
+        val latestOnNativeFullscreenRequest by rememberUpdatedState(onNativeFullscreenRequest)
         var initialFullscreenApplied by remember { mutableStateOf(false) }
         LaunchedEffect(playerState, initialMuted, initialLoop) {
             if (initialMuted) playerState.volume = 0f
@@ -101,6 +108,24 @@ fun App(
                 initialFullscreenApplied = true
             }
         }
+        LaunchedEffect(playerState, nativeFullscreen != null) {
+            var previousPlayerFullscreen = playerState.isFullscreen
+            var previousNativeFullscreen = latestNativeFullscreen ?: return@LaunchedEffect
+            snapshotFlow { playerState.isFullscreen to latestNativeFullscreen }
+                .collect { (playerFullscreen, currentNativeFullscreen) ->
+                    val nativeValue = currentNativeFullscreen ?: return@collect
+                    val playerChanged = playerFullscreen != previousPlayerFullscreen
+                    val nativeChanged = nativeValue != previousNativeFullscreen
+                    when {
+                        playerFullscreen == nativeValue -> Unit
+                        playerChanged && !nativeChanged -> latestOnNativeFullscreenRequest(playerFullscreen)
+                        nativeChanged && !playerChanged -> playerState.isFullscreen = nativeValue
+                        else -> playerState.isFullscreen = nativeValue
+                    }
+                    previousPlayerFullscreen = playerFullscreen
+                    previousNativeFullscreen = nativeValue
+                }
+        }
         LaunchedEffect(currentScreen, playerState) {
             if (currentScreen != Screen.Player) playerState.stop()
         }
@@ -108,42 +133,30 @@ fun App(
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val useRail = maxWidth >= 600.dp
 
-            if (useRail) {
-                RailLayout(
-                    currentScreen,
-                    onScreenChange = { currentScreen = it },
-                    player = player,
-                    initialVideoUrl = initialVideoUrl,
-                    initialSubtitleUrl = initialSubtitleUrl,
-                    demoSubtitleEnabled = demoSubtitleEnabled,
-                    selectedDesktopBackend = selectedDesktopBackend,
-                    onDesktopBackendChange = { selectedDesktopBackend = it },
-                    selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
-                    onDesktopSourceAdapterChange = { selectedDesktopSourceAdapter = it },
-                )
-            } else {
-                BarLayout(
-                    currentScreen,
-                    onScreenChange = { currentScreen = it },
-                    player = player,
-                    initialVideoUrl = initialVideoUrl,
-                    initialSubtitleUrl = initialSubtitleUrl,
-                    demoSubtitleEnabled = demoSubtitleEnabled,
-                    selectedDesktopBackend = selectedDesktopBackend,
-                    onDesktopBackendChange = { selectedDesktopBackend = it },
-                    selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
-                    onDesktopSourceAdapterChange = { selectedDesktopSourceAdapter = it },
-                )
-            }
+            ResponsiveLayout(
+                useRail = useRail,
+                fullscreen = playerState.isFullscreen,
+                current = currentScreen,
+                onScreenChange = { currentScreen = it },
+                player = player,
+                initialVideoUrl = initialVideoUrl,
+                initialSubtitleUrl = initialSubtitleUrl,
+                demoSubtitleEnabled = demoSubtitleEnabled,
+                selectedDesktopBackend = selectedDesktopBackend,
+                onDesktopBackendChange = { selectedDesktopBackend = it },
+                selectedDesktopSourceAdapter = selectedDesktopSourceAdapter,
+                onDesktopSourceAdapterChange = { selectedDesktopSourceAdapter = it },
+            )
         }
     }
 }
 
 private const val INITIAL_FULLSCREEN_POLL_MILLIS = 25L
 
-// Compact: bottom NavigationBar
 @Composable
-private fun BarLayout(
+private fun ResponsiveLayout(
+    useRail: Boolean,
+    fullscreen: Boolean,
     current: Screen,
     onScreenChange: (Screen) -> Unit,
     player: SampleVideoPlayerHandle,
@@ -157,72 +170,51 @@ private fun BarLayout(
 ) {
     Scaffold(
         bottomBar = {
-            NavigationBar(modifier = Modifier.zIndex(2f)) {
-                Screen.entries.forEach { screen ->
-                    NavigationBarItem(
-                        icon = { Icon(screen.icon, contentDescription = screen.label) },
-                        label = { Text(screen.label) },
-                        selected = current == screen,
-                        onClick = { onScreenChange(screen) },
-                    )
+            if (!fullscreen && !useRail) {
+                NavigationBar(modifier = Modifier.zIndex(2f)) {
+                    Screen.entries.forEach { screen ->
+                        NavigationBarItem(
+                            icon = { Icon(screen.icon, contentDescription = screen.label) },
+                            label = { Text(screen.label) },
+                            selected = current == screen,
+                            onClick = { onScreenChange(screen) },
+                        )
+                    }
                 }
             }
         },
     ) { padding ->
-        ScreenContent(
-            current,
-            Modifier.fillMaxSize().padding(padding).zIndex(0f),
-            player,
-            initialVideoUrl,
-            initialSubtitleUrl,
-            demoSubtitleEnabled,
-            selectedDesktopBackend,
-            onDesktopBackendChange,
-            selectedDesktopSourceAdapter,
-            onDesktopSourceAdapterChange,
-        )
-    }
-}
-
-// Medium+: side NavigationRail
-@Composable
-private fun RailLayout(
-    current: Screen,
-    onScreenChange: (Screen) -> Unit,
-    player: SampleVideoPlayerHandle,
-    initialVideoUrl: String?,
-    initialSubtitleUrl: String?,
-    demoSubtitleEnabled: Boolean,
-    selectedDesktopBackend: DesktopMkvPlaybackBackend,
-    onDesktopBackendChange: (DesktopMkvPlaybackBackend) -> Unit,
-    selectedDesktopSourceAdapter: DesktopMediaSourceAdapter,
-    onDesktopSourceAdapterChange: (DesktopMediaSourceAdapter) -> Unit,
-) {
-    Row(modifier = Modifier.fillMaxSize()) {
-        NavigationRail(modifier = Modifier.zIndex(2f)) {
-            Spacer(Modifier.weight(1f))
-            Screen.entries.forEach { screen ->
-                NavigationRailItem(
-                    icon = { Icon(screen.icon, contentDescription = screen.label) },
-                    label = { Text(screen.label) },
-                    selected = current == screen,
-                    onClick = { onScreenChange(screen) },
-                )
+        Row(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (!fullscreen && useRail) {
+                NavigationRail(modifier = Modifier.fillMaxHeight().zIndex(2f)) {
+                    Spacer(Modifier.weight(1f))
+                    Screen.entries.forEach { screen ->
+                        NavigationRailItem(
+                            icon = { Icon(screen.icon, contentDescription = screen.label) },
+                            label = { Text(screen.label) },
+                            selected = current == screen,
+                            onClick = { onScreenChange(screen) },
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                }
             }
-            Spacer(Modifier.weight(1f))
+            // Keep this at one stable composition call site while crossing the responsive
+            // breakpoint. Replacing the whole layout used to dispose the native video NSView
+            // while Tao still had deferred frame updates for it.
+            ScreenContent(
+                current,
+                Modifier.weight(1f).fillMaxHeight().zIndex(0f),
+                player,
+                initialVideoUrl,
+                initialSubtitleUrl,
+                demoSubtitleEnabled,
+                selectedDesktopBackend,
+                onDesktopBackendChange,
+                selectedDesktopSourceAdapter,
+                onDesktopSourceAdapterChange,
+            )
         }
-        ScreenContent(
-            current,
-            Modifier.weight(1f).fillMaxHeight().zIndex(0f),
-            player,
-            initialVideoUrl,
-            initialSubtitleUrl,
-            demoSubtitleEnabled,
-            selectedDesktopBackend,
-            onDesktopBackendChange,
-            selectedDesktopSourceAdapter,
-            onDesktopSourceAdapterChange,
-        )
     }
 }
 

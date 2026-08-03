@@ -7,6 +7,8 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 
 internal expect val sampleVideoPickerUsesAllFiles: Boolean
 
+internal expect val samplePlayerSheetsUseInlineHost: Boolean
+
 @Composable
 internal expect fun SampleVideoPlayerSurface(
     player: SampleVideoPlayerHandle,

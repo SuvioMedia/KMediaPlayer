@@ -116,7 +116,6 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
-import java.awt.Component
 import java.io.Closeable
 import java.io.File
 import java.net.URI
@@ -131,6 +130,12 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
+
+private data class WindowsNativeVideoWindowOwner(
+    val instance: Long,
+    val libVlc: Boolean,
+)
+
 private val windowsHdr10PlusMetadataUnavailableHresult = 0x80000004.toInt()
 private const val WINDOWS_PLAYBACK_DIAGNOSTICS_VALUE_COUNT = 5
 private const val WINDOWS_PLAYBACK_DIAGNOSTICS_MAX_AV_SYNC_MICROS_INDEX = 3
@@ -398,6 +403,9 @@ class WindowsVideoPlayerState(
 
     /** Serializes handle replacement/destruction with native-surface attachment. */
     private val nativeInstanceLock = Any()
+    private val nativeVideoWindowOwners = mutableMapOf<Long, WindowsNativeVideoWindowOwner>()
+    internal var nativeSurfaceGeneration: Long by mutableStateOf(0L)
+        private set
 
     /** Deferred completed when initialization is ready */
     private val initReady = CompletableDeferred<Unit>()
@@ -659,7 +667,7 @@ class WindowsVideoPlayerState(
 
     // Bitmaps awaiting safe closure. When the video resolution changes mid-stream
     // (HLS adaptive bitrate) the old double-buffer bitmaps may still be read by
-    // Compose on the AWT thread via currentFrameState. We defer close() by a few
+    // Compose on its render thread via currentFrameState. We defer close() by a few
     // consumed frames so Compose has swapped to the new bitmap first.
     private data class PendingCloseBitmap(
         val bitmap: Bitmap,
@@ -738,6 +746,7 @@ class WindowsVideoPlayerState(
                     }
 
                     videoPlayerInstance = handle
+                    nativeSurfaceGeneration += 1L
 
                     // Store default volume so that later instances inherit it
                     instanceVolumes[handle] = _volume
@@ -831,7 +840,7 @@ class WindowsVideoPlayerState(
         // Do NOT close the triple-buffer bitmaps here: the ImageBitmap exposed
         // via currentFrameState shares the same native pixel memory
         // (asComposeImageBitmap is zero-copy). Compose may still be rendering
-        // the last frame on the AWT-EventQueue thread. Closing now would free
+        // the last frame on the Compose render thread. Closing now would free
         // the native memory while Skia reads it, causing an access violation.
         // Nullifying the references lets the Skia Managed cleaner release them
         // once Compose (and any other holder) drops its reference.
@@ -1597,6 +1606,7 @@ class WindowsVideoPlayerState(
                 videoPlayerInstance = handle
                 nativeBackendUsesLibVlc = wantsLibVlc
                 nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
+                nativeSurfaceGeneration += 1L
                 instanceVolumes[handle] = _volume
                 nativeSetAudioVolume(handle, _volume)
                 nativeSetPlaybackSpeed(handle, _playbackSpeed)
@@ -1800,29 +1810,48 @@ class WindowsVideoPlayerState(
             !nativeBackendUsesLibVlc &&
             windowsHdrNativeConfiguration != null
 
-    internal fun attachWindowsHdrNativeComponent(component: Component): Boolean {
+    internal fun createNativeVideoWindow(): Long {
         synchronized(nativeInstanceLock) {
-            if (!shouldUseWindowsHdrSurface()) return false
+            val usesLibVlc = shouldUseLibVlcNativeSurface()
+            val usesHdr = shouldUseWindowsHdrSurface()
+            if (!usesLibVlc && !usesHdr) return 0L
             val instance = videoPlayerInstance
-            if (instance == 0L) return false
-            updateWindowsHdrNativeConfiguration()
-            val attached =
-                runCatching { WindowsNativeBridge.nAttachHdrOutput(instance, component) }
+            if (instance == 0L) return 0L
+            if (usesHdr) updateWindowsHdrNativeConfiguration()
+            val hwnd =
+                runCatching { WindowsNativeBridge.nCreateNativeVideoWindow(instance, usesLibVlc) }
                     .getOrElse { error ->
-                        windowsLogger.e { "Failed to attach Windows HDR output: ${error.message}" }
-                        false
+                        windowsLogger.e { "Failed to create the native Windows video child: ${error.message}" }
+                        0L
                     }
-            windowsHdrSurfaceAttached = attached
+            if (hwnd != 0L) {
+                nativeVideoWindowOwners[hwnd] = WindowsNativeVideoWindowOwner(instance, usesLibVlc)
+            }
+
+            if (usesLibVlc) {
+                libVlcNativeSurfaceAttached = hwnd != 0L
+                if (hwnd != 0L && _isPlaying) {
+                    val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
+                    if (hrPlay < 0) {
+                        windowsLogger.e {
+                            "Failed to start Windows libVLC native playback after attach: 0x${hrPlay.toString(16)}"
+                        }
+                    }
+                }
+                return hwnd
+            }
+
+            windowsHdrSurfaceAttached = hwnd != 0L
             windowsNativeHdrOutputStatus = WindowsNativeBridge.hdrOutputStatus(instance)
             refreshWindowsColorPipeline()
-            if (!attached) {
+            if (hwnd == 0L) {
                 handleWindowsHdrRouteFailure(
                     windowsNativeHdrOutputStatus?.let { status ->
                         "The active monitor rejected the HDR swapchain " +
                             "(hr=0x${status.lastError.toUInt().toString(16)})."
                     } ?: "The active monitor rejected the HDR swapchain.",
                 )
-                return false
+                return 0L
             }
             renderingInfo.update(
                 backend = "Media Foundation + D3D11",
@@ -1853,22 +1882,25 @@ class WindowsVideoPlayerState(
                         "Media Foundation could not start the attached HDR route " +
                             "(hr=0x${playHr.toUInt().toString(16)}).",
                     )
-                    return false
+                    return 0L
                 }
             }
-            return true
+            return hwnd
         }
     }
 
-    internal fun detachWindowsHdrNativeComponent(component: Component) {
+    internal fun disposeNativeVideoWindow(hwnd: Long) {
+        if (hwnd == 0L) return
         synchronized(nativeInstanceLock) {
-            val instance = videoPlayerInstance
-            if (instance != 0L && !nativeBackendUsesLibVlc) {
-                runCatching { WindowsNativeBridge.nDetachHdrOutput(instance, component) }
-                    .onFailure { error ->
-                        windowsLogger.e { "Failed to detach Windows HDR output: ${error.message}" }
-                    }
+            val owner = nativeVideoWindowOwners.remove(hwnd) ?: return
+            if (owner.instance == videoPlayerInstance && owner.instance != 0L) {
+                runCatching {
+                    WindowsNativeBridge.nDisposeNativeVideoWindow(owner.instance, hwnd, owner.libVlc)
+                }.onFailure { error ->
+                    windowsLogger.e { "Failed to dispose the native Windows video child: ${error.message}" }
+                }
             }
+            libVlcNativeSurfaceAttached = false
             windowsHdrSurfaceAttached = false
             colorOutputVerified = false
             refreshWindowsColorPipeline()
@@ -1945,44 +1977,6 @@ class WindowsVideoPlayerState(
                 openUri(source, restartState, lastRequestHeaders)
             } finally {
                 windowsHdrFailureRecoveryScheduled.set(false)
-            }
-        }
-    }
-
-    internal fun attachLibVlcNativeComponent(component: Component): Boolean {
-        synchronized(nativeInstanceLock) {
-            if (!shouldUseLibVlcNativeSurface()) return false
-            val instance = videoPlayerInstance
-            if (instance == 0L) return false
-
-            return runCatching {
-                val attached = WindowsNativeBridge.nAttachLibVlcNativeView(instance, component)
-                libVlcNativeSurfaceAttached = attached
-                if (attached && _isPlaying) {
-                    val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
-                    if (hrPlay < 0) {
-                        windowsLogger.e {
-                            "Failed to start Windows libVLC native playback after attach: 0x${hrPlay.toString(16)}"
-                        }
-                    }
-                }
-                attached
-            }.getOrElse { e ->
-                windowsLogger.e { "Failed to attach Windows libVLC native surface: ${e.message}" }
-                false
-            }
-        }
-    }
-
-    internal fun detachLibVlcNativeComponent(component: Component) {
-        synchronized(nativeInstanceLock) {
-            val instance = videoPlayerInstance
-            if (instance == 0L) return
-            runCatching {
-                WindowsNativeBridge.nDetachLibVlcNativeView(instance, component)
-                libVlcNativeSurfaceAttached = false
-            }.onFailure { e ->
-                windowsLogger.e { "Failed to detach Windows libVLC native surface: ${e.message}" }
             }
         }
     }
@@ -2601,7 +2595,7 @@ class WindowsVideoPlayerState(
                 bitmapLock.write {
                     // Queue previous bitmaps for deferred close instead of leaking them
                     // to the Skia managed cleaner: closing now would race with Compose
-                    // still drawing the last frame on the AWT thread.
+                    // still drawing the last frame on the Compose render thread.
                     for (i in skiaBitmaps.indices) {
                         skiaBitmaps[i]?.let {
                             pendingCloseBitmaps.addLast(PendingCloseBitmap(it, pendingCloseGraceFrames))
@@ -3288,6 +3282,17 @@ class WindowsVideoPlayerState(
         instance: Long,
         usesLibVlc: Boolean = nativeBackendUsesLibVlc,
     ) {
+        val ownedWindows =
+            nativeVideoWindowOwners
+                .filterValues { owner -> owner.instance == instance }
+                .toList()
+        ownedWindows.forEach { (hwnd, owner) ->
+            runCatching { WindowsNativeBridge.nDisposeNativeVideoWindow(owner.instance, hwnd, owner.libVlc) }
+                .onFailure { error ->
+                    windowsLogger.e { "Failed to dispose a native Windows video child: ${error.message}" }
+                }
+            nativeVideoWindowOwners.remove(hwnd)
+        }
         if (usesLibVlc) {
             WindowsNativeBridge.destroyLibVlcInstance(instance)
         } else {

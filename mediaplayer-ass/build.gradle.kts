@@ -663,8 +663,8 @@ val validateReleaseVersion =
             check(semver.matches(releaseVersion)) {
                 "ASS companion release version '$releaseVersion' must be immutable SemVer."
             }
-            check(releaseVersion.substringBefore('.').toInt() >= 2) {
-                "The ASS companion belongs to KMediaPlayer 2.x and cannot be published as $releaseVersion."
+            check(releaseVersion.substringBefore('.').toInt() >= 4) {
+                "The ASS companion belongs to KMediaPlayer 4.x and cannot be published as $releaseVersion."
             }
             check(releaseGroup == "io.github.shusek") {
                 "ASS companion release group must remain 'io.github.shusek', but was '$releaseGroup'."

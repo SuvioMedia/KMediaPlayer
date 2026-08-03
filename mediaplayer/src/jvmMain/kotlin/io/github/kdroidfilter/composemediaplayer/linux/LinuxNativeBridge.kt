@@ -1,7 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.linux
 
 import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
-import java.awt.Component
 import java.nio.ByteBuffer
 
 /**
@@ -10,7 +9,7 @@ import java.nio.ByteBuffer
  */
 internal object LinuxNativeBridge {
     /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the Linux .so. */
-    private const val EXPECTED_NATIVE_VERSION = 11
+    private const val EXPECTED_NATIVE_VERSION = 12
 
     init {
         runCatching {
@@ -37,7 +36,9 @@ internal object LinuxNativeBridge {
 
     @JvmStatic external fun nGetGStreamerRuntimeInfo(): IntArray?
 
-    @JvmStatic external fun nIsJbrWaylandAdapterAvailable(): Boolean
+    @JvmStatic external fun nIsGtkWaylandAdapterAvailable(): Boolean
+
+    @JvmStatic external fun nIsGtkX11AdapterAvailable(): Boolean
 
     @JvmStatic external fun nIsVulkanProjectionRendererAvailable(): Boolean
 
@@ -45,27 +46,19 @@ internal object LinuxNativeBridge {
 
     /**
      * Returns flags, resolved wl_output global id, minimum luminance x10000,
-     * maximum luminance and reference white, or null when the JBR connection
-     * cannot be queried safely.
+     * maximum luminance and reference white, or null when the GTK Wayland connection cannot be
+     * queried safely.
      */
-    @JvmStatic external fun nQueryJbrWaylandColorCapabilities(outputId: Int): LongArray?
+    @JvmStatic external fun nQueryGtkWaylandColorCapabilities(outputId: Int): LongArray?
 
-    @JvmStatic external fun nAttachWaylandHdrView(
+    @JvmStatic external fun nCreateNativeVideoWidget(
         handle: Long,
-        component: Component,
-    ): Boolean
+        libVlc: Boolean,
+        integerConfiguration: IntArray?,
+        floatingConfiguration: FloatArray?,
+    ): Long
 
-    @JvmStatic external fun nDetachWaylandHdrView(
-        handle: Long,
-        component: Component,
-    )
-
-    @JvmStatic external fun nAttachWaylandHdrProjectionView(
-        handle: Long,
-        component: Component,
-        integerConfiguration: IntArray,
-        floatingConfiguration: FloatArray,
-    ): Boolean
+    @JvmStatic external fun nDisposeNativeVideoWidget(widget: Long)
 
     @JvmStatic external fun nUpdateWaylandHdrProjectionConfiguration(
         handle: Long,
@@ -78,18 +71,6 @@ internal object LinuxNativeBridge {
     @JvmStatic external fun nGetDecodedVideoColorInfo(handle: Long): IntArray?
 
     @JvmStatic external fun nGetWaylandOutputId(handle: Long): Int
-
-    @JvmStatic external fun nGetWaylandHdrOverlaySize(handle: Long): IntArray?
-
-    @JvmStatic external fun nUpdateWaylandHdrOverlay(
-        handle: Long,
-        pixelAddress: Long,
-        rowBytes: Int,
-        width: Int,
-        height: Int,
-    ): Int
-
-    @JvmStatic external fun nClearWaylandHdrOverlay(handle: Long)
 
     @JvmStatic external fun nCreatePlayer(): Long
 
@@ -247,14 +228,4 @@ internal object LinuxNativeBridge {
     @JvmStatic external fun nGetLibVlcSubtitleTrackDescriptions(handle: Long): String?
 
     @JvmStatic external fun nDisableLibVlcSubtitles(handle: Long): Boolean
-
-    @JvmStatic external fun nAttachLibVlcNativeView(
-        handle: Long,
-        component: Component,
-    ): Boolean
-
-    @JvmStatic external fun nDetachLibVlcNativeView(
-        handle: Long,
-        component: Component,
-    )
 }

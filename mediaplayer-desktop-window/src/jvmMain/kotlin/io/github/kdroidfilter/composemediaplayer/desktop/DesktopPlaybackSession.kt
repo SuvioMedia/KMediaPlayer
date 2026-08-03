@@ -111,7 +111,17 @@ public class DesktopPlaybackSession(
             ensureOpen()
             val operationGeneration = generation.incrementAndGet()
             ActiveDesktopPlaybackSession.claim(this)
-            val candidates = candidates(request, backendId)
+            val candidates =
+                try {
+                    candidates(request, backendId)
+                } catch (failure: DesktopPlaybackOpenException) {
+                    mutableSessionState.value =
+                        DesktopPlaybackSessionState.Failed(
+                            backendId = backendId,
+                            message = failure.message.orEmpty(),
+                        )
+                    throw failure
+                }
             val previous = mutablePlayerState.value
             val previousBackend = activeBackend
             val previousRequest = activeRequest

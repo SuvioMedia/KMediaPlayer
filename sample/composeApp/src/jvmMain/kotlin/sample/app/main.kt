@@ -1,11 +1,23 @@
 package sample.app
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
-import androidx.compose.ui.window.application
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.rememberWindowState
+import dev.nucleusframework.application.DecoratedWindow
+import dev.nucleusframework.application.NucleusBackend
+import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.tao.LocalTaoWindow
+import dev.nucleusframework.window.tao.TaoWindow
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
@@ -13,12 +25,11 @@ import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionType
-import io.github.kdroidfilter.nucleus.graalvm.GraalVmInitializer
-import kotlinx.coroutines.delay
+import io.github.kdroidfilter.composemediaplayer.mac.MacNativeWindowFullscreen
 import sample.app.player.desktopPipelineExtensions
+import java.util.concurrent.atomic.AtomicReference
 
 fun main(args: Array<String>) {
-    GraalVmInitializer.initialize()
     val initialVideoUrl =
         args.firstOrNull()
             ?.takeIf { it.isNotBlank() }
@@ -87,7 +98,8 @@ fun main(args: Array<String>) {
             ?.toBooleanStrictOrNull()
             ?: false
 
-    application {
+    nucleusApplication(args = args, backend = NucleusBackend.Tao) {
+        val applicationScope = this
         val windowState =
             rememberWindowState(
                 position =
@@ -99,22 +111,58 @@ fun main(args: Array<String>) {
                 width = windowWidth.dp,
                 height = windowHeight.dp,
             )
-        Window(
-            onCloseRequest = ::exitApplication,
+        // Drive AppKit fullscreen directly and let Nucleus publish the confirmed placement back
+        // through WindowState. Writing WindowPlacement.Fullscreen first makes Nucleus 2.2.0 see a
+        // transient resize while Tao still reports `isFullscreen == false`; it then immediately
+        // writes Floating back and cancels the AppKit transition after the fullscreen pre-layout.
+        val taoWindow = remember { AtomicReference<TaoWindow?>(null) }
+        var confirmedNativeFullscreen by
+            remember { mutableStateOf(windowState.placement == WindowPlacement.Fullscreen) }
+        var inPlaceMacFullscreenActive by remember { mutableStateOf(false) }
+
+        LaunchedEffect(windowState.placement, inPlaceMacFullscreenActive) {
+            if (!inPlaceMacFullscreenActive) {
+                confirmedNativeFullscreen = windowState.placement == WindowPlacement.Fullscreen
+            }
+        }
+
+        fun requestNativeFullscreen(fullscreen: Boolean) {
+            val window = taoWindow.get() ?: return
+            if (MacNativeWindowFullscreen.setFullscreen(window.nativeHandle, fullscreen)) {
+                inPlaceMacFullscreenActive = fullscreen
+                confirmedNativeFullscreen = fullscreen
+            } else {
+                // Tao remains the portable implementation on Windows/Linux.
+                inPlaceMacFullscreenActive = false
+                window.setFullscreen(fullscreen)
+            }
+        }
+        applicationScope.DecoratedWindow(
+            onCloseRequest = applicationScope::exitApplication,
             title = "Compose Media Player",
             state = windowState,
-        ) {
-            LaunchedEffect(windowX, windowY, windowWidth, windowHeight) {
-                if (windowX != null && windowY != null) {
-                    delay(300)
-                    window.setLocation(windowX, windowY)
-                    window.setSize(windowWidth, windowHeight)
-                    window.toFront()
+            nativePopupLayers = true,
+            onKeyEvent = { event ->
+                if (event.key == Key.Escape &&
+                    event.type == KeyEventType.KeyDown &&
+                    (confirmedNativeFullscreen ||
+                        windowState.placement == WindowPlacement.Fullscreen ||
+                        taoWindow.get()?.isFullscreen == true)
+                ) {
+                    requestNativeFullscreen(false)
+                    true
+                } else {
+                    false
                 }
-            }
+            },
+        ) {
+            taoWindow.set(LocalTaoWindow.current)
             if (colorSelfTestSeconds != null) {
                 DesktopColorPipelineSelfTest(
-                    inputUri = checkNotNull(initialVideoUrl) { "The color self-test requires sample.app.videoUrl." },
+                    inputUri =
+                        checkNotNull(initialVideoUrl) {
+                            "The color self-test requires sample.app.videoUrl."
+                        },
                     expectedSource =
                         checkNotNull(colorSelfTestExpectedSource) {
                             "The color self-test requires sample.app.colorSelfTestExpectedSource."
@@ -127,7 +175,7 @@ fun main(args: Array<String>) {
                     durationSeconds = colorSelfTestSeconds,
                     resultFilePath = colorSelfTestResultFile,
                     playbackOptions = playbackOptions,
-                    onComplete = ::exitApplication,
+                    onComplete = applicationScope::exitApplication,
                 )
             } else {
                 App(
@@ -145,6 +193,10 @@ fun main(args: Array<String>) {
                         System.getProperty("sample.app.initialFullscreen")
                             ?.toBooleanStrictOrNull()
                             ?: false,
+                    nativeFullscreen = confirmedNativeFullscreen,
+                    onNativeFullscreenRequest = { fullscreen ->
+                        requestNativeFullscreen(fullscreen)
+                    },
                 )
             }
         }

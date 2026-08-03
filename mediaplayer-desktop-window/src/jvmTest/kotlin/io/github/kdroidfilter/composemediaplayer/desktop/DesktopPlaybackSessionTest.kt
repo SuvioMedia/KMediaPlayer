@@ -109,6 +109,34 @@ class DesktopPlaybackSessionTest {
         }
 
     @Test
+    fun unsupportedExplicitSwitchReportsFailureAndRetainsCurrentPlayer() =
+        runTest {
+            val current = PreviewableVideoPlayerState(isPlaying = true)
+            val platform = fakeBackend("platform", DesktopBackendRoutingTier.PLATFORM_DIRECT) { current }
+            val unsupported =
+                fakeBackend(
+                    id = "mpv",
+                    tier = DesktopBackendRoutingTier.MPV_NATIVE,
+                    sourceProbe = { DesktopBackendProbeResult.Unsupported("Unsupported test source.") },
+                ) {
+                    error("An unsupported backend must not be created.")
+                }
+            val session = DesktopPlaybackSession(listOf(platform, unsupported), readyTimeout = 1.seconds)
+
+            try {
+                session.open(DesktopPlaybackRequest(MediaSourceSpec("file:///movie.avi")), "platform")
+
+                assertFailsWith<DesktopPlaybackOpenException> { session.switchBackend("mpv") }
+                assertSame(current, session.playerState.value)
+                assertTrue(current.isPlaying)
+                val failure = assertIs<DesktopPlaybackSessionState.Failed>(session.state.value)
+                assertEquals("mpv", failure.backendId)
+            } finally {
+                session.close()
+            }
+        }
+
+    @Test
     fun bundledMpvMaterializesRemoteBytesWithoutPassingHeadersToNativeRuntime() =
         runTest {
             val payload = "credential-safe-media".encodeToByteArray()
@@ -185,6 +213,9 @@ private fun fakeBackend(
     id: String,
     tier: DesktopBackendRoutingTier,
     automaticSelection: Boolean = true,
+    sourceProbe: (DesktopPlaybackRequest) -> DesktopBackendProbeResult = {
+        DesktopBackendProbeResult.Supported(tier)
+    },
     create: () -> VideoPlayerState,
 ): DesktopPlaybackBackend =
     object : DesktopPlaybackBackend {
@@ -195,8 +226,7 @@ private fun fakeBackend(
 
         override fun inspectAvailability(): DesktopBackendAvailability = DesktopBackendAvailability.Available()
 
-        override fun probe(request: DesktopPlaybackRequest): DesktopBackendProbeResult =
-            DesktopBackendProbeResult.Supported(tier)
+        override fun probe(request: DesktopPlaybackRequest): DesktopBackendProbeResult = sourceProbe(request)
 
         override fun createPlayerState(): VideoPlayerState = create()
     }

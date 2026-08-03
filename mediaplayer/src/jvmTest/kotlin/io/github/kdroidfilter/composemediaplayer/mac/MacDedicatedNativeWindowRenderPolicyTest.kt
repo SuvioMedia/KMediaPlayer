@@ -1,7 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import kotlin.test.Test
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MacDedicatedNativeWindowRenderPolicyTest {
@@ -19,8 +18,8 @@ class MacDedicatedNativeWindowRenderPolicyTest {
     }
 
     @Test
-    fun hidesOrdinaryInlineSurfaceWhenSeparateFullscreenWindowOwnsVideo() {
-        assertFalse(
+    fun keepsTheCurrentTaoWindowSurfaceRenderedInFullscreen() {
+        assertTrue(
             shouldRenderMacVideoSurface(
                 hasMedia = true,
                 libVlcNativeSurfaceRequested = false,

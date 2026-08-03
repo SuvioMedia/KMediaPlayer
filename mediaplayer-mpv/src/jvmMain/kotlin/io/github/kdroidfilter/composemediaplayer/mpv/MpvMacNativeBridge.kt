@@ -1,6 +1,5 @@
 package io.github.kdroidfilter.composemediaplayer.mpv
 
-import java.awt.Window
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
@@ -17,12 +16,14 @@ internal object MpvMacNativeBridge {
         get() = isMacArm64() && loaded
 
     @JvmStatic
-    external fun nAttach(
+    external fun nCreateRenderer(
         mpvHandle: Long,
-        window: Window,
         libraryLoadName: String,
         colorMode: Int,
     ): Long
+
+    /** Returns the renderer-owned `NSView*` mounted by Nucleus Tao. */
+    @JvmStatic external fun nGetViewHandle(nativeRenderer: Long): Long
 
     @JvmStatic external fun nDetach(nativeRenderer: Long)
 
@@ -32,18 +33,6 @@ internal object MpvMacNativeBridge {
     )
 
     @JvmStatic external fun nRequestRedraw(nativeRenderer: Long)
-
-    /** Requests AppKit's native full-screen transition for the dedicated AWT-backed window. */
-    @JvmStatic external fun nSetWindowFullscreen(
-        window: Window,
-        fullscreen: Boolean,
-    ): Boolean
-
-    /** Configures opaque standard AppKit chrome for the dedicated video window. */
-    @JvmStatic external fun nConfigureNativeWindow(window: Window): Boolean
-
-    /** Returns the current AppKit NSWindow full-screen style state. */
-    @JvmStatic external fun nIsWindowFullscreen(window: Window): Boolean
 
     private fun loadNativeLibrary(): Boolean {
         if (!isMacArm64()) return false

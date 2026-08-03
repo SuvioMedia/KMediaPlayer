@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 // Native API version — bump when the exported JNI/native API changes.
-#define NATIVE_VIDEO_PLAYER_VERSION 11
+#define NATIVE_VIDEO_PLAYER_VERSION 12
 
 enum {
     NVP_GSTREAMER_WAYLAND_SINK = 1 << 0,
@@ -64,7 +64,7 @@ int32_t nvp_get_frame_width(VideoPlayer* p);
 int32_t nvp_get_frame_height(VideoPlayer* p);
 int32_t nvp_set_output_size(VideoPlayer* p, int32_t width, int32_t height);
 
-// JBR WLToolkit + GStreamer waylandsink direct-output path.
+// GTK/Tao + GStreamer waylandsink direct-output path.
 int32_t nvp_attach_wayland_output(
     VideoPlayer* p,
     uintptr_t display,

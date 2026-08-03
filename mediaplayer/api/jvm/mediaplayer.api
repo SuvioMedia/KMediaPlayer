@@ -31,13 +31,12 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun <init> ()V
 	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)V
 	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public fun RenderDesktopVideoWindowSurface (Ljava/awt/Window;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)V
+	public fun RenderDesktopVideoWindowSurface (Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)V
 	public fun addSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun canPlaySource (Ljava/lang/String;Ljava/lang/String;)Z
 	public fun clearCache ()Lio/github/kdroidfilter/composemediaplayer/CacheClearResult;
 	public fun clearError ()V
 	public fun clearExternalSubtitleTracks ()V
-	public fun configureNativeWindow (Ljava/awt/Window;)Z
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
 	public fun enterPip (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
@@ -98,7 +97,6 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun isPipSupported ()Z
 	public fun isPlaying ()Z
 	public fun isSeeking ()Z
-	public fun nativeWindowFullscreenState (Ljava/awt/Window;)Ljava/lang/Boolean;
 	public fun openAsset (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openFile (Lio/github/vinceglb/filekit/PlatformFile;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
 	public fun openSource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
@@ -111,7 +109,6 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun removeSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun removeSubtitleTrack (Ljava/lang/String;)V
 	public fun replaceExternalSubtitleTracks (Ljava/util/List;)V
-	public fun requestWindowFullscreen (Ljava/awt/Window;Z)Z
 	public fun restart ()V
 	public fun seekBy-LRDsOJo (J)V
 	public fun seekByMs (J)V
@@ -933,7 +930,7 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/ComposableSin
 public final class io/github/kdroidfilter/composemediaplayer/linux/ComposableSingletons$LinuxVideoPlayerSurface_jvmKt {
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/linux/ComposableSingletons$LinuxVideoPlayerSurface_jvmKt;
 	public fun <init> ()V
-	public final fun getLambda$520858376$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
+	public final fun getLambda$1987211068$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxFullscreenVideoPlayerWindowKt {
@@ -1068,10 +1065,6 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun toggleFullscreen ()V
 }
 
-public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPlayerSurface_jvmKt {
-	public static final fun LinuxVideoPlayerSurface (Lio/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPlayerState;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;ZLandroidx/compose/runtime/Composer;II)V
-}
-
 public final class io/github/kdroidfilter/composemediaplayer/mac/ComposableSingletons$MacFullscreenVideoPlayerWindowKt {
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/mac/ComposableSingletons$MacFullscreenVideoPlayerWindowKt;
 	public fun <init> ()V
@@ -1081,12 +1074,19 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/ComposableSingl
 public final class io/github/kdroidfilter/composemediaplayer/mac/ComposableSingletons$MacVideoPlayerSurfaceKt {
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/mac/ComposableSingletons$MacVideoPlayerSurfaceKt;
 	public fun <init> ()V
-	public final fun getLambda$-1975749651$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
+	public final fun getLambda$1544242213$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
 	public final fun getLambda$345260741$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/mac/MacFullscreenVideoPlayerWindowKt {
 	public static final fun openFullscreenWindow (Lio/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerState;Lkotlin/jvm/functions/Function2;Landroidx/compose/ui/layout/ContentScale;Landroidx/compose/runtime/Composer;II)V
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/mac/MacNativeWindowFullscreen {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/mac/MacNativeWindowFullscreen;
+	public final fun isSupported ()Z
+	public final fun setFullscreen (JZ)Z
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerState : io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
@@ -1217,10 +1217,6 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun toggleFullscreen ()V
 }
 
-public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerSurfaceKt {
-	public static final fun MacVideoPlayerSurface (Lio/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerState;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;ZLandroidx/compose/runtime/Composer;II)V
-}
-
 public final class io/github/kdroidfilter/composemediaplayer/subtitle/AssParser {
 	public static final field $stable I
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/subtitle/AssParser;
@@ -1328,7 +1324,7 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/ComposableS
 public final class io/github/kdroidfilter/composemediaplayer/windows/ComposableSingletons$WindowsVideoPlayerSurfaceKt {
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/windows/ComposableSingletons$WindowsVideoPlayerSurfaceKt;
 	public fun <init> ()V
-	public final fun getLambda$1084712029$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
+	public final fun getLambda$-1310530031$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsFullscreenVideoPlayerWindowKt {
@@ -1466,9 +1462,5 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVideoPlayerState$Companion {
-}
-
-public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVideoPlayerSurfaceKt {
-	public static final fun WindowsVideoPlayerSurface (Lio/github/kdroidfilter/composemediaplayer/windows/WindowsVideoPlayerState;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;ZLandroidx/compose/runtime/Composer;II)V
 }
 

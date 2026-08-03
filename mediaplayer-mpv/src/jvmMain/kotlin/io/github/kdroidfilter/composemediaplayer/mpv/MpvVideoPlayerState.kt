@@ -43,7 +43,6 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
-import java.awt.Window
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.util.concurrent.atomic.AtomicBoolean
@@ -93,7 +92,6 @@ internal class MpvVideoPlayerState(
 
     @Composable
     override fun RenderDesktopVideoWindowSurface(
-        window: Window,
         modifier: Modifier,
         contentScale: ContentScale,
         overlay: @Composable () -> Unit,
@@ -101,31 +99,12 @@ internal class MpvVideoPlayerState(
     ) {
         MpvVideoPlayerWindowSurface(
             playerState = this,
-            window = window,
             modifier = modifier,
             contentScale = contentScale,
             overlay = overlay,
             onSurfaceAttached = onSurfaceAttached,
         )
     }
-
-    override fun requestWindowFullscreen(
-        window: Window,
-        fullscreen: Boolean,
-    ): Boolean =
-        canUseNativeMacSurface &&
-            runCatching { MpvMacNativeBridge.nSetWindowFullscreen(window, fullscreen) }.getOrDefault(false)
-
-    override fun configureNativeWindow(window: Window): Boolean =
-        canUseNativeMacSurface &&
-            runCatching { MpvMacNativeBridge.nConfigureNativeWindow(window) }.getOrDefault(false)
-
-    override fun nativeWindowFullscreenState(window: Window): Boolean? =
-        if (canUseNativeMacSurface) {
-            runCatching { MpvMacNativeBridge.nIsWindowFullscreen(window) }.getOrNull()
-        } else {
-            null
-        }
 
     override val renderingInfo =
         VideoRenderingInfo(
@@ -351,11 +330,16 @@ internal class MpvVideoPlayerState(
         if (!disposed.get()) runCatching { engine.setProperty("panscan", if (crop) "1.0" else "0.0") }
     }
 
-    internal fun attachNativeMacWindow(window: Window): Boolean {
-        if (!canUseNativeMacSurface) return false
+    /** Creates the renderer-owned `NSView*` that Nucleus Tao mounts in its native hierarchy. */
+    internal fun createNativeMacView(): Long {
+        if (!canUseNativeMacSurface) return 0L
         return renderLock.withLock {
-            if (disposed.get()) return@withLock false
-            if (nativeMacRenderer != 0L) return@withLock true
+            if (disposed.get()) return@withLock 0L
+            if (nativeMacRenderer != 0L) {
+                return@withLock runCatching {
+                    MpvMacNativeBridge.nGetViewHandle(nativeMacRenderer)
+                }.getOrDefault(0L)
+            }
 
             val selectedVideo = suspendVideoOutputForContextSwitch()
             val target =
@@ -364,13 +348,12 @@ internal class MpvVideoPlayerState(
                 } catch (_: RuntimeException) {
                     renderContextSwitchDeadlineNanos = 0L
                     resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-                    return@withLock false
+                    return@withLock 0L
                 }
             val renderer =
                 try {
-                    MpvMacNativeBridge.nAttach(
+                    MpvMacNativeBridge.nCreateRenderer(
                         mpvHandle = target.mpvHandle,
-                        window = window,
                         libraryLoadName = target.libraryLoadName,
                         colorMode = nativeMacColorMode.nativeValue,
                     )
@@ -380,7 +363,16 @@ internal class MpvVideoPlayerState(
             if (renderer == 0L) {
                 runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
                 resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-                return@withLock false
+                return@withLock 0L
+            }
+
+            val nativeView =
+                runCatching { MpvMacNativeBridge.nGetViewHandle(renderer) }.getOrDefault(0L)
+            if (nativeView == 0L) {
+                runCatching { MpvMacNativeBridge.nDetach(renderer) }
+                runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
+                resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
+                return@withLock 0L
             }
 
             nativeMacRenderer = renderer
@@ -391,11 +383,13 @@ internal class MpvVideoPlayerState(
                 renderingInfo.videoRenderer = "libmpv OpenGL in a native macOS EDR surface"
                 renderingInfo.notes = nativeMacRenderingNotes()
             }
-            true
+            nativeView
         }
     }
 
-    internal fun detachNativeMacWindow() {
+    internal fun disposeNativeMacView(
+        @Suppress("UNUSED_PARAMETER") nativeView: Long,
+    ) {
         renderLock.withLock {
             detachNativeMacRendererLocked(restoreSoftwareRenderer = !disposed.get())
         }
@@ -504,6 +498,11 @@ internal class MpvVideoPlayerState(
                 ?.takeUnless { it.equals("no", ignoreCase = true) }
         val audioDecoder = engine.getProperty("audio-codec-name")
         val audioOutput = engine.getProperty("current-ao")
+        val audioChannels = engine.getProperty("audio-params/channel-count").positiveIntOrNull()
+        val audioSampleRate = engine.getProperty("audio-params/samplerate").positiveIntOrNull()
+        val audioOutputChannels = engine.getProperty("audio-out-params/channel-count").positiveIntOrNull()
+        val audioOutputSampleRate = engine.getProperty("audio-out-params/samplerate").positiveIntOrNull()
+        val audioOutputLayout = engine.getProperty("audio-out-params/hr-channels")
         val transfer = engine.getProperty("video-params/gamma")
 
         updateNativeMacOutputColorMode(transfer.toMacOutputColorMode())
@@ -520,6 +519,8 @@ internal class MpvVideoPlayerState(
             metadata.width = width
             metadata.height = height
             metadata.frameRate = frameRate
+            metadata.audioChannels = audioChannels
+            metadata.audioSampleRate = audioSampleRate
             renderingInfo.container = container
             renderingInfo.videoDecoder =
                 when {
@@ -528,13 +529,33 @@ internal class MpvVideoPlayerState(
                 }
             renderingInfo.audioRenderer =
                 when {
-                    audioDecoder != null && audioOutput != null -> "$audioDecoder via $audioOutput"
+                    audioDecoder != null && audioOutput != null ->
+                        "$audioDecoder via $audioOutput" +
+                            audioOutputDetails(
+                                channels = audioOutputChannels,
+                                sampleRate = audioOutputSampleRate,
+                                layout = audioOutputLayout,
+                            )
                     audioDecoder != null -> audioDecoder
                     audioOutput != null -> audioOutput
                     else -> "mpv audio output"
                 }
         }
         updateAspectRatio(width, height)
+    }
+
+    private fun audioOutputDetails(
+        channels: Int?,
+        sampleRate: Int?,
+        layout: String?,
+    ): String {
+        val details =
+            buildList {
+                layout?.takeIf(String::isNotBlank)?.let(::add)
+                if (layout.isNullOrBlank()) channels?.let { add("$it ch") }
+                sampleRate?.let { add("$it Hz") }
+            }
+        return details.takeIf(List<String>::isNotEmpty)?.joinToString(prefix = " (", postfix = ")") ?: ""
     }
 
     private fun refreshTracks() {

@@ -1,7 +1,5 @@
 package io.github.kdroidfilter.composemediaplayer.linux
 
-import java.awt.GraphicsEnvironment
-import java.awt.Toolkit
 import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -79,9 +77,6 @@ internal object LinuxGStreamerCapabilitiesDecoder {
 }
 
 internal data class LinuxHdrRuntimeFacts(
-    val isJetBrainsRuntime: Boolean,
-    val javaVersion: String?,
-    val usesWlToolkit: Boolean,
     val waylandSession: Boolean,
     val gstreamerVersion: String?,
     val hasWaylandSink: Boolean,
@@ -142,10 +137,6 @@ internal object LinuxHdrRuntimeEvaluator {
     fun evaluate(facts: LinuxHdrRuntimeFacts): LinuxHdrRuntimeStatus {
         val surfaceMissing =
             buildList {
-                if (!facts.isJetBrainsRuntime || !isAtLeast(facts.javaVersion, MINIMUM_JBR)) {
-                    add("JBR 25.0.3+ is required")
-                }
-                if (!facts.usesWlToolkit) add("JBR WLToolkit is not active")
                 if (!facts.waylandSession) add("the window is not in a native Wayland session")
                 if (!isAtLeast(facts.gstreamerVersion, MINIMUM_GSTREAMER)) {
                     add("GStreamer 1.28.5+ is required")
@@ -158,7 +149,7 @@ internal object LinuxHdrRuntimeEvaluator {
                 if (!facts.hasBt2020Primaries) add("the compositor does not accept BT.2020 primaries")
                 if (!facts.hasPqTransfer) add("the compositor does not accept PQ/ST 2084 surfaces")
                 if (!facts.hasHlgTransfer) add("the compositor does not accept HLG surfaces")
-                if (!facts.nativeWaylandAdapterAvailable) add("the JBR Wayland HDR surface adapter is not installed")
+                if (!facts.nativeWaylandAdapterAvailable) add("the Tao/GTK Wayland HDR surface adapter is unavailable")
             }
         val projectionMissing =
             buildList {
@@ -213,7 +204,6 @@ internal object LinuxHdrRuntimeEvaluator {
             ?.mapNotNull(String::toIntOrNull)
             .orEmpty()
 
-    private const val MINIMUM_JBR = "25.0.3"
     private const val MINIMUM_GSTREAMER = "1.28.5"
     private const val MINIMUM_HDR10_PLUS_GSTREAMER = "1.30.0"
     private val VERSION_PATTERN = Regex("\\d+(?:\\.\\d+){1,3}")
@@ -222,7 +212,7 @@ internal object LinuxHdrRuntimeEvaluator {
 internal object LinuxHdrRuntimeProbe {
     fun query(): LinuxHdrRuntimeStatus {
         val nativeColorValues =
-            runCatching { LinuxNativeBridge.nQueryJbrWaylandColorCapabilities(outputId = -1) }
+            runCatching { LinuxNativeBridge.nQueryGtkWaylandColorCapabilities(outputId = -1) }
                 .getOrNull()
         val nativeColorSnapshot = LinuxNativeWaylandColorCapabilitiesDecoder.decode(nativeColorValues)
         val waylandInfo =
@@ -242,27 +232,17 @@ internal object LinuxHdrRuntimeProbe {
         val colorSnapshot =
             nativeColorSnapshot ?: LinuxWaylandColorCapabilitiesParser.parse(waylandInfo)
         val defaultOutputId = nativeColorValues?.getOrNull(1)?.toInt()?.takeIf { it >= 0 }
-        val defaultDisplayName =
-            runCatching { GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.iDstring }
-                .getOrNull()
+        val defaultDisplayName: String? = null
         val defaultOutput =
             colorSnapshot.outputFor(
                 globalId = defaultOutputId,
                 displayName = defaultDisplayName,
             )
-        val toolkitName =
-            runCatching { Toolkit.getDefaultToolkit().javaClass.name }
-                .getOrElse { System.getProperty("awt.toolkit").orEmpty() }
+        val gtkWaylandAvailable =
+            runCatching { LinuxNativeBridge.nIsGtkWaylandAdapterAvailable() }.getOrDefault(false)
         val facts =
             LinuxHdrRuntimeFacts(
-                isJetBrainsRuntime =
-                    System.getProperty("java.vendor").orEmpty().contains("JetBrains", ignoreCase = true) ||
-                        System.getProperty("java.vm.name").orEmpty().contains("JBR", ignoreCase = true),
-                javaVersion = System.getProperty("java.runtime.version") ?: System.getProperty("java.version"),
-                usesWlToolkit = toolkitName.endsWith("WLToolkit"),
-                waylandSession =
-                    System.getenv("XDG_SESSION_TYPE").equals("wayland", ignoreCase = true) &&
-                        !System.getenv("WAYLAND_DISPLAY").isNullOrBlank(),
+                waylandSession = gtkWaylandAvailable,
                 gstreamerVersion = gstreamerCapabilities.version,
                 hasWaylandSink = gstreamerCapabilities.hasWaylandSink,
                 hasVulkanUpload = gstreamerCapabilities.hasVulkanUpload,
@@ -290,7 +270,7 @@ internal object LinuxHdrRuntimeProbe {
                 hasShaderFloat16 = vulkanCapabilities.hasShaderFloat16,
                 hasSamplerYcbcrConversion = vulkanCapabilities.hasSamplerYcbcrConversion,
                 nativeWaylandAdapterAvailable =
-                    runCatching { LinuxNativeBridge.nIsJbrWaylandAdapterAvailable() }.getOrDefault(false),
+                gtkWaylandAvailable,
                 nativeVulkanProjectionRendererAvailable =
                     runCatching { LinuxNativeBridge.nIsVulkanProjectionRendererAvailable() }.getOrDefault(false),
             )

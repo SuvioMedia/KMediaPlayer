@@ -14,7 +14,6 @@ import io.github.kdroidfilter.composemediaplayer.createMpvVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.kmediabridge.KMediaBridgeDesktopExtension
 import io.github.kdroidfilter.composemediaplayer.kmediabridge.KMediaBridgeDesktopRuntimeSelection
 import kotlinx.coroutines.runBlocking
-import java.awt.Font
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -223,33 +222,18 @@ private data class HostTestFont(
 
 private val HOST_FONT_CANDIDATES =
     listOf(
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/SFNS.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/segoeui.ttf",
+        HostTestFont("DejaVu Sans", Path.of("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")),
+        HostTestFont("Liberation Sans", Path.of("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf")),
+        HostTestFont("Arial", Path.of("/System/Library/Fonts/Supplemental/Arial.ttf")),
+        HostTestFont("SF Pro", Path.of("/System/Library/Fonts/SFNS.ttf")),
+        HostTestFont("Arial", Path.of("C:/Windows/Fonts/arial.ttf")),
+        HostTestFont("Segoe UI", Path.of("C:/Windows/Fonts/segoeui.ttf")),
     )
 
 private fun loadHostTestFont(): HostTestFont =
     HOST_FONT_CANDIDATES
-        .asSequence()
-        .map(Path::of)
-        .mapNotNull(::readHostTestFont)
-        .firstOrNull()
+        .firstOrNull { font -> Files.isRegularFile(font.source) }
         ?: error("No supported host font was available for the MPV ASS integration test.")
-
-private fun readHostTestFont(path: Path): HostTestFont? {
-    if (!Files.isRegularFile(path)) return null
-    return runCatching {
-        val family =
-            Files.newInputStream(path).use { input ->
-                Font.createFont(Font.TRUETYPE_FONT, input).family.trim()
-            }
-        require(family.isNotEmpty() && ',' !in family && '\n' !in family && '\r' !in family)
-        HostTestFont(family = family, source = path)
-    }.getOrNull()
-}
 
 private fun makeApplicationPrivate(directory: Path) {
     val posixView =

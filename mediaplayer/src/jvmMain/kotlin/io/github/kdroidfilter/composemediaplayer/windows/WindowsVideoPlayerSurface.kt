@@ -3,128 +3,91 @@ package io.github.kdroidfilter.composemediaplayer.windows
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.common.JvmNativeVideoHost
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurface
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurfaceKind
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
-/**
- * A composable function that provides a surface for rendering video frames
- * within the Windows video player. It adjusts to size changes and ensures the video
- * is displayed properly with respect to its aspect ratio.
- *
- * @param playerState The state of the Windows video player, used to manage video playback and rendering.
- * @param modifier The modifier to be used to adjust the layout or styling of the composable.
- * @param contentScale Controls how the video content should be scaled inside the surface.
- *                    This affects how the video is displayed when its dimensions don't match
- *                    the surface dimensions.
- * @param overlay Optional composable content to be displayed on top of the video surface.
- *               This can be used to add custom controls, information, or any UI elements.
- * @param isInFullscreenWindow Whether this surface is already being displayed in a fullscreen window.
- */
+/** Renders Windows video through a native child HWND or the Java-toolkit-free Skia fallback. */
 @Composable
-fun WindowsVideoPlayerSurface(
+internal fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable () -> Unit = {},
-    isInFullscreenWindow: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") isInFullscreenWindow: Boolean = false,
+    onSurfaceAttached: () -> Unit = {},
 ) {
-    Box(
-        modifier =
+    val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
+    val nativeSurfaceRequested =
+        playerState.shouldUseWindowsHdrSurface() || playerState.shouldUseLibVlcNativeSurface()
+    val videoModifier =
+        contentScale.toCanvasModifier(
+            playerState.aspectRatio,
+            playerState.metadata.width,
+            playerState.metadata.height,
+        )
+
+    val hostModifier =
+        if (nativeSurfaceRequested) {
+            modifier
+        } else {
             modifier.onSizeChanged { size ->
                 playerState.onResized(size.width, size.height)
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
-        val shouldRenderVideo =
-            (
-                playerState.hasMedia ||
-                    playerState.libVlcNativeSurfaceRequested ||
-                    playerState.windowsHdrSurfaceRequested
-            ) &&
-                (
-                    !playerState.isFullscreen ||
-                        isInFullscreenWindow ||
-                        playerState.libVlcNativeSurfaceRequested ||
-                        playerState.windowsHdrSurfaceRequested
-                )
-        if (shouldRenderVideo) {
-            if (playerState.shouldUseWindowsHdrSurface()) {
-                JvmNativeVideoHost(
-                    modifier =
-                        contentScale.toCanvasModifier(
-                            playerState.aspectRatio,
-                            playerState.metadata.width,
-                            playerState.metadata.height,
-                        ),
-                    canvasName = "ComposeMediaPlayer Windows D3D11 HDR canvas",
-                    hostName = "ComposeMediaPlayer Windows D3D11 HDR host",
-                    attachNative = playerState::attachWindowsHdrNativeComponent,
-                    detachNative = playerState::detachWindowsHdrNativeComponent,
-                    nativeFullscreen = playerState.isFullscreen && !isInFullscreenWindow,
-                    showExternalOverlay = !isInFullscreenWindow,
-                    overlay = {
-                        WindowsVideoOverlayContent(playerState, overlay)
-                    },
-                )
-            } else if (playerState.shouldUseLibVlcNativeSurface()) {
-                JvmNativeVideoHost(
-                    modifier =
-                        contentScale.toCanvasModifier(
-                            playerState.aspectRatio,
-                            playerState.metadata.width,
-                            playerState.metadata.height,
-                        ),
-                    canvasName = "ComposeMediaPlayer Windows libVLC native canvas",
-                    hostName = "ComposeMediaPlayer Windows libVLC native host",
-                    attachNative = playerState::attachLibVlcNativeComponent,
-                    detachNative = playerState::detachLibVlcNativeComponent,
-                    nativeFullscreen = playerState.isFullscreen && !isInFullscreenWindow,
-                    showExternalOverlay = !isInFullscreenWindow,
-                    overlay = {
-                        WindowsVideoOverlayContent(playerState, overlay)
-                    },
-                )
-            } else {
-                // Force recomposition when currentFrameState changes
-                val currentFrame by remember(playerState) { playerState.currentFrameState }
-
-                currentFrame?.let { frame ->
-                    JvmProjectedVideoCanvas(
-                        frame = frame,
-                        projection = playerState.projection,
-                        projectionView = playerState.projectionView,
-                        textureCrop = playerState.projectionTextureCrop,
-                        contentScale = contentScale,
-                        modifier =
-                            contentScale.toCanvasModifier(
-                                playerState.aspectRatio,
-                                playerState.metadata.width,
-                                playerState.metadata.height,
-                            ),
-                    )
-                }
-
-                WindowsVideoOverlayContent(playerState, overlay)
             }
         }
-    }
 
-    if (playerState.isFullscreen &&
-        !isInFullscreenWindow &&
-        !playerState.libVlcNativeSurfaceRequested &&
-        !playerState.windowsHdrSurfaceRequested
+    Box(
+        modifier = hostModifier,
+        contentAlignment = Alignment.Center,
     ) {
-        openFullscreenWindow(playerState, contentScale = contentScale, overlay = overlay)
+        if (nativeSurfaceRequested) {
+            val surface =
+                remember(playerState, playerState.nativeSurfaceGeneration, nativeSurfaceRequested) {
+                    DesktopNativeVideoSurface(
+                        kind = DesktopNativeVideoSurfaceKind.WINDOWS_HWND,
+                        createHandle = playerState::createNativeVideoWindow,
+                        disposeHandle = playerState::disposeNativeVideoWindow,
+                    )
+                }
+            DesktopNativeVideoView(
+                surface = surface,
+                // Keep controls and the native child bound to the complete player viewport;
+                // the Win32 renderer is responsible for fitting the media within that child.
+                modifier = Modifier.fillMaxSize(),
+                overlay = { WindowsVideoOverlayContent(playerState, overlay) },
+                onAttached = { latestOnSurfaceAttached() },
+                onUnavailable = { latestOnSurfaceAttached() },
+            )
+        } else {
+            val currentFrame by remember(playerState) { playerState.currentFrameState }
+            currentFrame?.let { frame ->
+                JvmProjectedVideoCanvas(
+                    frame = frame,
+                    projection = playerState.projection,
+                    projectionView = playerState.projectionView,
+                    textureCrop = playerState.projectionTextureCrop,
+                    contentScale = contentScale,
+                    modifier = videoModifier,
+                )
+            }
+            WindowsVideoOverlayContent(playerState, overlay)
+            DisposableEffect(playerState) {
+                latestOnSurfaceAttached()
+                onDispose { }
+            }
+        }
     }
 }
 
@@ -133,7 +96,6 @@ private fun WindowsVideoOverlayContent(
     playerState: WindowsVideoPlayerState,
     overlay: @Composable () -> Unit,
 ) {
-    // Add Compose-based subtitle layer
     if (playerState.subtitlesEnabled &&
         playerState.currentSubtitleTrack != null &&
         playerState.currentSubtitleTrack?.isEmbedded != true &&
@@ -157,10 +119,5 @@ private fun WindowsVideoOverlayContent(
             backgroundColor = playerState.subtitleBackgroundColor,
         )
     }
-
-    // Render the overlay content on top of the video with fillMaxSize modifier
-    // to ensure it takes the full height of the parent Box
-    Box(modifier = Modifier.fillMaxSize()) {
-        overlay()
-    }
+    Box(modifier = Modifier.fillMaxSize()) { overlay() }
 }

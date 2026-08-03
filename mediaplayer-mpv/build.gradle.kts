@@ -444,6 +444,9 @@ val validateReleaseVersion =
             check(semver.matches(releaseVersion)) {
                 "Release version '$releaseVersion' is not a valid immutable SemVer version."
             }
+            check(releaseVersion.substringBefore('.').toInt() >= 4) {
+                "The Tao MPV adapter belongs to KMediaPlayer 4.x and cannot be published as $releaseVersion."
+            }
         }
     }
 

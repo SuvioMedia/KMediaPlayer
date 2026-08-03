@@ -7,7 +7,6 @@ import androidx.compose.ui.graphics.asComposeImageBitmap
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
@@ -87,7 +86,6 @@ import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
-import java.awt.Component
 import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -175,7 +173,7 @@ class LinuxVideoPlayerState(
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
 
-    /** Serializes native-player replacement/destruction with AWT surface attachment. */
+    /** Serializes native-player replacement/destruction with native-widget attachment. */
     private val nativeInstanceLock = Any()
 
     // Serial dispatcher for frame processing
@@ -227,7 +225,11 @@ class LinuxVideoPlayerState(
         private set
     private var waylandProjectionRendererAttached = false
     private var waylandFallbackInProgress = false
-    private var waylandAttachedComponent: Component? = null
+    private var waylandAttachedWidget: Long = 0L
+    private val nativeVideoWidgetOwners = mutableMapOf<Long, Long>()
+    private val nativePlayersPendingDisposal = mutableMapOf<Long, Boolean>()
+    internal var nativeSurfaceGeneration: Long by mutableStateOf(0L)
+        private set
     private var waylandAttachStartedAtMillis = 0L
     private var libVlcBackendActive: Boolean = false
     private var libVlcSourceUri: String? = null
@@ -403,6 +405,7 @@ class LinuxVideoPlayerState(
                             false
                         } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
                             nativeBackendUsesLibVlc = false
+                            nativeSurfaceGeneration += 1L
                             true
                         } else {
                             false
@@ -651,7 +654,7 @@ class LinuxVideoPlayerState(
                 synchronized(nativeInstanceLock) {
                     val ptrToDispose = playerPtrAtomic.getAndSet(0L)
                     if (ptrToDispose != 0L) {
-                        disposeNativePlayer(ptrToDispose)
+                        retireNativePlayerLocked(ptrToDispose, nativeBackendUsesLibVlc)
                     }
                 }
             } catch (e: Exception) {
@@ -665,7 +668,7 @@ class LinuxVideoPlayerState(
         waylandColorSurfaceAttached = false
         waylandNativeOverlayAvailable = false
         waylandProjectionRendererAttached = false
-        waylandAttachedComponent = null
+        waylandAttachedWidget = 0L
         closeExternalHlsFallback()
         clearLibVlcTrackState()
     }
@@ -702,7 +705,7 @@ class LinuxVideoPlayerState(
                 synchronized(nativeInstanceLock) {
                     val ptrToDispose = playerPtrAtomic.getAndSet(0L)
                     if (ptrToDispose != 0L) {
-                        disposeNativePlayer(ptrToDispose, wasLibVlc = nativeBackendUsesLibVlc)
+                        retireNativePlayerLocked(ptrToDispose, nativeBackendUsesLibVlc)
                     }
                     nativeBackendUsesLibVlc = false
                     nativeBackendLibVlcRenderMode = null
@@ -730,6 +733,7 @@ class LinuxVideoPlayerState(
                         } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
                             nativeBackendUsesLibVlc = wantsLibVlc
                             nativeBackendLibVlcRenderMode = wantsLibVlcRenderMode
+                            nativeSurfaceGeneration += 1L
                             true
                         } else {
                             false
@@ -868,7 +872,8 @@ class LinuxVideoPlayerState(
         if (!System.getenv("DISPLAY").isNullOrBlank()) return
         throw UnsupportedOperationException(
             "The Linux libVLC native-view backend currently requires an X11/XWayland DISPLAY. " +
-                "This backend embeds VLC through an AWT/JAWT X11 drawable and libvlc_media_player_set_xwindow; " +
+                "This backend embeds VLC through a Tao-hosted GTK X11 widget and " +
+                "libvlc_media_player_set_xwindow; " +
                 "native Wayland wl_surface embedding is not available in the supported libVLC API. " +
                 "DISPLAY is empty; WAYLAND_DISPLAY=${System.getenv("WAYLAND_DISPLAY") ?: "<unset>"}, " +
                 "XDG_SESSION_TYPE=${System.getenv("XDG_SESSION_TYPE") ?: "<unset>"}.",
@@ -1063,56 +1068,65 @@ class LinuxVideoPlayerState(
             libVlcNativeSurfaceRequested &&
             libVlcBackendActive &&
             nativeBackendUsesLibVlc &&
-            nativeBackendLibVlcRenderMode == LinuxLibVlcRenderMode.NATIVE_VIEW
+            nativeBackendLibVlcRenderMode == LinuxLibVlcRenderMode.NATIVE_VIEW &&
+            runCatching { LinuxNativeBridge.nIsGtkX11AdapterAvailable() }.getOrDefault(false)
 
     internal fun shouldUseWaylandColorSurface(): Boolean =
         !lifecycle.isDisposed &&
             waylandColorSurfaceRequested &&
             !nativeBackendUsesLibVlc
 
-    internal fun attachWaylandColorComponent(component: Component): Boolean {
+    internal fun createNativeVideoWidget(): Long {
         synchronized(nativeInstanceLock) {
-            if (!shouldUseWaylandColorSurface()) return false
+            val usesLibVlc = shouldUseLibVlcNativeSurface()
+            val usesWaylandColor = shouldUseWaylandColorSurface()
+            if (!usesLibVlc && !usesWaylandColor) return 0L
             val ptr = playerPtr
-            if (ptr == 0L) return false
+            if (ptr == 0L) return 0L
 
             return runCatching {
-                val projectionConfiguration = currentLinuxHdrProjectionConfiguration()
-                val usesProjectionRenderer = projection.requiresProjectionRenderer
-                val attached =
-                    if (usesProjectionRenderer && projectionConfiguration != null) {
-                        LinuxNativeBridge.nAttachWaylandHdrProjectionView(
-                            ptr,
-                            component,
-                            projectionConfiguration.integers,
-                            projectionConfiguration.floats,
-                        )
-                    } else if (!usesProjectionRenderer) {
-                        LinuxNativeBridge.nAttachWaylandHdrView(ptr, component)
-                    } else {
-                        false
+                val projectionConfiguration =
+                    currentLinuxHdrProjectionConfiguration().takeIf {
+                        usesWaylandColor && projection.requiresProjectionRenderer
                     }
-                if (!attached) return@runCatching false
+                if (usesWaylandColor && projection.requiresProjectionRenderer && projectionConfiguration == null) {
+                    return@runCatching 0L
+                }
+                val widget =
+                    LinuxNativeBridge.nCreateNativeVideoWidget(
+                        ptr,
+                        usesLibVlc,
+                        projectionConfiguration?.integers,
+                        projectionConfiguration?.floats,
+                    )
+                if (widget == 0L) return@runCatching 0L
+                nativeVideoWidgetOwners[widget] = ptr
+                if (usesLibVlc) {
+                    libVlcNativeSurfaceAttached = true
+                    if (isPlaying) {
+                        nativePlay(ptr)
+                        startFrameUpdates()
+                        startBufferingCheck()
+                    }
+                    return@runCatching widget
+                }
+
                 val wasAttached = waylandColorSurfaceAttached
                 waylandColorSurfaceAttached = true
-                waylandProjectionRendererAttached = usesProjectionRenderer
-                waylandAttachedComponent = component
-                waylandNativeOverlayAvailable =
-                    LinuxNativeBridge.nGetWaylandHdrOverlaySize(ptr)?.let { size ->
-                        size.size >= 2 && size[0] > 0 && size[1] > 0
-                    } == true
+                waylandProjectionRendererAttached = projection.requiresProjectionRenderer
+                waylandAttachedWidget = widget
+                waylandNativeOverlayAvailable = false
                 if (!wasAttached) waylandAttachStartedAtMillis = System.currentTimeMillis()
 
                 val outputId = LinuxNativeBridge.nGetWaylandOutputId(ptr).takeIf { it >= 0 }
-                val displayName = component.graphicsConfiguration?.device?.iDstring
                 val activeSnapshot =
                     LinuxNativeWaylandColorCapabilitiesDecoder.decode(
-                        LinuxNativeBridge.nQueryJbrWaylandColorCapabilities(outputId ?: -1),
+                        LinuxNativeBridge.nQueryGtkWaylandColorCapabilities(outputId ?: -1),
                     ) ?: linuxHdrRuntimeStatus.waylandColorSnapshot
                 activeDisplayColorCapabilities =
                     activeSnapshot.displayCapabilitiesFor(
                         globalId = outputId,
-                        displayName = displayName,
+                        displayName = null,
                     )
                 updateWaylandProjectionConfiguration()
                 colorOutputVerified = false
@@ -1122,10 +1136,10 @@ class LinuxVideoPlayerState(
                 if (isStrictHdrRequest() && colorPipelineController.pipelineErrorOrNull() != null) {
                     scheduleWaylandColorFallback("The active Wayland output cannot satisfy REQUIRE_HDR.")
                 }
-                true
+                widget
             }.getOrElse { failure ->
-                linuxLogger.e { "Failed to attach the JBR Wayland color surface: ${failure.message}" }
-                false
+                linuxLogger.e { "Failed to create the Tao/GTK native video surface: ${failure.message}" }
+                0L
             }
         }
     }
@@ -1162,114 +1176,43 @@ class LinuxVideoPlayerState(
 
     private fun reconfigureAttachedWaylandColorSurface() {
         if (!waylandColorSurfaceAttached) return
-        val component = waylandAttachedComponent ?: return
-        if (!attachWaylandColorComponent(component)) {
-            scheduleWaylandColorFallback("Failed to reconfigure the active Wayland HDR surface.")
-        }
+        updateWaylandProjectionConfiguration()
     }
 
-    internal fun detachWaylandColorComponent(component: Component) {
+    internal fun disposeNativeVideoWidget(widget: Long) {
+        if (widget == 0L) return
         synchronized(nativeInstanceLock) {
-            val ptr = playerPtr
-            if (ptr != 0L) {
-                runCatching { LinuxNativeBridge.nDetachWaylandHdrView(ptr, component) }
-                    .onFailure { failure ->
-                        linuxLogger.e { "Failed to detach the JBR Wayland color surface: ${failure.message}" }
-                    }
-            }
+            val owner = nativeVideoWidgetOwners.remove(widget) ?: return
+            runCatching { LinuxNativeBridge.nDisposeNativeVideoWidget(widget) }
+                .onFailure { failure ->
+                    linuxLogger.e { "Failed to dispose the Tao/GTK native video surface: ${failure.message}" }
+                }
+            libVlcNativeSurfaceAttached = false
             waylandColorSurfaceAttached = false
             waylandNativeOverlayAvailable = false
             waylandProjectionRendererAttached = false
-            waylandAttachedComponent = null
+            if (waylandAttachedWidget == widget) waylandAttachedWidget = 0L
             colorOutputVerified = false
             refreshLinuxColorPipeline()
+            finalizeRetiredNativePlayerIfUnownedLocked(owner)
         }
     }
 
-    internal fun waylandOverlaySize(): IntSize? =
-        synchronized(nativeInstanceLock) {
-            if (!waylandColorSurfaceAttached || !waylandNativeOverlayAvailable) {
-                return@synchronized null
-            }
-            val ptr = playerPtr
-            if (ptr == 0L) return@synchronized null
-            runCatching { LinuxNativeBridge.nGetWaylandHdrOverlaySize(ptr) }
-                .getOrNull()
-                ?.takeIf { it.size >= 2 && it[0] > 0 && it[1] > 0 }
-                ?.let { IntSize(it[0], it[1]) }
-        }
-
-    internal fun updateWaylandOverlay(
-        pixelAddress: Long,
-        rowBytes: Int,
-        width: Int,
-        height: Int,
-    ): Int =
-        synchronized(nativeInstanceLock) {
-            if (!waylandColorSurfaceAttached || !waylandNativeOverlayAvailable) {
-                return@synchronized WAYLAND_OVERLAY_UPLOAD_FAILED
-            }
-            val ptr = playerPtr
-            if (ptr == 0L) return@synchronized WAYLAND_OVERLAY_UPLOAD_FAILED
-            runCatching {
-                LinuxNativeBridge.nUpdateWaylandHdrOverlay(
-                    ptr,
-                    pixelAddress,
-                    rowBytes,
-                    width,
-                    height,
-                )
-            }.getOrDefault(WAYLAND_OVERLAY_UPLOAD_FAILED)
-        }
-
-    internal fun clearWaylandOverlay() {
-        synchronized(nativeInstanceLock) {
-            val ptr = playerPtr
-            if (ptr != 0L && waylandColorSurfaceAttached) {
-                runCatching { LinuxNativeBridge.nClearWaylandHdrOverlay(ptr) }
-            }
+    private fun retireNativePlayerLocked(
+        ptr: Long,
+        wasLibVlc: Boolean,
+    ) {
+        if (nativeVideoWidgetOwners.containsValue(ptr)) {
+            nativePlayersPendingDisposal[ptr] = wasLibVlc
+        } else {
+            disposeNativePlayer(ptr, wasLibVlc)
         }
     }
 
-    internal fun disableWaylandNativeOverlay(detail: String) {
-        linuxLogger.e { detail }
-        clearWaylandOverlay()
-        waylandNativeOverlayAvailable = false
-    }
-
-    internal fun attachLibVlcNativeComponent(component: Component): Boolean {
-        synchronized(nativeInstanceLock) {
-            if (!shouldUseLibVlcNativeSurface()) return false
-            val ptr = playerPtr
-            if (ptr == 0L) return false
-
-            return runCatching {
-                val attached = LinuxNativeBridge.nAttachLibVlcNativeView(ptr, component)
-                libVlcNativeSurfaceAttached = attached
-                if (attached && isPlaying) {
-                    nativePlay(ptr)
-                    startFrameUpdates()
-                    startBufferingCheck()
-                }
-                attached
-            }.getOrElse { e ->
-                linuxLogger.e { "Failed to attach Linux libVLC native surface: ${e.message}" }
-                false
-            }
-        }
-    }
-
-    internal fun detachLibVlcNativeComponent(component: Component) {
-        synchronized(nativeInstanceLock) {
-            val ptr = playerPtr
-            if (ptr == 0L) return
-            runCatching {
-                LinuxNativeBridge.nDetachLibVlcNativeView(ptr, component)
-                libVlcNativeSurfaceAttached = false
-            }.onFailure { e ->
-                linuxLogger.e { "Failed to detach Linux libVLC native surface: ${e.message}" }
-            }
-        }
+    private fun finalizeRetiredNativePlayerIfUnownedLocked(ptr: Long) {
+        if (nativeVideoWidgetOwners.containsValue(ptr)) return
+        val wasLibVlc = nativePlayersPendingDisposal.remove(ptr) ?: return
+        disposeNativePlayer(ptr, wasLibVlc)
     }
 
     private fun isLibVlcAudioTrackId(id: String): Boolean = id.startsWith(LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX)
@@ -1667,16 +1610,12 @@ class LinuxVideoPlayerState(
         lifecycle.launchSourceBoundControlOperation { generation ->
             try {
                 val ptr = playerPtr
-                val component = waylandAttachedComponent
-                if (ptr != 0L && component != null) {
-                    synchronized(nativeInstanceLock) {
-                        LinuxNativeBridge.nDetachWaylandHdrView(ptr, component)
-                    }
-                }
+                val widget = waylandAttachedWidget
+                if (widget != 0L) withContext(Dispatchers.Main) { disposeNativeVideoWidget(widget) }
                 waylandColorSurfaceAttached = false
                 waylandNativeOverlayAvailable = false
                 waylandProjectionRendererAttached = false
-                waylandAttachedComponent = null
+                waylandAttachedWidget = 0L
                 colorOutputVerified = false
                 withContext(Dispatchers.Main) {
                     waylandColorSurfaceRequested = false
@@ -2163,7 +2102,7 @@ class LinuxVideoPlayerState(
                 if (ptrToDispose != 0L) {
                     try {
                         synchronized(nativeInstanceLock) {
-                            disposeNativePlayer(ptrToDispose, wasLibVlc = wasLibVlc)
+                            retireNativePlayerLocked(ptrToDispose, wasLibVlc)
                         }
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
@@ -2179,7 +2118,7 @@ class LinuxVideoPlayerState(
                 waylandColorSurfaceAttached = false
                 waylandNativeOverlayAvailable = false
                 waylandProjectionRendererAttached = false
-                waylandAttachedComponent = null
+                waylandAttachedWidget = 0L
                 clearDesktopAssSubtitleRenderer()
                 resetState()
                 onPlaybackEnded = null
@@ -3067,7 +3006,7 @@ class LinuxVideoPlayerState(
         waylandNativeOverlayAvailable = false
         waylandProjectionRendererAttached = false
         waylandFallbackInProgress = false
-        waylandAttachedComponent = null
+        waylandAttachedWidget = 0L
         waylandAttachStartedAtMillis = 0L
         colorPipelineController.resetSource()
     }

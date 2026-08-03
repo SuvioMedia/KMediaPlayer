@@ -2,13 +2,10 @@
 // Maps Kotlin external methods to the native C API and registers via JNI_OnLoad.
 
 #include <jni.h>
-#include <jawt.h>
-#include <jawt_md.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
-#include "JbrWaylandSurface.h"
+#include "GtkNativeVideoWidget.h"
 #include "WaylandColorProbe.h"
 #include "VulkanCapabilityProbe.h"
 #include "LibVlcCanvas.h"
@@ -24,134 +21,6 @@ static inline VideoPlayer* toCtx(jlong h) {
 
 static inline LibVlcCanvasPlayer* toLibVlc(jlong h) {
     return (LibVlcCanvasPlayer*)(uintptr_t)(uint64_t)h;
-}
-
-typedef struct WaylandAttachmentNode {
-    VideoPlayer* player;
-    JbrWaylandSurface* surface;
-    struct WaylandAttachmentNode* next;
-} WaylandAttachmentNode;
-
-static pthread_mutex_t g_wayland_attachments_lock = PTHREAD_MUTEX_INITIALIZER;
-static WaylandAttachmentNode* g_wayland_attachments = NULL;
-
-static WaylandAttachmentNode* find_wayland_attachment(VideoPlayer* player) {
-    WaylandAttachmentNode* node = g_wayland_attachments;
-    while (node) {
-        if (node->player == player) return node;
-        node = node->next;
-    }
-    return NULL;
-}
-
-static JbrWaylandSurface* remove_wayland_attachment(VideoPlayer* player) {
-    WaylandAttachmentNode** cursor = &g_wayland_attachments;
-    while (*cursor) {
-        WaylandAttachmentNode* node = *cursor;
-        if (node->player == player) {
-            JbrWaylandSurface* surface = node->surface;
-            *cursor = node->next;
-            free(node);
-            return surface;
-        }
-        cursor = &node->next;
-    }
-    return NULL;
-}
-
-static int install_wayland_attachment(VideoPlayer* player, JbrWaylandSurface* surface) {
-    WaylandAttachmentNode* node = calloc(1, sizeof(*node));
-    if (!node) return 0;
-    node->player = player;
-    node->surface = surface;
-    node->next = g_wayland_attachments;
-    g_wayland_attachments = node;
-    return 1;
-}
-
-static void detach_wayland_attachment(JNIEnv* env, VideoPlayer* player) {
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    JbrWaylandSurface* surface = remove_wayland_attachment(player);
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
-    nvp_detach_wayland_output(player);
-    jbr_wayland_surface_destroy(env, surface);
-}
-
-static uintptr_t wayland_video_target(const JbrWaylandSurface* surface) {
-    return
-        surface && surface->has_subsurface_pair
-            ? (uintptr_t)surface->video_surface_ptr
-            : (surface ? (uintptr_t)surface->surface_ptr : 0);
-}
-
-static int32_t wayland_video_x(const JbrWaylandSurface* surface) {
-    return surface && surface->has_subsurface_pair ? 0 : (surface ? surface->x : 0);
-}
-
-static int32_t wayland_video_y(const JbrWaylandSurface* surface) {
-    return surface && surface->has_subsurface_pair ? 0 : (surface ? surface->y : 0);
-}
-
-static int attach_wayland_video_target(
-    VideoPlayer* player,
-    const JbrWaylandSurface* surface
-) {
-    if (!player || !surface) return 0;
-    return nvp_attach_wayland_output(
-        player,
-        (uintptr_t)surface->display_ptr,
-        wayland_video_target(surface),
-        wayland_video_x(surface),
-        wayland_video_y(surface),
-        surface->width,
-        surface->height
-    );
-}
-
-static int attach_wayland_projection_target(
-    VideoPlayer* player,
-    const JbrWaylandSurface* surface,
-    const LinuxVulkanProjectionConfiguration* configuration
-) {
-    if (!player || !surface || !configuration) return 0;
-    return nvp_attach_wayland_projection_output(
-        player,
-        (uintptr_t)surface->display_ptr,
-        wayland_video_target(surface),
-        wayland_video_x(surface),
-        wayland_video_y(surface),
-        surface->width,
-        surface->height,
-        configuration
-    );
-}
-
-static uint32_t awt_component_xwindow(JNIEnv* env, jobject component) {
-    if (!component) return 0;
-
-    JAWT awt;
-    memset(&awt, 0, sizeof(awt));
-    awt.version = JAWT_VERSION_1_4;
-    if (JAWT_GetAWT(env, &awt) == JNI_FALSE) return 0;
-
-    JAWT_DrawingSurface* surface = awt.GetDrawingSurface(env, component);
-    if (!surface) return 0;
-
-    uint32_t xwindow = 0;
-    jint lock = surface->Lock(surface);
-    if ((lock & JAWT_LOCK_ERROR) == 0) {
-        JAWT_DrawingSurfaceInfo* surface_info = surface->GetDrawingSurfaceInfo(surface);
-        if (surface_info && surface_info->platformInfo) {
-            JAWT_X11DrawingSurfaceInfo* x11_info = (JAWT_X11DrawingSurfaceInfo*)surface_info->platformInfo;
-            xwindow = (uint32_t)x11_info->drawable;
-        }
-        if (surface_info) {
-            surface->FreeDrawingSurfaceInfo(surface_info);
-        }
-        surface->Unlock(surface);
-    }
-    awt.FreeDrawingSurface(surface);
-    return xwindow;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,9 +48,16 @@ static jintArray JNICALL jni_GetGStreamerRuntimeInfo(JNIEnv* env, jclass cls) {
     return (*env)->ExceptionCheck(env) ? NULL : result;
 }
 
-static jboolean JNICALL jni_IsJbrWaylandAdapterAvailable(JNIEnv* env, jclass cls) {
+static jboolean JNICALL jni_IsGtkWaylandAdapterAvailable(JNIEnv* env, jclass cls) {
+    (void)env;
     (void)cls;
-    return jbr_wayland_api_available(env) ? JNI_TRUE : JNI_FALSE;
+    return kmp_gtk_wayland_available() ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean JNICALL jni_IsGtkX11AdapterAvailable(JNIEnv* env, jclass cls) {
+    (void)env;
+    (void)cls;
+    return kmp_gtk_x11_available() ? JNI_TRUE : JNI_FALSE;
 }
 
 static jboolean JNICALL jni_IsVulkanProjectionRendererAvailable(JNIEnv* env, jclass cls) {
@@ -196,19 +72,7 @@ static jint JNICALL jni_QueryVulkanCapabilities(JNIEnv* env, jclass cls) {
     return (jint)vulkan_capability_probe_query();
 }
 
-static int query_wayland_color_callback(
-    uintptr_t display_ptr,
-    int32_t output_id,
-    void* user_data
-) {
-    return wayland_color_probe_query(
-        display_ptr,
-        output_id,
-        (WaylandColorProbeResult*)user_data
-    );
-}
-
-static jlongArray JNICALL jni_QueryJbrWaylandColorCapabilities(
+static jlongArray JNICALL jni_QueryGtkWaylandColorCapabilities(
     JNIEnv* env,
     jclass cls,
     jint output_id
@@ -217,11 +81,8 @@ static jlongArray JNICALL jni_QueryJbrWaylandColorCapabilities(
     WaylandColorProbeResult result;
     memset(&result, 0, sizeof(result));
     result.output_id = (int32_t)output_id;
-    if (!jbr_wayland_with_display(
-            env,
-            (int32_t)output_id,
-            query_wayland_color_callback,
-            &result)) {
+    uintptr_t display = kmp_gtk_wayland_display();
+    if (!display || !wayland_color_probe_query(display, (int32_t)output_id, &result)) {
         return NULL;
     }
 
@@ -236,52 +97,6 @@ static jlongArray JNICALL jni_QueryJbrWaylandColorCapabilities(
     if (!array) return NULL;
     (*env)->SetLongArrayRegion(env, array, 0, 5, values);
     return (*env)->ExceptionCheck(env) ? NULL : array;
-}
-
-static jboolean JNICALL jni_AttachWaylandHdrView(
-    JNIEnv* env,
-    jclass cls,
-    jlong handle,
-    jobject component
-) {
-    (void)cls;
-    if (!handle || !component) return JNI_FALSE;
-    VideoPlayer* player = toCtx(handle);
-
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    WaylandAttachmentNode* existing_node = find_wayland_attachment(player);
-    JbrWaylandSurface* existing = existing_node ? existing_node->surface : NULL;
-    int refreshed = existing ? jbr_wayland_surface_refresh(env, existing) : -1;
-    if (existing && refreshed == 1) {
-        int attached = attach_wayland_video_target(player, existing);
-        pthread_mutex_unlock(&g_wayland_attachments_lock);
-        return attached ? JNI_TRUE : JNI_FALSE;
-    }
-    JbrWaylandSurface* stale = refreshed < 0 ? remove_wayland_attachment(player) : NULL;
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
-    if (existing && refreshed == 0) return JNI_FALSE;
-    if (stale) {
-        nvp_detach_wayland_output(player);
-        jbr_wayland_surface_destroy(env, stale);
-    }
-
-    JbrWaylandSurface* captured = jbr_wayland_surface_capture(env, component);
-    if (!captured) return JNI_FALSE;
-    int attached = attach_wayland_video_target(player, captured);
-    if (!attached) {
-        jbr_wayland_surface_destroy(env, captured);
-        return JNI_FALSE;
-    }
-
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    int installed = install_wayland_attachment(player, captured);
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
-    if (!installed) {
-        nvp_detach_wayland_output(player);
-        jbr_wayland_surface_destroy(env, captured);
-        return JNI_FALSE;
-    }
-    return JNI_TRUE;
 }
 
 static int read_projection_configuration(
@@ -336,55 +151,37 @@ static int read_projection_configuration(
     return 1;
 }
 
-static jboolean JNICALL jni_AttachWaylandHdrProjectionView(
+static jlong JNICALL jni_CreateNativeVideoWidget(
     JNIEnv* env,
     jclass cls,
     jlong handle,
-    jobject component,
+    jboolean libvlc,
     jintArray integer_values,
     jfloatArray floating_values
 ) {
     (void)cls;
-    if (!handle || !component) return JNI_FALSE;
+    if (!handle) return 0L;
     LinuxVulkanProjectionConfiguration configuration;
-    if (!read_projection_configuration(env, integer_values, floating_values, &configuration)) {
-        return JNI_FALSE;
+    LinuxVulkanProjectionConfiguration* configuration_ptr = NULL;
+    if (integer_values && floating_values &&
+        read_projection_configuration(env, integer_values, floating_values, &configuration)) {
+        configuration_ptr = &configuration;
     }
-    VideoPlayer* player = toCtx(handle);
+    void* widget = kmp_gtk_video_widget_create(
+        libvlc == JNI_TRUE ? NULL : toCtx(handle),
+        libvlc == JNI_TRUE ? toLibVlc(handle) : NULL,
+        configuration_ptr);
+    return (jlong)(uintptr_t)widget;
+}
 
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    WaylandAttachmentNode* existing_node = find_wayland_attachment(player);
-    JbrWaylandSurface* existing = existing_node ? existing_node->surface : NULL;
-    int refreshed = existing ? jbr_wayland_surface_refresh(env, existing) : -1;
-    if (existing && refreshed == 1) {
-        int attached = attach_wayland_projection_target(player, existing, &configuration);
-        pthread_mutex_unlock(&g_wayland_attachments_lock);
-        return attached ? JNI_TRUE : JNI_FALSE;
-    }
-    JbrWaylandSurface* stale = refreshed < 0 ? remove_wayland_attachment(player) : NULL;
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
-    if (existing && refreshed == 0) return JNI_FALSE;
-    if (stale) {
-        nvp_detach_wayland_output(player);
-        jbr_wayland_surface_destroy(env, stale);
-    }
-
-    JbrWaylandSurface* captured = jbr_wayland_surface_capture(env, component);
-    if (!captured) return JNI_FALSE;
-    int attached = attach_wayland_projection_target(player, captured, &configuration);
-    if (!attached) {
-        jbr_wayland_surface_destroy(env, captured);
-        return JNI_FALSE;
-    }
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    int installed = install_wayland_attachment(player, captured);
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
-    if (!installed) {
-        nvp_detach_wayland_output(player);
-        jbr_wayland_surface_destroy(env, captured);
-        return JNI_FALSE;
-    }
-    return JNI_TRUE;
+static void JNICALL jni_DisposeNativeVideoWidget(
+    JNIEnv* env,
+    jclass cls,
+    jlong widget
+) {
+    (void)env;
+    (void)cls;
+    if (widget) kmp_gtk_video_widget_destroy((void*)(uintptr_t)(uint64_t)widget);
 }
 
 static void JNICALL jni_UpdateWaylandHdrProjectionConfiguration(
@@ -399,12 +196,6 @@ static void JNICALL jni_UpdateWaylandHdrProjectionConfiguration(
     LinuxVulkanProjectionConfiguration configuration;
     if (!read_projection_configuration(env, integer_values, floating_values, &configuration)) return;
     nvp_update_wayland_projection_configuration(toCtx(handle), &configuration);
-}
-
-static void JNICALL jni_DetachWaylandHdrView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
-    (void)cls;
-    (void)component;
-    if (handle) detach_wayland_attachment(env, toCtx(handle));
 }
 
 static jint JNICALL jni_GetWaylandHdrOutputState(JNIEnv* env, jclass cls, jlong handle) {
@@ -429,76 +220,8 @@ static jintArray JNICALL jni_GetDecodedVideoColorInfo(JNIEnv* env, jclass cls, j
 static jint JNICALL jni_GetWaylandOutputId(JNIEnv* env, jclass cls, jlong handle) {
     (void)env;
     (void)cls;
-    if (!handle) return -1;
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    WaylandAttachmentNode* node = find_wayland_attachment(toCtx(handle));
-    jint output_id = node && node->surface ? (jint)node->surface->output_id : -1;
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
-    return output_id;
-}
-
-static jintArray JNICALL jni_GetWaylandHdrOverlaySize(JNIEnv* env, jclass cls, jlong handle) {
-    (void)cls;
-    if (!handle) return NULL;
-    jint values[2] = {0, 0};
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    WaylandAttachmentNode* node = find_wayland_attachment(toCtx(handle));
-    if (node && node->surface && node->surface->has_subsurface_pair) {
-        values[0] = (jint)node->surface->buffer_width;
-        values[1] = (jint)node->surface->buffer_height;
-    }
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
-    if (values[0] <= 0 || values[1] <= 0) return NULL;
-    jintArray result = (*env)->NewIntArray(env, 2);
-    if (!result) return NULL;
-    (*env)->SetIntArrayRegion(env, result, 0, 2, values);
-    return (*env)->ExceptionCheck(env) ? NULL : result;
-}
-
-static jint JNICALL jni_UpdateWaylandHdrOverlay(
-    JNIEnv* env,
-    jclass cls,
-    jlong handle,
-    jlong pixel_address,
-    jint row_bytes,
-    jint width,
-    jint height
-) {
-    (void)cls;
-    if (!handle || !pixel_address || row_bytes <= 0 || width <= 0 || height <= 0) {
-        return 0;
-    }
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    WaylandAttachmentNode* node = find_wayland_attachment(toCtx(handle));
-    JbrWaylandSurface* surface = node ? node->surface : NULL;
-    int updated =
-        surface && surface->has_subsurface_pair &&
-        surface->buffer_width == width && surface->buffer_height == height &&
-        jbr_wayland_surface_update_overlay(
-            env,
-            surface,
-            (const void*)(uintptr_t)(uint64_t)pixel_address,
-            (size_t)row_bytes,
-            (int32_t)width,
-            (int32_t)height
-        );
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
-    return (jint)updated;
-}
-
-static void JNICALL jni_ClearWaylandHdrOverlay(
-    JNIEnv* env,
-    jclass cls,
-    jlong handle
-) {
-    (void)cls;
-    if (!handle) return;
-    pthread_mutex_lock(&g_wayland_attachments_lock);
-    WaylandAttachmentNode* node = find_wayland_attachment(toCtx(handle));
-    if (node && node->surface) {
-        jbr_wayland_surface_clear_overlay(env, node->surface);
-    }
-    pthread_mutex_unlock(&g_wayland_attachments_lock);
+    (void)handle;
+    return -1;
 }
 
 static jlong JNICALL jni_CreateLibVlcPlayer(
@@ -520,19 +243,6 @@ static jlong JNICALL jni_CreateLibVlcPlayer(
     (*env)->ReleaseStringUTFChars(env, libPath, cLibPath);
     (*env)->ReleaseStringUTFChars(env, pluginPath, cPluginPath);
     return p ? (jlong)(uintptr_t)p : 0L;
-}
-
-static jboolean JNICALL jni_AttachLibVlcNativeView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
-    if (!handle || !component) return JNI_FALSE;
-    uint32_t xwindow = awt_component_xwindow(env, component);
-    if (!xwindow) return JNI_FALSE;
-    return (jboolean)(lvc_set_native_window(toLibVlc(handle), xwindow) != 0);
-}
-
-static void JNICALL jni_DetachLibVlcNativeView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
-    if (handle) {
-        lvc_set_native_window(toLibVlc(handle), 0);
-    }
 }
 
 static jboolean JNICALL jni_OpenLibVlcUriWithHeaders(
@@ -755,7 +465,7 @@ static void JNICALL jni_SeekTo(JNIEnv* env, jclass cls, jlong handle, jdouble ti
 static void JNICALL jni_DisposePlayer(JNIEnv* env, jclass cls, jlong handle) {
     if (handle) {
         VideoPlayer* player = toCtx(handle);
-        detach_wayland_attachment(env, player);
+        nvp_detach_wayland_output(player);
         nvp_destroy(player);
     }
 }
@@ -822,10 +532,11 @@ static jboolean JNICALL jni_ConsumeDidPlayToEnd(JNIEnv* env, jclass cls, jlong h
 static const JNINativeMethod g_methods[] = {
     { "nGetNativeVersion",       "()I",                         (void*)jni_GetNativeVersion },
     { "nGetGStreamerRuntimeInfo", "()[I",                      (void*)jni_GetGStreamerRuntimeInfo },
-    { "nIsJbrWaylandAdapterAvailable", "()Z",                   (void*)jni_IsJbrWaylandAdapterAvailable },
+    { "nIsGtkWaylandAdapterAvailable", "()Z",                   (void*)jni_IsGtkWaylandAdapterAvailable },
+    { "nIsGtkX11AdapterAvailable", "()Z",                       (void*)jni_IsGtkX11AdapterAvailable },
     { "nIsVulkanProjectionRendererAvailable", "()Z",           (void*)jni_IsVulkanProjectionRendererAvailable },
     { "nQueryVulkanCapabilities", "()I",                       (void*)jni_QueryVulkanCapabilities },
-    { "nQueryJbrWaylandColorCapabilities", "(I)[J",            (void*)jni_QueryJbrWaylandColorCapabilities },
+    { "nQueryGtkWaylandColorCapabilities", "(I)[J",            (void*)jni_QueryGtkWaylandColorCapabilities },
     { "nCreatePlayer",           "()J",                         (void*)jni_CreatePlayer },
     { "nCreateLibVlcPlayer",     "(Ljava/lang/String;Ljava/lang/String;Z)J", (void*)jni_CreateLibVlcPlayer },
     { "nOpenLibVlcUriWithHeaders", "(JLjava/lang/String;Ljava/lang/String;Z)Z", (void*)jni_OpenLibVlcUriWithHeaders },
@@ -850,18 +561,12 @@ static const JNINativeMethod g_methods[] = {
     { "nDisableLibVlcSubtitles", "(J)Z",                        (void*)jni_DisableLibVlcSubtitles },
     { "nGetLibVlcAudioTrackDescriptions", "(J)Ljava/lang/String;", (void*)jni_GetLibVlcAudioTrackDescriptions },
     { "nGetLibVlcSubtitleTrackDescriptions", "(J)Ljava/lang/String;", (void*)jni_GetLibVlcSubtitleTrackDescriptions },
-    { "nAttachLibVlcNativeView", "(JLjava/awt/Component;)Z",     (void*)jni_AttachLibVlcNativeView },
-    { "nDetachLibVlcNativeView", "(JLjava/awt/Component;)V",     (void*)jni_DetachLibVlcNativeView },
-    { "nAttachWaylandHdrView",   "(JLjava/awt/Component;)Z",     (void*)jni_AttachWaylandHdrView },
-    { "nAttachWaylandHdrProjectionView", "(JLjava/awt/Component;[I[F)Z", (void*)jni_AttachWaylandHdrProjectionView },
+    { "nCreateNativeVideoWidget", "(JZ[I[F)J",                  (void*)jni_CreateNativeVideoWidget },
+    { "nDisposeNativeVideoWidget", "(J)V",                      (void*)jni_DisposeNativeVideoWidget },
     { "nUpdateWaylandHdrProjectionConfiguration", "(J[I[F)V", (void*)jni_UpdateWaylandHdrProjectionConfiguration },
-    { "nDetachWaylandHdrView",   "(JLjava/awt/Component;)V",     (void*)jni_DetachWaylandHdrView },
     { "nGetWaylandHdrOutputState", "(J)I",                      (void*)jni_GetWaylandHdrOutputState },
     { "nGetDecodedVideoColorInfo", "(J)[I",                    (void*)jni_GetDecodedVideoColorInfo },
     { "nGetWaylandOutputId",     "(J)I",                        (void*)jni_GetWaylandOutputId },
-    { "nGetWaylandHdrOverlaySize", "(J)[I",                     (void*)jni_GetWaylandHdrOverlaySize },
-    { "nUpdateWaylandHdrOverlay", "(JJIII)I",                   (void*)jni_UpdateWaylandHdrOverlay },
-    { "nClearWaylandHdrOverlay", "(J)V",                        (void*)jni_ClearWaylandHdrOverlay },
     { "nOpenUri",                "(JLjava/lang/String;)V",      (void*)jni_OpenUri },
     { "nOpenUriWithHeaders",     "(JLjava/lang/String;Ljava/lang/String;)V", (void*)jni_OpenUriWithHeaders },
     { "nPlay",                   "(J)V",                        (void*)jni_Play },

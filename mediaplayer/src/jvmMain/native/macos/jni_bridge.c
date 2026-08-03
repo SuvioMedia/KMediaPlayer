@@ -2,7 +2,6 @@
 // Calls Swift @_cdecl exports and registers them as JNI native methods.
 
 #include <jni.h>
-#include <jawt_md.h>
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <limits.h>
@@ -76,49 +75,21 @@ extern int32_t consumeDidPlayToEnd(void* ctx);
 
 #ifdef __OBJC__
 /**
- * Full-window host used by the dedicated macOS player window. AppKit resizes this view directly;
- * the Swift renderer only receives the resulting drawable size and is never reattached during a
- * live resize.
+ * Native AppKit child mounted and sized by Nucleus Tao. The backend owns the view and its
+ * rendering layer; Compose controls are rendered in Nucleus' sibling overlay.
  */
 @interface KMPNativeVideoView : NSView {
     void* _kmpHdrContext;
-    BOOL _kmpFillsSuperview;
-    NSView* _kmpObservedSuperview;
+    CALayer* _kmpHostedLayer;
 }
 - (void)setKmpHdrContext:(void*)context;
-- (void)setKmpFillsSuperview:(BOOL)fillsSuperview;
-- (void)kmpObserveAndSynchronizeSuperview;
-- (void)kmpSuperviewGeometryDidChange:(NSNotification*)notification;
-- (void)kmpSynchronizeFrameToSuperview;
+- (void)setKmpHostedLayer:(CALayer*)layer;
 - (void)updateKmpHostedLayerSize;
 @end
 
-static BOOL is_window_fullscreen(NSWindow* window);
-
-static NSRect native_window_video_frame_for_host_view(NSView* host_view) {
-    if (!host_view) return NSZeroRect;
-    NSWindow* window = [host_view window];
-    if (is_window_fullscreen(window)) return [host_view bounds];
-    NSView* content_view = [window contentView];
-    if (content_view && [content_view superview] == host_view) {
-        // The renderer is a sibling below JBR's content view. Using AppKit's real content frame
-        // keeps it out of the native title bar for every title-bar height and display scale, while
-        // automatically expanding to the whole screen during an AppKit full-screen transition.
-        return [content_view frame];
-    }
-    return [host_view bounds];
-}
-
 @implementation KMPNativeVideoView
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [super dealloc];
-}
-
 - (NSView*)hitTest:(NSPoint)point {
     (void)point;
-    // The full-window native renderer is purely visual. Compose owns controls, gestures,
-    // accessibility, and window dragging in the transparent layer above it.
     return nil;
 }
 
@@ -131,76 +102,28 @@ static NSRect native_window_video_frame_for_host_view(NSView* host_view) {
     [self updateKmpHostedLayerSize];
 }
 
-- (void)setKmpFillsSuperview:(BOOL)fillsSuperview {
-    if (_kmpFillsSuperview == fillsSuperview) {
-        if (fillsSuperview) [self kmpSynchronizeFrameToSuperview];
-        return;
-    }
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    _kmpObservedSuperview = nil;
-    _kmpFillsSuperview = fillsSuperview;
-    if (fillsSuperview) [self kmpObserveAndSynchronizeSuperview];
+- (void)setKmpHostedLayer:(CALayer*)layer {
+    if (_kmpHostedLayer == layer) return;
+    [_kmpHostedLayer removeFromSuperlayer];
+    [_kmpHostedLayer release];
+    _kmpHostedLayer = [layer retain];
+
+    [self setWantsLayer:YES];
+    CALayer* container = [self layer];
+    [container setMasksToBounds:YES];
+    [container setBackgroundColor:[[NSColor blackColor] CGColor]];
+    if (_kmpHostedLayer) [container addSublayer:_kmpHostedLayer];
+    [self updateKmpHostedLayerSize];
 }
 
-- (void)viewDidMoveToSuperview {
-    [super viewDidMoveToSuperview];
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    _kmpObservedSuperview = nil;
-    if (_kmpFillsSuperview) [self kmpObserveAndSynchronizeSuperview];
+- (void)dealloc {
+    [self setKmpHostedLayer:nil];
+    [super dealloc];
 }
 
-- (void)kmpObserveAndSynchronizeSuperview {
-    NSView* superview = [self superview];
-    if (!superview) return;
-    _kmpObservedSuperview = superview;
-    [superview setPostsFrameChangedNotifications:YES];
-    [superview setPostsBoundsChangedNotifications:YES];
-    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-    [center
-        addObserver:self
-        selector:@selector(kmpSuperviewGeometryDidChange:)
-        name:NSViewFrameDidChangeNotification
-        object:superview];
-    [center
-        addObserver:self
-        selector:@selector(kmpSuperviewGeometryDidChange:)
-        name:NSViewBoundsDidChangeNotification
-        object:superview];
-    NSWindow* window = [self window];
-    if (window) {
-        [center
-            addObserver:self
-            selector:@selector(kmpSuperviewGeometryDidChange:)
-            name:NSWindowDidResizeNotification
-            object:window];
-        [center
-            addObserver:self
-            selector:@selector(kmpSuperviewGeometryDidChange:)
-            name:NSWindowDidEnterFullScreenNotification
-            object:window];
-        [center
-            addObserver:self
-            selector:@selector(kmpSuperviewGeometryDidChange:)
-            name:NSWindowDidExitFullScreenNotification
-            object:window];
-    }
-    [self kmpSynchronizeFrameToSuperview];
-}
-
-- (void)kmpSuperviewGeometryDidChange:(NSNotification*)notification {
-    (void)notification;
-    [self kmpSynchronizeFrameToSuperview];
-}
-
-- (void)kmpSynchronizeFrameToSuperview {
-    NSView* superview = _kmpObservedSuperview ?: [self superview];
-    if (!_kmpFillsSuperview || !superview) return;
-    NSRect targetFrame = native_window_video_frame_for_host_view(superview);
-    if (!NSEqualRects([self frame], targetFrame)) {
-        [self setFrame:targetFrame];
-    } else {
-        [self updateKmpHostedLayerSize];
-    }
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [self updateKmpHostedLayerSize];
 }
 
 - (void)setFrameSize:(NSSize)newSize {
@@ -214,10 +137,15 @@ static NSRect native_window_video_frame_for_host_view(NSView* host_view) {
 }
 
 - (void)updateKmpHostedLayerSize {
-    if (!_kmpHdrContext) return;
+    if (!_kmpHdrContext || !_kmpHostedLayer) return;
     NSRect bounds = [self bounds];
     CGFloat scale = [[self window] backingScaleFactor];
     if (scale <= 0.0) scale = 1.0;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [_kmpHostedLayer setFrame:bounds];
+    [_kmpHostedLayer setContentsScale:scale];
+    [CATransaction commit];
     setHdrMetalLayerSize(
         _kmpHdrContext,
         (int32_t)llround(bounds.size.width),
@@ -231,10 +159,6 @@ static NSRect native_window_video_frame_for_host_view(NSView* host_view) {
 // ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
-
-static inline void* toCtx(jlong h) {
-    return (void*)(uintptr_t)(uint64_t)h;
-}
 
 static int native_logging_enabled(void) {
     static int initialized = 0;
@@ -281,1276 +205,34 @@ static void* avCtx(NativePlayerHandle* handle) {
     return (handle && handle->kind == PLAYER_KIND_AV) ? handle->ctx : NULL;
 }
 
-typedef jboolean (JNICALL *JAWT_GetAWT_Fn)(JNIEnv*, JAWT*);
-
-static JAWT_GetAWT_Fn resolve_jawt_get_awt(void) {
-    static JAWT_GetAWT_Fn fn = NULL;
-    static int attempted = 0;
-    if (attempted) return fn;
-    attempted = 1;
-
-    fn = (JAWT_GetAWT_Fn)dlsym(RTLD_DEFAULT, "JAWT_GetAWT");
-    if (fn) return fn;
-
-    void* jawt = dlopen("libjawt.dylib", RTLD_LAZY | RTLD_LOCAL);
-    if (!jawt) {
-        const char* java_home = getenv("JAVA_HOME");
-        if (java_home && java_home[0]) {
-            char path[PATH_MAX];
-            int written = snprintf(path, sizeof(path), "%s/lib/libjawt.dylib", java_home);
-            if (written > 0 && written < (int)sizeof(path)) {
-                jawt = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
-            }
-        }
-    }
-    if (jawt) {
-        fn = (JAWT_GetAWT_Fn)dlsym(jawt, "JAWT_GetAWT");
-    }
-    return fn;
-}
-
-static jint call_component_int(JNIEnv* env, jobject component, const char* method_name) {
-    if (!component) return 0;
-    jclass cls = (*env)->GetObjectClass(env, component);
-    if (!cls) return 0;
-    jmethodID method = (*env)->GetMethodID(env, cls, method_name, "()I");
-    if (!method) {
-        (*env)->DeleteLocalRef(env, cls);
-        return 0;
-    }
-    jint value = (*env)->CallIntMethod(env, component, method);
-    (*env)->DeleteLocalRef(env, cls);
-    return (*env)->ExceptionCheck(env) ? 0 : value;
-}
-
-static jboolean is_awt_window(JNIEnv* env, jobject component) {
-    if (!component) return JNI_FALSE;
-    jclass window_cls = (*env)->FindClass(env, "java/awt/Window");
-    if (!window_cls) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-        return JNI_FALSE;
-    }
-    jboolean result = (*env)->IsInstanceOf(env, component, window_cls);
-    (*env)->DeleteLocalRef(env, window_cls);
-    return result;
-}
-
-static jobject call_component_parent(JNIEnv* env, jobject component) {
-    if (!component) return NULL;
-    jclass cls = (*env)->GetObjectClass(env, component);
-    if (!cls) return NULL;
-    jmethodID method = (*env)->GetMethodID(env, cls, "getParent", "()Ljava/awt/Container;");
-    jobject parent = method ? (*env)->CallObjectMethod(env, component, method) : NULL;
-    (*env)->DeleteLocalRef(env, cls);
-    if ((*env)->ExceptionCheck(env)) {
-        (*env)->ExceptionClear(env);
-        return NULL;
-    }
-    return parent;
-}
-
-static jobject component_window_ancestor(JNIEnv* env, jobject component) {
-    jobject current = component ? (*env)->NewLocalRef(env, component) : NULL;
-    if (current && is_awt_window(env, current)) {
-        return current;
-    }
-    while (current) {
-        jobject parent = call_component_parent(env, current);
-        (*env)->DeleteLocalRef(env, current);
-        if (!parent) return NULL;
-        if (is_awt_window(env, parent)) {
-            return parent;
-        }
-        current = parent;
-    }
-    return NULL;
-}
-
-static jstring call_object_string(JNIEnv* env, jobject object, const char* method_name) {
-    if (!object) return NULL;
-    jclass cls = (*env)->GetObjectClass(env, object);
-    if (!cls) return NULL;
-    jmethodID method = (*env)->GetMethodID(env, cls, method_name, "()Ljava/lang/String;");
-    if (!method) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-        (*env)->DeleteLocalRef(env, cls);
-        return NULL;
-    }
-    jstring value = (jstring)(*env)->CallObjectMethod(env, object, method);
-    (*env)->DeleteLocalRef(env, cls);
-    if ((*env)->ExceptionCheck(env)) {
-        (*env)->ExceptionClear(env);
-        return NULL;
-    }
-    return value;
-}
-
-static jboolean component_location_on_screen(
-    JNIEnv* env,
-    jobject component,
-    jint* out_x,
-    jint* out_y
-) {
-    if (!component || !out_x || !out_y) return JNI_FALSE;
-    jclass component_cls = (*env)->GetObjectClass(env, component);
-    if (!component_cls) return JNI_FALSE;
-    jmethodID get_location = (*env)->GetMethodID(
-        env, component_cls, "getLocationOnScreen", "()Ljava/awt/Point;");
-    if (!get_location) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-        (*env)->DeleteLocalRef(env, component_cls);
-        return JNI_FALSE;
-    }
-
-    jobject point = (*env)->CallObjectMethod(env, component, get_location);
-    (*env)->DeleteLocalRef(env, component_cls);
-    if ((*env)->ExceptionCheck(env) || !point) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-        if (point) (*env)->DeleteLocalRef(env, point);
-        return JNI_FALSE;
-    }
-
-    jclass point_cls = (*env)->GetObjectClass(env, point);
-    jfieldID x_field = point_cls ? (*env)->GetFieldID(env, point_cls, "x", "I") : NULL;
-    jfieldID y_field = point_cls ? (*env)->GetFieldID(env, point_cls, "y", "I") : NULL;
-    if (!point_cls || !x_field || !y_field || (*env)->ExceptionCheck(env)) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-        if (point_cls) (*env)->DeleteLocalRef(env, point_cls);
-        (*env)->DeleteLocalRef(env, point);
-        return JNI_FALSE;
-    }
-
-    *out_x = (*env)->GetIntField(env, point, x_field);
-    *out_y = (*env)->GetIntField(env, point, y_field);
-    (*env)->DeleteLocalRef(env, point_cls);
-    (*env)->DeleteLocalRef(env, point);
-    return JNI_TRUE;
-}
-
-static jboolean window_content_insets(
-    JNIEnv* env,
-    jobject window,
-    jint* out_left,
-    jint* out_top
-) {
-    if (!window || !out_left || !out_top) return JNI_FALSE;
-    jclass window_cls = (*env)->GetObjectClass(env, window);
-    if (!window_cls) return JNI_FALSE;
-    jmethodID get_insets = (*env)->GetMethodID(
-        env, window_cls, "getInsets", "()Ljava/awt/Insets;");
-    if (!get_insets) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-        (*env)->DeleteLocalRef(env, window_cls);
-        return JNI_FALSE;
-    }
-
-    jobject insets = (*env)->CallObjectMethod(env, window, get_insets);
-    (*env)->DeleteLocalRef(env, window_cls);
-    if ((*env)->ExceptionCheck(env) || !insets) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-        if (insets) (*env)->DeleteLocalRef(env, insets);
-        return JNI_FALSE;
-    }
-
-    jclass insets_cls = (*env)->GetObjectClass(env, insets);
-    jfieldID left_field = insets_cls ? (*env)->GetFieldID(env, insets_cls, "left", "I") : NULL;
-    jfieldID top_field = insets_cls ? (*env)->GetFieldID(env, insets_cls, "top", "I") : NULL;
-    if (!insets_cls || !left_field || !top_field || (*env)->ExceptionCheck(env)) {
-        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
-        if (insets_cls) (*env)->DeleteLocalRef(env, insets_cls);
-        (*env)->DeleteLocalRef(env, insets);
-        return JNI_FALSE;
-    }
-
-    *out_left = (*env)->GetIntField(env, insets, left_field);
-    *out_top = (*env)->GetIntField(env, insets, top_field);
-    (*env)->DeleteLocalRef(env, insets_cls);
-    (*env)->DeleteLocalRef(env, insets);
-    return JNI_TRUE;
-}
-
-static void component_position_in_window(JNIEnv* env, jobject component, jint* out_x, jint* out_y) {
-    jobject window = component_window_ancestor(env, component);
-    if (window) {
-        jint component_screen_x = 0;
-        jint component_screen_y = 0;
-        jint window_screen_x = 0;
-        jint window_screen_y = 0;
-        jint inset_left = 0;
-        jint inset_top = 0;
-        if (component_location_on_screen(env, component, &component_screen_x, &component_screen_y) &&
-            component_location_on_screen(env, window, &window_screen_x, &window_screen_y) &&
-            window_content_insets(env, window, &inset_left, &inset_top)) {
-            *out_x = component_screen_x - window_screen_x - inset_left;
-            *out_y = component_screen_y - window_screen_y - inset_top;
-            (*env)->DeleteLocalRef(env, window);
-            return;
-        }
-        (*env)->DeleteLocalRef(env, window);
-    }
-
-    // Fallback for a component that is not showing yet. Once it becomes visible,
-    // the geometry listener calls this function again with screen coordinates available.
-    jint x = 0;
-    jint y = 0;
-    jobject current = component ? (*env)->NewLocalRef(env, component) : NULL;
-    while (current) {
-        x += call_component_int(env, current, "getX");
-        y += call_component_int(env, current, "getY");
-
-        jobject parent = call_component_parent(env, current);
-        (*env)->DeleteLocalRef(env, current);
-        if (!parent || is_awt_window(env, parent)) {
-            if (parent) (*env)->DeleteLocalRef(env, parent);
-            break;
-        }
-        current = parent;
-    }
-    *out_x = x;
-    *out_y = y;
-}
-
-static double component_backing_scale(JNIEnv* env, jobject component) {
-    if (!component) return 1.0;
-    double scale = 1.0;
-    jclass component_cls = (*env)->GetObjectClass(env, component);
-    if (!component_cls) return scale;
-
-    jmethodID get_gc = (*env)->GetMethodID(
-        env, component_cls, "getGraphicsConfiguration", "()Ljava/awt/GraphicsConfiguration;");
-    if (!get_gc) {
-        (*env)->DeleteLocalRef(env, component_cls);
-        return scale;
-    }
-
-    jobject graphics_config = (*env)->CallObjectMethod(env, component, get_gc);
-    if ((*env)->ExceptionCheck(env) || !graphics_config) {
-        (*env)->DeleteLocalRef(env, component_cls);
-        return scale;
-    }
-
-    jclass gc_cls = (*env)->GetObjectClass(env, graphics_config);
-    jmethodID get_transform = gc_cls
-        ? (*env)->GetMethodID(env, gc_cls, "getDefaultTransform", "()Ljava/awt/geom/AffineTransform;")
-        : NULL;
-    jobject transform = get_transform
-        ? (*env)->CallObjectMethod(env, graphics_config, get_transform)
-        : NULL;
-    if (!(*env)->ExceptionCheck(env) && transform) {
-        jclass transform_cls = (*env)->GetObjectClass(env, transform);
-        jmethodID get_scale_x = transform_cls
-            ? (*env)->GetMethodID(env, transform_cls, "getScaleX", "()D")
-            : NULL;
-        if (get_scale_x) {
-            double value = (*env)->CallDoubleMethod(env, transform, get_scale_x);
-            if (!(*env)->ExceptionCheck(env) && value > 0.0) {
-                scale = value;
-            }
-        }
-        if (transform_cls) (*env)->DeleteLocalRef(env, transform_cls);
-        (*env)->DeleteLocalRef(env, transform);
-    }
-
-    if ((*env)->ExceptionCheck(env)) {
-        (*env)->ExceptionClear(env);
-        scale = 1.0;
-    }
-    if (gc_cls) (*env)->DeleteLocalRef(env, gc_cls);
-    (*env)->DeleteLocalRef(env, graphics_config);
-    (*env)->DeleteLocalRef(env, component_cls);
-    return scale;
-}
-
-#ifdef __OBJC__
-typedef struct {
-    NSString* window_title;
-    NSView** native_view_slot;
-    CALayer* layer;
-    void* hdr_context;
-    jint width;
-    jint height;
-    jint x;
-    jint y;
-    jboolean fills_content_view;
-    jboolean below_compose;
-    jboolean attached;
-} AwtNativeViewAttachment;
-
 static void run_on_appkit_main_sync(dispatch_function_t operation, void* context) {
+#ifdef __OBJC__
     if (pthread_main_np()) {
         operation(context);
     } else {
         dispatch_sync_f(dispatch_get_main_queue(), context, operation);
     }
+#else
+    operation(context);
+#endif
 }
 
-static NSWindow* find_awt_window_exact(NSString* target_window_title) {
-    if ([target_window_title length] > 0) {
-        for (NSWindow* candidate in [NSApp windows]) {
-            if ([[candidate title] isEqualToString:target_window_title]) {
-                return candidate;
-            }
-        }
-    }
-    return nil;
-}
-
-static NSWindow* find_awt_window(NSString* target_window_title) {
-    NSWindow* window = find_awt_window_exact(target_window_title);
-    if (!window) {
-        window = [NSApp keyWindow] ?: [NSApp mainWindow];
-    }
-    if (!window) {
-        window = [[NSApp windows] firstObject];
-    }
-    return window;
-}
-
+#ifdef __OBJC__
 typedef struct {
-    NSString* window_title;
-    BOOL requested_fullscreen;
-    BOOL should_update;
-    BOOL found;
-    BOOL accepted;
-    BOOL fullscreen;
-} KMPWindowFullscreenContext;
+    NSView* view;
+} KMPReleaseNativeViewContext;
 
-static char KMP_NATIVE_MANAGED_FULLSCREEN_KEY;
-
-static BOOL window_frame_covers_screen(NSWindow* window) {
-    if (!window) return NO;
-    NSScreen* screen = [window screen] ?: [NSScreen mainScreen];
-    if (!screen) return NO;
-    NSRect frame = [window frame];
-    NSRect screen_frame = [screen frame];
-    const CGFloat tolerance = 1.0;
-    return fabs(frame.origin.x - screen_frame.origin.x) <= tolerance &&
-        fabs(frame.origin.y - screen_frame.origin.y) <= tolerance &&
-        fabs(frame.size.width - screen_frame.size.width) <= tolerance &&
-        fabs(frame.size.height - screen_frame.size.height) <= tolerance;
-}
-
-static BOOL is_window_fullscreen(NSWindow* window) {
-    if (!window) return NO;
-    if (([window styleMask] & NSWindowStyleMaskFullScreen) != 0) return YES;
-    NSNumber* managed = objc_getAssociatedObject(window, &KMP_NATIVE_MANAGED_FULLSCREEN_KEY);
-    return [managed boolValue] && window_frame_covers_screen(window);
-}
-
-static void prepare_window_for_native_fullscreen(NSWindow* window) {
-    if (!window) return;
-    NSWindowCollectionBehavior behavior = [window collectionBehavior];
-    behavior &= ~(NSWindowCollectionBehaviorFullScreenAuxiliary |
-        NSWindowCollectionBehaviorFullScreenNone);
-    behavior |= NSWindowCollectionBehaviorFullScreenPrimary;
-    [window setCollectionBehavior:behavior];
-    [window setTitleVisibility:NSWindowTitleHidden];
-    [window setTitlebarAppearsTransparent:YES];
-}
-
-static void set_standard_window_buttons_hidden(NSWindow* window, BOOL hidden) {
-    if (!window) return;
-    [[window standardWindowButton:NSWindowCloseButton] setHidden:hidden];
-    [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:hidden];
-    [[window standardWindowButton:NSWindowZoomButton] setHidden:hidden];
-}
-
-@interface KMPNativeWindowFullscreenCoordinator : NSObject {
-    NSWindow* _window;
-    NSString* _windowTitle;
-    BOOL _managedFullscreen;
-    BOOL _hasWindowedState;
-    NSRect _windowedFrame;
-    NSInteger _windowedLevel;
-    NSWindowCollectionBehavior _windowedCollectionBehavior;
-    NSApplicationPresentationOptions _windowedPresentationOptions;
-    BOOL _windowedHasShadow;
-    BOOL _nativeTransitionInProgress;
-    BOOL _hasPendingNativeRequest;
-    BOOL _pendingNativeFullscreen;
-}
-- (instancetype)initWithWindow:(NSWindow*)window;
-- (NSWindow*)resolveLiveWindow;
-- (BOOL)enterManagedFullscreen:(NSWindow*)window;
-- (BOOL)leaveManagedFullscreen:(NSWindow*)window;
-- (BOOL)requestFullscreen:(BOOL)fullscreen;
-- (void)nativeWindowWillChangeFullscreen:(NSNotification*)notification;
-- (void)nativeWindowDidChangeFullscreen:(NSNotification*)notification;
-- (void)windowWillClose:(NSNotification*)notification;
-@end
-
-@implementation KMPNativeWindowFullscreenCoordinator
-
-- (instancetype)initWithWindow:(NSWindow*)window {
-    self = [super init];
-    if (self) {
-        _window = window;
-        _windowTitle = [[window title] copy];
-        NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-        [center addObserver:self
-                   selector:@selector(windowWillClose:)
-                       name:NSWindowWillCloseNotification
-                     object:window];
-        [center addObserver:self
-                   selector:@selector(nativeWindowWillChangeFullscreen:)
-                       name:NSWindowWillEnterFullScreenNotification
-                     object:window];
-        [center addObserver:self
-                   selector:@selector(nativeWindowWillChangeFullscreen:)
-                       name:NSWindowWillExitFullScreenNotification
-                     object:window];
-        [center addObserver:self
-                   selector:@selector(nativeWindowDidChangeFullscreen:)
-                       name:NSWindowDidEnterFullScreenNotification
-                     object:window];
-        [center addObserver:self
-                   selector:@selector(nativeWindowDidChangeFullscreen:)
-                       name:NSWindowDidExitFullScreenNotification
-                     object:window];
-    }
-    return self;
-}
-
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    _window = nil;
-    [_windowTitle release];
-    _windowTitle = nil;
-    [super dealloc];
-}
-
-- (NSWindow*)resolveLiveWindow {
-    NSWindow* live_window = find_awt_window_exact(_windowTitle);
-    if (!live_window || ![live_window isVisible]) {
-        _window = nil;
-        return nil;
-    }
-    _window = live_window;
-    return live_window;
-}
-
-- (BOOL)enterManagedFullscreen:(NSWindow*)window {
-    if (!window) return NO;
-    if (_managedFullscreen) return YES;
-
-    NSScreen* screen = [window screen] ?: [NSScreen mainScreen];
-    if (!screen) return NO;
-
-    _windowedFrame = [window frame];
-    _windowedLevel = [window level];
-    _windowedCollectionBehavior = [window collectionBehavior];
-    _windowedPresentationOptions = [NSApp presentationOptions];
-    _windowedHasShadow = [window hasShadow];
-    _hasWindowedState = YES;
-
-    @try {
-        prepare_window_for_native_fullscreen(window);
-        set_standard_window_buttons_hidden(window, YES);
-        objc_setAssociatedObject(
-            window,
-            &KMP_NATIVE_MANAGED_FULLSCREEN_KEY,
-            [NSNumber numberWithBool:YES],
-            OBJC_ASSOCIATION_RETAIN_NONATOMIC
-        );
-        NSApplicationPresentationOptions presentation = _windowedPresentationOptions;
-        presentation &= ~(NSApplicationPresentationHideDock |
-            NSApplicationPresentationHideMenuBar);
-        presentation |= NSApplicationPresentationAutoHideDock |
-            NSApplicationPresentationAutoHideMenuBar;
-        [NSApp setPresentationOptions:presentation];
-        [window setHasShadow:NO];
-        [window setFrame:[screen frame] display:YES animate:NO];
-        [window makeKeyAndOrderFront:nil];
-        if (!window_frame_covers_screen(window)) {
-            objc_setAssociatedObject(
-                window,
-                &KMP_NATIVE_MANAGED_FULLSCREEN_KEY,
-                nil,
-                OBJC_ASSOCIATION_ASSIGN
-            );
-            [NSApp setPresentationOptions:_windowedPresentationOptions];
-            set_standard_window_buttons_hidden(window, NO);
-            [window setCollectionBehavior:_windowedCollectionBehavior];
-            [window setLevel:_windowedLevel];
-            [window setHasShadow:_windowedHasShadow];
-            [window setFrame:_windowedFrame display:YES animate:NO];
-            _hasWindowedState = NO;
-            return NO;
-        }
-        _managedFullscreen = YES;
-        return YES;
-    } @catch (NSException* exception) {
-        (void)exception;
-        objc_setAssociatedObject(
-            window,
-            &KMP_NATIVE_MANAGED_FULLSCREEN_KEY,
-            nil,
-            OBJC_ASSOCIATION_ASSIGN
-        );
-        if (_hasWindowedState) {
-            [NSApp setPresentationOptions:_windowedPresentationOptions];
-            set_standard_window_buttons_hidden(window, NO);
-            [window setCollectionBehavior:_windowedCollectionBehavior];
-            [window setLevel:_windowedLevel];
-            [window setHasShadow:_windowedHasShadow];
-            [window setFrame:_windowedFrame display:YES animate:NO];
-        }
-        _hasWindowedState = NO;
-        return NO;
-    }
-}
-
-- (BOOL)leaveManagedFullscreen:(NSWindow*)window {
-    if (!window) return NO;
-    if (!_managedFullscreen) return YES;
-    @try {
-        objc_setAssociatedObject(
-            window,
-            &KMP_NATIVE_MANAGED_FULLSCREEN_KEY,
-            nil,
-            OBJC_ASSOCIATION_ASSIGN
-        );
-        if (_hasWindowedState) {
-            [NSApp setPresentationOptions:_windowedPresentationOptions];
-            set_standard_window_buttons_hidden(window, NO);
-            [window setCollectionBehavior:_windowedCollectionBehavior];
-            [window setLevel:_windowedLevel];
-            [window setHasShadow:_windowedHasShadow];
-            [window setFrame:_windowedFrame display:YES animate:NO];
-        }
-        [window makeKeyAndOrderFront:nil];
-        _managedFullscreen = NO;
-        _hasWindowedState = NO;
-        return YES;
-    } @catch (NSException* exception) {
-        (void)exception;
-        return NO;
-    }
-}
-
-- (BOOL)requestFullscreen:(BOOL)fullscreen {
-    NSWindow* window = [self resolveLiveWindow];
-    if (!window) return NO;
-    BOOL appkit_native_fullscreen =
-        ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
-    if (_nativeTransitionInProgress || appkit_native_fullscreen) {
-        if (_nativeTransitionInProgress) {
-            _hasPendingNativeRequest = YES;
-            _pendingNativeFullscreen = fullscreen;
-            return YES;
-        }
-        if (is_window_fullscreen(window) == fullscreen) return YES;
-        @try {
-            prepare_window_for_native_fullscreen(window);
-            _nativeTransitionInProgress = YES;
-            [window toggleFullScreen:nil];
-            return YES;
-        } @catch (NSException* exception) {
-            (void)exception;
-            _nativeTransitionInProgress = NO;
-            return NO;
-        }
-    }
-    if (_managedFullscreen) {
-        return fullscreen ? YES : [self leaveManagedFullscreen:window];
-    }
-    return fullscreen ? [self enterManagedFullscreen:window] : YES;
-}
-
-- (void)nativeWindowWillChangeFullscreen:(NSNotification*)notification {
-    if ([notification object] != _window) return;
-    _nativeTransitionInProgress = YES;
-}
-
-- (void)nativeWindowDidChangeFullscreen:(NSNotification*)notification {
-    if ([notification object] != _window) return;
-    _nativeTransitionInProgress = NO;
-    if (!_hasPendingNativeRequest) return;
-    BOOL requested = _pendingNativeFullscreen;
-    _hasPendingNativeRequest = NO;
-    if (is_window_fullscreen(_window) != requested) {
-        [self requestFullscreen:requested];
-    }
-}
-
-- (void)windowWillClose:(NSNotification*)notification {
-    if ([notification object] != _window) return;
-    if (_managedFullscreen) {
-        [NSApp setPresentationOptions:_windowedPresentationOptions];
-        objc_setAssociatedObject(
-            _window,
-            &KMP_NATIVE_MANAGED_FULLSCREEN_KEY,
-            nil,
-            OBJC_ASSOCIATION_ASSIGN
-        );
-    }
-    _window = nil;
-    _managedFullscreen = NO;
-    _hasWindowedState = NO;
-    _nativeTransitionInProgress = NO;
-    _hasPendingNativeRequest = NO;
-}
-
-@end
-
-static char KMP_NATIVE_FULLSCREEN_COORDINATOR_KEY;
-
-static KMPNativeWindowFullscreenCoordinator* fullscreen_coordinator_for_window(
-    NSWindow* window
-) {
-    if (!window) return nil;
-    KMPNativeWindowFullscreenCoordinator* coordinator =
-        objc_getAssociatedObject(window, &KMP_NATIVE_FULLSCREEN_COORDINATOR_KEY);
-    if (!coordinator) {
-        coordinator =
-            [[KMPNativeWindowFullscreenCoordinator alloc] initWithWindow:window];
-        objc_setAssociatedObject(
-            window,
-            &KMP_NATIVE_FULLSCREEN_COORDINATOR_KEY,
-            coordinator,
-            OBJC_ASSOCIATION_RETAIN_NONATOMIC
-        );
-        [coordinator release];
-        coordinator =
-            objc_getAssociatedObject(window, &KMP_NATIVE_FULLSCREEN_COORDINATOR_KEY);
-    }
-    return coordinator;
-}
-
-static const void* native_window_zoom_coordinator_key(void) {
-    // SEL identities are process-wide, unlike addresses of static variables in separate dylibs.
-    // AVFoundation, libVLC, and MPV therefore share one coordinator when a Compose window is
-    // retained across a dynamic backend switch.
-    return (const void*)sel_registerName("KMPSharedNativeWindowZoomCoordinator");
-}
-
-@interface KMPNativeWindowZoomCoordinator : NSObject {
-    NSWindow* _window;
-    id _eventMonitor;
-    BOOL _zoomed;
-    BOOL _requestedZoomed;
-    BOOL _animationInProgress;
-    NSRect _restoreFrame;
-}
-- (instancetype)initWithWindow:(NSWindow*)window;
-- (NSEvent*)handleLocalMouseDown:(NSEvent*)event;
-- (BOOL)isTitleBarEvent:(NSEvent*)event;
-- (void)toggleZoom;
-- (void)startPendingZoomAnimation;
-- (void)removeEventMonitor;
-- (void)windowDidResize:(NSNotification*)notification;
-- (void)windowWillClose:(NSNotification*)notification;
-@end
-
-@implementation KMPNativeWindowZoomCoordinator
-
-- (instancetype)initWithWindow:(NSWindow*)window {
-    self = [super init];
-    if (self) {
-        _window = window;
-        __block KMPNativeWindowZoomCoordinator* unretained_self = self;
-        _eventMonitor = [[NSEvent
-            addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
-            handler:^NSEvent*(NSEvent* event) {
-                return [unretained_self handleLocalMouseDown:event];
-            }] retain];
-        [[NSNotificationCenter defaultCenter]
-            addObserver:self
-            selector:@selector(windowWillClose:)
-            name:NSWindowWillCloseNotification
-            object:window];
-        [[NSNotificationCenter defaultCenter]
-            addObserver:self
-            selector:@selector(windowDidResize:)
-            name:NSWindowDidResizeNotification
-            object:window];
-    }
-    return self;
-}
-
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [self removeEventMonitor];
-    _window = nil;
-    [super dealloc];
-}
-
-- (void)removeEventMonitor {
-    if (!_eventMonitor) return;
-    [NSEvent removeMonitor:_eventMonitor];
-    [_eventMonitor release];
-    _eventMonitor = nil;
-}
-
-- (void)windowWillClose:(NSNotification*)notification {
-    if ([notification object] != _window) return;
-    [self removeEventMonitor];
-    _window = nil;
-}
-
-- (void)windowDidResize:(NSNotification*)notification {
-    NSWindow* window = _window;
-    if ([notification object] != window ||
-        (!_animationInProgress && ![window inLiveResize])) {
-        return;
-    }
-    NSView* compose_view = [window contentView];
-    if (!compose_view) return;
-    [compose_view setNeedsLayout:YES];
-    [compose_view layoutSubtreeIfNeeded];
-    [compose_view setNeedsDisplay:YES];
-    [window setViewsNeedDisplay:YES];
-    [window displayIfNeeded];
-}
-
-- (BOOL)isTitleBarEvent:(NSEvent*)event {
-    NSWindow* window = _window;
-    if (!window || [event window] != window) return NO;
-    NSPoint window_point = [event locationInWindow];
-
-    for (NSWindowButton button_type = NSWindowCloseButton;
-         button_type <= NSWindowZoomButton;
-         button_type++) {
-        NSButton* button = [window standardWindowButton:button_type];
-        if (!button || [button isHidden]) continue;
-        NSPoint button_point = [button convertPoint:window_point fromView:nil];
-        if (NSPointInRect(button_point, [button bounds])) return NO;
-    }
-
-    NSView* content_view = [window contentView];
-    if (content_view) {
-        NSPoint content_point = [content_view convertPoint:window_point fromView:nil];
-        if (NSPointInRect(content_point, [content_view bounds])) return NO;
-    }
-    return window_point.y >= 0.0 && window_point.y <= [window frame].size.height;
-}
-
-- (NSEvent*)handleLocalMouseDown:(NSEvent*)event {
-    NSInteger click_count = [event clickCount];
-    // macOS reports two rapid double-clicks as click counts 1, 2, 3, 4. Treat every even
-    // click as a complete title-bar double-click so the restore request is never discarded.
-    if (click_count < 2 || (click_count % 2) != 0 || ![self isTitleBarEvent:event]) {
-        return event;
-    }
-    BOOL system_fullscreen = ([_window styleMask] & NSWindowStyleMaskFullScreen) != 0;
-    NSButton* zoom_button = [_window standardWindowButton:NSWindowZoomButton];
-    if (system_fullscreen || [zoom_button isHidden]) return event;
-    [self toggleZoom];
-    return nil;
-}
-
-- (void)toggleZoom {
-    NSWindow* window = _window;
-    if (!window) return;
-    _requestedZoomed = !_requestedZoomed;
-    if (_requestedZoomed && !_zoomed && !_animationInProgress) {
-        _restoreFrame = [window frame];
-    }
-    [self startPendingZoomAnimation];
-}
-
-- (void)startPendingZoomAnimation {
-    NSWindow* window = _window;
-    if (!window || _animationInProgress || _zoomed == _requestedZoomed) return;
-
-    BOOL target_zoomed = _requestedZoomed;
-    NSRect target_frame;
-    if (target_zoomed) {
-        NSScreen* screen = [window screen] ?: [NSScreen mainScreen];
-        if (!screen) return;
-        target_frame = [screen visibleFrame];
-    } else {
-        target_frame = _restoreFrame;
-    }
-    _animationInProgress = YES;
-
-    [window makeKeyAndOrderFront:nil];
-    KMPNativeWindowZoomCoordinator* retained_self = [self retain];
-    [NSAnimationContext
-        runAnimationGroup:^(NSAnimationContext* context) {
-            [context setDuration:0.22];
-            [context setTimingFunction:
-                [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]];
-            [[window animator] setFrame:target_frame display:YES];
-        }
-        completionHandler:^{
-            retained_self->_zoomed = target_zoomed;
-            retained_self->_animationInProgress = NO;
-            [retained_self startPendingZoomAnimation];
-            [retained_self release];
-        }];
-}
-
-@end
-
-static void install_native_window_zoom_coordinator(NSWindow* window) {
-    const void* key = native_window_zoom_coordinator_key();
-    if (!window || objc_getAssociatedObject(window, key)) return;
-    KMPNativeWindowZoomCoordinator* coordinator =
-        [[KMPNativeWindowZoomCoordinator alloc] initWithWindow:window];
-    objc_setAssociatedObject(
-        window,
-        key,
-        coordinator,
-        OBJC_ASSOCIATION_RETAIN_NONATOMIC
-    );
-    [coordinator release];
-}
-
-static void synchronize_window_fullscreen_on_appkit_main(void* raw_context) {
-    KMPWindowFullscreenContext* context = (KMPWindowFullscreenContext*)raw_context;
+static void release_native_view_on_appkit_main(void* raw_context) {
+    KMPReleaseNativeViewContext* context = (KMPReleaseNativeViewContext*)raw_context;
+    if (!context || !context->view) return;
     @autoreleasepool {
-        if (!context) return;
-        NSWindow* window = find_awt_window_exact(context->window_title);
-        if (!window) return;
-        context->found = YES;
-        context->fullscreen = is_window_fullscreen(window);
-        if (!context->should_update) {
-            context->accepted = YES;
-            return;
-        }
-        KMPNativeWindowFullscreenCoordinator* coordinator =
-            fullscreen_coordinator_for_window(window);
-        context->accepted =
-            coordinator &&
-            [coordinator requestFullscreen:context->requested_fullscreen];
+        [context->view removeFromSuperview];
+        [context->view setLayer:nil];
+        [context->view release];
+        context->view = nil;
     }
-}
-
-typedef struct {
-    NSString* window_title;
-    BOOL configured;
-} KMPNativeWindowConfigurationContext;
-
-static void configure_native_window_on_appkit_main(void* raw_context) {
-    KMPNativeWindowConfigurationContext* context =
-        (KMPNativeWindowConfigurationContext*)raw_context;
-    @autoreleasepool {
-        if (!context) return;
-        NSWindow* window = find_awt_window_exact(context->window_title);
-        if (!window) return;
-
-        NSWindowStyleMask style_mask = [window styleMask];
-        NSWindowStyleMask native_style_mask =
-            (style_mask |
-                NSWindowStyleMaskTitled |
-                NSWindowStyleMaskClosable |
-                NSWindowStyleMaskMiniaturizable |
-                NSWindowStyleMaskResizable) &
-            ~NSWindowStyleMaskFullSizeContentView;
-        if (native_style_mask != style_mask) {
-            [window setStyleMask:native_style_mask];
-        }
-        [window setOpaque:YES];
-        [window setAlphaValue:1.0];
-        [window setBackgroundColor:[NSColor blackColor]];
-        [window setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]];
-        [window setTitleVisibility:NSWindowTitleHidden];
-        // The title bar reveals only the window's fixed black background. The content view remains
-        // below it, so neither AVPlayerLayer nor Compose can bleed through the native chrome.
-        [window setTitlebarAppearsTransparent:YES];
-        [window setMovableByWindowBackground:NO];
-        [window setHasShadow:YES];
-        install_native_window_zoom_coordinator(window);
-        context->configured = YES;
-    }
-}
-
-static void attach_awt_native_view_on_appkit_main(void* raw_context) {
-    AwtNativeViewAttachment* context = (AwtNativeViewAttachment*)raw_context;
-    @autoreleasepool {
-        NSWindow* target_window = find_awt_window(context->window_title);
-        NSView* content_view = [[target_window contentView] retain];
-        // Dedicated windows keep JBR's contentView untouched. The renderer becomes its sibling
-        // one level lower in the existing theme-frame hierarchy, which gives AppKit an explicit
-        // native -> Compose order without replacing the view JBR owns for input and lifecycle.
-        NSView* host_view = context->fills_content_view && [content_view superview]
-            ? [content_view superview]
-            : content_view;
-        CGFloat target_width = context->fills_content_view
-            ? host_view.bounds.size.width
-            : context->width;
-        CGFloat target_height = context->fills_content_view
-            ? host_view.bounds.size.height
-            : context->height;
-        if (!content_view || !host_view || target_width <= 0 || target_height <= 0) {
-            [content_view release];
-            return;
-        }
-
-        if (!*context->native_view_slot) {
-            *context->native_view_slot = [[KMPNativeVideoView alloc] initWithFrame:NSZeroRect];
-            [*context->native_view_slot setWantsLayer:YES];
-        }
-
-        KMPNativeVideoView* native_view = (KMPNativeVideoView*)*context->native_view_slot;
-        [native_view setKmpHdrContext:context->hdr_context];
-
-        CGFloat view_y = context->fills_content_view
-            ? 0.0
-            : ([content_view isFlipped]
-                ? context->y
-                : content_view.bounds.size.height - context->y - context->height);
-        if (view_y < 0.0 && view_y > -64.0) {
-            view_y = 0.0;
-        }
-        [*context->native_view_slot setFrame:NSMakeRect(
-            context->fills_content_view ? 0.0 : context->x,
-            view_y,
-            target_width,
-            target_height
-        )];
-        [*context->native_view_slot setAutoresizingMask:
-            context->fills_content_view
-                ? (NSViewWidthSizable | NSViewHeightSizable)
-                : NSViewNotSizable];
-        if (context->layer) {
-            [*context->native_view_slot setLayer:context->layer];
-            [context->layer setBackgroundColor:[[NSColor blackColor] CGColor]];
-        } else {
-            [*context->native_view_slot setWantsLayer:YES];
-            [[*context->native_view_slot layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
-        }
-        [*context->native_view_slot setWantsLayer:YES];
-        // Sibling NSView ordering is enough to keep Compose above the renderer. A negative
-        // CALayer z-position can place AVPlayerLayer behind the transparent NSWindow backing
-        // surface, making the window show whatever application happens to be underneath it.
-        [[*context->native_view_slot layer] setZPosition:0.0];
-        if ([*context->native_view_slot superview] != host_view) {
-            [*context->native_view_slot removeFromSuperview];
-            [host_view
-                addSubview:*context->native_view_slot
-                positioned:context->below_compose ? NSWindowBelow : NSWindowAbove
-                relativeTo:
-                    context->fills_content_view && host_view != content_view
-                        ? content_view
-                        : nil];
-        }
-        [native_view setKmpFillsSuperview:context->fills_content_view];
-        [native_view updateKmpHostedLayerSize];
-        context->attached = JNI_TRUE;
-        [content_view release];
-    }
-}
-
-static void detach_awt_native_view_on_appkit_main(void* raw_native_view_slot) {
-    NSView** native_view_slot = (NSView**)raw_native_view_slot;
-    @autoreleasepool {
-        if (!native_view_slot || !*native_view_slot) return;
-        if ([*native_view_slot isKindOfClass:[KMPNativeVideoView class]]) {
-            [(KMPNativeVideoView*)*native_view_slot setKmpHdrContext:NULL];
-            [(KMPNativeVideoView*)*native_view_slot setKmpFillsSuperview:NO];
-        }
-        [*native_view_slot removeFromSuperview];
-        [*native_view_slot setLayer:nil];
-        [*native_view_slot release];
-        *native_view_slot = nil;
-    }
-}
-
-static NSView* attach_awt_full_window_native_view(
-    JNIEnv* env,
-    jobject window,
-    NSView** native_view_slot,
-    CALayer* layer,
-    void* hdr_context,
-    const char* log_prefix
-) {
-#ifdef __OBJC__
-    if (!window || !native_view_slot) return nil;
-
-    jobject awt_window = component_window_ancestor(env, window);
-    jstring awt_window_title = awt_window ? call_object_string(env, awt_window, "getTitle") : NULL;
-    const char* awt_window_title_utf = awt_window_title
-        ? (*env)->GetStringUTFChars(env, awt_window_title, NULL)
-        : NULL;
-    NSString* target_window_title = awt_window_title_utf
-        ? [[NSString alloc] initWithUTF8String:awt_window_title_utf]
-        : nil;
-    if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
-    if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
-    if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
-
-    AwtNativeViewAttachment attachment = {
-        .window_title = target_window_title,
-        .native_view_slot = native_view_slot,
-        .layer = layer,
-        .hdr_context = hdr_context,
-        .fills_content_view = JNI_TRUE,
-        .below_compose = JNI_TRUE,
-        .attached = JNI_FALSE,
-    };
-    run_on_appkit_main_sync(attach_awt_native_view_on_appkit_main, &attachment);
-    [target_window_title release];
-
-    if (!attachment.attached) {
-        if (log_prefix) native_logf("%s: missing dedicated content view or invalid size\n", log_prefix);
-        return nil;
-    }
-    return *native_view_slot;
-#else
-    (void)env;
-    (void)window;
-    (void)native_view_slot;
-    (void)layer;
-    (void)hdr_context;
-    (void)log_prefix;
-    return NULL;
-#endif
 }
 #endif
-
-static jboolean set_awt_component_layer(
-    JNIEnv* env,
-    jobject component,
-    CALayer* layer,
-    NSView** native_view_slot
-) {
-#ifdef __OBJC__
-    if (!component || !native_view_slot) return JNI_FALSE;
-    jobject awt_window = component_window_ancestor(env, component);
-    jstring awt_window_title = awt_window ? call_object_string(env, awt_window, "getTitle") : NULL;
-    const char* awt_window_title_utf = awt_window_title
-        ? (*env)->GetStringUTFChars(env, awt_window_title, NULL)
-        : NULL;
-    NSString* target_window_title = awt_window_title_utf
-        ? [[NSString alloc] initWithUTF8String:awt_window_title_utf]
-        : nil;
-    if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
-    if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
-    if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
-
-    AwtNativeViewAttachment attachment = {
-        .window_title = target_window_title,
-        .native_view_slot = native_view_slot,
-        .layer = layer,
-        .width = call_component_int(env, component, "getWidth"),
-        .height = call_component_int(env, component, "getHeight"),
-        .x = 0,
-        .y = 0,
-        .attached = JNI_FALSE,
-    };
-    component_position_in_window(env, component, &attachment.x, &attachment.y);
-
-    JAWT_GetAWT_Fn get_awt = resolve_jawt_get_awt();
-    if (!get_awt) {
-        if (layer) native_logf("HDR Metal: JAWT_GetAWT unavailable\n");
-        [target_window_title release];
-        return JNI_FALSE;
-    }
-
-    JAWT awt;
-    memset(&awt, 0, sizeof(awt));
-    awt.version = JAWT_VERSION_1_4 | JAWT_MACOSX_USE_CALAYER;
-    if (get_awt(env, &awt) == JNI_FALSE) {
-        if (layer) native_logf("HDR Metal: JAWT_GetAWT returned false\n");
-        [target_window_title release];
-        return JNI_FALSE;
-    }
-
-    JAWT_DrawingSurface* ds = awt.GetDrawingSurface(env, component);
-    if (!ds) {
-        if (layer) native_logf("HDR Metal: GetDrawingSurface returned null\n");
-        [target_window_title release];
-        return JNI_FALSE;
-    }
-
-    jboolean surface_layers_found = JNI_FALSE;
-    jint lock = ds->Lock(ds);
-    if ((lock & JAWT_LOCK_ERROR) == 0) {
-        JAWT_DrawingSurfaceInfo* dsi = ds->GetDrawingSurfaceInfo(ds);
-        if (dsi && dsi->platformInfo) {
-            id surface_layers = (id)dsi->platformInfo;
-            if ([surface_layers respondsToSelector:@selector(setLayer:)]) {
-                ((id<JAWT_SurfaceLayers>)surface_layers).layer = nil;
-                surface_layers_found = JNI_TRUE;
-            } else if (layer) {
-                native_logf("HDR Metal: platformInfo does not accept setLayer:\n");
-            }
-        } else if (layer) {
-            native_logf("HDR Metal: drawing surface info missing platformInfo\n");
-        }
-        if (dsi) ds->FreeDrawingSurfaceInfo(dsi);
-        ds->Unlock(ds);
-    } else if (layer) {
-        native_logf("HDR Metal: drawing surface lock error %d\n", lock);
-    }
-    awt.FreeDrawingSurface(ds);
-    if (surface_layers_found) {
-        if (layer) {
-            run_on_appkit_main_sync(attach_awt_native_view_on_appkit_main, &attachment);
-        } else {
-            run_on_appkit_main_sync(detach_awt_native_view_on_appkit_main, native_view_slot);
-            attachment.attached = JNI_TRUE;
-        }
-    }
-    [target_window_title release];
-    return attachment.attached;
-#else
-    (void)env;
-    (void)component;
-    (void)layer;
-    (void)native_view_slot;
-    return JNI_FALSE;
-#endif
-}
-
-static NSView* attach_awt_component_native_view(
-    JNIEnv* env,
-    jobject component,
-    NSView** native_view_slot,
-    const char* log_prefix
-) {
-#ifdef __OBJC__
-    if (!component || !native_view_slot) return nil;
-
-    jobject awt_window = component_window_ancestor(env, component);
-    jstring awt_window_title = awt_window ? call_object_string(env, awt_window, "getTitle") : NULL;
-    const char* awt_window_title_utf = awt_window_title
-        ? (*env)->GetStringUTFChars(env, awt_window_title, NULL)
-        : NULL;
-    NSString* target_window_title = awt_window_title_utf
-        ? [[NSString alloc] initWithUTF8String:awt_window_title_utf]
-        : nil;
-    if (awt_window_title_utf) (*env)->ReleaseStringUTFChars(env, awt_window_title, awt_window_title_utf);
-    if (awt_window_title) (*env)->DeleteLocalRef(env, awt_window_title);
-    if (awt_window) (*env)->DeleteLocalRef(env, awt_window);
-
-    AwtNativeViewAttachment attachment = {
-        .window_title = target_window_title,
-        .native_view_slot = native_view_slot,
-        .layer = nil,
-        .width = call_component_int(env, component, "getWidth"),
-        .height = call_component_int(env, component, "getHeight"),
-        .x = 0,
-        .y = 0,
-        .attached = JNI_FALSE,
-    };
-    component_position_in_window(env, component, &attachment.x, &attachment.y);
-    run_on_appkit_main_sync(attach_awt_native_view_on_appkit_main, &attachment);
-    [target_window_title release];
-
-    if (!attachment.attached) {
-        if (log_prefix) native_logf("%s: missing content view or invalid size\n", log_prefix);
-        return nil;
-    }
-    return *native_view_slot;
-#else
-    (void)env;
-    (void)component;
-    (void)native_view_slot;
-    (void)log_prefix;
-    return NULL;
-#endif
-}
-
-static void detach_awt_component_native_view(NSView** native_view_slot) {
-#ifdef __OBJC__
-    if (!native_view_slot || !*native_view_slot) return;
-    run_on_appkit_main_sync(detach_awt_native_view_on_appkit_main, native_view_slot);
-#else
-    (void)native_view_slot;
-#endif
-}
-
-static NSString* copy_awt_window_title(JNIEnv* env, jobject window) {
-#ifdef __OBJC__
-    if (!env || !window) return nil;
-    jstring title_value = call_object_string(env, window, "getTitle");
-    const char* title_utf = title_value
-        ? (*env)->GetStringUTFChars(env, title_value, NULL)
-        : NULL;
-    NSString* title = title_utf
-        ? [[NSString alloc] initWithUTF8String:title_utf]
-        : nil;
-    if (title_utf) (*env)->ReleaseStringUTFChars(env, title_value, title_utf);
-    if (title_value) (*env)->DeleteLocalRef(env, title_value);
-    return title;
-#else
-    (void)env;
-    (void)window;
-    return NULL;
-#endif
-}
-
-static jboolean JNICALL jni_SetWindowFullscreen(
-    JNIEnv* env,
-    jclass cls,
-    jobject window,
-    jboolean fullscreen
-) {
-    (void)cls;
-#ifdef __OBJC__
-    NSString* title = copy_awt_window_title(env, window);
-    if (!title) return JNI_FALSE;
-    KMPWindowFullscreenContext context = {
-        .window_title = title,
-        .requested_fullscreen = fullscreen == JNI_TRUE,
-        .should_update = YES,
-        .found = NO,
-        .accepted = NO,
-        .fullscreen = NO,
-    };
-    run_on_appkit_main_sync(synchronize_window_fullscreen_on_appkit_main, &context);
-    [title release];
-    return context.found && context.accepted ? JNI_TRUE : JNI_FALSE;
-#else
-    (void)env;
-    (void)window;
-    (void)fullscreen;
-    return JNI_FALSE;
-#endif
-}
-
-static jboolean JNICALL jni_ConfigureNativeWindow(
-    JNIEnv* env,
-    jclass cls,
-    jobject window
-) {
-    (void)cls;
-#ifdef __OBJC__
-    NSString* title = copy_awt_window_title(env, window);
-    if (!title) return JNI_FALSE;
-    KMPNativeWindowConfigurationContext context = {
-        .window_title = title,
-        .configured = NO,
-    };
-    run_on_appkit_main_sync(configure_native_window_on_appkit_main, &context);
-    [title release];
-    return context.configured ? JNI_TRUE : JNI_FALSE;
-#else
-    (void)env;
-    (void)window;
-    return JNI_FALSE;
-#endif
-}
-
-static jboolean JNICALL jni_IsWindowFullscreen(
-    JNIEnv* env,
-    jclass cls,
-    jobject window
-) {
-    (void)cls;
-#ifdef __OBJC__
-    NSString* title = copy_awt_window_title(env, window);
-    if (!title) return JNI_FALSE;
-    KMPWindowFullscreenContext context = {
-        .window_title = title,
-        .requested_fullscreen = NO,
-        .should_update = NO,
-        .found = NO,
-        .accepted = NO,
-        .fullscreen = NO,
-    };
-    run_on_appkit_main_sync(synchronize_window_fullscreen_on_appkit_main, &context);
-    [title release];
-    return context.found && context.fullscreen ? JNI_TRUE : JNI_FALSE;
-#else
-    (void)env;
-    (void)window;
-    return JNI_FALSE;
-#endif
-}
 
 // ---------------------------------------------------------------------------
 // Optional libVLC backend
@@ -2031,10 +713,16 @@ static void dispose_libvlc_player(LibVlcPlayer* player) {
         player->player = NULL;
     }
 #ifdef __OBJC__
-    NSView* native_view = (NSView*)player->native_view;
-    detach_awt_component_native_view(&native_view);
-#endif
+    KMPReleaseNativeViewContext view_context = {
+        .view = (NSView*)player->native_view,
+    };
     player->native_view = NULL;
+    if (view_context.view) {
+        run_on_appkit_main_sync(release_native_view_on_appkit_main, &view_context);
+    }
+#else
+    player->native_view = NULL;
+#endif
     if (player->instance) {
         player->api.release_instance(player->instance);
         player->instance = NULL;
@@ -2566,139 +1254,336 @@ static jstring JNICALL jni_GetDisplayColorCapabilities(JNIEnv* env, jclass cls, 
 #endif
 }
 
-static jboolean JNICALL jni_AttachHdrMetalView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
-    NativePlayerHandle* native = toHandle(handle);
-    if (vlcCtx(native)) return JNI_FALSE;
-    void* ctx = avCtx(native);
-    if (!ctx || !component || !isHdrMetalAvailable(ctx)) return JNI_FALSE;
+#ifdef __OBJC__
+typedef struct {
+    NativePlayerHandle* native;
+    NSView* result;
+} KMPCreateNativeVideoViewContext;
 
-    CALayer* layer = (CALayer*)getHdrMetalLayer(ctx);
-    if (!layer) {
-        native_logf("HDR Metal: native layer is null\n");
-        return JNI_FALSE;
-    }
-    jint width = call_component_int(env, component, "getWidth");
-    jint height = call_component_int(env, component, "getHeight");
-    double scale = component_backing_scale(env, component);
-    setHdrMetalLayerSize(ctx, (int32_t)width, (int32_t)height, scale);
+static void create_native_video_view_on_appkit_main(void* raw_context) {
+    KMPCreateNativeVideoViewContext* context = (KMPCreateNativeVideoViewContext*)raw_context;
+    @autoreleasepool {
+        if (!context || !context->native) return;
+        NativePlayerHandle* native = context->native;
+        if (native->kind == PLAYER_KIND_AV) {
+            void* hdr_context = avCtx(native);
+            if (!hdr_context || !isHdrMetalAvailable(hdr_context)) return;
+            if (native->native_view) {
+                context->result = (NSView*)native->native_view;
+                return;
+            }
+            CALayer* layer = (CALayer*)getHdrMetalLayer(hdr_context);
+            if (!layer) return;
+            KMPNativeVideoView* view =
+                [[KMPNativeVideoView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 1.0, 1.0)];
+            [view setWantsLayer:YES];
+            [view setKmpHostedLayer:layer];
+            [view setKmpHdrContext:hdr_context];
+            native->native_view = view;
+            context->result = view;
+            return;
+        }
 
-    NSView* native_view = (NSView*)native->native_view;
-    jboolean attached = set_awt_component_layer(env, component, layer, &native_view);
-    native->native_view = native_view;
-    if (!attached) {
-        native_logf("HDR Metal: JAWT layer attach failed\n");
+        LibVlcPlayer* vlc = vlcCtx(native);
+        if (!vlc || !vlc->native_video) return;
+        if (!vlc->native_view) {
+            KMPNativeVideoView* view =
+                [[KMPNativeVideoView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 1.0, 1.0)];
+            [view setWantsLayer:YES];
+            [[view layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
+            vlc->native_view = view;
+        }
+        if (vlc->player && vlc->api.media_player_set_nsobject) {
+            vlc->api.media_player_set_nsobject(vlc->player, vlc->native_view);
+        }
+        context->result = (NSView*)vlc->native_view;
     }
-    return attached;
 }
 
-static void JNICALL jni_DetachHdrMetalView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
+typedef struct {
+    NativePlayerHandle* native;
+    NSView* view;
+} KMPDisposeNativeVideoViewContext;
+
+static void dispose_native_video_view_on_appkit_main(void* raw_context) {
+    KMPDisposeNativeVideoViewContext* context = (KMPDisposeNativeVideoViewContext*)raw_context;
+    @autoreleasepool {
+        if (!context || !context->native || !context->view) return;
+        NativePlayerHandle* native = context->native;
+        if (native->kind == PLAYER_KIND_AV && native->native_view == context->view) {
+            KMPNativeVideoView* view = (KMPNativeVideoView*)context->view;
+            [view setKmpHdrContext:NULL];
+            [view setKmpHostedLayer:nil];
+            [view removeFromSuperview];
+            [view setLayer:nil];
+            [view release];
+            native->native_view = NULL;
+            detachHdrMetalLayer(avCtx(native));
+            return;
+        }
+        LibVlcPlayer* vlc = vlcCtx(native);
+        if (vlc && vlc->native_view == context->view) {
+            if (vlc->player && vlc->api.media_player_set_nsobject) {
+                vlc->api.media_player_set_nsobject(vlc->player, NULL);
+            }
+            [context->view removeFromSuperview];
+            [context->view setLayer:nil];
+            [context->view release];
+            vlc->native_view = NULL;
+        }
+    }
+}
+#endif
+
+static jlong JNICALL jni_CreateNativeVideoView(JNIEnv* env, jclass cls, jlong handle) {
     (void)env;
     (void)cls;
-    (void)component;
-    NativePlayerHandle* native = toHandle(handle);
 #ifdef __OBJC__
-    if (native && !vlcCtx(native)) {
-        NSView* native_view = (NSView*)native->native_view;
-        // Compose may dispose SwingPanel after its Canvas has already become
-        // undisplayable. Detaching through JAWT then cannot obtain a drawing
-        // surface and leaves this NSView (and its AVPlayerLayer) above Compose.
-        // The retained native view is sufficient to remove it deterministically.
-        detach_awt_component_native_view(&native_view);
-        native->native_view = native_view;
-    }
-#endif
-    void* ctx = avCtx(native);
-    if (ctx) detachHdrMetalLayer(ctx);
-}
-
-static jboolean JNICALL jni_AttachHdrMetalWindow(JNIEnv* env, jclass cls, jlong handle, jobject window) {
-    (void)cls;
-    NativePlayerHandle* native = toHandle(handle);
-    if (vlcCtx(native)) return JNI_FALSE;
-    void* ctx = avCtx(native);
-    if (!ctx || !window || !isHdrMetalAvailable(ctx)) return JNI_FALSE;
-
-#ifdef __OBJC__
-    CALayer* layer = (CALayer*)getHdrMetalLayer(ctx);
-    if (!layer) {
-        native_logf("HDR Metal window: native layer is null\n");
-        return JNI_FALSE;
-    }
-    NSView* native_view = (NSView*)native->native_view;
-    NSView* view = attach_awt_full_window_native_view(
-        env,
-        window,
-        &native_view,
-        layer,
-        ctx,
-        "HDR Metal window"
-    );
-    native->native_view = native_view;
-    return view ? JNI_TRUE : JNI_FALSE;
+    KMPCreateNativeVideoViewContext context = {
+        .native = toHandle(handle),
+        .result = nil,
+    };
+    run_on_appkit_main_sync(create_native_video_view_on_appkit_main, &context);
+    return (jlong)(uintptr_t)context.result;
 #else
-    return JNI_FALSE;
+    return 0L;
 #endif
 }
 
-static jboolean JNICALL jni_AttachLibVlcNativeView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
-    NativePlayerHandle* native = toHandle(handle);
-    LibVlcPlayer* vlc = vlcCtx(native);
-    if (!vlc || !vlc->native_video || !component) return JNI_FALSE;
-
-#ifdef __OBJC__
-    NSView* native_view = (NSView*)vlc->native_view;
-    NSView* view = attach_awt_component_native_view(env, component, &native_view, "libVLC native view");
-    if (!view) return JNI_FALSE;
-    vlc->native_view = view;
-    if (vlc->player && vlc->api.media_player_set_nsobject) {
-        vlc->api.media_player_set_nsobject(vlc->player, view);
-    }
-    return JNI_TRUE;
-#else
-    return JNI_FALSE;
-#endif
-}
-
-static void JNICALL jni_DetachLibVlcNativeView(JNIEnv* env, jclass cls, jlong handle, jobject component) {
+static void JNICALL jni_DisposeNativeVideoView(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jlong native_view
+) {
     (void)env;
     (void)cls;
-    (void)component;
-    NativePlayerHandle* native = toHandle(handle);
-    LibVlcPlayer* vlc = vlcCtx(native);
-    if (!vlc || !vlc->native_video) return;
-    if (vlc->player && vlc->api.media_player_set_nsobject) {
-        vlc->api.media_player_set_nsobject(vlc->player, NULL);
-    }
 #ifdef __OBJC__
-    NSView* native_view = (NSView*)vlc->native_view;
-    detach_awt_component_native_view(&native_view);
+    KMPDisposeNativeVideoViewContext context = {
+        .native = toHandle(handle),
+        .view = (NSView*)(uintptr_t)native_view,
+    };
+    run_on_appkit_main_sync(dispose_native_video_view_on_appkit_main, &context);
+#else
+    (void)handle;
+    (void)native_view;
 #endif
-    vlc->native_view = NULL;
 }
 
-static jboolean JNICALL jni_AttachLibVlcNativeWindow(JNIEnv* env, jclass cls, jlong handle, jobject window) {
-    (void)cls;
-    NativePlayerHandle* native = toHandle(handle);
-    LibVlcPlayer* vlc = vlcCtx(native);
-    if (!vlc || !vlc->native_video || !window) return JNI_FALSE;
-
 #ifdef __OBJC__
-    NSView* native_view = (NSView*)vlc->native_view;
-    NSView* view = attach_awt_full_window_native_view(
-        env,
-        window,
-        &native_view,
-        nil,
-        NULL,
-        "libVLC native window"
-    );
-    if (!view) return JNI_FALSE;
-    vlc->native_view = view;
-    if (vlc->player && vlc->api.media_player_set_nsobject) {
-        vlc->api.media_player_set_nsobject(vlc->player, view);
+static char kKMPWindowedFrameKey;
+static char kKMPWindowStyleMaskKey;
+static char kKMPWindowLevelKey;
+static char kKMPWindowMovableKey;
+static char kKMPWindowMovableByBackgroundKey;
+static char kKMPWindowShadowKey;
+static char kKMPWindowTitleVisibilityKey;
+static char kKMPWindowTitlebarTransparentKey;
+static char kKMPWindowButtonVisibilityKey;
+static char kKMPApplicationPresentationOptionsKey;
+
+typedef struct {
+    NSView* view;
+    BOOL fullscreen;
+    BOOL result;
+} KMPNativeWindowFullscreenContext;
+
+static void set_native_window_fullscreen_on_appkit_main(void* raw_context) {
+    KMPNativeWindowFullscreenContext* context =
+        (KMPNativeWindowFullscreenContext*)raw_context;
+    if (!context || !context->view) return;
+
+    @autoreleasepool {
+        NSWindow* window = [context->view window];
+        if (!window) return;
+
+        NSValue* stored_frame = objc_getAssociatedObject(window, &kKMPWindowedFrameKey);
+        if (context->fullscreen) {
+            if (!stored_frame) {
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowedFrameKey,
+                    [NSValue valueWithRect:[window frame]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowStyleMaskKey,
+                    [NSNumber numberWithUnsignedLongLong:(unsigned long long)[window styleMask]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowLevelKey,
+                    [NSNumber numberWithInteger:[window level]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowMovableKey,
+                    [NSNumber numberWithBool:[window isMovable]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowMovableByBackgroundKey,
+                    [NSNumber numberWithBool:[window isMovableByWindowBackground]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowShadowKey,
+                    [NSNumber numberWithBool:[window hasShadow]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowTitleVisibilityKey,
+                    [NSNumber numberWithInteger:[window titleVisibility]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowTitlebarTransparentKey,
+                    [NSNumber numberWithBool:[window titlebarAppearsTransparent]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                NSArray* button_visibility = @[
+                    [NSNumber numberWithBool:[[window standardWindowButton:NSWindowCloseButton] isHidden]],
+                    [NSNumber numberWithBool:[[window standardWindowButton:NSWindowMiniaturizeButton] isHidden]],
+                    [NSNumber numberWithBool:[[window standardWindowButton:NSWindowZoomButton] isHidden]]
+                ];
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPWindowButtonVisibilityKey,
+                    button_visibility,
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+                objc_setAssociatedObject(
+                    window,
+                    &kKMPApplicationPresentationOptionsKey,
+                    [NSNumber numberWithUnsignedLongLong:
+                        (unsigned long long)[NSApp presentationOptions]],
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+                );
+            }
+
+            NSScreen* screen = [window screen] ?: [NSScreen mainScreen];
+            if (!screen) return;
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            [NSApp setPresentationOptions:
+                [NSApp presentationOptions] |
+                NSApplicationPresentationAutoHideDock |
+                NSApplicationPresentationAutoHideMenuBar];
+            [window setStyleMask:[window styleMask] | NSWindowStyleMaskFullSizeContentView];
+            [window setTitleVisibility:NSWindowTitleHidden];
+            [window setTitlebarAppearsTransparent:YES];
+            [[window standardWindowButton:NSWindowCloseButton] setHidden:YES];
+            [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
+            [[window standardWindowButton:NSWindowZoomButton] setHidden:YES];
+            [window setMovable:NO];
+            [window setMovableByWindowBackground:NO];
+            [window setHasShadow:NO];
+            [window setFrame:[screen frame] display:YES animate:NO];
+            [window makeKeyAndOrderFront:nil];
+            [CATransaction commit];
+            context->result = YES;
+            return;
+        }
+
+        if (!stored_frame) {
+            context->result = YES;
+            return;
+        }
+
+        NSNumber* style_mask = objc_getAssociatedObject(window, &kKMPWindowStyleMaskKey);
+        NSNumber* level = objc_getAssociatedObject(window, &kKMPWindowLevelKey);
+        NSNumber* movable = objc_getAssociatedObject(window, &kKMPWindowMovableKey);
+        NSNumber* movable_by_background =
+            objc_getAssociatedObject(window, &kKMPWindowMovableByBackgroundKey);
+        NSNumber* shadow = objc_getAssociatedObject(window, &kKMPWindowShadowKey);
+        NSNumber* title_visibility =
+            objc_getAssociatedObject(window, &kKMPWindowTitleVisibilityKey);
+        NSNumber* titlebar_transparent =
+            objc_getAssociatedObject(window, &kKMPWindowTitlebarTransparentKey);
+        NSArray* button_visibility =
+            objc_getAssociatedObject(window, &kKMPWindowButtonVisibilityKey);
+        NSNumber* presentation_options =
+            objc_getAssociatedObject(window, &kKMPApplicationPresentationOptionsKey);
+
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        if (presentation_options) {
+            [NSApp setPresentationOptions:
+                (NSApplicationPresentationOptions)[presentation_options unsignedLongLongValue]];
+        }
+        if (style_mask) {
+            [window setStyleMask:(NSWindowStyleMask)[style_mask unsignedLongLongValue]];
+        }
+        if (title_visibility) {
+            [window setTitleVisibility:(NSWindowTitleVisibility)[title_visibility integerValue]];
+        }
+        if (titlebar_transparent) {
+            [window setTitlebarAppearsTransparent:[titlebar_transparent boolValue]];
+        }
+        if ([button_visibility count] == 3) {
+            [[window standardWindowButton:NSWindowCloseButton]
+                setHidden:[[button_visibility objectAtIndex:0] boolValue]];
+            [[window standardWindowButton:NSWindowMiniaturizeButton]
+                setHidden:[[button_visibility objectAtIndex:1] boolValue]];
+            [[window standardWindowButton:NSWindowZoomButton]
+                setHidden:[[button_visibility objectAtIndex:2] boolValue]];
+        }
+        if (movable) [window setMovable:[movable boolValue]];
+        if (movable_by_background) {
+            [window setMovableByWindowBackground:[movable_by_background boolValue]];
+        }
+        if (shadow) [window setHasShadow:[shadow boolValue]];
+        if (level) [window setLevel:[level integerValue]];
+        [window setFrame:[stored_frame rectValue] display:YES animate:NO];
+        [window makeKeyAndOrderFront:nil];
+        [CATransaction commit];
+
+        objc_setAssociatedObject(window, &kKMPWindowedFrameKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(window, &kKMPWindowStyleMaskKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(window, &kKMPWindowLevelKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(window, &kKMPWindowMovableKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(window, &kKMPWindowMovableByBackgroundKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(window, &kKMPWindowShadowKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(window, &kKMPWindowTitleVisibilityKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(window, &kKMPWindowTitlebarTransparentKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(window, &kKMPWindowButtonVisibilityKey, nil, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(
+            window,
+            &kKMPApplicationPresentationOptionsKey,
+            nil,
+            OBJC_ASSOCIATION_ASSIGN
+        );
+        context->result = YES;
     }
-    return JNI_TRUE;
+}
+#endif
+
+static jboolean JNICALL jni_SetNativeWindowFullscreen(
+    JNIEnv* env,
+    jclass cls,
+    jlong native_view,
+    jboolean fullscreen
+) {
+    (void)env;
+    (void)cls;
+#ifdef __OBJC__
+    KMPNativeWindowFullscreenContext context = {
+        .view = (NSView*)(uintptr_t)native_view,
+        .fullscreen = fullscreen == JNI_TRUE,
+        .result = NO,
+    };
+    run_on_appkit_main_sync(set_native_window_fullscreen_on_appkit_main, &context);
+    return context.result ? JNI_TRUE : JNI_FALSE;
 #else
+    (void)native_view;
+    (void)fullscreen;
     return JNI_FALSE;
 #endif
 }
@@ -2817,9 +1702,15 @@ static void JNICALL jni_DisposePlayer(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     if (!native) return;
     if (native->kind == PLAYER_KIND_AV && native->native_view) {
-        NSView* native_view = (NSView*)native->native_view;
-        detach_awt_component_native_view(&native_view);
+#ifdef __OBJC__
+        KMPDisposeNativeVideoViewContext context = {
+            .native = native,
+            .view = (NSView*)native->native_view,
+        };
+        run_on_appkit_main_sync(dispose_native_video_view_on_appkit_main, &context);
+#else
         native->native_view = NULL;
+#endif
     }
     if (native->kind == PLAYER_KIND_LIBVLC) {
         dispose_libvlc_player((LibVlcPlayer*)native->ctx);
@@ -2985,15 +1876,9 @@ static const JNINativeMethod g_methods[] = {
     { "nSetHdrMetalProjectionConfiguration", "(JLjava/lang/String;)Z", (void*)jni_SetHdrMetalProjectionConfiguration },
     { "nGetHdrRendererFailure", "(J)Ljava/lang/String;",       (void*)jni_GetHdrRendererFailure },
     { "nGetDisplayColorCapabilities", "(J)Ljava/lang/String;",   (void*)jni_GetDisplayColorCapabilities },
-    { "nAttachHdrMetalView",     "(JLjava/awt/Component;)Z",    (void*)jni_AttachHdrMetalView },
-    { "nDetachHdrMetalView",     "(JLjava/awt/Component;)V",    (void*)jni_DetachHdrMetalView },
-    { "nAttachHdrMetalWindow",   "(JLjava/awt/Window;)Z",       (void*)jni_AttachHdrMetalWindow },
-    { "nAttachLibVlcNativeView", "(JLjava/awt/Component;)Z",    (void*)jni_AttachLibVlcNativeView },
-    { "nDetachLibVlcNativeView", "(JLjava/awt/Component;)V",    (void*)jni_DetachLibVlcNativeView },
-    { "nAttachLibVlcNativeWindow", "(JLjava/awt/Window;)Z",     (void*)jni_AttachLibVlcNativeWindow },
-    { "nSetWindowFullscreen",    "(Ljava/awt/Window;Z)Z",       (void*)jni_SetWindowFullscreen },
-    { "nConfigureNativeWindow",  "(Ljava/awt/Window;)Z",        (void*)jni_ConfigureNativeWindow },
-    { "nIsWindowFullscreen",     "(Ljava/awt/Window;)Z",        (void*)jni_IsWindowFullscreen },
+    { "nCreateNativeVideoView",  "(J)J",                        (void*)jni_CreateNativeVideoView },
+    { "nDisposeNativeVideoView", "(JJ)V",                       (void*)jni_DisposeNativeVideoView },
+    { "nSetNativeWindowFullscreen", "(JZ)Z",                    (void*)jni_SetNativeWindowFullscreen },
     { "nSetHdrMetalContentScaleMode", "(JI)V",                  (void*)jni_SetHdrMetalContentScaleMode },
     { "nIsHdrMetalAvailable",    "(J)Z",                        (void*)jni_IsHdrMetalAvailable },
     { "nIsHdrOutputReady",       "(J)Z",                        (void*)jni_IsHdrOutputReady },

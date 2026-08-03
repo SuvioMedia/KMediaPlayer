@@ -7,7 +7,8 @@ agp = "9.3.1"
 kotlinx-coroutines = "1.11.0"
 kotlinxBrowserWasmJs = "0.5.0"
 kotlinxDatetime = "0.8.0"
-compose = "1.12.0-beta03"
+compose = "1.11.1"
+nucleus = "2.2.0"
 kmediaMpv = "0.3.0-rc.7"
 kmediaBridge = "0.5.0-rc.6"
 kmediaWasmEngine = "0.4.0-alpha.2"
@@ -38,7 +39,6 @@ kotlinx-browser-wasm-js = { module = "org.jetbrains.kotlinx:kotlinx-browser-wasm
 kotlinx-browser = { module = "org.jetbrains.kotlinx:kotlinx-browser", version.ref = "kotlinxBrowserWasmJs" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
-kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 kmedia-mpv-runtime-android = { module = "io.github.shusek:kmedia-mpv-runtime-android", version.ref = "kmediaMpv" }
@@ -56,7 +56,10 @@ compose-ui-tooling = { module = "org.jetbrains.compose.ui:ui-tooling", version.r
 compose-ui-tooling-preview = { module = "org.jetbrains.compose.components:components-ui-tooling-preview", version.ref = "compose" }
 compose-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version = "1.7.3" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "androidx-lifecycle-runtime-ktx" }
-nucleus-graalvm-runtime = { module = "io.github.kdroidfilter:nucleus.graalvm-runtime", version = "1.15.7" }
+nucleus-application = { module = "dev.nucleusframework:nucleus.nucleus-application", version.ref = "nucleus" }
+nucleus-decorated-window-core = { module = "dev.nucleusframework:nucleus.decorated-window-core", version.ref = "nucleus" }
+nucleus-decorated-window-tao = { module = "dev.nucleusframework:nucleus.decorated-window-tao", version.ref = "nucleus" }
+nucleus-graalvm-runtime = { module = "dev.nucleusframework:nucleus.graalvm-runtime", version.ref = "nucleus" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
 
@@ -73,4 +76,4 @@ vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.3
 dokka = { id = "org.jetbrains.dokka" , version = "2.2.0"}
 detekt = { id = "dev.detekt", version.ref = "detekt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
-nucleus = { id = "io.github.kdroidfilter.nucleus", version = "1.15.7" }
+nucleus = { id = "dev.nucleusframework", version.ref = "nucleus" }

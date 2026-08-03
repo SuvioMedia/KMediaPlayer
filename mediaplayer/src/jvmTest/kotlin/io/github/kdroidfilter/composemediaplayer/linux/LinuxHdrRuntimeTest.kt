@@ -32,7 +32,7 @@ class LinuxHdrRuntimeTest {
     }
 
     @Test
-    fun `runtime version comparison handles JBR build suffixes`() {
+    fun `runtime version comparison handles build suffixes`() {
         assertTrue(LinuxHdrRuntimeEvaluator.isAtLeast("25.0.3+9-b1234.1", "25.0.3"))
         assertTrue(LinuxHdrRuntimeEvaluator.isAtLeast("1.29.0", "1.28.5"))
         assertFalse(LinuxHdrRuntimeEvaluator.isAtLeast("25.0.2", "25.0.3"))
@@ -185,9 +185,6 @@ class LinuxHdrRuntimeTest {
 
     private fun completeFacts() =
         LinuxHdrRuntimeFacts(
-            isJetBrainsRuntime = true,
-            javaVersion = "25.0.3",
-            usesWlToolkit = true,
             waylandSession = true,
             gstreamerVersion = "1.28.5",
             hasWaylandSink = true,

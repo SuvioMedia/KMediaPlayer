@@ -501,7 +501,7 @@ jobs:
       - name: Check pinned libdovi shim
         run: cargo check --locked --manifest-path mediaplayer-dolbyvision/native/libdovi/Cargo.toml
 
-      - name: Validate KMediaPlayer 3.0 release-candidate versions
+      - name: Validate KMediaPlayer 4.0 release versions
         run: >-
           ./gradlew :mediaplayer-core:validateReleaseVersion
           :mediaplayer-desktop-window:validateReleaseVersion
@@ -509,7 +509,7 @@ jobs:
           :mediaplayer-mpv:validateReleaseVersion
           :mediaplayer-ass:validateReleaseVersion
           :mediaplayer-dolbyvision:validateReleaseVersion
-          -PpublicationVersion=3.0.0-rc.0
+          -PpublicationVersion=4.0.0
           -PcomposeMediaPlayer.skipNativeBuild=true --no-daemon
 
       - name: Run formatting and static analysis

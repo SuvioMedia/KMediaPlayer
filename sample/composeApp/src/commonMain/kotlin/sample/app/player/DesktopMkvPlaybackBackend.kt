@@ -59,9 +59,11 @@ internal expect fun rememberSampleVideoPlayer(
 internal class SampleVideoPlayerHandle(
     val playerState: VideoPlayerState,
     val isPlaybackTransitioning: Boolean = false,
+    val playbackTransitionError: String? = null,
     private val openUriAction: (String, InitialPlayerState) -> Unit,
     private val openFileAction: (PlatformFile, InitialPlayerState) -> Unit,
     private val surfaceAttachedAction: (VideoPlayerState) -> Unit = {},
+    private val clearPlaybackTransitionErrorAction: () -> Unit = {},
 ) {
     fun openUri(
         uri: String,
@@ -74,4 +76,6 @@ internal class SampleVideoPlayerHandle(
     ) = openFileAction(file, initialPlayerState)
 
     fun notifySurfaceAttached() = surfaceAttachedAction(playerState)
+
+    fun clearPlaybackTransitionError() = clearPlaybackTransitionErrorAction()
 }

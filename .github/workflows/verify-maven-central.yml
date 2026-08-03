@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable version tag, for example v3.0.0-rc.5
+        description: Existing immutable version tag, for example v4.0.0
         required: true
         type: string
 
@@ -36,7 +36,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           if [[ "$RELEASE_TAG" != "v$version" || ! "$version" =~ $semver ]]; then
-            echo "Version tags must use immutable SemVer, for example v3.0.0-rc.5." >&2
+            echo "Version tags must use immutable SemVer, for example v4.0.0." >&2
             exit 1
           fi
           local_sha="$(git rev-parse "$RELEASE_TAG^{commit}")"

@@ -63,6 +63,14 @@ class MpvLegacyContainerIntegrationTest {
                     ?.lowercase()
                     ?.startsWith("wmapro via ") == true
             }
+            val audioRenderer =
+                player.renderingInfo.audioRenderer
+                    .orEmpty()
+                    .lowercase()
+            assertTrue(
+                audioRenderer.usesRealPlatformAudioOutput(),
+                "MPV decoded WMA Pro without a real platform audio output: $audioRenderer",
+            )
             await("MPV did not advance while decoding the WMA Pro fixture.") {
                 player.currentTime >= MINIMUM_AUDIO_PROGRESS
             }
@@ -116,6 +124,17 @@ class MpvLegacyContainerIntegrationTest {
             ?: MpvPlaybackOptions()
 
     private fun IntArray.hasVisibleVariation(): Boolean = isNotEmpty() && any { pixel -> pixel != first() }
+
+    private fun String.usesRealPlatformAudioOutput(): Boolean {
+        val output = substringAfter(" via ", missingDelimiterValue = "").trim()
+        if (output.isEmpty() || output == "null") return false
+        val os = System.getProperty("os.name", "").lowercase()
+        return if (os.contains("mac") || os.contains("darwin")) {
+            output.startsWith("coreaudio") || output == "avfoundation"
+        } else {
+            true
+        }
+    }
 
     private fun await(
         message: String,

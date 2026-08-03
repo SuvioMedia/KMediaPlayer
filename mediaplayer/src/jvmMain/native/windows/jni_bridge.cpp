@@ -4,8 +4,6 @@
 #include <jni.h>
 #include "LibVlcCanvas.h"
 #include "NativeVideoPlayer.h"
-#include <jawt.h>
-#include <jawt_md.h>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -25,97 +23,20 @@ static inline LibVlcCanvasPlayer* toLibVlc(jlong handle) {
 
 static constexpr double HUNDRED_NANOSECOND_TICKS_PER_SECOND = 10000000.0;
 
-using JawtGetAwtFn = jboolean(JNICALL*)(JNIEnv*, JAWT*);
-
-static std::wstring javaHome(JNIEnv* env) {
-    jclass systemClass = env->FindClass("java/lang/System");
-    if (!systemClass) {
-        env->ExceptionClear();
-        return {};
-    }
-
-    jmethodID getProperty = env->GetStaticMethodID(
-        systemClass,
-        "getProperty",
-        "(Ljava/lang/String;)Ljava/lang/String;");
-    if (!getProperty) {
-        env->DeleteLocalRef(systemClass);
-        env->ExceptionClear();
-        return {};
-    }
-
-    jstring key = env->NewStringUTF("java.home");
-    if (!key) {
-        env->DeleteLocalRef(systemClass);
-        env->ExceptionClear();
-        return {};
-    }
-
-    auto value = static_cast<jstring>(env->CallStaticObjectMethod(systemClass, getProperty, key));
-    env->DeleteLocalRef(systemClass);
-    env->DeleteLocalRef(key);
-    if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-        return {};
-    }
-    if (!value) return {};
-
-    const jchar* chars = env->GetStringChars(value, nullptr);
-    if (!chars) {
-        env->DeleteLocalRef(value);
-        return {};
-    }
-
-    std::wstring home(reinterpret_cast<const wchar_t*>(chars), env->GetStringLength(value));
-    env->ReleaseStringChars(value, chars);
-    env->DeleteLocalRef(value);
-    return home;
-}
-
-static JawtGetAwtFn resolveJawtGetAwt(JNIEnv* env) {
-    HMODULE jawt = GetModuleHandleW(L"jawt.dll");
-    if (!jawt) {
-        const std::wstring home = javaHome(env);
-        if (!home.empty()) {
-            jawt = LoadLibraryW((home + L"\\bin\\jawt.dll").c_str());
-        }
-    }
-    if (!jawt) {
-        jawt = LoadLibraryW(L"jawt.dll");
-    }
-    if (!jawt) return nullptr;
-
-    return reinterpret_cast<JawtGetAwtFn>(GetProcAddress(jawt, "JAWT_GetAWT"));
-}
-
-static HWND awtComponentHwnd(JNIEnv* env, jobject component) {
-    if (!component) return nullptr;
-
-    JawtGetAwtFn getAwt = resolveJawtGetAwt(env);
-    if (!getAwt) return nullptr;
-
-    JAWT awt{};
-    awt.version = JAWT_VERSION_1_4;
-    if (getAwt(env, &awt) == JNI_FALSE) return nullptr;
-
-    JAWT_DrawingSurface* surface = awt.GetDrawingSurface(env, component);
-    if (!surface) return nullptr;
-
-    HWND hwnd = nullptr;
-    const jint lock = surface->Lock(surface);
-    if ((lock & JAWT_LOCK_ERROR) == 0) {
-        JAWT_DrawingSurfaceInfo* surfaceInfo = surface->GetDrawingSurfaceInfo(surface);
-        if (surfaceInfo && surfaceInfo->platformInfo) {
-            auto* win32Info = static_cast<JAWT_Win32DrawingSurfaceInfo*>(surfaceInfo->platformInfo);
-            hwnd = win32Info->hwnd;
-        }
-        if (surfaceInfo) {
-            surface->FreeDrawingSurfaceInfo(surfaceInfo);
-        }
-        surface->Unlock(surface);
-    }
-    awt.FreeDrawingSurface(surface);
-    return hwnd;
+static HWND createNativeVideoWindow() {
+    return CreateWindowExW(
+        0,
+        L"STATIC",
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        0,
+        0,
+        1,
+        1,
+        GetDesktopWindow(),
+        nullptr,
+        GetModuleHandleW(nullptr),
+        nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -363,15 +284,36 @@ static jint JNICALL jni_ConfigureHdrOutput(
         values.size());
 }
 
-static jboolean JNICALL jni_AttachHdrOutput(JNIEnv* env, jclass, jlong handle, jobject component) {
-    if (!handle || !component) return JNI_FALSE;
-    HWND hwnd = awtComponentHwnd(env, component);
-    if (!hwnd) return JNI_FALSE;
-    return SUCCEEDED(AttachHdrOutput(toInstance(handle), hwnd)) ? JNI_TRUE : JNI_FALSE;
+static jlong JNICALL jni_CreateNativeVideoWindow(JNIEnv*, jclass, jlong handle, jboolean libVlc) {
+    if (!handle) return 0;
+    HWND hwnd = createNativeVideoWindow();
+    if (!hwnd) return 0;
+    const bool attached = libVlc == JNI_TRUE
+        ? lvc_set_native_window(toLibVlc(handle), hwnd)
+        : SUCCEEDED(AttachHdrOutput(toInstance(handle), hwnd));
+    if (!attached) {
+        DestroyWindow(hwnd);
+        return 0;
+    }
+    return reinterpret_cast<jlong>(hwnd);
 }
 
-static void JNICALL jni_DetachHdrOutput(JNIEnv*, jclass, jlong handle, jobject) {
-    if (handle) DetachHdrOutput(toInstance(handle));
+static void JNICALL jni_DisposeNativeVideoWindow(
+    JNIEnv*,
+    jclass,
+    jlong handle,
+    jlong hwndHandle,
+    jboolean libVlc
+) {
+    if (handle) {
+        if (libVlc == JNI_TRUE) {
+            lvc_set_native_window(toLibVlc(handle), nullptr);
+        } else {
+            DetachHdrOutput(toInstance(handle));
+        }
+    }
+    HWND hwnd = reinterpret_cast<HWND>(hwndHandle);
+    if (hwnd && IsWindow(hwnd)) DestroyWindow(hwnd);
 }
 
 static jint JNICALL jni_RenderHdrFrame(JNIEnv*, jclass, jlong handle) {
@@ -500,19 +442,6 @@ static jlong JNICALL jni_CreateLibVlcInstance(
     env->ReleaseStringUTFChars(libPath, cLibPath);
     env->ReleaseStringUTFChars(pluginPath, cPluginPath);
     return p ? reinterpret_cast<jlong>(p) : 0;
-}
-
-static jboolean JNICALL jni_AttachLibVlcNativeView(JNIEnv* env, jclass, jlong handle, jobject component) {
-    if (!handle || !component) return JNI_FALSE;
-    HWND hwnd = awtComponentHwnd(env, component);
-    if (!hwnd) return JNI_FALSE;
-    return lvc_set_native_window(toLibVlc(handle), hwnd) ? JNI_TRUE : JNI_FALSE;
-}
-
-static void JNICALL jni_DetachLibVlcNativeView(JNIEnv*, jclass, jlong handle, jobject) {
-    if (handle) {
-        lvc_set_native_window(toLibVlc(handle), nullptr);
-    }
 }
 
 static void JNICALL jni_DestroyLibVlcInstance(JNIEnv*, jclass, jlong handle) {
@@ -715,8 +644,8 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nWrapPointer"),         const_cast<char*>("(JJ)Ljava/nio/ByteBuffer;"),    (void*)jni_WrapPointer },
     { const_cast<char*>("nSetOutputSize"),      const_cast<char*>("(JII)I"),                       (void*)jni_SetOutputSize },
     { const_cast<char*>("nConfigureHdrOutput"), const_cast<char*>("(J[I[F)I"),                    (void*)jni_ConfigureHdrOutput },
-    { const_cast<char*>("nAttachHdrOutput"),    const_cast<char*>("(JLjava/awt/Component;)Z"),     (void*)jni_AttachHdrOutput },
-    { const_cast<char*>("nDetachHdrOutput"),    const_cast<char*>("(JLjava/awt/Component;)V"),     (void*)jni_DetachHdrOutput },
+    { const_cast<char*>("nCreateNativeVideoWindow"), const_cast<char*>("(JZ)J"),                  (void*)jni_CreateNativeVideoWindow },
+    { const_cast<char*>("nDisposeNativeVideoWindow"), const_cast<char*>("(JJZ)V"),                (void*)jni_DisposeNativeVideoWindow },
     { const_cast<char*>("nRenderHdrFrame"),     const_cast<char*>("(J)I"),                         (void*)jni_RenderHdrFrame },
     { const_cast<char*>("nGetHdrOutputStatus"), const_cast<char*>("(J[I[F)I"),                    (void*)jni_GetHdrOutputStatus },
     { const_cast<char*>("nGetDecodedVideoColorInfo"), const_cast<char*>("(J)[I"),              (void*)jni_GetDecodedVideoColorInfo },
@@ -744,8 +673,6 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nDisableLibVlcSubtitles"), const_cast<char*>("(J)Z"),                      (void*)jni_DisableLibVlcSubtitles },
     { const_cast<char*>("nGetLibVlcAudioTrackDescriptions"), const_cast<char*>("(J)Ljava/lang/String;"), (void*)jni_GetLibVlcAudioTrackDescriptions },
     { const_cast<char*>("nGetLibVlcSubtitleTrackDescriptions"), const_cast<char*>("(J)Ljava/lang/String;"), (void*)jni_GetLibVlcSubtitleTrackDescriptions },
-    { const_cast<char*>("nAttachLibVlcNativeView"), const_cast<char*>("(JLjava/awt/Component;)Z"),   (void*)jni_AttachLibVlcNativeView },
-    { const_cast<char*>("nDetachLibVlcNativeView"), const_cast<char*>("(JLjava/awt/Component;)V"),   (void*)jni_DetachLibVlcNativeView },
 };
 
 extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {

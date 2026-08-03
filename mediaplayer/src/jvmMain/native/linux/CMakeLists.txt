@@ -15,6 +15,7 @@ pkg_check_modules(GST REQUIRED
     gstreamer-video-1.0
 )
 pkg_check_modules(WAYLAND REQUIRED wayland-client)
+pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
 
 # Find JNI
 find_package(JNI REQUIRED)
@@ -58,8 +59,7 @@ compile_shader(
 # Source files
 set(SOURCES
     NativeVideoPlayer.c
-    JbrWaylandSurface.c
-    WaylandOverlaySurface.c
+    GtkNativeVideoWidget.c
     WaylandColorProbe.c
     VulkanCapabilityProbe.c
     LinuxVulkanProjectionLoader.c
@@ -89,6 +89,7 @@ target_compile_definitions(KMediaPlayerVulkanProjection PRIVATE
 target_include_directories(NativeVideoPlayer PRIVATE
     ${GST_INCLUDE_DIRS}
     ${WAYLAND_INCLUDE_DIRS}
+    ${GTK3_INCLUDE_DIRS}
     ${JNI_INCLUDE_DIRS}
     "${GENERATED_SHADER_DIR}"
     "${HDR10_PLUS_COMMON_DIR}"
@@ -100,13 +101,10 @@ target_include_directories(KMediaPlayerVulkanProjection PRIVATE
     "${HDR10_PLUS_COMMON_DIR}"
 )
 
-if(JAVA_AWT_INCLUDE_PATH)
-    target_include_directories(NativeVideoPlayer PRIVATE "${JAVA_AWT_INCLUDE_PATH}")
-endif()
-
 target_link_libraries(NativeVideoPlayer PRIVATE
     ${GST_LIBRARIES}
     ${WAYLAND_LIBRARIES}
+    ${GTK3_LIBRARIES}
     dl
     m
     pthread
@@ -119,19 +117,10 @@ target_link_libraries(KMediaPlayerVulkanProjection PRIVATE
     pthread
 )
 
-if(TARGET JNI::AWT)
-    target_link_libraries(NativeVideoPlayer PRIVATE JNI::AWT)
-elseif(JAVA_AWT_LIBRARY)
-    target_link_libraries(NativeVideoPlayer PRIVATE "${JAVA_AWT_LIBRARY}")
-elseif(JNI_AWT_LIBRARY)
-    target_link_libraries(NativeVideoPlayer PRIVATE "${JNI_AWT_LIBRARY}")
-else()
-    message(FATAL_ERROR "JNI AWT library is required for the libVLC native-view backend. JAVA_HOME='$ENV{JAVA_HOME}'")
-endif()
-
 target_compile_options(NativeVideoPlayer PRIVATE
     ${GST_CFLAGS_OTHER}
     ${WAYLAND_CFLAGS_OTHER}
+    ${GTK3_CFLAGS_OTHER}
     -Wall -Wextra -Wno-unused-parameter
     -O2
     -fPIC

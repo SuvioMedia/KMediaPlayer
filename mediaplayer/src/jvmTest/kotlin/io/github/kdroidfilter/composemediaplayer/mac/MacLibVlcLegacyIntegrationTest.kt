@@ -4,15 +4,8 @@ import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
-import java.awt.Color
-import java.awt.GraphicsEnvironment
-import java.awt.Rectangle
-import java.awt.Robot
 import java.nio.file.Files
 import java.nio.file.Path
-import javax.swing.JFrame
-import javax.swing.JPanel
-import javax.swing.SwingUtilities
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -22,8 +15,8 @@ import kotlin.time.Duration.Companion.milliseconds
 
 class MacLibVlcLegacyIntegrationTest {
     @Test
-    fun playsConfiguredAviWmvAndWmaProInANativeWindow() {
-        if (!isMacArm64() || GraphicsEnvironment.isHeadless()) return
+    fun playsConfiguredAviWmvAndWmaProInATaoHostedNativeView() {
+        if (!isMacArm64()) return
         val inputs = configuredMedia()
         if (inputs.isEmpty()) return
 
@@ -41,31 +34,29 @@ class MacLibVlcLegacyIntegrationTest {
                         desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
                     ),
             )
-        val window = createTransparentWindow(media.fileName.toString())
-        var attached = false
+        var nativeView = 0L
         try {
             player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
             await("libVLC did not start ${media.fileName}.") {
-                player.hasMedia && player.isPlaying && !player.isLoading && player.currentTime >= 250.milliseconds
+                player.hasMedia &&
+                    player.isPlaying &&
+                    !player.isLoading &&
+                    player.currentTime >= 250.milliseconds
             }
             assertEquals(null, player.error, "libVLC reported a playback error for ${media.fileName}.")
             assertContains(player.renderingInfo.backend.orEmpty(), "libVLC")
             assertNotNull(player.currentAudioTrack, "libVLC did not select an audio track for ${media.fileName}.")
             assertTrue(player.availableAudioTracks.isNotEmpty(), "libVLC found no audio track in ${media.fileName}.")
 
-            attached = player.attachLibVlcNativeWindow(window)
-            assertTrue(attached, "The native libVLC surface did not attach for ${media.fileName}.")
-            await("The native libVLC surface did not display ${media.fileName}.") {
-                capturedPixels(window).hasVisibleVariation()
-            }
+            nativeView = player.createNativeVideoView(CONTENT_SCALE_FIT)
+            assertTrue(nativeView != 0L, "The native libVLC NSView was not created for ${media.fileName}.")
             val timeBeforeObservation = player.currentTime
-            await("libVLC stalled after native attachment for ${media.fileName}.") {
+            await("libVLC stalled after native-view creation for ${media.fileName}.") {
                 player.currentTime >= timeBeforeObservation + 250.milliseconds
             }
         } finally {
-            if (attached) runCatching { player.detachLibVlcNativeComponent(window) }
+            if (nativeView != 0L) runCatching { player.disposeNativeVideoView(nativeView) }
             player.dispose()
-            onEdt { window.dispose() }
         }
     }
 
@@ -101,30 +92,6 @@ class MacLibVlcLegacyIntegrationTest {
 
     private fun Path.extension(): String = fileName.toString().substringAfterLast('.', "").lowercase()
 
-    private fun createTransparentWindow(label: String): JFrame {
-        lateinit var result: JFrame
-        onEdt {
-            result =
-                JFrame("Compose Media Player libVLC $label ${System.nanoTime()}").apply {
-                    isUndecorated = true
-                    background = Color(0, 0, 0, 0)
-                    contentPane = JPanel().apply { isOpaque = false }
-                    setSize(WINDOW_WIDTH, WINDOW_HEIGHT)
-                    setLocation(WINDOW_X, WINDOW_Y)
-                    isVisible = true
-                }
-        }
-        return result
-    }
-
-    private fun capturedPixels(window: JFrame): IntArray {
-        val bounds = onEdtResult { Rectangle(window.locationOnScreen, window.size) }
-        val image = Robot(window.graphicsConfiguration.device).createScreenCapture(bounds)
-        return image.getRGB(0, 0, image.width, image.height, null, 0, image.width)
-    }
-
-    private fun IntArray.hasVisibleVariation(): Boolean = isNotEmpty() && any { pixel -> pixel != first() }
-
     private fun await(
         message: String,
         condition: () -> Boolean,
@@ -137,17 +104,6 @@ class MacLibVlcLegacyIntegrationTest {
         assertTrue(condition(), message)
     }
 
-    private fun onEdt(block: () -> Unit) {
-        if (SwingUtilities.isEventDispatchThread()) block() else SwingUtilities.invokeAndWait(block)
-    }
-
-    private fun <T> onEdtResult(block: () -> T): T {
-        if (SwingUtilities.isEventDispatchThread()) return block()
-        var result: Result<T>? = null
-        SwingUtilities.invokeAndWait { result = runCatching(block) }
-        return result!!.getOrThrow()
-    }
-
     private fun isMacArm64(): Boolean {
         val os = System.getProperty("os.name", "").lowercase()
         val architecture = System.getProperty("os.arch", "").lowercase()
@@ -157,10 +113,7 @@ class MacLibVlcLegacyIntegrationTest {
     private companion object {
         const val LEGACY_MEDIA_PROPERTY = "composemediaplayer.test.legacyMedia"
         const val WMAPRO_MEDIA_PROPERTY = "composemediaplayer.test.wmaProMedia"
-        const val WINDOW_WIDTH = 640
-        const val WINDOW_HEIGHT = 360
-        const val WINDOW_X = 100
-        const val WINDOW_Y = 100
+        const val CONTENT_SCALE_FIT = 0
         const val POLL_INTERVAL_MILLIS = 50L
         const val TEST_TIMEOUT_NANOS = 15_000_000_000L
         val ASF_EXTENSIONS = setOf("wmv", "asf")

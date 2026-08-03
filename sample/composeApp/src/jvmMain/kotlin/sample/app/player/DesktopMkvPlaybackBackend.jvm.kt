@@ -117,6 +117,7 @@ internal actual fun rememberSampleVideoPlayer(
     val activePlayer by session.playerState.collectAsState()
     val sessionState by session.state.collectAsState()
     var surfaceTransitionPending by remember(session) { mutableStateOf(false) }
+    var playbackTransitionError by remember(session) { mutableStateOf<String?>(null) }
     val sessionIsOpeningOrSwitching =
         sessionState is DesktopPlaybackSessionState.Opening ||
             sessionState is DesktopPlaybackSessionState.Switching
@@ -124,14 +125,29 @@ internal actual fun rememberSampleVideoPlayer(
         when (sessionState) {
             is DesktopPlaybackSessionState.Opening,
             is DesktopPlaybackSessionState.Switching,
-            -> surfaceTransitionPending = true
+            -> {
+                surfaceTransitionPending = true
+                playbackTransitionError = null
+            }
 
-            is DesktopPlaybackSessionState.Failed,
+            is DesktopPlaybackSessionState.Failed -> {
+                surfaceTransitionPending = false
+                playbackTransitionError =
+                    if (session.playerState.value == null) {
+                        "No desktop backend could open this source."
+                    } else {
+                        "The selected backend cannot open this source. The previous backend is still active."
+                    }
+            }
+
             DesktopPlaybackSessionState.Idle,
             DesktopPlaybackSessionState.Closed,
-            -> surfaceTransitionPending = false
+            -> {
+                surfaceTransitionPending = false
+                playbackTransitionError = null
+            }
 
-            is DesktopPlaybackSessionState.Ready -> Unit
+            is DesktopPlaybackSessionState.Ready -> playbackTransitionError = null
         }
     }
     val isPlaybackTransitioning = sessionIsOpeningOrSwitching || surfaceTransitionPending
@@ -155,10 +171,11 @@ internal actual fun rememberSampleVideoPlayer(
     }
 
     val playerState = activePlayer ?: placeholder
-    return remember(playerState, session, scope, isPlaybackTransitioning) {
+    return remember(playerState, session, scope, isPlaybackTransitioning, playbackTransitionError) {
         SampleVideoPlayerHandle(
             playerState = playerState,
             isPlaybackTransitioning = isPlaybackTransitioning,
+            playbackTransitionError = playbackTransitionError,
             openUriAction = { uri, initial ->
                 scope.launch {
                     applyDesktopPlaybackSelection(selectedBackend, selectedSourceAdapter)
@@ -195,6 +212,7 @@ internal actual fun rememberSampleVideoPlayer(
                     surfaceTransitionPending = false
                 }
             },
+            clearPlaybackTransitionErrorAction = { playbackTransitionError = null },
         )
     }
 }
