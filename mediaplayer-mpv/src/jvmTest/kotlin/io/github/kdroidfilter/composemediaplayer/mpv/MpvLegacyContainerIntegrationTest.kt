@@ -61,8 +61,10 @@ class MpvLegacyContainerIntegrationTest {
             await("MPV did not decode WMA Pro through a platform audio output.") {
                 player.renderingInfo.audioRenderer
                     ?.lowercase()
-                    ?.let { renderer -> renderer.startsWith("wmapro via ") } == true &&
-                    player.currentTime >= MINIMUM_AUDIO_PROGRESS
+                    ?.startsWith("wmapro via ") == true
+            }
+            await("MPV did not advance while decoding the WMA Pro fixture.") {
+                player.currentTime >= MINIMUM_AUDIO_PROGRESS
             }
             assertEquals(null, player.error)
         } finally {

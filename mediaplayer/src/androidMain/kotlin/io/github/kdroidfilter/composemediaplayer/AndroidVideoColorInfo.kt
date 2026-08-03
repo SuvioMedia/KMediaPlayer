@@ -104,6 +104,10 @@ private fun Format.dolbyVisionInfoOrNull(): DolbyVisionInfo? {
         // Profile 7 is defined around an HDR10-compatible base layer. Profile 8 compatibility
         // still needs the configuration record's compatibility id, which Format does not expose.
         hasHdr10CompatibleBaseLayer = profile == DOLBY_VISION_PROFILE_7,
+        // Media3 does expose the base signal's transfer, so HLG is sufficient evidence for P8.4.
+        hasHlgCompatibleBaseLayer =
+            profile == DOLBY_VISION_PROFILE_8 &&
+                colorInfo.toVideoColorTransfer() == VideoColorTransfer.HLG,
     )
 }
 
@@ -160,3 +164,4 @@ private const val MIN_LUMINANCE_DENOMINATOR = 10_000f
 private const val BYTE_MASK = 0xff
 private const val BYTE_BITS = 8
 private const val DOLBY_VISION_PROFILE_7 = 7
+private const val DOLBY_VISION_PROFILE_8 = 8

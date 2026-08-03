@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.runtime.snapshots.SnapshotApplyConflictException
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
@@ -398,7 +399,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
 
     protected fun resetSourceState() {
         val releasedSession = _mediaSessionId
-        Snapshot.withMutableSnapshot {
+        mutateSnapshotState {
             _hasMedia = false
             _isPlaying = false
             _isLoading = false
@@ -431,7 +432,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
         loading: Boolean? = null,
         seeking: Boolean? = null,
     ) {
-        Snapshot.withMutableSnapshot {
+        mutateSnapshotState {
             _currentTime = position
             _duration = mediaDuration
             playing?.let { _isPlaying = it }
@@ -456,7 +457,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
         selectedAudio: AudioTrack?,
         selectedSubtitle: SubtitleTrack?,
     ) {
-        Snapshot.withMutableSnapshot {
+        mutateSnapshotState {
             audioTracks.clear()
             audioTracks.addAll(discoveredAudio)
             subtitleTracks.clear()
@@ -473,7 +474,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
     }
 
     protected fun replaceDiscoveredChapters(chapters: List<MediaChapter>) {
-        Snapshot.withMutableSnapshot {
+        mutateSnapshotState {
             _chapters = chapters
         }
     }
@@ -525,7 +526,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
     }
 
     protected fun publishError(playerError: VideoPlayerError) {
-        Snapshot.withMutableSnapshot {
+        mutateSnapshotState {
             _error = playerError
             _isLoading = false
             _isPlaying = false
@@ -537,6 +538,24 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
                 error = playerError,
             ),
         )
+    }
+
+    /**
+     * Applies a grouped Compose state mutation without letting a transient background/UI
+     * snapshot race tear down playback. The block only mutates idempotent state holders, so it
+     * is safe to retry from a fresh snapshot. The final direct application is a fail-safe for a
+     * continuously busy global snapshot and preserves the no-crash command contract.
+     */
+    protected fun mutateSnapshotState(block: () -> Unit) {
+        repeat(SNAPSHOT_MUTATION_RETRIES) {
+            try {
+                Snapshot.withMutableSnapshot(block)
+                return
+            } catch (_: SnapshotApplyConflictException) {
+                // Retry against the latest global snapshot.
+            }
+        }
+        block()
     }
 
     protected fun clearMetadata() {
@@ -582,6 +601,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
 
     private companion object {
         const val EVENT_BUFFER_CAPACITY = 64
+        const val SNAPSHOT_MUTATION_RETRIES = 16
         const val DEFAULT_ASPECT_RATIO = 16f / 9f
         const val SECONDS_PER_MINUTE = 60L
         const val SECONDS_PER_HOUR = 3_600L

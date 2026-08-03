@@ -165,6 +165,7 @@ internal fun ByteArray.toAppleDolbyVisionInfo(): DolbyVisionInfo? {
     val rpuPresent = flags and 0x04 != 0
     val enhancementLayerPresent = flags and 0x02 != 0
     val baseLayerPresent = flags and 0x01 != 0
+    val compatibilityId = getOrNull(4)?.toInt()?.ushr(4)?.and(0x0f)
     return DolbyVisionInfo(
         profile = profile,
         level = level,
@@ -175,7 +176,10 @@ internal fun ByteArray.toAppleDolbyVisionInfo(): DolbyVisionInfo? {
             } else {
                 DolbyVisionEnhancementLayer.NONE
             },
-        hasHdr10CompatibleBaseLayer = profile == DOLBY_VISION_PROFILE_7 && baseLayerPresent,
+        hasHdr10CompatibleBaseLayer =
+            baseLayerPresent &&
+                (profile == DOLBY_VISION_PROFILE_7 || compatibilityId == HDR10_DOVI_COMPATIBILITY_ID),
+        hasHlgCompatibleBaseLayer = baseLayerPresent && compatibilityId == HLG_DOVI_COMPATIBILITY_ID,
     )
 }
 
@@ -220,6 +224,8 @@ private val VideoDynamicRange.isHdr: Boolean
 private const val DVHE_CODEC: UInt = 0x64766865u
 private const val MAX_STATIC_METADATA_BYTES = 4_096
 private const val DOLBY_VISION_PROFILE_7 = 7
+private const val HDR10_DOVI_COMPATIBILITY_ID = 1
+private const val HLG_DOVI_COMPATIBILITY_ID = 4
 private const val MIN_DOLBY_VISION_CONFIGURATION_BYTES = 4
 private const val MAX_DOLBY_VISION_CONFIGURATION_BYTES = 64
 private val DOLBY_VISION_CONFIGURATION_KEYS =

@@ -6,7 +6,7 @@ internal fun VideoColorInfo.toConfirmedDecoderCapabilities(): DecoderColorCapabi
         buildSet {
             add(dynamicRange)
             if (dynamicRange == VideoDynamicRange.HDR10_PLUS) add(VideoDynamicRange.HDR10)
-            if (dolbyVision?.hasHdr10CompatibleBaseLayer == true) add(VideoDynamicRange.HDR10)
+            dolbyVision?.compatibleBaseLayerDynamicRange?.let(::add)
         }
     return DecoderColorCapabilities(
         isKnown = true,

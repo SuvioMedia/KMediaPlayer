@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
@@ -336,13 +335,13 @@ internal class MpvVideoPlayerState(
                     rowBytes = target.rowBytes,
                     pixelsAddress = target.pixelsAddress,
                 )
-                Snapshot.withMutableSnapshot {
+                mutateSnapshotState {
                     frameState.value = target.bitmap.asComposeImageBitmap()
                 }
             }
         } catch (_: Exception) {
             if (!disposed.get()) {
-                Snapshot.withMutableSnapshot { _hasMedia = false }
+                mutateSnapshotState { _hasMedia = false }
                 publishError(VideoPlayerError.UnknownError("libmpv software rendering failed."))
             }
         }
@@ -388,7 +387,7 @@ internal class MpvVideoPlayerState(
             frameState.value = null
             applyNativeMacOutputColorMode(nativeMacColorMode)
             resumeVideoOutputAfterContextSwitch(selectedVideo, NATIVE_RENDER_HWDEC)
-            Snapshot.withMutableSnapshot {
+            mutateSnapshotState {
                 renderingInfo.videoRenderer = "libmpv OpenGL in a native macOS EDR surface"
                 renderingInfo.notes = nativeMacRenderingNotes()
             }
@@ -420,7 +419,7 @@ internal class MpvVideoPlayerState(
         if (restoreSoftwareRenderer) {
             resetNativeMacTargetColorProperties()
             resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-            Snapshot.withMutableSnapshot {
+            mutateSnapshotState {
                 renderingInfo.videoRenderer = "libmpv software render API"
                 renderingInfo.notes = softwareRenderingNotes()
             }
@@ -435,7 +434,7 @@ internal class MpvVideoPlayerState(
                     NativeMpvEvent.Shutdown -> return
                     NativeMpvEvent.FileLoaded -> onFileLoaded()
                     is NativeMpvEvent.EndFile -> onEndFile(event)
-                    NativeMpvEvent.SeekStarted -> Snapshot.withMutableSnapshot { _isSeeking = true }
+                    NativeMpvEvent.SeekStarted -> mutateSnapshotState { _isSeeking = true }
                     NativeMpvEvent.PlaybackRestarted -> onPlaybackRestarted()
                 }
                 refreshSnapshot()
@@ -468,7 +467,7 @@ internal class MpvVideoPlayerState(
             return
         }
         if (event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) {
-            Snapshot.withMutableSnapshot { _hasMedia = false }
+            mutateSnapshotState { _hasMedia = false }
             publishError(VideoPlayerError.SourceError("libmpv could not finish the media source."))
             return
         }
@@ -516,7 +515,7 @@ internal class MpvVideoPlayerState(
             loading = buffering,
             seeking = seeking,
         )
-        Snapshot.withMutableSnapshot {
+        mutateSnapshotState {
             metadata.title = title
             metadata.width = width
             metadata.height = height

@@ -40,6 +40,7 @@ import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID
 import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.PreparedVideoPipelineSource
 import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
@@ -49,6 +50,8 @@ import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineController
 import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineStatus
 import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
+import io.github.kdroidfilter.composemediaplayer.VideoPipelineSourcePreparation
+import io.github.kdroidfilter.composemediaplayer.VideoPipelineSourceRequest
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
@@ -56,6 +59,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+import io.github.kdroidfilter.composemediaplayer.VideoSourcePipelineExtension
 import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import io.github.kdroidfilter.composemediaplayer.allowsExternalSourceAdapter
@@ -67,6 +71,8 @@ import io.github.kdroidfilter.composemediaplayer.isExternalHlsSubtitleTrackId
 import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
 import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.prepareSourceWithExtensions
+import io.github.kdroidfilter.composemediaplayer.profile7To81MappingOrNull
 import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.requiresProjectionRenderer
@@ -130,6 +136,7 @@ private const val WINDOWS_PLAYBACK_DIAGNOSTICS_VALUE_COUNT = 5
 private const val WINDOWS_PLAYBACK_DIAGNOSTICS_MAX_AV_SYNC_MICROS_INDEX = 3
 private const val WINDOWS_PLAYBACK_DIAGNOSTICS_HAS_AUDIO_INDEX = 4
 private const val MICROSECONDS_PER_MILLISECOND = 1_000f
+private const val WINDOWS_PLATFORM_AUDIO_TRACK_ID = "windows:media-foundation:audio:default"
 
 internal fun maximumWindowsAvSyncOffsetMs(nativeDiagnostics: LongArray?): Float? =
     nativeDiagnostics
@@ -138,6 +145,18 @@ internal fun maximumWindowsAvSyncOffsetMs(nativeDiagnostics: LongArray?): Float?
                 diagnostics[WINDOWS_PLAYBACK_DIAGNOSTICS_HAS_AUDIO_INDEX] != 0L
         }?.get(WINDOWS_PLAYBACK_DIAGNOSTICS_MAX_AV_SYNC_MICROS_INDEX)
         ?.div(MICROSECONDS_PER_MILLISECOND)
+
+internal fun windowsPlatformAudioTrack(metadata: VideoMetadata): AudioTrack? {
+    if (metadata.audioChannels == null && metadata.audioSampleRate == null) return null
+
+    return AudioTrack(
+        id = WINDOWS_PLATFORM_AUDIO_TRACK_ID,
+        label = "Default audio",
+        channels = metadata.audioChannels,
+        sampleRate = metadata.audioSampleRate,
+        isDefault = true,
+    )
+}
 
 private sealed interface WindowsSeekRequest {
     data class Time(
@@ -216,6 +235,47 @@ internal fun windowsDesktopBridgeColorRequest(
     )
 }
 
+internal fun windowsDolbyVisionBaseLayerOutput(
+    source: VideoColorInfo,
+    requestedPolicy: DolbyVisionPolicy,
+    profile7To81MappingApplied: Boolean,
+): VideoDynamicRange? {
+    if (source.dynamicRange != VideoDynamicRange.DOLBY_VISION) return null
+    val compatibleBaseLayer = source.dolbyVision?.compatibleBaseLayerDynamicRange ?: return null
+    return when (requestedPolicy) {
+        DolbyVisionPolicy.AUTO -> compatibleBaseLayer
+        DolbyVisionPolicy.PREFER_HDR10_BASE_LAYER ->
+            compatibleBaseLayer.takeIf { it == VideoDynamicRange.HDR10 }
+        DolbyVisionPolicy.CONVERT_PROFILE_7_TO_8_1 -> compatibleBaseLayer.takeIf { profile7To81MappingApplied }
+        DolbyVisionPolicy.REQUIRE_NATIVE -> null
+    }
+}
+
+internal fun shouldFailClosedForUnsupportedWindowsDolbyVision(
+    source: VideoColorInfo,
+    nativeHdrRouteAvailable: Boolean,
+    hasColorPipelineError: Boolean,
+): Boolean =
+    source.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
+        source.dolbyVision?.compatibleBaseLayerDynamicRange == null &&
+        !nativeHdrRouteAvailable &&
+        hasColorPipelineError
+
+internal fun windowsConfirmedHdrDecoderDynamicRanges(source: VideoColorInfo): Set<VideoDynamicRange> =
+    when (source.dynamicRange) {
+        VideoDynamicRange.HDR10_PLUS -> setOf(VideoDynamicRange.HDR10_PLUS, VideoDynamicRange.HDR10)
+        VideoDynamicRange.DOLBY_VISION ->
+            source.dolbyVision
+                ?.compatibleBaseLayerDynamicRange
+                ?.let(::setOf)
+                .orEmpty()
+        VideoDynamicRange.HDR10 -> setOf(VideoDynamicRange.HDR10)
+        VideoDynamicRange.HLG -> setOf(VideoDynamicRange.HLG)
+        VideoDynamicRange.UNKNOWN,
+        VideoDynamicRange.SDR,
+        -> emptySet()
+    }
+
 /**
  * Windows implementation of the video player state.
  * Handles media playback using Media Foundation on Windows platform.
@@ -265,6 +325,7 @@ class WindowsVideoPlayerState(
 
     companion object {
         private const val HUNDRED_NANOSECOND_TICKS_PER_SECOND = 10_000_000.0
+        private const val RESIZE_WAIT_TIMEOUT_NANOS = 2_000_000_000L
         private val isMfBootstrapped = AtomicBoolean(false)
 
         /** Map to store volume settings for each player instance */
@@ -550,6 +611,7 @@ class WindowsVideoPlayerState(
     // Synchronization
     private val mediaOperationMutex = Mutex()
     private val isResizing = AtomicBoolean(false)
+    private val resizeStartedAtNanos = AtomicLong(0L)
     private var videoJob: Job? = null
     private var resizeJob: Job? = null
     private val resizeRequestToken = AtomicLong(0L)
@@ -622,7 +684,10 @@ class WindowsVideoPlayerState(
     private var externalHlsSelectedSubtitleStreamIndex: Int? = null
     private var externalHlsPlaybackOffsetSeconds: Double = 0.0
     private var externalFallbackToneMappedHdrToSdr = false
+    private var preparedPipelineSource: PreparedVideoPipelineSource? = null
+    private var preparedPipelineOriginalColorInfo: VideoColorInfo? = null
     private var activeSourceColorInfo = VideoColorInfo()
+    private var activeDecoderInputColorInfo = VideoColorInfo()
     private var nativeDecodedColorGeneration = 0
     private var activeDecoderName: String? = null
     private var colorOutputVerified = false
@@ -730,6 +795,7 @@ class WindowsVideoPlayerState(
                                 }
 
                                 closeExternalHlsFallback()
+                                closePreparedPipelineSource()
                                 clearExternalHlsFallbackTrackState()
                                 clearLibVlcTrackState()
                                 clearDesktopAssSubtitleRenderer()
@@ -878,17 +944,29 @@ class WindowsVideoPlayerState(
         }
 
         mediaOperationMutex.withLock {
+            var pendingPreparedSource: PreparedVideoPipelineSource? = null
+            var previousMediaReleased = false
+            var uncommittedMediaOpened = false
             try {
                 ensureSourceIsCurrent()
                 isLoading = true
 
                 val normalizedUri = normalizeWindowsLocalFileUriForPlayback(uri)
+                val originalIsHlsSource =
+                    normalizedUri
+                        .substringBefore('?')
+                        .substringBefore('#')
+                        .endsWith(".m3u8", ignoreCase = true)
                 val containerProbe =
                     withContext(Dispatchers.IO) {
                         JvmLibVlcMediaProbe.probe(normalizedUri, requestHeaders)
                     }
-                val sourceProbe =
-                    if (containerProbe.videoColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN) {
+                var sourceProbe =
+                    if (
+                        containerProbe.videoColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN ||
+                        containerProbe.videoColorInfo.dynamicRange == VideoDynamicRange.HDR10 ||
+                        containerProbe.videoColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION
+                    ) {
                         val nativeColorSignal =
                             withContext(Dispatchers.IO) {
                                 JvmDecodedVideoColorSignalCodec.decode(
@@ -908,8 +986,65 @@ class WindowsVideoPlayerState(
                     } else {
                         containerProbe
                     }
+                if (originalIsHlsSource && sourceProbe.videoColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN) {
+                    val playlistColor =
+                        withContext(Dispatchers.IO) {
+                            WindowsHlsColorProbe.probe(normalizedUri, requestHeaders)
+                        }
+                    if (playlistColor != null) {
+                        sourceProbe = sourceProbe.copy(videoColorInfo = playlistColor)
+                    }
+                }
                 _chapters = sourceProbe.chapters
-                val isLiveSource = normalizedUri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
+                val sourceIsLive = originalIsHlsSource && sourceProbe.durationSeconds == null
+                var directPlaybackUri = normalizedUri
+                var directPlaybackRequestHeaders = requestHeaders
+                var decoderInputColorInfo = sourceProbe.videoColorInfo
+                var sourcePreparationError: VideoPlayerError.ColorPipelineError? = null
+                val hasSourcePipelineExtension =
+                    playbackOptions.extensions.any { extension ->
+                        extension is VideoSourcePipelineExtension && extension.availability.canContribute
+                    }
+                if (hasSourcePipelineExtension) {
+                    when (
+                        val preparation =
+                            playbackOptions.prepareSourceWithExtensions(
+                                VideoPipelineSourceRequest(
+                                    uri = normalizedUri,
+                                    requestHeaders = requestHeaders,
+                                    source = sourceProbe.videoColorInfo,
+                                    dynamicRangePolicy = playbackOptions.dynamicRangePolicy,
+                                    dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+                                    isLive = sourceIsLive,
+                                    automaticDolbyVisionConversionAllowed =
+                                        sourceProbe.videoColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
+                                            sourceProbe.videoColorInfo.dolbyVision?.profile == 7,
+                                ),
+                            )
+                    ) {
+                        is VideoPipelineSourcePreparation.Ready -> {
+                            pendingPreparedSource = preparation.source
+                            directPlaybackUri = normalizeWindowsLocalFileUriForPlayback(preparation.source.uri)
+                            directPlaybackRequestHeaders = preparation.source.requestHeaders.sanitizedRequestHeaders()
+                            decoderInputColorInfo = preparation.source.outputColorInfo
+                        }
+                        is VideoPipelineSourcePreparation.Rejected ->
+                            sourcePreparationError =
+                                VideoPlayerError.ColorPipelineError(
+                                    reason = preparation.reason,
+                                    message = preparation.detail,
+                                )
+                        VideoPipelineSourcePreparation.NotApplicable -> Unit
+                    }
+                    ensureSourceIsCurrent()
+                }
+                val isHlsSource =
+                    directPlaybackUri
+                        .substringBefore('?')
+                        .substringBefore('#')
+                        .endsWith(".m3u8", ignoreCase = true)
+                val appliedDolbyVisionProfileMapping =
+                    sourceProbe.videoColorInfo.profile7To81MappingOrNull(decoderInputColorInfo)
                 val strictHdrRequest =
                     playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR ||
                         (
@@ -927,13 +1062,18 @@ class WindowsVideoPlayerState(
                         )
                 val nativeHdrConfiguration =
                     buildWindowsHdrNativeConfiguration(
-                        source = sourceProbe.videoColorInfo,
-                        dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+                        source = decoderInputColorInfo,
+                        dolbyVisionBaseLayerOutput =
+                            windowsDolbyVisionBaseLayerOutput(
+                                source = decoderInputColorInfo,
+                                requestedPolicy = playbackOptions.dolbyVisionPolicy,
+                                profile7To81MappingApplied = appliedDolbyVisionProfileMapping != null,
+                            ),
                         projection = projection,
                         projectionView = projectionView,
                         textureCrop = projectionTextureCrop,
                         metadataHandling =
-                            if (sourceProbe.videoColorInfo.dynamicRange == VideoDynamicRange.HDR10_PLUS) {
+                            if (decoderInputColorInfo.dynamicRange == VideoDynamicRange.HDR10_PLUS) {
                                 DynamicMetadataHandling.APPLIED_BY_RENDERER
                             } else {
                                 DynamicMetadataHandling.NONE
@@ -941,7 +1081,7 @@ class WindowsVideoPlayerState(
                         forceSdrOutput = requestNativeSdrToneMapping,
                     )
                 val canAttemptNativeHdr =
-                    !isLiveSource &&
+                    !isHlsSource &&
                         (!skipFailedHdrRoute || requestNativeSdrToneMapping) &&
                         nativeHdrConfiguration != null
                 var needsManagedSdrFallback =
@@ -949,7 +1089,7 @@ class WindowsVideoPlayerState(
                         !canAttemptNativeHdr &&
                         !sourceProbe.videoColorInfo.isSafeForUnmanagedSdrFallback()
                 val libVlcBackend =
-                    if (needsManagedSdrFallback || strictHdrRequest) {
+                    if (needsManagedSdrFallback || strictHdrRequest || pendingPreparedSource != null) {
                         null
                     } else {
                         resolveLibVlcBackendForUri(normalizedUri, requestHeaders)
@@ -982,29 +1122,64 @@ class WindowsVideoPlayerState(
                     nativeCloseMedia(oldInstance)
                 }
                 closeExternalHlsFallback()
+                closePreparedPipelineSource()
                 clearExternalHlsFallbackTrackState()
                 clearLibVlcTrackState()
+                clearWindowsPlatformAudioTrackState()
                 externalHlsSelectedAudioStreamIndex = requestedExternalAudioStreamIndex
                 externalHlsSelectedSubtitleStreamIndex = requestedExternalSubtitleStreamIndex
                 externalHlsPlaybackOffsetSeconds = requestedExternalPlaybackOffset
+                previousMediaReleased = true
+                _hasMedia = false
+                _isPlaying = false
 
                 activeSourceColorInfo = sourceProbe.videoColorInfo
+                activeDecoderInputColorInfo = decoderInputColorInfo
                 activeDecoderName = "Media Foundation (decoder component not reported)"
                 colorOutputVerified = false
                 windowsSdrToneMappingRequested = requestNativeSdrToneMapping
                 colorPipelineController.updateSource(
                     source = activeSourceColorInfo,
+                    decoderInput = activeDecoderInputColorInfo,
+                    appliedDolbyVisionProfileMapping = appliedDolbyVisionProfileMapping,
                     decoderName = activeDecoderName,
                     decoderCapabilities = DecoderColorCapabilities(),
-                    isLive = isLiveSource,
+                    isLive = sourceIsLive,
                 )
                 windowsHdrNativeConfiguration = nativeHdrConfiguration.takeIf { canAttemptNativeHdr }
                 windowsHdrSurfaceRequested = canAttemptNativeHdr
                 windowsHdrSurfaceAttached = false
                 windowsNativeHdrOutputStatus = null
                 refreshWindowsColorPipeline()
-                if (strictHdrRequest && !canAttemptNativeHdr && colorPipelineController.pipelineErrorOrNull() != null) {
+                sourcePreparationError?.let { pipelineError ->
+                    commitSourceUpdate {
+                        _error = pipelineError
+                        errorMessage = pipelineError.message
+                        isLoading = false
+                    }
+                    return@withLock
+                }
+                if (
+                    shouldFailClosedForUnsupportedWindowsDolbyVision(
+                        source = sourceProbe.videoColorInfo,
+                        nativeHdrRouteAvailable = canAttemptNativeHdr,
+                        hasColorPipelineError = colorPipelineController.pipelineErrorOrNull() != null,
+                    )
+                ) {
                     publishWindowsColorPipelineError()
+                    return@withLock
+                }
+                if (strictHdrRequest && !canAttemptNativeHdr && colorPipelineController.pipelineErrorOrNull() != null) {
+                    publishWindowsColorPipelineError(
+                        messageOverride =
+                            if (isHlsSource && sourceProbe.videoColorInfo.isHdr) {
+                                "Controlled HDR output for HLS is not available on Windows. " +
+                                    "The current Media Foundation HLS route renders to an 8-bit BGRA surface, so " +
+                                    "REQUIRE_HDR refuses playback instead of silently presenting HDR as SDR."
+                            } else {
+                                null
+                            },
+                    )
                     return@withLock
                 }
 
@@ -1039,6 +1214,20 @@ class WindowsVideoPlayerState(
                     }
                 }
 
+                if (needsManagedSdrFallback && pendingPreparedSource != null) {
+                    pendingPreparedSource.close()
+                    pendingPreparedSource = null
+                    activeDecoderInputColorInfo = activeSourceColorInfo
+                    colorPipelineController.updateSource(
+                        source = activeSourceColorInfo,
+                        decoderInput = activeDecoderInputColorInfo,
+                        decoderName = activeDecoderName,
+                        decoderCapabilities = DecoderColorCapabilities(),
+                        isLive = sourceIsLive,
+                    )
+                    refreshWindowsColorPipeline()
+                }
+
                 _currentTime = Duration.ZERO
                 _progress = 0f
                 _duration = Duration.ZERO
@@ -1066,13 +1255,16 @@ class WindowsVideoPlayerState(
                         }
                     } else if (libVlcBackend != null) {
                         prepareLibVlcPlayback(normalizedUri, requestHeaders, libVlcBackend.renderMode)
+                    } else if (pendingPreparedSource != null) {
+                        directPlaybackUri
                     } else if (shouldUseExternalHlsFallback(normalizedUri, requestHeaders)) {
                         prepareExternalHlsPlayback(normalizedUri, requestHeaders)
                     } else {
                         normalizedUri
                     }
                 ensureSourceIsCurrent()
-                var playbackRequestHeaders = if (playbackUri == normalizedUri) requestHeaders else emptyMap()
+                var playbackRequestHeaders =
+                    if (playbackUri == directPlaybackUri) directPlaybackRequestHeaders else emptyMap()
 
                 // Always open media in paused state to avoid starting the native
                 // playback clock before we've finished setup (SetOutputSize, metadata, etc.).
@@ -1103,6 +1295,10 @@ class WindowsVideoPlayerState(
                     windowsHdrSurfaceRequested = false
                     windowsHdrSurfaceAttached = false
                     windowsHdrNativeConfiguration = null
+                    nativeCloseMedia(instance)
+                    pendingPreparedSource?.close()
+                    pendingPreparedSource = null
+                    activeDecoderInputColorInfo = activeSourceColorInfo
                     playbackUri = prepareExternalHlsPlayback(normalizedUri, requestHeaders)
                     playbackRequestHeaders = emptyMap()
                     requestHeaderLines = playbackRequestHeaders.requestHeadersLineString()
@@ -1115,9 +1311,11 @@ class WindowsVideoPlayerState(
                     ensureSourceIsCurrent()
                 }
                 if (hrOpen < 0) {
+                    nativeCloseMedia(instance)
                     commitSourceError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                     return@withLock
                 }
+                uncommittedMediaOpened = true
 
                 // Get the video dimensions
                 val sizeArr = IntArray(2)
@@ -1135,6 +1333,7 @@ class WindowsVideoPlayerState(
                 if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
                     commitSourceError("Failed to retrieve video size")
                     nativeCloseMedia(instance)
+                    uncommittedMediaOpened = false
                     return@withLock
                 }
                 videoWidth = sizeArr[0]
@@ -1160,6 +1359,7 @@ class WindowsVideoPlayerState(
                     if (!uri.startsWith("http", ignoreCase = true)) {
                         commitSourceError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
                         nativeCloseMedia(instance)
+                        uncommittedMediaOpened = false
                         return@withLock
                     }
                 }
@@ -1182,6 +1382,9 @@ class WindowsVideoPlayerState(
                             duration = _duration,
                         )
                 }
+                if (!nativeBackendUsesLibVlc && externalHlsSourceUri == null) {
+                    updateWindowsPlatformAudioTrack(_metadata)
+                }
 
                 // Query the native frame rate to compute an adaptive polling interval
                 // like macOS does with captureFrameRate.
@@ -1203,6 +1406,11 @@ class WindowsVideoPlayerState(
                 ensureSourceIsCurrent()
                 val sourceCommitted =
                     commitSourceUpdate {
+                        preparedPipelineSource = pendingPreparedSource
+                        preparedPipelineOriginalColorInfo =
+                            sourceProbe.videoColorInfo.takeIf { pendingPreparedSource != null }
+                        pendingPreparedSource = null
+                        uncommittedMediaOpened = false
                         // Publish the requested playback state before _hasMedia. Creating the
                         // native child surface is driven by _hasMedia and may happen immediately;
                         // the attach callback must already know whether it should start playback.
@@ -1263,6 +1471,16 @@ class WindowsVideoPlayerState(
                     _hasMedia = false
                 }
             } finally {
+                if (previousMediaReleased && uncommittedMediaOpened) {
+                    runCatching { nativeCloseMedia(videoPlayerInstance) }
+                    uncommittedMediaOpened = false
+                }
+                if (previousMediaReleased && !_hasMedia) {
+                    closeExternalHlsFallback()
+                    closePreparedPipelineSource()
+                }
+                pendingPreparedSource?.close()
+                pendingPreparedSource = null
                 commitSourceUpdate {
                     if (!_hasMedia) {
                         isLoading = false
@@ -1554,6 +1772,21 @@ class WindowsVideoPlayerState(
         }
     }
 
+    private fun updateWindowsPlatformAudioTrack(metadata: VideoMetadata) {
+        clearWindowsPlatformAudioTrackState()
+        windowsPlatformAudioTrack(metadata)?.let { track ->
+            _availableAudioTracks.add(track)
+            currentAudioTrack = track
+        }
+    }
+
+    private fun clearWindowsPlatformAudioTrackState() {
+        _availableAudioTracks.removeAll { it.id == WINDOWS_PLATFORM_AUDIO_TRACK_ID }
+        if (currentAudioTrack?.id == WINDOWS_PLATFORM_AUDIO_TRACK_ID) {
+            currentAudioTrack = null
+        }
+    }
+
     internal fun shouldUseLibVlcNativeSurface(): Boolean =
         !lifecycle.isDisposed &&
             libVlcNativeSurfaceRequested &&
@@ -1644,10 +1877,17 @@ class WindowsVideoPlayerState(
 
     private fun updateWindowsHdrNativeConfiguration() {
         if (!windowsHdrSurfaceRequested) return
+        val preparedDolbyVisionMapping =
+            preparedPipelineOriginalColorInfo?.profile7To81MappingOrNull(activeDecoderInputColorInfo)
         val configuration =
             buildWindowsHdrNativeConfiguration(
-                source = activeSourceColorInfo,
-                dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+                source = activeDecoderInputColorInfo,
+                dolbyVisionBaseLayerOutput =
+                    windowsDolbyVisionBaseLayerOutput(
+                        source = activeDecoderInputColorInfo,
+                        requestedPolicy = playbackOptions.dolbyVisionPolicy,
+                        profile7To81MappingApplied = preparedDolbyVisionMapping != null,
+                    ),
                 projection = projection,
                 projectionView = projectionView,
                 textureCrop = projectionTextureCrop,
@@ -1812,6 +2052,10 @@ class WindowsVideoPlayerState(
         if (started.source.inputColorInfo.dynamicRange != VideoDynamicRange.UNKNOWN) {
             activeSourceColorInfo = started.source.inputColorInfo
         }
+        activeDecoderInputColorInfo =
+            started.source.outputColorInfo.takeIf {
+                it.dynamicRange != VideoDynamicRange.UNKNOWN
+            } ?: activeSourceColorInfo
         activeDecoderName =
             when {
                 started.source.videoCopiedWithoutReencoding -> "KMediaBridge sample copy -> Media Foundation"
@@ -1820,8 +2064,9 @@ class WindowsVideoPlayerState(
             }
         colorPipelineController.updateSource(
             source = activeSourceColorInfo,
+            decoderInput = activeDecoderInputColorInfo,
             decoderName = activeDecoderName,
-            decoderCapabilities = activeSourceColorInfo.toConfirmedDecoderCapabilities(),
+            decoderCapabilities = activeDecoderInputColorInfo.toConfirmedDecoderCapabilities(),
             isLive = false,
         )
         refreshWindowsColorPipeline()
@@ -1839,6 +2084,13 @@ class WindowsVideoPlayerState(
         externalHlsPlaybackOffsetSeconds = 0.0
         externalFallbackToneMappedHdrToSdr = false
         fallback?.close()
+    }
+
+    private fun closePreparedPipelineSource() {
+        val source = preparedPipelineSource
+        preparedPipelineSource = null
+        preparedPipelineOriginalColorInfo = null
+        source?.close()
     }
 
     private fun clearExternalHlsFallbackTrackState() {
@@ -1928,8 +2180,12 @@ class WindowsVideoPlayerState(
             startNativeTimelinePipeline()
         } else {
             scope.launch {
-                launch { produceFrames() }
-                launch { consumeFrames() }
+                val consumer = launch { consumeFrames() }
+                try {
+                    produceFrames()
+                } finally {
+                    consumer.cancelAndJoin()
+                }
             }
         }
 
@@ -1988,7 +2244,7 @@ class WindowsVideoPlayerState(
                 }
                 if (
                     renderHr == windowsHdr10PlusMetadataUnavailableHresult &&
-                    activeSourceColorInfo.dynamicRange == VideoDynamicRange.HDR10_PLUS &&
+                    activeDecoderInputColorInfo.dynamicRange == VideoDynamicRange.HDR10_PLUS &&
                     !windowsHdr10PlusApplicationUnavailable
                 ) {
                     windowsHdr10PlusApplicationUnavailable = true
@@ -2016,6 +2272,11 @@ class WindowsVideoPlayerState(
                     activeDecoderName = "Media Foundation decoder (P010 GPU surface; component not exposed)"
                     colorPipelineController.updateSource(
                         source = activeSourceColorInfo,
+                        decoderInput = activeDecoderInputColorInfo,
+                        appliedDolbyVisionProfileMapping =
+                            preparedPipelineOriginalColorInfo?.profile7To81MappingOrNull(
+                                activeDecoderInputColorInfo,
+                            ),
                         decoderName = activeDecoderName,
                         decoderCapabilities = confirmedWindowsHdrDecoderCapabilities(),
                         isLive = false,
@@ -2039,23 +2300,12 @@ class WindowsVideoPlayerState(
             }
         }
 
-    private fun confirmedWindowsHdrDecoderCapabilities(): DecoderColorCapabilities {
-        val ranges =
-            when (activeSourceColorInfo.dynamicRange) {
-                VideoDynamicRange.HDR10_PLUS -> setOf(VideoDynamicRange.HDR10_PLUS, VideoDynamicRange.HDR10)
-                VideoDynamicRange.DOLBY_VISION -> setOf(VideoDynamicRange.HDR10)
-                VideoDynamicRange.HDR10 -> setOf(VideoDynamicRange.HDR10)
-                VideoDynamicRange.HLG -> setOf(VideoDynamicRange.HLG)
-                VideoDynamicRange.UNKNOWN,
-                VideoDynamicRange.SDR,
-                -> emptySet()
-            }
-        return DecoderColorCapabilities(
+    private fun confirmedWindowsHdrDecoderCapabilities(): DecoderColorCapabilities =
+        DecoderColorCapabilities(
             isKnown = true,
-            supportedDynamicRanges = ranges,
+            supportedDynamicRanges = windowsConfirmedHdrDecoderDynamicRanges(activeDecoderInputColorInfo),
             maxBitDepth = 10,
         )
-    }
 
     private fun refreshWindowsDecodedColorInfo(instance: Long): Boolean {
         val decoded =
@@ -2065,18 +2315,24 @@ class WindowsVideoPlayerState(
         if (decoded.generation == nativeDecodedColorGeneration) return false
         nativeDecodedColorGeneration = decoded.generation
 
-        val previous = activeSourceColorInfo
-        val updated = decoded.mergeInto(previous)
-        if (updated == previous) return false
+        val previousDecoderInput = activeDecoderInputColorInfo
+        val updatedDecoderInput = decoded.mergeInto(previousDecoderInput)
+        if (updatedDecoderInput == previousDecoderInput) return false
 
-        activeSourceColorInfo = updated
+        activeDecoderInputColorInfo = updatedDecoderInput
+        if (preparedPipelineOriginalColorInfo == null) {
+            activeSourceColorInfo = updatedDecoderInput
+        }
         colorOutputVerified = false
-        if (updated.dynamicRange != previous.dynamicRange) {
+        if (updatedDecoderInput.dynamicRange != previousDecoderInput.dynamicRange) {
             windowsHdr10PlusApplicationUnavailable = false
         }
         activeDecoderName = "Media Foundation decoder (decoded GPU surface; component not exposed)"
         colorPipelineController.updateSource(
-            source = updated,
+            source = activeSourceColorInfo,
+            decoderInput = activeDecoderInputColorInfo,
+            appliedDolbyVisionProfileMapping =
+                preparedPipelineOriginalColorInfo?.profile7To81MappingOrNull(activeDecoderInputColorInfo),
             decoderName = activeDecoderName,
             decoderCapabilities = confirmedWindowsHdrDecoderCapabilities(),
             isLive = false,
@@ -2084,14 +2340,22 @@ class WindowsVideoPlayerState(
 
         val configuration =
             buildWindowsHdrNativeConfiguration(
-                source = updated,
-                dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+                source = activeDecoderInputColorInfo,
+                dolbyVisionBaseLayerOutput =
+                    windowsDolbyVisionBaseLayerOutput(
+                        source = activeDecoderInputColorInfo,
+                        requestedPolicy = playbackOptions.dolbyVisionPolicy,
+                        profile7To81MappingApplied =
+                            preparedPipelineOriginalColorInfo?.profile7To81MappingOrNull(
+                                activeDecoderInputColorInfo,
+                            ) != null,
+                    ),
                 projection = projection,
                 projectionView = projectionView,
                 textureCrop = projectionTextureCrop,
                 metadataHandling =
                     if (
-                        updated.dynamicRange == VideoDynamicRange.HDR10_PLUS &&
+                        activeDecoderInputColorInfo.dynamicRange == VideoDynamicRange.HDR10_PLUS &&
                         !windowsHdr10PlusApplicationUnavailable
                     ) {
                         DynamicMetadataHandling.APPLIED_BY_RENDERER
@@ -2258,7 +2522,11 @@ class WindowsVideoPlayerState(
                 ProduceOutcome.SkipIteration -> yield()
                 is ProduceOutcome.Frame -> {
                     frameChannel.trySend(FrameData(produced.bitmap, produced.timestamp))
-                    delay(frameIntervalMs.milliseconds)
+                    // AcquireNextSample already paces frames against the audio
+                    // clock and returns NotReady for an early cached sample.
+                    // A second full frame delay here halves effective cadence
+                    // once decode/copy time is included.
+                    delay(2.milliseconds)
                 }
                 null -> { /* exception already handled */ }
             }
@@ -2500,6 +2768,7 @@ class WindowsVideoPlayerState(
 
         if (readyForPlayback()) {
             executeMediaOperation(operation = "play") {
+                if (playbackReachedEnd() && !rewindEndedPlayback()) return@executeMediaOperation
                 resumePlayback()
             }
             return
@@ -2508,6 +2777,43 @@ class WindowsVideoPlayerState(
         val sourceUri = lastUri
         if (!sourceUri.isNullOrEmpty()) {
             openUri(sourceUri, InitialPlayerState.PLAY, lastRequestHeaders)
+        }
+    }
+
+    private fun playbackReachedEnd(): Boolean {
+        if (_duration <= Duration.ZERO) return false
+        val instance = videoPlayerInstance
+        return _currentTime >= _duration || (instance != 0L && nativeIsEOF(instance))
+    }
+
+    private suspend fun rewindEndedPlayback(): Boolean {
+        videoJob?.cancelAndJoin()
+        videoJob = null
+        val instance = videoPlayerInstance
+        if (instance == 0L || !_hasMedia) return false
+
+        seekInProgress.set(true)
+        return try {
+            videoReaderMutex.withLock {
+                initialFrameRead.set(false)
+                lastFrameHash = Int.MIN_VALUE
+                clearFrameChannel()
+                var hr = nativeSeekMedia(instance, externalHlsLocalSeekTicks(0L))
+                if (hr < 0) {
+                    delay(30.milliseconds)
+                    hr = nativeSeekMedia(instance, externalHlsLocalSeekTicks(0L))
+                }
+                if (hr < 0) {
+                    setError("Replay seek failed (hr=0x${hr.toString(16)})")
+                    false
+                } else {
+                    _currentTime = Duration.ZERO
+                    _progress = 0f
+                    true
+                }
+            }
+        } finally {
+            seekInProgress.set(false)
         }
     }
 
@@ -2602,8 +2908,10 @@ class WindowsVideoPlayerState(
                 .onFailure { e -> windowsLogger.e { "Exception closing the current source: ${e.message}" } }
         }
         closeExternalHlsFallback()
+        closePreparedPipelineSource()
         clearExternalHlsFallbackTrackState()
         clearLibVlcTrackState()
+        clearWindowsPlatformAudioTrackState()
         clearDesktopAssSubtitleRenderer()
         _hasMedia = false
         _isPlaying = false
@@ -2622,6 +2930,7 @@ class WindowsVideoPlayerState(
 
     @Suppress("CyclomaticComplexMethod")
     private fun refreshWindowsColorPipeline() {
+        val renderedComposeFrame = colorOutputVerified
         val nativeStatus = windowsNativeHdrOutputStatus.takeIf { windowsHdrSurfaceRequested }
         val nativeRoute = windowsHdrSurfaceRequested && windowsHdrNativeConfiguration != null
         val nativeConfirmed =
@@ -2632,7 +2941,14 @@ class WindowsVideoPlayerState(
             }
         val supportsHdr10PlusApplication =
             nativeRoute && !windowsHdr10PlusApplicationUnavailable
-        colorOutputVerified = nativeConfirmed || (externalFallbackToneMappedHdrToSdr && colorOutputVerified)
+        val composeSdrOutputConfirmed =
+            renderedComposeFrame &&
+                !nativeRoute &&
+                (
+                    activeSourceColorInfo.dynamicRange == VideoDynamicRange.SDR ||
+                        externalFallbackToneMappedHdrToSdr
+                )
+        colorOutputVerified = nativeConfirmed || composeSdrOutputConfirmed
         val runtimeDetail =
             when {
                 !activeSourceColorInfo.isHdr -> null
@@ -2698,6 +3014,7 @@ class WindowsVideoPlayerState(
 
     private fun resetWindowsColorPipeline() {
         activeSourceColorInfo = VideoColorInfo()
+        activeDecoderInputColorInfo = VideoColorInfo()
         nativeDecodedColorGeneration = 0
         activeDecoderName = null
         colorOutputVerified = false
@@ -2711,7 +3028,10 @@ class WindowsVideoPlayerState(
         colorPipelineController.resetSource()
     }
 
-    private suspend fun publishWindowsColorPipelineError(extraDetail: String? = null) {
+    private suspend fun publishWindowsColorPipelineError(
+        extraDetail: String? = null,
+        messageOverride: String? = null,
+    ) {
         val pipelineError =
             colorPipelineController.pipelineErrorOrNull()
                 ?: VideoPlayerError.ColorPipelineError(
@@ -2728,13 +3048,18 @@ class WindowsVideoPlayerState(
                             "No verified Windows color pipeline is available."
                         },
                 )
+        val reportedPipelineError =
+            messageOverride
+                ?.takeIf(String::isNotBlank)
+                ?.let { message -> pipelineError.copy(message = message) }
+                ?: pipelineError
         withContext(Dispatchers.Main) {
             isLoading = false
             _error =
                 if (extraDetail.isNullOrBlank()) {
-                    pipelineError
+                    reportedPipelineError
                 } else {
-                    pipelineError.copy(message = "${pipelineError.message} $extraDetail")
+                    reportedPipelineError.copy(message = "${reportedPipelineError.message} $extraDetail")
                 }
             errorMessage = (_error as? VideoPlayerError.ColorPipelineError)?.message
         }
@@ -2912,18 +3237,22 @@ class WindowsVideoPlayerState(
         // Mark resizing in progress and debounce rapid events
         val requestToken = resizeRequestToken.incrementAndGet()
         isResizing.set(true)
+        resizeStartedAtNanos.set(System.nanoTime())
         resizeJob?.cancel()
-        resizeJob =
+        val scheduledResize =
             lifecycle.launchSourceBoundControlOperation {
-                try {
-                    delay(120.milliseconds)
-                    applyOutputScaling()
-                } finally {
-                    if (resizeRequestToken.get() == requestToken) {
-                        isResizing.set(false)
-                    }
-                }
+                delay(120.milliseconds)
+                applyOutputScaling()
             }
+        resizeJob = scheduledResize
+        // A source replacement can cancel this job before its body starts, so
+        // cleanup belongs to completion rather than a finally inside the body.
+        scheduledResize.invokeOnCompletion {
+            if (resizeRequestToken.get() == requestToken) {
+                isResizing.set(false)
+                resizeStartedAtNanos.set(0L)
+            }
+        }
     }
 
     /**
@@ -3246,9 +3575,6 @@ class WindowsVideoPlayerState(
         return false
     }
 
-    /** Tracks how many consecutive iterations we've been waiting for resize */
-    private var resizeWaitCount = 0
-
     /**
      * Waits if the player is currently resizing.
      * Has a safety timeout to prevent infinite blocking.
@@ -3257,13 +3583,16 @@ class WindowsVideoPlayerState(
      */
     private suspend fun waitIfResizing(): Boolean {
         if (isResizing.get()) {
-            resizeWaitCount++
-            if (resizeWaitCount > 200) { // ~1.6s max wait
+            val startedAt = resizeStartedAtNanos.get()
+            if (
+                startedAt > 0L &&
+                System.nanoTime() - startedAt > RESIZE_WAIT_TIMEOUT_NANOS &&
+                isResizing.compareAndSet(true, false)
+            ) {
+                resizeStartedAtNanos.set(0L)
                 windowsLogger.w {
-                    "waitIfResizing: timeout after $resizeWaitCount iterations, forcing isResizing=false"
+                    "Resize debounce exceeded its safety timeout; resuming frame processing"
                 }
-                isResizing.set(false)
-                resizeWaitCount = 0
                 return false
             }
             try {
@@ -3274,7 +3603,6 @@ class WindowsVideoPlayerState(
             }
             return true
         }
-        resizeWaitCount = 0
         return false
     }
 

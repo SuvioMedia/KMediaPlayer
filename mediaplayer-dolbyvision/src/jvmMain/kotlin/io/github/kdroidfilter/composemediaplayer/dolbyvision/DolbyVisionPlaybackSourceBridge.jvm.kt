@@ -11,6 +11,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoPipelineSourcePreparation
 import io.github.kdroidfilter.composemediaplayer.VideoPipelineSourceRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -25,6 +26,9 @@ import java.nio.file.StandardOpenOption
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.coroutineContext
 import kotlin.math.ceil
 
 internal actual fun platformDolbyVisionSourceBridgeAvailable(): Boolean = true
@@ -186,26 +190,49 @@ private suspend fun prepareHlsVodSource(
     }
 }
 
-private fun ready(
+@Suppress("TooGenericExceptionCaught")
+private suspend fun ready(
     request: VideoPipelineSourceRequest,
     session: JvmDolbyVisionHlsSession,
-): VideoPipelineSourcePreparation =
-    runCatching {
-        VideoPipelineSourcePreparation.Ready(
-            LoopbackDolbyVisionHlsSource(
-                session = session,
-                outputColorInfo = request.profile81OutputColorInfo(),
-                detail =
-                    if (request.source.dolbyVision?.enhancementLayer ==
-                        io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer.FEL
-                    ) {
-                        "Dolby Vision Profile 7 FEL was converted to Profile 8.1; the enhancement layer and FEL mapping were discarded."
-                    } else {
-                        "Dolby Vision Profile 7 RPU was converted to Profile 8.1 without re-encoding the base-layer picture."
-                    },
-            ),
+): VideoPipelineSourcePreparation {
+    var sessionOwnedByReady = true
+    return try {
+        val outputColorInfo = request.profile81OutputColorInfo()
+        val detail =
+            if (request.source.dolbyVision?.enhancementLayer ==
+                io.github.kdroidfilter.composemediaplayer.DolbyVisionEnhancementLayer.FEL
+            ) {
+                "Dolby Vision Profile 7 FEL was converted to Profile 8.1; the enhancement layer and FEL mapping were discarded."
+            } else {
+                "Dolby Vision Profile 7 RPU was converted to Profile 8.1 without re-encoding the base-layer picture."
+            }
+        val source =
+            if (isWindowsHost() && session.supportsSingleFilePlayback) {
+                sessionOwnedByReady = false
+                materializeDolbyVisionSession(
+                    session = session,
+                    outputColorInfo = outputColorInfo,
+                    detail = detail,
+                )
+            } else {
+                LoopbackDolbyVisionHlsSource(
+                    session = session,
+                    outputColorInfo = outputColorInfo,
+                    detail = detail,
+                )
+            }
+        VideoPipelineSourcePreparation.Ready(source)
+    } catch (cancelled: CancellationException) {
+        if (sessionOwnedByReady) session.close()
+        throw cancelled
+    } catch (error: Exception) {
+        if (sessionOwnedByReady) session.close()
+        rejected(
+            "Unable to start the local Dolby Vision playback bridge: " +
+                "${error.message ?: error::class.simpleName}.",
         )
-    }.getOrElse { rejected("Unable to start the local Dolby Vision playback bridge: ${it.message}.") }
+    }
+}
 
 private fun rejected(detail: String) =
     VideoPipelineSourcePreparation.Rejected(
@@ -215,6 +242,13 @@ private fun rejected(detail: String) =
 
 internal interface JvmDolbyVisionHlsSession {
     val initializationSegment: ByteArray
+
+    /** Number of media fragments when this session can be represented as one fragmented MP4. */
+    val singleFileSegmentCount: Int?
+        get() = null
+
+    val supportsSingleFilePlayback: Boolean
+        get() = singleFileSegmentCount != null
 
     fun playlist(resourcePrefix: String): String
 
@@ -240,6 +274,8 @@ private class SpooledFfmpegHlsSession(
     private val fragments: List<SpooledDolbyVisionFragment>,
 ) : JvmDolbyVisionHlsSession {
     @Volatile private var closed = false
+
+    override val singleFileSegmentCount: Int = fragments.size
 
     override fun playlist(resourcePrefix: String): String {
         check(!closed) { "The spooled Dolby Vision session is closed." }
@@ -305,6 +341,7 @@ private class FlatMp4HlsSession(
     private val session: FlatMp4DolbyVisionSession,
 ) : JvmDolbyVisionHlsSession {
     override val initializationSegment: ByteArray = session.initializationSegment
+    override val singleFileSegmentCount: Int = session.fragments.size
 
     override fun playlist(resourcePrefix: String): String {
         val normalizedPrefix = resourcePrefix.trimEnd('/')
@@ -344,6 +381,7 @@ private class MatroskaHlsSession(
     private val session: MatroskaDolbyVisionSession,
 ) : JvmDolbyVisionHlsSession {
     override val initializationSegment: ByteArray = session.initializationSegment
+    override val singleFileSegmentCount: Int = session.fragments.size
 
     override fun playlist(resourcePrefix: String): String {
         val normalizedPrefix = resourcePrefix.trimEnd('/')
@@ -377,6 +415,106 @@ private class MatroskaHlsSession(
             is MatroskaDolbyVisionFragmentResult.Success -> result.payload
             is MatroskaDolbyVisionFragmentResult.Failure -> error(result.message)
         }
+}
+
+/**
+ * Windows Media Foundation sends HLS through its BGRA frame-server route. A local fragmented MP4
+ * instead reaches the controlled P010/D3D11 path, so bounded file VOD is materialized before open.
+ */
+internal suspend fun materializeDolbyVisionSession(
+    session: JvmDolbyVisionHlsSession,
+    outputColorInfo: io.github.kdroidfilter.composemediaplayer.VideoColorInfo,
+    detail: String,
+    maximumBytes: Long = maximumSpoolBytes(),
+): PreparedVideoPipelineSource {
+    val pendingSource = AtomicReference<PreparedVideoPipelineSource?>()
+    var ownershipTransferred = false
+    try {
+        val prepared =
+            withContext(Dispatchers.IO) {
+                val segmentCount =
+                    requireNotNull(session.singleFileSegmentCount) {
+                        "This Dolby Vision session cannot be represented as one fragmented MP4."
+                    }
+                require(segmentCount > 0) { "The Dolby Vision session contains no media fragments." }
+                require(maximumBytes > 0) { "The temporary-storage limit must be positive." }
+
+                val directory = Files.createTempDirectory("kmediaplayer-dovi-mf-")
+                val path = directory.resolve("stream.mp4")
+                var completed = false
+                try {
+                    var totalBytes = 0L
+                    Files
+                        .newOutputStream(
+                            path,
+                            StandardOpenOption.CREATE_NEW,
+                            StandardOpenOption.WRITE,
+                        ).use { output ->
+                            fun append(payload: ByteArray) {
+                                totalBytes += payload.size
+                                if (totalBytes > maximumBytes) {
+                                    error(
+                                        "The converted Dolby Vision VOD exceeds " +
+                                            "the configured temporary-storage limit.",
+                                    )
+                                }
+                                output.write(payload)
+                            }
+
+                            append(session.initializationSegment)
+                            repeat(segmentCount) { index ->
+                                coroutineContext.ensureActive()
+                                append(session.segment(index))
+                            }
+                        }
+                    MaterializedDolbyVisionFileSource(
+                        directory = directory,
+                        path = path,
+                        session = session,
+                        outputColorInfo = outputColorInfo,
+                        detail = detail,
+                    ).also { source ->
+                        completed = true
+                        pendingSource.set(source)
+                    }
+                } finally {
+                    if (!completed) directory.deleteRecursively()
+                }
+            }
+        pendingSource.set(null)
+        ownershipTransferred = true
+        return prepared
+    } finally {
+        val pending = pendingSource.getAndSet(null)
+        if (pending != null) {
+            pending.close()
+        } else if (!ownershipTransferred) {
+            session.close()
+        }
+    }
+}
+
+internal class MaterializedDolbyVisionFileSource(
+    private val directory: Path,
+    private val path: Path,
+    private val session: JvmDolbyVisionHlsSession,
+    override val outputColorInfo: io.github.kdroidfilter.composemediaplayer.VideoColorInfo,
+    override val detail: String,
+) : PreparedVideoPipelineSource {
+    private val closed = AtomicBoolean(false)
+
+    override val uri: String = path.toString()
+    override val requestHeaders: Map<String, String> = emptyMap()
+    override val metadataHandling: DynamicMetadataHandling = DynamicMetadataHandling.CONVERTED
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        try {
+            directory.deleteRecursively()
+        } finally {
+            session.close()
+        }
+    }
 }
 
 internal class LoopbackDolbyVisionHlsSource(
@@ -688,3 +826,5 @@ private val HTTP_SUCCESS = HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX
 private val SEGMENT_PATH = Regex("segment/(\\d+)\\.m4s")
 private val CONTENT_RANGE_TOTAL = Regex("/([0-9]+)$")
 private val WINDOWS_ABSOLUTE_PATH = Regex("^[A-Za-z]:[\\\\/].*")
+
+private fun isWindowsHost(): Boolean = System.getProperty("os.name").orEmpty().contains("Windows", ignoreCase = true)

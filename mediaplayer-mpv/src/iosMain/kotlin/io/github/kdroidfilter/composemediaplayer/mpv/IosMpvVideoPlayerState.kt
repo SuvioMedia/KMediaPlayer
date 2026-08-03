@@ -6,7 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
@@ -287,7 +286,7 @@ internal class IosMpvVideoPlayerState(
                 val image = checkNotNull(CGBitmapContextCreateImage(context))
                 try {
                     val uiImage = UIImage.imageWithCGImage(image)
-                    Snapshot.withMutableSnapshot {
+                    mutateSnapshotState {
                         frameState.value = uiImage
                     }
                 } finally {
@@ -299,7 +298,7 @@ internal class IosMpvVideoPlayerState(
             }
         } catch (_: Throwable) {
             if (!isDisposed()) {
-                Snapshot.withMutableSnapshot { _hasMedia = false }
+                mutateSnapshotState { _hasMedia = false }
                 publishError(VideoPlayerError.UnknownError("libmpv software rendering failed."))
             }
         } finally {
@@ -322,7 +321,7 @@ internal class IosMpvVideoPlayerState(
                     IosNativeMpvEvent.FileLoaded -> onFileLoaded()
                     is IosNativeMpvEvent.EndFile -> onEndFile(event)
                     IosNativeMpvEvent.SeekStarted ->
-                        Snapshot.withMutableSnapshot { _isSeeking = true }
+                        mutateSnapshotState { _isSeeking = true }
                     IosNativeMpvEvent.PlaybackRestarted -> onPlaybackRestarted()
                 }
                 refreshSnapshot()
@@ -357,7 +356,7 @@ internal class IosMpvVideoPlayerState(
             return
         }
         if (event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) {
-            Snapshot.withMutableSnapshot { _hasMedia = false }
+            mutateSnapshotState { _hasMedia = false }
             publishError(VideoPlayerError.SourceError("libmpv could not finish the media source."))
             return
         }
@@ -396,7 +395,7 @@ internal class IosMpvVideoPlayerState(
             loading = buffering,
             seeking = seeking,
         )
-        Snapshot.withMutableSnapshot {
+        mutateSnapshotState {
             metadata.title = title
             metadata.width = width
             metadata.height = height

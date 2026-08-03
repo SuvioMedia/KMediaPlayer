@@ -11,9 +11,6 @@ import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSession
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSource
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
 import io.github.kdroidfilter.composemediaplayer.VideoPipelineExtensionAvailability
-import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
-import io.github.shusek.kmediabridge.MediaInput
-import io.github.shusek.kmediabridge.MediaInputKind
 import io.github.shusek.kmediabridge.VideoHandling
 import io.github.shusek.kmediabridge.ffmpeg.BundledFfmpegHlsPlaybackBackend
 import io.github.shusek.kmediabridge.ffmpeg.BundledFfmpegHlsPlaybackSession
@@ -161,95 +158,122 @@ private fun currentKMediaBridgeDesktopPlatformIsSupported(): Boolean =
 
 private class KMediaBridgeDesktopSession(
     private val playbackSession: BundledFfmpegHlsPlaybackSession,
+    private val preparedInput: PreparedBridgeInput,
     override val source: DesktopPlaybackBridgeSource,
 ) : DesktopPlaybackBridgeSession {
-    override fun close(): Unit = playbackSession.close()
+    override fun close() {
+        try {
+            playbackSession.close()
+        } finally {
+            preparedInput.close()
+        }
+    }
 
     companion object {
         suspend fun open(
             request: DesktopPlaybackBridgeRequest,
             runtimeSelection: FfmpegRuntimeSelection,
         ): KMediaBridgeDesktopSession {
-            val startTimeUs =
-                runCatching { Math.multiplyExact(request.startPositionMs, MICROSECONDS_PER_MILLISECOND) }
-                    .getOrElse {
-                        throw IllegalArgumentException("The desktop bridge start position is too large.", it)
-                    }
-            val started =
-                BundledFfmpegHlsPlaybackBackend.start(
-                    request =
-                        FfmpegHlsPlaybackRequest(
-                            input = mediaBridgeInput(request.uri, request.requestHeaders),
-                            selectedAudioTrackId = request.selectedAudioStreamIndex,
-                            selectedSubtitleTrackId = request.selectedSubtitleStreamIndex,
-                            videoOutputPolicy =
-                                when {
-                                    request.forceAvFoundationCompatibility ->
-                                        FfmpegHlsVideoOutputPolicy.AVFOUNDATION_COMPATIBLE_SDR
-                                    request.forceSdrOutput -> FfmpegHlsVideoOutputPolicy.FORCE_SDR
-                                    else -> FfmpegHlsVideoOutputPolicy.PRESERVE_SOURCE
-                                },
-                            startTimeUs = startTimeUs,
-                            // AVFoundation treats this growing VOD playlist as live. Keep a deep
-                            // but byte-bounded history so the position selected by the user cannot
-                            // be evicted while the bridge runs ahead to maintain its prebuffer.
-                            maxBufferedFragments = DESKTOP_HLS_MAX_BUFFERED_FRAGMENTS,
-                            maxBufferedBytes = DESKTOP_HLS_MAX_BUFFERED_BYTES,
-                        ),
-                    driver = BundledFfmpegNativeDriver.load(runtimeSelection),
-                )
-            return started.closeOnFailure {
-                val bridgeSource = started.source
-                val hdrSampleCopy = bridgeSource.copiedHdrSignal != FfmpegCmafHdrSampleCopy.NONE
-                if (request.requireHdrCmafPassthrough && !hdrSampleCopy) {
-                    throw UnsupportedOperationException(
-                        "REQUIRE_HDR rejected this bridge because KMediaBridge could not confirm " +
-                            "an unchanged HEVC Main 10 HDR signal in CMAF.",
+            val startTimeUs = request.startTimeUs()
+            val preparedInput = prepareBridgeInput(request.uri, request.requestHeaders)
+            var ownershipTransferred = false
+            try {
+                val started =
+                    BundledFfmpegHlsPlaybackBackend.start(
+                        request =
+                            FfmpegHlsPlaybackRequest(
+                                input = preparedInput.input,
+                                selectedAudioTrackId = request.selectedAudioStreamIndex,
+                                selectedSubtitleTrackId = request.selectedSubtitleStreamIndex,
+                                videoOutputPolicy =
+                                    when {
+                                        request.forceAvFoundationCompatibility ->
+                                            FfmpegHlsVideoOutputPolicy.AVFOUNDATION_COMPATIBLE_SDR
+                                        request.forceSdrOutput -> FfmpegHlsVideoOutputPolicy.FORCE_SDR
+                                        else -> FfmpegHlsVideoOutputPolicy.PRESERVE_SOURCE
+                                    },
+                                startTimeUs = startTimeUs,
+                                // Desktop platform players can treat this growing VOD playlist as live.
+                                // Keep a deep but byte-bounded history so a selected seek position
+                                // cannot be evicted while the bridge runs ahead to maintain its prebuffer.
+                                maxBufferedFragments = DESKTOP_HLS_MAX_BUFFERED_FRAGMENTS,
+                                maxBufferedBytes = DESKTOP_HLS_MAX_BUFFERED_BYTES,
+                            ),
+                        driver = BundledFfmpegNativeDriver.load(runtimeSelection),
                     )
-                }
+                return started.closeOnFailure {
+                    val bridgeSource = started.source
+                    val hdrSampleCopy = bridgeSource.copiedHdrSignal != FfmpegCmafHdrSampleCopy.NONE
+                    requireHdrCmafPassthrough(request.requireHdrCmafPassthrough, hdrSampleCopy)
 
-                val inputColor =
-                    bridgeSource.outputInfo.inputColorInfo?.toPlayerVideoColorInfo() ?: VideoColorInfo()
-                val outputColor =
-                    bridgeSource.outputInfo.outputColorInfo?.toPlayerVideoColorInfo() ?: inputColor
-                KMediaBridgeDesktopSession(
-                    playbackSession = started,
-                    source =
-                        DesktopPlaybackBridgeSource(
-                            playlistUrl = bridgeSource.playlistUrl,
-                            durationMs = bridgeSource.probe.durationUs?.div(MICROSECONDS_PER_MILLISECOND),
-                            playbackOffsetMs = bridgeSource.playbackOffsetUs / MICROSECONDS_PER_MILLISECOND,
-                            audioTracks =
-                                bridgeSource.probe.tracks
-                                    .filterIsInstance<BridgeAudioTrackInfo>()
-                                    .map(::toAudioTrack),
-                            selectedAudioStreamIndex = bridgeSource.outputInfo.selectedAudioTrackId,
-                            subtitleTracks =
-                                bridgeSource.probe.tracks
-                                    .filterIsInstance<BridgeSubtitleTrackInfo>()
-                                    .mapNotNull(::toSubtitleTrack),
-                            selectedSubtitleStreamIndex = bridgeSource.outputInfo.selectedSubtitleTrackId,
-                            inputColorInfo = inputColor,
-                            outputColorInfo = outputColor,
-                            toneMappedHdrToSdr =
-                                bridgeSource.outputInfo.videoHandling == VideoHandling.TONE_MAP_TO_SDR,
-                            hdrCmafPassthrough = request.allowHdrCmafPassthrough && hdrSampleCopy,
-                            videoCopiedWithoutReencoding =
-                                bridgeSource.outputInfo.videoHandling == VideoHandling.COPY,
-                            avFoundationCompatibleTranscode = request.forceAvFoundationCompatibility,
-                            detail =
-                                if (request.forceAvFoundationCompatibility) {
-                                    "KMediaBridge decoded the source to AVFoundation-compatible AVC/AAC CMAF."
-                                } else {
-                                    "KMediaBridge provided the desktop decoder-ready stream."
-                                },
-                        ),
-                )
+                    val inputColor =
+                        bridgeSource.outputInfo.inputColorInfo?.toPlayerVideoColorInfo() ?: VideoColorInfo()
+                    val outputColor =
+                        bridgeSource.outputInfo.outputColorInfo?.toPlayerVideoColorInfo() ?: inputColor
+                    val session =
+                        KMediaBridgeDesktopSession(
+                            playbackSession = started,
+                            preparedInput = preparedInput,
+                            source =
+                                DesktopPlaybackBridgeSource(
+                                    playlistUrl = bridgeSource.playlistUrl,
+                                    durationMs = bridgeSource.probe.durationUs?.div(MICROSECONDS_PER_MILLISECOND),
+                                    playbackOffsetMs = bridgeSource.playbackOffsetUs / MICROSECONDS_PER_MILLISECOND,
+                                    audioTracks =
+                                        bridgeSource.probe.tracks
+                                            .filterIsInstance<BridgeAudioTrackInfo>()
+                                            .map(::toAudioTrack),
+                                    selectedAudioStreamIndex = bridgeSource.outputInfo.selectedAudioTrackId,
+                                    subtitleTracks =
+                                        bridgeSource.probe.tracks
+                                            .filterIsInstance<BridgeSubtitleTrackInfo>()
+                                            .mapNotNull(::toSubtitleTrack),
+                                    selectedSubtitleStreamIndex = bridgeSource.outputInfo.selectedSubtitleTrackId,
+                                    inputColorInfo = inputColor,
+                                    outputColorInfo = outputColor,
+                                    toneMappedHdrToSdr =
+                                        bridgeSource.outputInfo.videoHandling == VideoHandling.TONE_MAP_TO_SDR,
+                                    hdrCmafPassthrough = request.allowHdrCmafPassthrough && hdrSampleCopy,
+                                    videoCopiedWithoutReencoding =
+                                        bridgeSource.outputInfo.videoHandling == VideoHandling.COPY,
+                                    avFoundationCompatibleTranscode = request.forceAvFoundationCompatibility,
+                                    detail =
+                                        if (request.forceAvFoundationCompatibility) {
+                                            "KMediaBridge decoded the source to platform-compatible AVC/AAC CMAF."
+                                        } else {
+                                            "KMediaBridge provided the desktop decoder-ready stream."
+                                        },
+                                ),
+                        )
+                    ownershipTransferred = true
+                    session
+                }
+            } finally {
+                if (!ownershipTransferred) preparedInput.close()
             }
         }
 
         private const val DESKTOP_HLS_MAX_BUFFERED_FRAGMENTS: Int = 256
         private const val DESKTOP_HLS_MAX_BUFFERED_BYTES: Long = 256L * 1024L * 1024L
+    }
+}
+
+private fun DesktopPlaybackBridgeRequest.startTimeUs(): Long =
+    try {
+        Math.multiplyExact(startPositionMs, MICROSECONDS_PER_MILLISECOND)
+    } catch (failure: ArithmeticException) {
+        throw IllegalArgumentException("The desktop bridge start position is too large.", failure)
+    }
+
+private fun requireHdrCmafPassthrough(
+    required: Boolean,
+    copied: Boolean,
+) {
+    if (required && !copied) {
+        throw UnsupportedOperationException(
+            "REQUIRE_HDR rejected this bridge because KMediaBridge could not confirm " +
+                "an unchanged HEVC Main 10 HDR signal in CMAF.",
+        )
     }
 }
 
@@ -276,23 +300,7 @@ private fun KMediaBridgeDesktopRuntimeSelection.toBridgeSelection(): FfmpegRunti
         externalRuntimeDirectory = externalRuntimeDirectory,
     )
 
-private fun mediaBridgeInput(
-    uri: String,
-    requestHeaders: Map<String, String>,
-): MediaInput {
-    val localPath = localPath(uri)
-    return if (localPath != null) {
-        MediaInput(locator = localPath, kind = MediaInputKind.FILE)
-    } else {
-        MediaInput(
-            locator = uri,
-            kind = MediaInputKind.URI,
-            requestHeaders = requestHeaders.sanitizedRequestHeaders(),
-        )
-    }
-}
-
-private fun localPath(uri: String): String? {
+internal fun localPath(uri: String): String? {
     if (WINDOWS_DRIVE_PATH.matches(uri)) return File(uri).absolutePath
     val parsed = runCatching { URI(uri) }.getOrNull() ?: return File(uri).absolutePath
     return when (parsed.scheme?.lowercase()) {
@@ -303,4 +311,4 @@ private fun localPath(uri: String): String? {
 }
 
 private const val MICROSECONDS_PER_MILLISECOND = 1_000L
-private val WINDOWS_DRIVE_PATH = Regex("^[A-Za-z]:[\\\\/].*")
+internal val WINDOWS_DRIVE_PATH = Regex("^[A-Za-z]:[\\\\/].*")

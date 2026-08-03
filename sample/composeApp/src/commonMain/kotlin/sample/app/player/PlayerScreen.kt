@@ -368,6 +368,15 @@ internal fun PlayerScreen(
                     color = Color.White.copy(alpha = 0.4f),
                     style = MaterialTheme.typography.bodyLarge,
                 )
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { showSourceSheet = true }) {
+                    Icon(
+                        Icons.Default.UploadFile,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 8.dp),
+                    )
+                    Text("Choose source")
+                }
             }
         }
 

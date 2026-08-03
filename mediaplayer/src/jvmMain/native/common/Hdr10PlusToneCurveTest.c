@@ -28,7 +28,8 @@ static size_t build_profile_b_payload(
     const uint32_t max_scl[3],
     uint32_t knee_y,
     const uint32_t* anchors,
-    uint32_t anchor_count
+    uint32_t anchor_count,
+    int rbsp_alignment_marker
 ) {
     static const uint8_t percentile_indexes[] = {1, 5, 10, 25, 50, 75, 90, 95, 99};
     BitWriter writer;
@@ -60,6 +61,7 @@ static size_t build_profile_b_payload(
     write_bits(&writer, anchor_count, 4);
     for (index = 0; index < anchor_count; ++index) write_bits(&writer, anchors[index], 10);
     write_bits(&writer, 0, 1);
+    if (rbsp_alignment_marker) write_bits(&writer, 1, 1);
     size = (writer.bit_count + 7) / 8;
     assert(size <= capacity);
     memcpy(output, writer.bytes, size);
@@ -82,7 +84,8 @@ int main(void) {
         max_scl,
         1200,
         anchors,
-        2
+        2,
+        0
     );
     size_t index;
 
@@ -106,10 +109,30 @@ int main(void) {
     size = build_profile_b_payload(
         payload,
         sizeof(payload),
+        max_scl,
+        1200,
+        anchors,
+        2,
+        1
+    );
+    assert(kmp_hdr10_plus_parse_tone_curve(
+        payload,
+        size,
+        600.0,
+        &source_peak,
+        curve,
+        error,
+        sizeof(error)
+    ));
+
+    size = build_profile_b_payload(
+        payload,
+        sizeof(payload),
         reference_max_scl,
         2048,
         reference_anchor,
-        1
+        1,
+        0
     );
     assert(kmp_hdr10_plus_parse_tone_curve(
         payload,

@@ -1,5 +1,6 @@
 package sample.app.feed
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
 
@@ -142,9 +144,8 @@ private fun FeedPostCard(post: Post, isMuted: Boolean, onMuteToggle: (Boolean) -
     val playerState = rememberRenderableVideoPlayerState(playbackOptions = MINI_VIDEO_PLAYBACK_OPTIONS)
 
     LaunchedEffect(post.videoUrl) {
-        playerState.openUri(post.videoUrl)
         playerState.loop = true
-        playerState.play()
+        playerState.openUri(post.videoUrl)
     }
 
     LaunchedEffect(isMuted) {
@@ -222,6 +223,32 @@ private fun FeedPostCard(post: Post, isMuted: Boolean, onMuteToggle: (Boolean) -
                     ) {
                         Icon(Icons.Default.PlayArrow, "Play", modifier = Modifier.size(28.dp))
                     }
+                }
+
+                playerState.error?.let { error ->
+                    Text(
+                        text =
+                            when (error) {
+                                is VideoPlayerError.CodecError -> error.message
+                                is VideoPlayerError.UnsupportedCodecError -> error.message
+                                is VideoPlayerError.NetworkError -> error.message
+                                is VideoPlayerError.CorsError -> error.message
+                                is VideoPlayerError.SourceError -> error.message
+                                is VideoPlayerError.NoSourceError -> error.message
+                                is VideoPlayerError.TimeoutError -> error.message
+                                is VideoPlayerError.HlsError -> error.message
+                                is VideoPlayerError.DrmError -> error.message
+                                is VideoPlayerError.ColorPipelineError -> error.message
+                                is VideoPlayerError.UnknownError -> error.message
+                            },
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier =
+                            Modifier
+                                .align(Alignment.Center)
+                                .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
                 }
 
                 // Volume toggle

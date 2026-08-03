@@ -162,6 +162,8 @@ class JvmVideoColorProbeTest {
         assertFalse(probe(profile = 8, compatibilityId = null).hasHdr10CompatibleBaseLayer)
         assertFalse(probe(profile = 8, compatibilityId = 2).hasHdr10CompatibleBaseLayer)
         assertFalse(probe(profile = 8, compatibilityId = 4).hasHdr10CompatibleBaseLayer)
+        assertTrue(probe(profile = 8, compatibilityId = 4).hasHlgCompatibleBaseLayer)
+        assertFalse(probe(profile = 8, compatibilityId = 2).hasHlgCompatibleBaseLayer)
         assertTrue(probe(profile = 8, compatibilityId = 1, rpuPresent = 1).hasHdr10CompatibleBaseLayer)
         assertTrue(probe(profile = 7, compatibilityId = 6).hasHdr10CompatibleBaseLayer)
     }

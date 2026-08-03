@@ -50,6 +50,7 @@ struct VideoPlayerInstance {
     std::atomic<int64_t> totalVideoFrames{0};
     std::atomic<int64_t> renderedVideoFrames{0};
     std::atomic<int64_t> droppedVideoFrames{0};
+    std::atomic<uint32_t> consecutiveEmptyVideoReads{0};
     std::atomic<int64_t> maximumAvSyncOffsetMicros{0};
 
     // A second, compressed SourceReader keeps the HEVC access units needed

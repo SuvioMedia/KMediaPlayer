@@ -61,6 +61,7 @@ public fun DesktopVideoPlayerWindow(
 }
 
 /** Explicit dedicated window for callers that already own a single backend state. */
+@Suppress("CyclomaticComplexMethod")
 @Composable
 public fun DesktopVideoPlayerWindow(
     playerState: VideoPlayerState,

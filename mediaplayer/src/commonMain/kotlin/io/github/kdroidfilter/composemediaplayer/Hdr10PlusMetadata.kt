@@ -398,10 +398,12 @@ private class BitReader(
     fun hasOnlyByteAlignmentPadding(): Boolean {
         val remaining = bytes.size * 8 - bitOffset
         if (remaining !in 0..7) return false
-        repeat(remaining) {
+        repeat(remaining) { paddingIndex ->
             val byteIndex = bitOffset ushr 3
             val bitIndex = 7 - (bitOffset and 7)
-            if (((bytes[byteIndex].toInt() ushr bitIndex) and 1) != 0) return false
+            val bit = (bytes[byteIndex].toInt() ushr bitIndex) and 1
+            // Accept zero-fill and the RBSP-style one marker used by real HEVC HDR10+ payloads.
+            if (bit != 0 && paddingIndex != 0) return false
             bitOffset += 1
         }
         return true

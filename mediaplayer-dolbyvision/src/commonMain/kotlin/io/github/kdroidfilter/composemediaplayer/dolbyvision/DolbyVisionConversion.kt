@@ -287,5 +287,6 @@ internal fun VideoPipelineSourceRequest.profile81OutputColorInfo() =
                 hasRpu = true,
                 enhancementLayer = DolbyVisionEnhancementLayer.NONE,
                 hasHdr10CompatibleBaseLayer = true,
+                hasHlgCompatibleBaseLayer = false,
             ),
     )
