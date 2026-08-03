@@ -4,17 +4,42 @@
 from __future__ import annotations
 
 import argparse
+import tomllib
 import xml.etree.ElementTree as element_tree
 from pathlib import Path
+
+
+VERSION_CATALOG = Path(__file__).resolve().parents[2] / "gradle/libs.versions.toml"
+
+
+def _catalog_version(alias: str) -> str:
+    with VERSION_CATALOG.open("rb") as catalog_file:
+        catalog = tomllib.load(catalog_file)
+    value = catalog.get("versions", {}).get(alias)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{VERSION_CATALOG}: missing version alias {alias!r}")
+    return value.strip()
 
 
 EXPECTED_BACKEND_DEPENDENCIES = {
     "composemediaplayer-ass-android": ("kmedia-ass-runtime-android", "0.1.0-rc.5"),
     "composemediaplayer-ass-jvm": ("kmedia-ass-runtime-desktop", "0.1.0-rc.5"),
-    "composemediaplayer-mpv-android": ("kmedia-mpv-runtime-android", "0.3.0-rc.6"),
-    "composemediaplayer-mpv-jvm": ("kmedia-mpv-runtime-desktop", "0.3.0-rc.6"),
-    "composemediaplayer-kmediabridge-android": ("kmedia-bridge-ffmpeg-android", "0.5.0-rc.4"),
-    "composemediaplayer-kmediabridge-jvm": ("kmedia-bridge-ffmpeg-jvm", "0.5.0-rc.4"),
+    "composemediaplayer-mpv-android": (
+        "kmedia-mpv-runtime-android",
+        _catalog_version("kmediaMpv"),
+    ),
+    "composemediaplayer-mpv-jvm": (
+        "kmedia-mpv-runtime-desktop",
+        _catalog_version("kmediaMpv"),
+    ),
+    "composemediaplayer-kmediabridge-android": (
+        "kmedia-bridge-ffmpeg-android",
+        _catalog_version("kmediaBridge"),
+    ),
+    "composemediaplayer-kmediabridge-jvm": (
+        "kmedia-bridge-ffmpeg-jvm",
+        _catalog_version("kmediaBridge"),
+    ),
 }
 EXPECTED_DESKTOP_WINDOW_DEPENDENCIES = {
     "composemediaplayer-jvm": "composemediaplayer-desktop-window-jvm",
