@@ -2,6 +2,7 @@
 
 androidcontextprovider = "1.0.1"
 filekit = "0.14.2"
+graalvmNativeImage = "25.0.2"
 kotlin = "2.4.10"
 agp = "9.3.1"
 kotlinx-coroutines = "1.11.0"
@@ -35,6 +36,7 @@ androidx-media3-database = { module = "androidx.media3:media3-database", version
 androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3Exoplayer" }
 filekit-core = { module = "io.github.vinceglb:filekit-core", version.ref = "filekit" }
 filekit-dialogs-compose = { module = "io.github.vinceglb:filekit-dialogs-compose", version.ref = "filekit" }
+graalvm-nativeimage = { module = "org.graalvm.sdk:nativeimage", version.ref = "graalvmNativeImage" }
 kotlinx-browser-wasm-js = { module = "org.jetbrains.kotlinx:kotlinx-browser-wasm-js", version.ref = "kotlinxBrowserWasmJs" }
 kotlinx-browser = { module = "org.jetbrains.kotlinx:kotlinx-browser", version.ref = "kotlinxBrowserWasmJs" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }

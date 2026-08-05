@@ -244,6 +244,7 @@ kotlin {
         jvmMain.dependencies {
             api(project(":mediaplayer-desktop-window"))
             implementation(libs.compose.ui)
+            compileOnly(libs.graalvm.nativeimage)
             api("io.github.shusek:kmedia-mpv-runtime-desktop:$kmediaMpvVersion") {
                 version { strictly(kmediaMpvVersion) }
             }
