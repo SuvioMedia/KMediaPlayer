@@ -1,4 +1,4 @@
-package io.github.kdroidfilter.composemediaplayer.desktop
+package io.github.kdroidfilter.composemediaplayer.desktop.tao
 
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.scene.ComposeScene
@@ -11,7 +11,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(InternalComposeUiApi::class)
-class NucleusNativeViewOverlayViewportTest {
+class NucleusTaoNativeViewWorkaroundsTest {
     @Test
     fun updatesPrivateOverlaySceneViewportAfterResize() {
         val currentSize = AtomicReference(IntSize(640, 360))

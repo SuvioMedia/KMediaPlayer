@@ -8,7 +8,6 @@ import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerSurface
-import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerWindowSurface
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerSurface
 
@@ -46,9 +45,9 @@ actual fun VideoPlayerSurface(
     }
 }
 
-/** Explicit full-player surface hosted by composemediaplayer-desktop-window. */
+/** Desktop surface variant that reports when the active backend has attached. */
 @Composable
-internal fun JvmDesktopVideoWindowSurface(
+internal fun JvmTaoPlaybackSurface(
     playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
@@ -70,25 +69,24 @@ internal fun JvmDesktopVideoWindowSurface(
                 modifier,
                 contentScale,
                 overlay,
-                isInFullscreenWindow = true,
                 onSurfaceAttached = onSurfaceAttached,
             )
         }
-        is MacVideoPlayerState ->
-            MacVideoPlayerWindowSurface(
+        is MacVideoPlayerState -> {
+            MacVideoPlayerSurface(
                 surfaceState,
                 modifier,
                 contentScale,
                 overlay,
-                onSurfaceAttached,
+                onSurfaceAttached = onSurfaceAttached,
             )
+        }
         is LinuxVideoPlayerState -> {
             LinuxVideoPlayerSurface(
                 surfaceState,
                 modifier,
                 contentScale,
                 overlay,
-                isInFullscreenWindow = true,
                 onSurfaceAttached = onSurfaceAttached,
             )
         }

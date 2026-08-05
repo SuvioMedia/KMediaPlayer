@@ -6,7 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopVideoWindowSurfaceProvider
+import io.github.kdroidfilter.composemediaplayer.desktop.TaoPlaybackSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
@@ -45,10 +45,11 @@ actual fun createVideoPlayerState(
  * - `dispose()`: Releases resources used by the video player and disposes of the state.
  */
 @Stable
+@OptIn(ExperimentalComposeMediaPlayerBackendApi::class)
 open class DefaultVideoPlayerState(
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState,
-    DesktopVideoWindowSurfaceProvider {
+    TaoPlaybackSurfaceProvider {
     val delegate: VideoPlayerState =
         EventingVideoPlayerState(
             when (CurrentPlatform.os) {
@@ -255,13 +256,13 @@ open class DefaultVideoPlayerState(
     override fun clearError() = delegate.clearError()
 
     @Composable
-    override fun RenderDesktopVideoWindowSurface(
+    override fun RenderTaoPlaybackSurface(
         modifier: Modifier,
         contentScale: ContentScale,
         overlay: @Composable () -> Unit,
         onSurfaceAttached: () -> Unit,
     ) {
-        JvmDesktopVideoWindowSurface(
+        JvmTaoPlaybackSurface(
             playerState = delegate,
             modifier = modifier,
             contentScale = contentScale,

@@ -24,10 +24,11 @@ Android distributions contain only `arm64-v8a` and `armeabi-v7a`. KMediaBridge k
 macOS is ARM64-only. Linux supports x86_64 and ARM64, Windows supports x86_64. iOS embeds the ARM64 device/simulator `KMediaMpv` pod and its exact `KMediaFfmpegRuntime` pod dependency; KMediaBridge remains unavailable as an iOS backend.
 
 Full-size JVM playback no longer relies on an implicitly created native window
-inside `VideoPlayerSurface`. Add `composemediaplayer-desktop-window` (it is also
+inside `VideoPlayerSurface`. Add `composemediaplayer-desktop-tao` (it is also
 transitive from the default player and MPV JVM artifacts), create one
-`DesktopPlaybackSession`, and render it with `DesktopVideoPlayerWindow`.
-Continue to use `VideoPlayerSurface` for feed/gallery/mini-player embedding.
+`DesktopPlaybackSession`, and render it with `DesktopPlaybackSurface` inside the
+application's Tao window. Use `VideoPlayerSurface` when no coordinated session
+is needed.
 
 The session's default route is:
 

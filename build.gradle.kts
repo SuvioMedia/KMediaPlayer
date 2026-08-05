@@ -37,7 +37,7 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
     abstract val extensionApiDependencies: SetProperty<String>
 
     @get:Input
-    abstract val desktopWindowDependencies: SetProperty<String>
+    abstract val desktopTaoDependencies: SetProperty<String>
 
     @get:Input
     abstract val defaultPlayerDependencies: SetProperty<String>
@@ -55,7 +55,7 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
     fun verifyBoundaries() {
         val core = coreDependencies.get()
         val extensionApi = extensionApiDependencies.get()
-        val desktopWindow = desktopWindowDependencies.get()
+        val desktopTao = desktopTaoDependencies.get()
         val defaultPlayer = defaultPlayerDependencies.get()
         val defaultPlayerExternal = defaultPlayerExternalDependencies.get()
         val mpvBackend = mpvBackendDependencies.get()
@@ -70,14 +70,14 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         check(":mediaplayer-core" in extensionApi) {
             "The extension API must consume the backend-neutral :mediaplayer-core contracts."
         }
-        check(":mediaplayer-core" in desktopWindow) {
-            "The desktop-window API must consume the backend-neutral :mediaplayer-core contracts."
+        check(":mediaplayer-core" in desktopTao) {
+            "The desktop Tao API must consume the backend-neutral :mediaplayer-core contracts."
         }
-        check(":mediaplayer-desktop-window" in defaultPlayer) {
-            "The default JVM player must implement the explicit desktop-window SPI."
+        check(":mediaplayer-desktop-tao" in defaultPlayer) {
+            "The default JVM player must implement the Tao playback SPI."
         }
-        check(":mediaplayer-desktop-window" in mpvBackend) {
-            "The MPV JVM backend must implement the explicit desktop-window SPI."
+        check(":mediaplayer-desktop-tao" in mpvBackend) {
+            "The MPV JVM backend must implement the Tao playback SPI."
         }
         check(":mediaplayer-core" in mpvBackend) {
             "The MPV backend must consume the backend-neutral :mediaplayer-core contracts."
@@ -97,8 +97,8 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         check(extensionApi.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
             ":mediaplayer-extension-api must not depend on a player implementation."
         }
-        check(desktopWindow.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
-            ":mediaplayer-desktop-window must not depend on a player implementation."
+        check(desktopTao.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
+            ":mediaplayer-desktop-tao must not depend on a player implementation."
         }
         check(optionalExtensions.none { edge -> edge.endsWith("->:mediaplayer") }) {
             "Optional pipeline extensions must depend on :mediaplayer-extension-api, not on the default player."
@@ -172,8 +172,8 @@ tasks.register("publishConsumerSmokeArtifacts") {
         ":mediaplayer-core:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-core:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-core:publishAndroidPublicationToConsumerSmokeRepository",
-        ":mediaplayer-desktop-window:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
-        ":mediaplayer-desktop-window:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-tao:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-tao:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-extension-api:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-extension-api:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-extension-api:publishAndroidPublicationToConsumerSmokeRepository",
@@ -230,7 +230,7 @@ gradle.projectsEvaluated {
     verifyBackendModuleBoundaries.configure {
         coreDependencies.set(project(":mediaplayer-core").productionProjectDependencyPaths())
         extensionApiDependencies.set(project(":mediaplayer-extension-api").productionProjectDependencyPaths())
-        desktopWindowDependencies.set(project(":mediaplayer-desktop-window").productionProjectDependencyPaths())
+        desktopTaoDependencies.set(project(":mediaplayer-desktop-tao").productionProjectDependencyPaths())
         defaultPlayerDependencies.set(project(":mediaplayer").productionProjectDependencyPaths())
         defaultPlayerExternalDependencies.set(project(":mediaplayer").productionExternalDependencyCoordinates())
         mpvBackendDependencies.set(project(":mediaplayer-mpv").productionProjectDependencyPaths())

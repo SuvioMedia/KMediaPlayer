@@ -9,8 +9,8 @@ application
 ├── composemediaplayer-ass ─────────────> composemediaplayer-extension-api ──┤
 ├── composemediaplayer-dolbyvision ─────> composemediaplayer-extension-api ──┤
 ├── composemediaplayer-kmediabridge ────> composemediaplayer-extension-api ──┤
-├── composemediaplayer-desktop-window ─────────────────────────────────> composemediaplayer-core
-└── composemediaplayer-mpv ──────────────────────────────────────────> desktop-window ──> core
+├── composemediaplayer-desktop-tao ────────────────────────────────────> composemediaplayer-core
+└── composemediaplayer-mpv ───────────────────────────────────────────────> desktop-tao ──> core
 ```
 
 Backend and extension implementations never depend on the default player:
@@ -20,9 +20,10 @@ Backend and extension implementations never depend on the default player:
 - `composemediaplayer-extension-api` owns lightweight common and platform
   contracts for source, subtitle, color-conversion, and scoped desktop bridge
   extensions. It depends only on core.
-- `composemediaplayer-desktop-window` owns the explicit JVM full-player window,
-  ordered routing, single-session ownership, and transactional backend switching.
-  It depends only on core and never chooses a platform implementation itself.
+- `composemediaplayer-desktop-tao` owns Tao native-surface interop, ordered
+  routing, single-session ownership, and transactional backend switching. It
+  does not create windows, depends only on core plus Tao, and never chooses a
+  platform implementation itself.
 - `composemediaplayer` owns the default Media3, AVPlayer, browser, and desktop
   JNI implementations plus the public `VideoPlayerSurface`. It consumes
   extension contracts but contains no ASS, Dolby Vision, KMediaBridge, or
@@ -42,9 +43,10 @@ extension API to implementation modules.
 
 ## Full desktop playback
 
-Full playback on JVM desktop is explicit and belongs in a dedicated player
-window. `VideoPlayerSurface` remains an embedded surface for feeds, galleries,
-previews, and mini players; it never creates another OS window as a side effect.
+Full playback on JVM desktop is rendered inside the application's existing Tao
+window. `DesktopPlaybackSurface` coordinates a `DesktopPlaybackSession`, while
+`VideoPlayerSurface` renders an app-owned state directly. Neither creates an OS
+window as a side effect.
 
 ```kotlin
 val options = VideoPlaybackOptions(
@@ -66,10 +68,9 @@ LaunchedEffect(uri) {
     session.open(DesktopPlaybackRequest(MediaSourceSpec(uri)))
 }
 
-DesktopVideoPlayerWindow(
+DesktopPlaybackSurface(
     session = session,
-    visible = true,
-    onCloseRequest = { /* return to the catalog */ },
+    modifier = Modifier.fillMaxSize(),
 )
 ```
 
@@ -85,13 +86,13 @@ session closes the previous one. Renderer selection and source adaptation are
 separate: `DesktopMediaSourcePolicy` controls direct/remux/transcode input while
 the backend controls the output surface.
 
-The application and player windows use the Nucleus Tao backend. On macOS Tao owns
-the `NSWindow`; AVFoundation/Metal, libVLC, and native MPV provide a direct `NSView`
+The application window uses the Nucleus Tao backend. On macOS Tao owns the
+`NSWindow`; AVFoundation/Metal, libVLC, and native MPV provide a direct `NSView`
 below the Compose control layer. Windows embeds a renderer-owned child `HWND`, and
 Linux embeds a renderer-owned `GtkWidget` for Wayland HDR or X11/XWayland libVLC.
-Resize and fullscreen stay inside one native hierarchy on every platform. No
-AWT/Swing/JAWT/JBR window peer is initialized. A software Skia route remains a
-valid SDR fallback and is never promoted to an HDR claim.
+Resize and fullscreen stay inside that one native hierarchy on every platform.
+No AWT/Swing/JAWT/JBR window peer is initialized. A software Skia route remains
+a valid SDR fallback and is never promoted to an HDR claim.
 
 Remote authenticated progressive input for MPV is read through the application's
 seekable data-source callback and materialized into a bounded private cache;

@@ -21,7 +21,7 @@ import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopVideoWindowSurfaceProvider
+import io.github.kdroidfilter.composemediaplayer.desktop.TaoPlaybackSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvEngine
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.MpvLoadFailure
@@ -59,7 +59,7 @@ internal class MpvVideoPlayerState(
     private val engine: LibMpvEngine,
 ) : AbstractMpvVideoPlayerState(),
     VideoPlayerSurfaceProvider,
-    DesktopVideoWindowSurfaceProvider {
+    TaoPlaybackSurfaceProvider {
     private val disposed = AtomicBoolean(false)
     private val renderLock = ReentrantLock()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -91,13 +91,13 @@ internal class MpvVideoPlayerState(
     }
 
     @Composable
-    override fun RenderDesktopVideoWindowSurface(
+    override fun RenderTaoPlaybackSurface(
         modifier: Modifier,
         contentScale: ContentScale,
         overlay: @Composable () -> Unit,
         onSurfaceAttached: () -> Unit,
     ) {
-        MpvVideoPlayerWindowSurface(
+        MpvVideoPlayerSurface(
             playerState = this,
             modifier = modifier,
             contentScale = contentScale,

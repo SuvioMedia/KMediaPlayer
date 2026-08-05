@@ -1,3 +1,5 @@
+@file:OptIn(io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi::class)
+
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import androidx.compose.foundation.layout.Box
@@ -13,9 +15,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurface
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurfaceKind
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
@@ -26,7 +28,6 @@ internal fun WindowsVideoPlayerSurface(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable () -> Unit = {},
-    @Suppress("UNUSED_PARAMETER") isInFullscreenWindow: Boolean = false,
     onSurfaceAttached: () -> Unit = {},
 ) {
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
@@ -55,13 +56,13 @@ internal fun WindowsVideoPlayerSurface(
         if (nativeSurfaceRequested) {
             val surface =
                 remember(playerState, playerState.nativeSurfaceGeneration, nativeSurfaceRequested) {
-                    DesktopNativeVideoSurface(
-                        kind = DesktopNativeVideoSurfaceKind.WINDOWS_HWND,
+                    TaoNativeVideoSurface(
+                        kind = TaoNativeVideoSurfaceKind.WINDOWS_HWND,
                         createHandle = playerState::createNativeVideoWindow,
                         disposeHandle = playerState::disposeNativeVideoWindow,
                     )
                 }
-            DesktopNativeVideoView(
+            TaoNativeVideoView(
                 surface = surface,
                 // Keep controls and the native child bound to the complete player viewport;
                 // the Win32 renderer is responsible for fitting the media within that child.

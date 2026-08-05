@@ -32,7 +32,7 @@ jobs:
           ./gradlew \
             :mediaplayer-core:dokkaGenerateHtml \
             :mediaplayer-extension-api:dokkaGenerateHtml \
-            :mediaplayer-desktop-window:dokkaGenerateHtml \
+            :mediaplayer-desktop-tao:dokkaGenerateHtml \
             :mediaplayer:dokkaGenerateHtml \
             :mediaplayer-mpv:dokkaGenerateHtml \
             :mediaplayer-ass:dokkaGenerateHtml \
@@ -53,7 +53,7 @@ jobs:
           set -euo pipefail
           mkdir -p \
             build/final/core \
-            build/final/desktop-window \
+            build/final/desktop-tao \
             build/final/extensions/api \
             build/final/extensions/ass \
             build/final/extensions/dolbyvision \
@@ -64,7 +64,7 @@ jobs:
           # Keep the default-player docs at the root of the artifact.
           cp -r mediaplayer/build/dokka/html/* build/final
           cp -r mediaplayer-core/build/dokka/html/* build/final/core
-          cp -r mediaplayer-desktop-window/build/dokka/html/* build/final/desktop-window
+          cp -r mediaplayer-desktop-tao/build/dokka/html/* build/final/desktop-tao
           cp -r mediaplayer-extension-api/build/dokka/html/* build/final/extensions/api
           cp -r mediaplayer-ass/build/dokka/html/* build/final/extensions/ass
           cp -r mediaplayer-dolbyvision/build/dokka/html/* build/final/extensions/dolbyvision

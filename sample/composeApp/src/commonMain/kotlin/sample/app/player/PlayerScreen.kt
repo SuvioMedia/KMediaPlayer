@@ -425,8 +425,8 @@ internal fun PlayerScreen(
             }
         }
 
-        // Before a dedicated native playback window exists, keep the same progress affordance in
-        // the Compose host window. Once media is attached, it is rendered in the native overlay.
+        // Keep the loading affordance in the Tao host scene until media is attached to the
+        // embedded playback surface.
         AnimatedVisibility(
             visible = !playerState.isPipActive && !playerState.hasMedia && loadingVisible,
             enter = fadeIn(tween(120)),

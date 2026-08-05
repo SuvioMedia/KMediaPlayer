@@ -1,3 +1,5 @@
+@file:OptIn(io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi::class)
+
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import androidx.compose.foundation.layout.Box
@@ -13,27 +15,15 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurface
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurfaceKind
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
 /** Renders macOS video through an AppKit `NSView` or the Java-toolkit-free Skia fallback. */
 @Composable
 internal fun MacVideoPlayerSurface(
-    playerState: MacVideoPlayerState,
-    modifier: Modifier = Modifier,
-    contentScale: ContentScale = ContentScale.Fit,
-    overlay: @Composable () -> Unit = {},
-    @Suppress("UNUSED_PARAMETER") isInFullscreenWindow: Boolean = false,
-) {
-    MacVideoSurfaceContent(playerState, modifier, contentScale, overlay)
-}
-
-/** Full-player variant that reports when its native child has been created. */
-@Composable
-internal fun MacVideoPlayerWindowSurface(
     playerState: MacVideoPlayerState,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
@@ -77,13 +67,13 @@ private fun MacVideoSurfaceContent(
         if (nativeSurfaceRequested) {
             val surface =
                 remember(playerState, playerState.nativeSurfaceGeneration, nativeSurfaceRequested, contentScale) {
-                    DesktopNativeVideoSurface(
-                        kind = DesktopNativeVideoSurfaceKind.MACOS_NS_VIEW,
+                    TaoNativeVideoSurface(
+                        kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
                         createHandle = { playerState.createNativeVideoView(contentScale.toHdrMetalMode()) },
                         disposeHandle = { handle -> playerState.disposeNativeVideoView(handle) },
                     )
                 }
-            DesktopNativeVideoView(
+            TaoNativeVideoView(
                 surface = surface,
                 // The native view and Compose overlay represent the complete player viewport.
                 // AVPlayerLayer/Metal applies ContentScale to the media inside that viewport.
@@ -143,15 +133,6 @@ private fun MacVideoOverlayContent(
     }
     Box(modifier = Modifier.fillMaxSize()) { overlay() }
 }
-
-/** Retained for source compatibility with render-policy tests and older callers. */
-internal fun shouldRenderMacVideoSurface(
-    hasMedia: Boolean,
-    libVlcNativeSurfaceRequested: Boolean,
-    @Suppress("UNUSED_PARAMETER") isFullscreen: Boolean,
-    @Suppress("UNUSED_PARAMETER") isInFullscreenWindow: Boolean,
-    @Suppress("UNUSED_PARAMETER") usesDedicatedNativeWindow: Boolean,
-): Boolean = hasMedia || libVlcNativeSurfaceRequested
 
 private fun ContentScale.toHdrMetalMode(): Int =
     when (this) {
