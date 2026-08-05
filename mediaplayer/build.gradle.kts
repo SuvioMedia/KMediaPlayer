@@ -279,7 +279,7 @@ kotlin {
         jvmMain {
             resources.exclude("composemediaplayer/native/darwin-x86-64/**")
             dependencies {
-                api(project(":mediaplayer-desktop-window"))
+                api(project(":mediaplayer-desktop-tao"))
                 implementation(libs.compose.ui)
             }
         }

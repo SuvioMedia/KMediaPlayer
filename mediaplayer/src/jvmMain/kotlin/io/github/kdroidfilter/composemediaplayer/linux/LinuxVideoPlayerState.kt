@@ -935,7 +935,7 @@ class LinuxVideoPlayerState(
             LinuxLibVlcRenderMode.MEMORY ->
                 "VLC is loaded dynamically from the user's installation; frames are copied into Compose SDR."
             LinuxLibVlcRenderMode.NATIVE_VIEW ->
-                "Native X11/XWayland child-window rendering for container compatibility; this path is not accepted as confirmed HDR. Compose controls use a separate overlay window."
+                "Native X11/XWayland child rendering for container compatibility; this path is not accepted as confirmed HDR. Compose controls remain in Tao's overlay scene."
         }
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {

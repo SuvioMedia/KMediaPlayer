@@ -41,9 +41,9 @@ EXPECTED_BACKEND_DEPENDENCIES = {
         _catalog_version("kmediaBridge"),
     ),
 }
-EXPECTED_DESKTOP_WINDOW_DEPENDENCIES = {
-    "composemediaplayer-jvm": "composemediaplayer-desktop-window-jvm",
-    "composemediaplayer-mpv-jvm": "composemediaplayer-desktop-window-jvm",
+EXPECTED_DESKTOP_TAO_DEPENDENCIES = {
+    "composemediaplayer-jvm": "composemediaplayer-desktop-tao-jvm",
+    "composemediaplayer-mpv-jvm": "composemediaplayer-desktop-tao-jvm",
 }
 
 
@@ -119,11 +119,11 @@ def validate_pom(pom: Path, expected_version: str) -> None:
         expected = ("io.github.shusek", expected_artifact, expected_dependency_version)
         if expected not in values:
             raise ValueError(f"{pom}: missing exact transitive backend dependency {expected}")
-    expected_desktop_window = EXPECTED_DESKTOP_WINDOW_DEPENDENCIES.get(artifact_id)
-    if expected_desktop_window is not None:
-        expected = ("io.github.shusek", expected_desktop_window, expected_version)
+    expected_desktop_tao = EXPECTED_DESKTOP_TAO_DEPENDENCIES.get(artifact_id)
+    if expected_desktop_tao is not None:
+        expected = ("io.github.shusek", expected_desktop_tao, expected_version)
         if expected not in values:
-            raise ValueError(f"{pom}: missing exact desktop-window dependency {expected}")
+            raise ValueError(f"{pom}: missing exact desktop-tao dependency {expected}")
 
 
 def validate_repository(repository: Path, version: str) -> int:

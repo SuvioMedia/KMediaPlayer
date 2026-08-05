@@ -63,8 +63,6 @@ kotlin {
         jvmMain.dependencies {
             api(project(":mediaplayer-core"))
             api(libs.compose.ui)
-            api(libs.nucleus.application)
-            api(libs.nucleus.decorated.window.core)
             api(libs.nucleus.decorated.window.tao)
             implementation(libs.compose.foundation)
             implementation(libs.kotlinx.coroutines.core)
@@ -98,13 +96,13 @@ publishing {
 mavenPublishing {
     coordinates(
         groupId = projectGroup,
-        artifactId = "composemediaplayer-desktop-window",
+        artifactId = "composemediaplayer-desktop-tao",
         version = projectVersion,
     )
 
     pom {
-        name.set("Compose Media Player Desktop Window")
-        description.set("Explicit desktop playback sessions and dedicated Compose/native player windows.")
+        name.set("Compose Media Player Desktop Tao")
+        description.set("Desktop playback sessions and native video surfaces for Nucleus Tao applications.")
         inceptionYear.set("2026")
         url.set("https://github.com/SuvioMedia/KMediaPlayer")
 
@@ -138,7 +136,7 @@ val java25ClassFileVersion = 69
 val verifyJvm25Bytecode =
     tasks.register("verifyJvm25Bytecode") {
         group = "verification"
-        description = "Verifies that every desktop-window JVM class targets Java 25."
+        description = "Verifies that every desktop playback JVM class targets Java 25."
 
         val jvmJar = tasks.named<Jar>("jvmJar")
         dependsOn(jvmJar)
@@ -165,7 +163,7 @@ val verifyJvm25Bytecode =
                         }
                     }
             }
-            check(verifiedClasses > 0) { "The desktop-window JVM publication contains no classes." }
+            check(verifiedClasses > 0) { "The desktop playback JVM publication contains no classes." }
         }
     }
 
@@ -176,7 +174,7 @@ tasks.named("check") {
 val validateReleaseVersion =
     tasks.register("validateReleaseVersion") {
         group = "verification"
-        description = "Rejects mutable or invalid versions before publishing desktop-window remotely."
+        description = "Rejects mutable or invalid versions before publishing desktop playback remotely."
         inputs.property("releaseVersion", projectVersion)
 
         doLast {
@@ -191,7 +189,7 @@ val validateReleaseVersion =
                 "Release version '$releaseVersion' is not a valid immutable SemVer version."
             }
             check(releaseVersion.substringBefore('.').toInt() >= 4) {
-                "The Tao desktop-window API belongs to KMediaPlayer 4.x and cannot be published as $releaseVersion."
+                "The Tao desktop playback API belongs to KMediaPlayer 4.x and cannot be published as $releaseVersion."
             }
         }
     }

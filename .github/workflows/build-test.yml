@@ -82,7 +82,7 @@ jobs:
         run: >-
           ${{ matrix.gradle }} :mediaplayer-core:jvmTest
           :mediaplayer-extension-api:jvmTest
-          :mediaplayer-desktop-window:jvmTest
+          :mediaplayer-desktop-tao:jvmTest
           :mediaplayer:compileKotlinJvm :mediaplayer:jvmTest
           :mediaplayer:verifyJvmMacArmNativeMatrix
           :mediaplayer-ass:jvmTest :mediaplayer-ass:verifyJvmMacArmNativeMatrix
@@ -103,8 +103,8 @@ jobs:
             mediaplayer/build/test-results/
             mediaplayer-extension-api/build/reports/tests/
             mediaplayer-extension-api/build/test-results/
-            mediaplayer-desktop-window/build/reports/tests/
-            mediaplayer-desktop-window/build/test-results/
+            mediaplayer-desktop-tao/build/reports/tests/
+            mediaplayer-desktop-tao/build/test-results/
             mediaplayer-ass/build/reports/tests/
             mediaplayer-ass/build/test-results/
             mediaplayer-dolbyvision/build/reports/tests/
@@ -463,7 +463,7 @@ jobs:
         run: >-
           ./gradlew publishConsumerSmokeArtifacts :mediaplayer:verifyJvm25Bytecode
           :mediaplayer-core:verifyJvm25Bytecode
-          :mediaplayer-desktop-window:verifyJvm25Bytecode
+          :mediaplayer-desktop-tao:verifyJvm25Bytecode
           :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion=0.0.0-consumer.${{ github.sha }}
           -PcomposeMediaPlayer.skipNativeBuild=true
@@ -504,7 +504,7 @@ jobs:
       - name: Validate KMediaPlayer 4.0 release versions
         run: >-
           ./gradlew :mediaplayer-core:validateReleaseVersion
-          :mediaplayer-desktop-window:validateReleaseVersion
+          :mediaplayer-desktop-tao:validateReleaseVersion
           :mediaplayer:validateReleaseVersion
           :mediaplayer-mpv:validateReleaseVersion
           :mediaplayer-ass:validateReleaseVersion
@@ -516,11 +516,11 @@ jobs:
         run: >-
           ./gradlew :mediaplayer-core:ktlintCheck
           :mediaplayer-extension-api:ktlintCheck
-          :mediaplayer-desktop-window:ktlintCheck
+          :mediaplayer-desktop-tao:ktlintCheck
           :mediaplayer:ktlintCheck :mediaplayer-mpv:ktlintCheck
           :mediaplayer-ass:ktlintCheck :mediaplayer-dolbyvision:ktlintCheck
           :mediaplayer-kmediabridge:ktlintCheck
-          :mediaplayer-extension-api:detekt :mediaplayer-desktop-window:detekt
+          :mediaplayer-extension-api:detekt :mediaplayer-desktop-tao:detekt
           :mediaplayer:detekt :mediaplayer-ass:detekt
           :mediaplayer-dolbyvision:detekt :mediaplayer-kmediabridge:detekt
           verifyBackendModuleBoundaries
@@ -577,7 +577,7 @@ jobs:
         run: >-
           ./gradlew :mediaplayer-core:checkKotlinAbi
           :mediaplayer-extension-api:checkKotlinAbi
-          :mediaplayer-desktop-window:checkKotlinAbi
+          :mediaplayer-desktop-tao:checkKotlinAbi
           :mediaplayer:checkKotlinAbi
           :mediaplayer-mpv:checkKotlinAbi
           :mediaplayer-ass:checkKotlinAbi

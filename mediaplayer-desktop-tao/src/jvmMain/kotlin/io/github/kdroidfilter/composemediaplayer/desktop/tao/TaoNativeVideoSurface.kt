@@ -1,4 +1,6 @@
-package io.github.kdroidfilter.composemediaplayer.desktop
+@file:OptIn(io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi::class)
+
+package io.github.kdroidfilter.composemediaplayer.desktop.tao
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,11 +18,13 @@ import dev.nucleusframework.window.tao.NucleusPlatformView
 import dev.nucleusframework.window.tao.nucleusGtkPlatformView
 import dev.nucleusframework.window.tao.nucleusHwndPlatformView
 import dev.nucleusframework.window.tao.nucleusNsPlatformView
+import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /** Native child type mounted directly by Nucleus Tao, without a Java UI-toolkit intermediary. */
-public enum class DesktopNativeVideoSurfaceKind {
+@ExperimentalComposeMediaPlayerBackendApi
+public enum class TaoNativeVideoSurfaceKind {
     MACOS_NS_VIEW,
     WINDOWS_HWND,
     LINUX_GTK_WIDGET,
@@ -33,8 +37,9 @@ public enum class DesktopNativeVideoSurfaceKind {
  * sizes that child. [disposeHandle] is called exactly once when the Compose node leaves the tree.
  */
 @Stable
-public class DesktopNativeVideoSurface(
-    public val kind: DesktopNativeVideoSurfaceKind,
+@ExperimentalComposeMediaPlayerBackendApi
+public class TaoNativeVideoSurface(
+    public val kind: TaoNativeVideoSurfaceKind,
     private val createHandle: () -> Long,
     private val resizeHandle: (handle: Long, widthPx: Int, heightPx: Int) -> Unit = { _, _, _ -> },
     private val setBoundsHandle: (handle: Long, xPx: Int, yPx: Int, widthPx: Int, heightPx: Int) -> Unit =
@@ -143,8 +148,9 @@ public class DesktopNativeVideoSurface(
 
 /** Embeds [surface] and renders [overlay] in Nucleus' native sibling overlay. */
 @Composable
-public fun DesktopNativeVideoView(
-    surface: DesktopNativeVideoSurface,
+@ExperimentalComposeMediaPlayerBackendApi
+public fun TaoNativeVideoView(
+    surface: TaoNativeVideoSurface,
     modifier: Modifier = Modifier,
     overlay: @Composable () -> Unit = {},
     onAttached: () -> Unit = {},
@@ -182,7 +188,7 @@ public fun DesktopNativeVideoView(
     }
 }
 
-private fun DesktopNativeVideoSurface.toNucleusPlatformView(
+private fun TaoNativeVideoSurface.toNucleusPlatformView(
     scheduleInterop: ((() -> Unit) -> Unit)?,
 ): NucleusPlatformView {
     val dispose = {
@@ -195,7 +201,7 @@ private fun DesktopNativeVideoSurface.toNucleusPlatformView(
         }
     }
     return when (kind) {
-        DesktopNativeVideoSurfaceKind.MACOS_NS_VIEW ->
+        TaoNativeVideoSurfaceKind.MACOS_NS_VIEW ->
             nucleusNsPlatformView(
                 handle = ::handle,
                 onResize = ::resize,
@@ -203,7 +209,7 @@ private fun DesktopNativeVideoSurface.toNucleusPlatformView(
                 onClearFocus = ::clearFocus,
                 onDispose = dispose,
             )
-        DesktopNativeVideoSurfaceKind.WINDOWS_HWND ->
+        TaoNativeVideoSurfaceKind.WINDOWS_HWND ->
             nucleusHwndPlatformView(
                 handle = ::handle,
                 onResize = ::resize,
@@ -211,7 +217,7 @@ private fun DesktopNativeVideoSurface.toNucleusPlatformView(
                 onClearFocus = ::clearFocus,
                 onDispose = dispose,
             )
-        DesktopNativeVideoSurfaceKind.LINUX_GTK_WIDGET ->
+        TaoNativeVideoSurfaceKind.LINUX_GTK_WIDGET ->
             nucleusGtkPlatformView(
                 handle = ::handle,
                 onResize = ::resize,

@@ -1,16 +1,17 @@
-package io.github.kdroidfilter.composemediaplayer.desktop
+package io.github.kdroidfilter.composemediaplayer.desktop.tao
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class DesktopNativeVideoSurfaceTest {
+@OptIn(io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi::class)
+class TaoNativeVideoSurfaceTest {
     @Test
     fun `native handle is created and disposed exactly once`() {
         var createCalls = 0
         val disposed = mutableListOf<Long>()
         val surface =
-            DesktopNativeVideoSurface(
-                kind = DesktopNativeVideoSurfaceKind.MACOS_NS_VIEW,
+            TaoNativeVideoSurface(
+                kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
                 createHandle = {
                     createCalls++
                     42L
@@ -32,8 +33,8 @@ class DesktopNativeVideoSurfaceTest {
     fun `failed creation is stable until a new surface lifecycle is composed`() {
         var createCalls = 0
         val surface =
-            DesktopNativeVideoSurface(
-                kind = DesktopNativeVideoSurfaceKind.LINUX_GTK_WIDGET,
+            TaoNativeVideoSurface(
+                kind = TaoNativeVideoSurfaceKind.LINUX_GTK_WIDGET,
                 createHandle = {
                     createCalls++
                     0L
@@ -53,8 +54,8 @@ class DesktopNativeVideoSurfaceTest {
         val disposed = mutableListOf<Long>()
         val scheduled = mutableListOf<() -> Unit>()
         val surface =
-            DesktopNativeVideoSurface(
-                kind = DesktopNativeVideoSurfaceKind.MACOS_NS_VIEW,
+            TaoNativeVideoSurface(
+                kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
                 createHandle = { 42L },
                 disposeHandle = disposed::add,
             )
@@ -77,8 +78,8 @@ class DesktopNativeVideoSurfaceTest {
         val disposed = mutableListOf<Long>()
         val scheduled = mutableListOf<() -> Unit>()
         val surface =
-            DesktopNativeVideoSurface(
-                kind = DesktopNativeVideoSurfaceKind.MACOS_NS_VIEW,
+            TaoNativeVideoSurface(
+                kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
                 createHandle = { 42L },
                 disposeHandle = disposed::add,
             )

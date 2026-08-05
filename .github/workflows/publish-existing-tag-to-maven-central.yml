@@ -209,7 +209,7 @@ jobs:
         run: >-
           ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
           :mediaplayer-extension-api:publishAndReleaseToMavenCentral
-          :mediaplayer-desktop-window:publishAndReleaseToMavenCentral
+          :mediaplayer-desktop-tao:publishAndReleaseToMavenCentral
           :mediaplayer:publishAndReleaseToMavenCentral
           :mediaplayer-mpv:publishAndReleaseToMavenCentral
           :mediaplayer-ass:publishAndReleaseToMavenCentral

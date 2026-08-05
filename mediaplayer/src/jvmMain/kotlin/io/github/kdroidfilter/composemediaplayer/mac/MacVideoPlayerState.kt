@@ -1424,9 +1424,9 @@ class MacVideoPlayerState(
     private fun avFoundationNotes(): String =
         when {
             shouldUseHdrMetalSurface() && usesMacMetalProjectionRenderer() ->
-                "Projected video uses a per-player FP16 Metal layer in a dedicated native player window; Compose controls share that window."
+                "Projected video uses a per-player FP16 Metal layer embedded in the current Tao window below Compose controls."
             shouldUseHdrMetalSurface() ->
-                "Native macOS HDR path uses a dedicated player window shared with Compose controls."
+                "Native macOS HDR uses an AppKit child view embedded in the current Tao window below Compose controls."
             hdrToneMappingRequested -> "HDR sources are tone-mapped to SDR for stable Compose rendering."
             else -> "No external GPL components are bundled or linked."
         }
@@ -1688,7 +1688,7 @@ class MacVideoPlayerState(
                 subtitleRenderer = null,
                 subtitleSource = null,
                 notes =
-                    "VLC renders into a native macOS view in a dedicated player window shared with Compose controls.",
+                    "VLC renders into an AppKit child view embedded in the current Tao window below Compose controls.",
             )
         }
         val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }

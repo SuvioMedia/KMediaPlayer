@@ -1,6 +1,6 @@
 @file:Suppress("TooManyFunctions")
 
-package io.github.kdroidfilter.composemediaplayer.desktop
+package io.github.kdroidfilter.composemediaplayer.desktop.tao
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocal
@@ -74,7 +74,7 @@ internal fun SyncNucleusNativeViewOverlayViewport(
  * stopped responding beside a navigation rail. Registering the same region in that coordinate
  * space preserves normal Nucleus behaviour on Windows/Linux and corrects the bounded macOS bug.
  */
-public fun Modifier.consumeNativeVideoOverlayPointerEvents(cursor: PointerIcon? = null): Modifier =
+internal fun Modifier.consumeTaoVideoOverlayPointerEvents(cursor: PointerIcon? = null): Modifier =
     composed {
         val nucleusModifier = this.consumeOverlayPointerEvents(cursor)
         val overlayLocal = nucleusOverlayControllerLocal ?: return@composed nucleusModifier

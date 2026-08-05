@@ -1,3 +1,5 @@
+@file:OptIn(io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi::class)
+
 package io.github.kdroidfilter.composemediaplayer.linux
 
 import androidx.compose.foundation.layout.Box
@@ -13,9 +15,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurface
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurfaceKind
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
@@ -26,7 +28,6 @@ internal fun LinuxVideoPlayerSurface(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable () -> Unit = {},
-    @Suppress("UNUSED_PARAMETER") isInFullscreenWindow: Boolean = false,
     onSurfaceAttached: () -> Unit = {},
 ) {
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
@@ -55,13 +56,13 @@ internal fun LinuxVideoPlayerSurface(
         if (nativeSurfaceRequested) {
             val surface =
                 remember(playerState, playerState.nativeSurfaceGeneration, nativeSurfaceRequested) {
-                    DesktopNativeVideoSurface(
-                        kind = DesktopNativeVideoSurfaceKind.LINUX_GTK_WIDGET,
+                    TaoNativeVideoSurface(
+                        kind = TaoNativeVideoSurfaceKind.LINUX_GTK_WIDGET,
                         createHandle = playerState::createNativeVideoWidget,
                         disposeHandle = playerState::disposeNativeVideoWidget,
                     )
                 }
-            DesktopNativeVideoView(
+            TaoNativeVideoView(
                 surface = surface,
                 // GTK owns media scaling inside the native child. The child and its Compose
                 // overlay must continue to cover the complete player viewport.

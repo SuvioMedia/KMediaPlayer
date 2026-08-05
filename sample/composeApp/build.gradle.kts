@@ -72,6 +72,12 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     }
 }
 
+// GraalVM resource discovery scans the generated libdovi runtime directory. Make the
+// producing task explicit so Gradle never analyzes a stale or only partially generated tree.
+tasks.matching { it.name == "generateGraalvmProjectResourceMetadata" }.configureEach {
+    dependsOn(":mediaplayer-dolbyvision:packageHostLibDovi")
+}
+
 kotlin {
     jvmToolchain(25)
 

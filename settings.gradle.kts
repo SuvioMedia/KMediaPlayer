@@ -170,8 +170,8 @@ dependencyResolutionManagement {
                 includeModule("io.github.shusek", "composemediaplayer-core")
                 includeModule("io.github.shusek", "composemediaplayer-core-android")
                 includeModule("io.github.shusek", "composemediaplayer-core-jvm")
-                includeModule("io.github.shusek", "composemediaplayer-desktop-window")
-                includeModule("io.github.shusek", "composemediaplayer-desktop-window-jvm")
+                includeModule("io.github.shusek", "composemediaplayer-desktop-tao")
+                includeModule("io.github.shusek", "composemediaplayer-desktop-tao-jvm")
                 includeModule("io.github.shusek", "composemediaplayer-extension-api")
                 includeModule("io.github.shusek", "composemediaplayer-extension-api-android")
                 includeModule("io.github.shusek", "composemediaplayer-extension-api-jvm")
@@ -197,7 +197,7 @@ dependencyResolutionManagement {
     }
 }
 include(":mediaplayer-core")
-include(":mediaplayer-desktop-window")
+include(":mediaplayer-desktop-tao")
 include(":mediaplayer-extension-api")
 include(":mediaplayer")
 include(":mediaplayer-ass")

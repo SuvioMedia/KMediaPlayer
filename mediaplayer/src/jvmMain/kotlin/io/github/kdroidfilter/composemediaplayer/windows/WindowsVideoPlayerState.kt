@@ -1660,7 +1660,7 @@ class WindowsVideoPlayerState(
             WindowsLibVlcRenderMode.MEMORY ->
                 "VLC is loaded dynamically from the user's installation; frames are copied into Compose SDR."
             WindowsLibVlcRenderMode.NATIVE_VIEW ->
-                "Native child-window rendering for container compatibility; this path is not accepted as confirmed HDR. Compose controls use a separate overlay window."
+                "Native child HWND rendering for container compatibility; this path is not accepted as confirmed HDR. Compose controls remain in Tao's overlay scene."
         }
 
     private fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {

@@ -10,33 +10,35 @@ Keep every KMediaPlayer artifact on the same immutable version:
 
 ```kotlin
 implementation("io.github.shusek:composemediaplayer:4.0.1")
-implementation("io.github.shusek:composemediaplayer-desktop-window:4.0.1")
+implementation("io.github.shusek:composemediaplayer-desktop-tao:4.0.1")
 
 // Optional backends; add only those selected by the application.
 implementation("io.github.shusek:composemediaplayer-mpv:4.0.1")
 implementation("io.github.shusek:composemediaplayer-kmediabridge:4.0.1")
 ```
 
-The default player and MPV JVM artifacts already expose the desktop-window
-contract transitively. A direct desktop-window dependency is useful when the
+The default player and MPV JVM artifacts already expose the desktop Tao
+contract transitively. A direct desktop Tao dependency is useful when the
 application owns its desktop bootstrap explicitly.
+
+The former `composemediaplayer-desktop-window` coordinate is not published as
+an alias. Replace it directly; the removed window APIs have no deprecated
+wrappers.
 
 ## Desktop application bootstrap
 
-Desktop JVM applications must run through Nucleus Tao and provide the Nucleus
-application scope to the player:
+Desktop JVM applications must run through Nucleus Tao. The application owns the
+window; the player only contributes content and native child surfaces:
 
 ```kotlin
 fun main(args: Array<String>) = nucleusApplication(args, backend = NucleusBackend.Tao) {
     val app = this
-    app.ProvideDesktopVideoApplicationScope {
-        app.DecoratedWindow(
-            onCloseRequest = app::exitApplication,
-            title = "My app",
-            nativePopupLayers = true,
-        ) {
-            App()
-        }
+    app.DecoratedWindow(
+        onCloseRequest = app::exitApplication,
+        title = "My app",
+        nativePopupLayers = true,
+    ) {
+        App()
     }
 }
 ```
@@ -45,11 +47,12 @@ The verified desktop pair is Nucleus `2.2.0` with Compose Multiplatform
 `1.11.1`, running on Java 25. The production path does not initialize AWT,
 Swing, JAWT, or a JetBrains Runtime window toolkit.
 
-## Player windows and surfaces
+## Playback surfaces
 
-Create one `DesktopPlaybackSession` for full-size playback and render it with
-`DesktopVideoPlayerWindow`. Continue using `VideoPlayerSurface` for embedded
-feed, gallery, and mini-player content.
+Create one `DesktopPlaybackSession` for coordinated full-size playback and
+render it with `DesktopPlaybackSurface` inside the application's existing Tao
+window. Use `VideoPlayerSurface` when the application owns one player state
+directly. Neither API creates another OS window.
 
 Tao owns the platform window. Each backend supplies a native child view:
 
@@ -58,12 +61,19 @@ Tao owns the platform window. Each backend supplies a native child view:
 - Linux: `GtkWidget*` for GStreamer, MPV, or libVLC.
 
 Compose controls stay in Nucleus' overlay scene above the native renderer.
-Fullscreen changes the Tao-owned window placement instead of moving a renderer
-between Java window peers.
+Fullscreen changes the application's Tao-owned window placement instead of
+moving a renderer between window peers.
 
 `JvmNativeVideoHost`, the JBR Wayland surface host, and the AWT/JAWT window
 bridge have been removed. Applications that imported those internal JVM APIs
-must migrate to `DesktopNativeVideoSurface` and `DesktopVideoPlayerWindow`.
+must migrate to `TaoNativeVideoSurface` for backend interop and
+`DesktopPlaybackSurface` for session rendering.
+
+Backend implementations import `TaoNativeVideoSurface`,
+`TaoNativeVideoSurfaceKind`, and `TaoNativeVideoView` from
+`io.github.kdroidfilter.composemediaplayer.desktop.tao` and opt in to
+`ExperimentalComposeMediaPlayerBackendApi`. Regular applications only use
+`DesktopPlaybackSurface` and do not opt in to the Tao backend SPI.
 
 ## Backend switching
 

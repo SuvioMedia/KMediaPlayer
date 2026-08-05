@@ -155,7 +155,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("stageWindowsMpvRuntimeForVerification", mpv_build)
 
-    def test_consumer_smoke_trusts_the_generated_desktop_window_fixtures(self) -> None:
+    def test_consumer_smoke_trusts_the_generated_desktop_tao_fixtures(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         verification = (
             repository_root / "gradle/verification-metadata.xml"
@@ -164,7 +164,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
             "</trusted-artifacts>", 1
         )[0]
 
-        self.assertIn("desktop-window", trusted_artifacts)
+        self.assertIn("desktop-tao", trusted_artifacts)
         self.assertIn("0[.]0[.]0-consumer", trusted_artifacts)
 
     def test_all_apple_release_downloads_are_authenticated(self) -> None:

@@ -21,8 +21,8 @@ repository="${repository%/}"
 group_path="io/github/shusek"
 artifacts=(
   composemediaplayer-core
-  composemediaplayer-desktop-window
-  composemediaplayer-desktop-window-jvm
+  composemediaplayer-desktop-tao
+  composemediaplayer-desktop-tao-jvm
   composemediaplayer-extension-api
   composemediaplayer-extension-api-android
   composemediaplayer-extension-api-jvm

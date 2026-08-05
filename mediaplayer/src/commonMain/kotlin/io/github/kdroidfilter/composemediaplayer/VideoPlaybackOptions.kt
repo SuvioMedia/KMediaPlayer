@@ -55,7 +55,7 @@ enum class DesktopVideoBackend {
  * Selects how the default desktop platform backend presents video.
  *
  * [PREFER_NATIVE] uses the platform's direct video surface when it is compatible with the
- * requested color pipeline and the state is hosted by the explicit desktop-window API.
+ * requested color pipeline and the state is hosted in a Nucleus Tao `NativeView`.
  * [COMPOSE] copies decoded frames into Compose and is intended for thumbnails, feeds, and other
  * embedded mini players that must remain inside their parent layout.
  */
@@ -69,7 +69,7 @@ enum class DesktopVideoSurfaceMode {
  *
  * [INHERIT] preserves the legacy backend/property policy. The remaining values are explicit and
  * keep source adaptation independent from [DesktopVideoBackend], which lets an application use a
- * platform-native output window without giving the adapter ownership of that window.
+ * platform-native output surface without giving the adapter ownership of that surface.
  */
 enum class DesktopMediaSourcePolicy {
     INHERIT,

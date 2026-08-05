@@ -1,3 +1,5 @@
+@file:OptIn(io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi::class)
+
 package io.github.kdroidfilter.composemediaplayer.mpv
 
 import androidx.compose.foundation.Image
@@ -18,9 +20,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurface
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoSurfaceKind
-import io.github.kdroidfilter.composemediaplayer.desktop.DesktopNativeVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -29,22 +31,6 @@ import kotlinx.coroutines.withContext
 /** Uses a Tao-hosted native macOS OpenGL/EDR view, with Skia as the portable fallback. */
 @Composable
 internal fun MpvVideoPlayerSurface(
-    playerState: MpvVideoPlayerState,
-    modifier: Modifier = Modifier,
-    contentScale: ContentScale = ContentScale.Fit,
-    overlay: @Composable () -> Unit = {},
-) {
-    MpvVideoSurfaceContent(
-        playerState = playerState,
-        modifier = modifier,
-        contentScale = contentScale,
-        overlay = overlay,
-    )
-}
-
-/** Full-player variant that reports when Tao has obtained its native child. */
-@Composable
-internal fun MpvVideoPlayerWindowSurface(
     playerState: MpvVideoPlayerState,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
@@ -83,13 +69,13 @@ private fun MpvVideoSurfaceContent(
     if (useNativeMacSurface) {
         val surface =
             remember(playerState, useNativeMacSurface) {
-                DesktopNativeVideoSurface(
-                    kind = DesktopNativeVideoSurfaceKind.MACOS_NS_VIEW,
+                TaoNativeVideoSurface(
+                    kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
                     createHandle = playerState::createNativeMacView,
                     disposeHandle = playerState::disposeNativeMacView,
                 )
             }
-        DesktopNativeVideoView(
+        TaoNativeVideoView(
             surface = surface,
             modifier = modifier.background(Color.Black),
             overlay = overlay,
