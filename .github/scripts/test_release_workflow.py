@@ -189,6 +189,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("verify_maven_central_release.sh", workflow)
         self.assertIn("mavenCentral()", settings)
+        self.assertIn("https://suviomedia.github.io/Nucleus/maven", settings)
+        self.assertIn('includeGroup("dev.nucleusframework")', settings)
         self.assertIn("composemediaplayer-mpv-jvm", build)
         self.assertIn("composemediaplayer-kmediabridge-jvm", build)
         self.assertIn("composemediaplayer-mpv-android", build)

@@ -12,6 +12,14 @@ dependencyResolutionManagement {
         if (publicRepositoryOverride != null) {
             maven(publicRepositoryOverride)
         }
+        exclusiveContent {
+            forRepository {
+                maven("https://suviomedia.github.io/Nucleus/maven")
+            }
+            filter {
+                includeGroup("dev.nucleusframework")
+            }
+        }
         mavenCentral()
         google()
     }
