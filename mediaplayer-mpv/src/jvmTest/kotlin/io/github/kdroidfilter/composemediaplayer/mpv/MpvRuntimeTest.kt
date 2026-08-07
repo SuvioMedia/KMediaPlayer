@@ -119,6 +119,14 @@ class MpvRuntimeTest {
             MpvBackendUnavailableReason.INVALID_RUNTIME,
             assertIs<MpvBackendAvailability.Unavailable>(unavailable).reason,
         )
+        val relativeRuntimeDirectory =
+            inspectMpvBackend(
+                MpvPlaybackOptions(desktopRuntimeDirectory = "relative-runtime"),
+            )
+        assertEquals(
+            MpvBackendUnavailableReason.INVALID_RUNTIME,
+            assertIs<MpvBackendAvailability.Unavailable>(relativeRuntimeDirectory).reason,
+        )
     }
 
     @Test

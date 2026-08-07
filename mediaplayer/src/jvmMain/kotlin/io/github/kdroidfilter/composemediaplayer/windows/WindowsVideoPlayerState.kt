@@ -1339,14 +1339,17 @@ class WindowsVideoPlayerState(
                         sizeArr[1] = probedInfo.videoHeight
                     }
                 }
-                if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
+                val allowsUnknownNativeVideoSize =
+                    nativeBackendUsesLibVlc &&
+                        nativeBackendLibVlcRenderMode == WindowsLibVlcRenderMode.NATIVE_VIEW
+                if ((sizeArr[0] <= 0 || sizeArr[1] <= 0) && !allowsUnknownNativeVideoSize) {
                     commitSourceError("Failed to retrieve video size")
                     nativeCloseMedia(instance)
                     uncommittedMediaOpened = false
                     return@withLock
                 }
-                videoWidth = sizeArr[0]
-                videoHeight = sizeArr[1]
+                videoWidth = sizeArr[0].coerceAtLeast(0)
+                videoHeight = sizeArr[1].coerceAtLeast(0)
 
                 // Scale output to match display surface (saves memory for 4K+ video)
                 if (surfaceWidth > 0 && surfaceHeight > 0) {
@@ -2385,6 +2388,14 @@ class WindowsVideoPlayerState(
             while (scope.isActive && _hasMedia && !lifecycle.isDisposed) {
                 val instance = videoPlayerInstance
                 if (instance == 0L) break
+
+                if (_duration <= Duration.ZERO) {
+                    val durationArr = LongArray(1)
+                    if (nativeGetMediaDuration(instance, durationArr) >= 0 && durationArr[0] > 0L) {
+                        _duration = durationArr[0].hundredNanosecondsAsDuration()
+                        _metadata = _metadata.copy(duration = _duration)
+                    }
+                }
 
                 if (nativeIsEOF(instance)) {
                     if (_duration <= Duration.ZERO) {

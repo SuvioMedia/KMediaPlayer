@@ -21,6 +21,10 @@ import androidx.compose.runtime.remember
  * verified KMediaMpv runtime on currently published Android and desktop targets.
  * Windows and iOS applications can opt into an app-supplied runtime with
  * [MpvRuntimeSource.System] or [MpvRuntimeSource.ExplicitPath].
+ * @param desktopRuntimeDirectory optional absolute, application-private parent directory used
+ * to extract the verified bundled desktop runtime. Desktop applications whose default temporary
+ * directory is shared or otherwise rejected can provision a secure directory and pass it here.
+ * Other targets ignore this option.
  */
 @Stable
 data class MpvPlaybackOptions(
@@ -30,6 +34,7 @@ data class MpvPlaybackOptions(
     val androidDecodeMode: MpvAndroidDecodeMode = MpvAndroidDecodeMode.MEDIA_CODEC_COPY,
     val maxDesktopRenderPixels: Int = DEFAULT_MAX_DESKTOP_RENDER_PIXELS,
     val runtimeSource: MpvRuntimeSource = MpvRuntimeSource.Bundled,
+    val desktopRuntimeDirectory: String? = null,
 ) {
     init {
         require(subtitleFontsDirectory == null || subtitleFontsDirectory.isNotBlank()) {
@@ -40,6 +45,12 @@ data class MpvPlaybackOptions(
         }
         require(maxDesktopRenderPixels in 1..MAX_DESKTOP_RENDER_PIXELS) {
             "maxDesktopRenderPixels must be between 1 and $MAX_DESKTOP_RENDER_PIXELS."
+        }
+        require(desktopRuntimeDirectory == null || desktopRuntimeDirectory.isNotBlank()) {
+            "desktopRuntimeDirectory must be null or a non-blank absolute path."
+        }
+        require(desktopRuntimeDirectory?.contains('\u0000') != true) {
+            "desktopRuntimeDirectory must not contain NUL."
         }
     }
 

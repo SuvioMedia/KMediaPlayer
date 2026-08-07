@@ -17,6 +17,7 @@ class MpvPlaybackOptionsTest {
             options.maxDesktopRenderPixels,
         )
         assertEquals(MpvRuntimeSource.Bundled, options.runtimeSource)
+        assertEquals(null, options.desktopRuntimeDirectory)
     }
 
     @Test
@@ -29,6 +30,12 @@ class MpvPlaybackOptionsTest {
         }
         assertFailsWith<IllegalArgumentException> {
             MpvPlaybackOptions(maxDesktopRenderPixels = 0)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            MpvPlaybackOptions(desktopRuntimeDirectory = " ")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            MpvPlaybackOptions(desktopRuntimeDirectory = "/runtime\u0000escape")
         }
         assertFailsWith<IllegalArgumentException> {
             MpvPlaybackOptions(

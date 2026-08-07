@@ -46,12 +46,19 @@ internal data class MpvRuntimeConfig(
     val useEmbeddedFonts: Boolean = true,
     /** One non-recursive directory containing application-supplied subtitle fonts. */
     val subtitleFontsDirectory: Path? = null,
+    /** Application-private parent directory for the verified bundled runtime. */
+    val desktopRuntimeDirectory: Path? = null,
     val maxRenderPixels: Int = 16_777_216,
 ) {
     init {
         subtitleFontsDirectory?.let { directory ->
             require(directory.isAbsolute) {
                 "subtitleFontsDirectory must be an absolute path."
+            }
+        }
+        desktopRuntimeDirectory?.let { directory ->
+            require(directory.isAbsolute) {
+                "desktopRuntimeDirectory must be an absolute path."
             }
         }
         require(maxRenderPixels in 1..67_108_864) {
@@ -189,13 +196,19 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
 
     try {
         val fontsDirectory = config.subtitleFontsDirectory
+        val runtimeDirectory = config.desktopRuntimeDirectory ?: configuredDesktopRuntimeDirectory()
         val resolution =
             if (fontsDirectory == null) {
                 null
-            } else {
+            } else if (runtimeDirectory == null) {
                 MpvDesktopRuntime.resolveRuntimeForLoading(fontsDirectory)
+            } else {
+                MpvDesktopRuntime.resolveRuntimeForLoading(fontsDirectory, runtimeDirectory)
             }
-        val path = resolution?.libMpvPath() ?: MpvDesktopRuntime.resolveLibMpvForLoading()
+        val path =
+            resolution?.libMpvPath()
+                ?: runtimeDirectory?.let(MpvDesktopRuntime::resolveLibMpvForLoading)
+                ?: MpvDesktopRuntime.resolveLibMpvForLoading()
         return ResolvedMpvRuntime(
             librarySource = MpvLibrarySource.ExplicitPath(path),
             requiredOptions = resolution?.requiredOptions().orEmpty(),
@@ -237,6 +250,20 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
     }
 }
 
+private fun configuredDesktopRuntimeDirectory(): Path? {
+    val configuredPath =
+        System.getProperty(MPV_RUNTIME_DIRECTORY_PROPERTY)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: System.getenv(MPV_RUNTIME_DIRECTORY_ENVIRONMENT)
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+            ?: return null
+    return Path.of(configuredPath).also { path ->
+        require(path.isAbsolute) { "The configured MPV runtime directory must be absolute." }
+    }
+}
+
 internal fun isBundledMpvDesktopSupported(
     osName: String = System.getProperty("os.name"),
     architecture: String = System.getProperty("os.arch"),
@@ -256,6 +283,9 @@ internal fun isBundledMpvDesktopSupported(
                 normalizedArchitecture in setOf("amd64", "x86_64", "x86-64", "x64")
         )
 }
+
+private const val MPV_RUNTIME_DIRECTORY_PROPERTY = "composemediaplayer.mpv.runtimeDirectory"
+private const val MPV_RUNTIME_DIRECTORY_ENVIRONMENT = "COMPOSE_MEDIA_PLAYER_MPV_RUNTIME_DIRECTORY"
 
 internal fun isMpvDesktopPlatformSupported(
     osName: String,

@@ -33,7 +33,8 @@ actual fun inspectMpvBackend(options: MpvPlaybackOptions): MpvBackendAvailabilit
                 reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
                 guidance =
                     "MPV runtime paths must be valid absolute desktop paths; " +
-                        "the subtitle-font directory must also exist before player creation.",
+                        "configured runtime and subtitle-font directories must also exist " +
+                        "before player creation.",
             )
         }
 
@@ -66,7 +67,8 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
                         reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
                         guidance =
                             "MPV runtime paths must be valid absolute desktop paths; " +
-                                "the subtitle-font directory must also exist before player creation.",
+                                "configured runtime and subtitle-font directories must also exist " +
+                                "before player creation.",
                     ),
                 cause = failure,
             )
@@ -102,6 +104,16 @@ private fun MpvPlaybackOptions.toDesktopRuntimeConfig(): MpvRuntimeConfig {
                 require(path.isAbsolute) { "The subtitle-font directory must be absolute." }
             }
         }
+    val runtimeDirectory =
+        desktopRuntimeDirectory?.let { configuredPath ->
+            try {
+                Path.of(configuredPath)
+            } catch (failure: InvalidPathException) {
+                throw IllegalArgumentException("Invalid desktop runtime directory.", failure)
+            }.also { path ->
+                require(path.isAbsolute) { "The desktop runtime directory must be absolute." }
+            }
+        }
     return MpvRuntimeConfig(
         librarySource =
             when (val source = runtimeSource) {
@@ -121,6 +133,7 @@ private fun MpvPlaybackOptions.toDesktopRuntimeConfig(): MpvRuntimeConfig {
         preserveAssStyles = preserveAssStyles,
         useEmbeddedFonts = useEmbeddedFonts,
         subtitleFontsDirectory = fontsDirectory,
+        desktopRuntimeDirectory = runtimeDirectory,
         maxRenderPixels = maxDesktopRenderPixels,
     )
 }
