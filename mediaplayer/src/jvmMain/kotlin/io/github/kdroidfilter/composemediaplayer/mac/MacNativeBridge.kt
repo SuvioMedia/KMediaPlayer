@@ -71,6 +71,9 @@ internal object MacNativeBridge {
 
     @JvmStatic external fun nPause(handle: Long)
 
+    /** Stops decoding and disconnects native video output without releasing the handle. */
+    @JvmStatic external fun nRetirePlayer(handle: Long)
+
     /** True after the active AVFoundation item is ready for playback. */
     @JvmStatic external fun nIsReadyForPlayback(handle: Long): Boolean
 

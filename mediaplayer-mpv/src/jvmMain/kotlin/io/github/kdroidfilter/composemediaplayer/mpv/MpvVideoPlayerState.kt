@@ -75,7 +75,7 @@ internal class MpvVideoPlayerState(
     private var nativeMacRenderer = 0L
     private var nativeMacColorMode = MpvMacOutputColorMode.SDR
     private var nativeMacProjectionEnabled = false
-    private var cropMode = false
+    private var nativeMacContentScaleMode = MpvMacContentScaleMode.FIT
 
     @Volatile
     private var nativeMacDecodeRoute = MpvMacDecodeRoute.HARDWARE_AUTO
@@ -456,8 +456,8 @@ internal class MpvVideoPlayerState(
         }
     }
 
-    internal fun setCropMode(crop: Boolean) {
-        cropMode = crop
+    internal fun setContentScaleMode(contentScale: ContentScale) {
+        nativeMacContentScaleMode = contentScale.toMpvMacContentScaleMode()
         if (!disposed.get()) applyNativeMacInputGeometry()
     }
 
@@ -973,10 +973,20 @@ internal class MpvVideoPlayerState(
         val geometry =
             mpvMacInputGeometry(
                 projectionEnabled = nativeMacRenderer != 0L && nativeMacProjectionEnabled,
-                crop = cropMode,
+                contentScaleMode = nativeMacContentScaleMode,
             )
         runCatching { engine.setProperty("keepaspect", geometry.keepAspect) }
         runCatching { engine.setProperty("panscan", geometry.panscan) }
+        val renderer = nativeMacRenderer
+        if (renderer != 0L) {
+            runCatching {
+                MpvMacNativeBridge.nSetContentScale(
+                    nativeRenderer = renderer,
+                    contentScaleMode = nativeMacContentScaleMode.nativeValue,
+                    mediaAspect = aspectRatio.takeIf { it.isFinite() && it > 0f } ?: (16f / 9f),
+                )
+            }
+        }
     }
 
     /** Rebuilds mpv's video chain after replacing its sole render context. */

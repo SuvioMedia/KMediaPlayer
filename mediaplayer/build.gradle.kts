@@ -517,6 +517,9 @@ tasks.withType<Test>().configureEach {
     providers.gradleProperty("composeMediaPlayerWmaProTestMedia").orNull?.let { mediaPath ->
         systemProperty("composemediaplayer.test.wmaProMedia", mediaPath)
     }
+    providers.gradleProperty("composeMediaPlayerVrTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.test.vrMedia", mediaPath)
+    }
 }
 
 val java25ClassFileVersion = 69

@@ -38,6 +38,13 @@ internal object MpvMacNativeBridge {
         parameters: FloatArray,
     )
 
+    /** Applies the public Compose scale mode to the native projected output. */
+    @JvmStatic external fun nSetContentScale(
+        nativeRenderer: Long,
+        contentScaleMode: Int,
+        mediaAspect: Float,
+    )
+
     @JvmStatic external fun nRequestRedraw(nativeRenderer: Long)
 
     @JvmStatic external fun nGetDisplayRefreshRate(nativeRenderer: Long): Double

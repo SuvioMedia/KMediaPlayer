@@ -2,6 +2,7 @@
 
 package io.github.kdroidfilter.composemediaplayer.mpv
 
+import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionRenderOptions
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
@@ -101,15 +102,37 @@ internal data class MpvMacInputGeometry(
     val panscan: String,
 )
 
+internal enum class MpvMacContentScaleMode(
+    val nativeValue: Int,
+) {
+    FIT(0),
+    CROP(1),
+    FILL(2),
+}
+
+internal fun ContentScale.toMpvMacContentScaleMode(): MpvMacContentScaleMode =
+    when (this) {
+        ContentScale.Crop,
+        ContentScale.FillWidth,
+        ContentScale.FillHeight,
+        -> MpvMacContentScaleMode.CROP
+        ContentScale.FillBounds -> MpvMacContentScaleMode.FILL
+        else -> MpvMacContentScaleMode.FIT
+    }
+
 internal fun mpvMacInputGeometry(
     projectionEnabled: Boolean,
-    crop: Boolean,
+    contentScaleMode: MpvMacContentScaleMode,
 ): MpvMacInputGeometry =
     if (projectionEnabled) {
         MpvMacInputGeometry(keepAspect = "no", panscan = "0.0")
     } else {
-        MpvMacInputGeometry(
-            keepAspect = "yes",
-            panscan = if (crop) "1.0" else "0.0",
-        )
+        when (contentScaleMode) {
+            MpvMacContentScaleMode.FIT ->
+                MpvMacInputGeometry(keepAspect = "yes", panscan = "0.0")
+            MpvMacContentScaleMode.CROP ->
+                MpvMacInputGeometry(keepAspect = "yes", panscan = "1.0")
+            MpvMacContentScaleMode.FILL ->
+                MpvMacInputGeometry(keepAspect = "no", panscan = "0.0")
+        }
     }

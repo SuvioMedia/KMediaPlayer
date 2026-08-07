@@ -17,11 +17,17 @@ class MpvMacProjectionConfigurationTest {
     fun `projection input always fills the intermediate texture`() {
         assertEquals(
             MpvMacInputGeometry(keepAspect = "no", panscan = "0.0"),
-            mpvMacInputGeometry(projectionEnabled = true, crop = false),
+            mpvMacInputGeometry(
+                projectionEnabled = true,
+                contentScaleMode = MpvMacContentScaleMode.FIT,
+            ),
         )
         assertEquals(
             MpvMacInputGeometry(keepAspect = "no", panscan = "0.0"),
-            mpvMacInputGeometry(projectionEnabled = true, crop = true),
+            mpvMacInputGeometry(
+                projectionEnabled = true,
+                contentScaleMode = MpvMacContentScaleMode.FILL,
+            ),
         )
     }
 
@@ -29,11 +35,24 @@ class MpvMacProjectionConfigurationTest {
     fun `ordinary video keeps public content scale behavior`() {
         assertEquals(
             MpvMacInputGeometry(keepAspect = "yes", panscan = "0.0"),
-            mpvMacInputGeometry(projectionEnabled = false, crop = false),
+            mpvMacInputGeometry(
+                projectionEnabled = false,
+                contentScaleMode = MpvMacContentScaleMode.FIT,
+            ),
         )
         assertEquals(
             MpvMacInputGeometry(keepAspect = "yes", panscan = "1.0"),
-            mpvMacInputGeometry(projectionEnabled = false, crop = true),
+            mpvMacInputGeometry(
+                projectionEnabled = false,
+                contentScaleMode = MpvMacContentScaleMode.CROP,
+            ),
+        )
+        assertEquals(
+            MpvMacInputGeometry(keepAspect = "no", panscan = "0.0"),
+            mpvMacInputGeometry(
+                projectionEnabled = false,
+                contentScaleMode = MpvMacContentScaleMode.FILL,
+            ),
         )
     }
 

@@ -4,6 +4,10 @@ import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionDisplayMode
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionType
+import io.github.kdroidfilter.composemediaplayer.VideoStereoLayout
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -23,6 +27,55 @@ class MacLibVlcLegacyIntegrationTest {
         assertTrue(inputs.any { it.extension() == "avi" }, "The configured fixtures contain no AVI file.")
         assertTrue(inputs.any { it.extension() in ASF_EXTENSIONS }, "The configured fixtures contain no WMV/ASF file.")
         inputs.forEach(::verifyNativeLibVlcPlayback)
+    }
+
+    @Test
+    fun changesConfiguredLibVlcFromNativeViewToControlledFisheyeProjection() {
+        if (!isMacArm64()) return
+        val media =
+            System
+                .getProperty(VR_MEDIA_PROPERTY)
+                ?.takeIf(String::isNotBlank)
+                ?.let(Path::of)
+                ?.takeIf(Files::isRegularFile)
+                ?: return
+        val player =
+            MacVideoPlayerState(
+                playbackOptions =
+                    VideoPlaybackOptions(
+                        desktopVideoBackend = DesktopVideoBackend.LIBVLC_NATIVE,
+                        desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                    ),
+            )
+        var nativeView = 0L
+        try {
+            player.onResized(width = 1280, height = 720)
+            player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
+            await("libVLC did not start the configured VR fixture.") {
+                player.hasMedia && player.isPlaying && !player.isLoading
+            }
+            nativeView = player.createNativeVideoView(CONTENT_SCALE_FIT)
+            assertTrue(nativeView != 0L, "Flat libVLC playback did not start in its native view.")
+
+            player.projection =
+                VideoProjectionSettings(
+                    projectionType = VideoProjectionType.Fisheye190,
+                    stereoLayout = VideoStereoLayout.SideBySide,
+                    displayMode = VideoProjectionDisplayMode.MonoscopicLeft,
+                )
+
+            await("libVLC did not reopen through the controlled fisheye renderer.") {
+                player.renderingInfo.backend.orEmpty().contains("controlled projection") &&
+                    !player.shouldUseLibVlcNativeSurface() &&
+                    player.currentFrameState.value != null
+            }
+            val frame = assertNotNull(player.currentFrameState.value)
+            assertTrue(frame.width <= 1280, "The controlled libVLC frame exceeded the requested viewport width.")
+            assertTrue(frame.height <= 720, "The controlled libVLC frame exceeded the requested viewport height.")
+        } finally {
+            if (nativeView != 0L) runCatching { player.disposeNativeVideoView(nativeView) }
+            player.dispose()
+        }
     }
 
     private fun verifyNativeLibVlcPlayback(media: Path) {
@@ -113,6 +166,7 @@ class MacLibVlcLegacyIntegrationTest {
     private companion object {
         const val LEGACY_MEDIA_PROPERTY = "composemediaplayer.test.legacyMedia"
         const val WMAPRO_MEDIA_PROPERTY = "composemediaplayer.test.wmaProMedia"
+        const val VR_MEDIA_PROPERTY = "composemediaplayer.test.vrMedia"
         const val CONTENT_SCALE_FIT = 0
         const val POLL_INTERVAL_MILLIS = 50L
         const val TEST_TIMEOUT_NANOS = 15_000_000_000L

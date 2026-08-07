@@ -242,6 +242,11 @@ static void release_native_view_on_appkit_main(void* raw_context) {
 // Optional libVLC backend
 // ---------------------------------------------------------------------------
 
+enum {
+    LIBVLC_MEMORY_MAX_DIMENSION = 2560,
+    BGRA_BYTES_PER_PIXEL = 4,
+};
+
 typedef long long libvlc_time_t;
 typedef struct libvlc_instance_t libvlc_instance_t;
 typedef struct libvlc_media_t libvlc_media_t;
@@ -358,20 +363,13 @@ typedef struct {
     libvlc_media_player_t* player;
     pthread_mutex_t frame_mutex;
     uint8_t* frame;
-    uint8_t* bgra_frame;
     uint8_t* read_frame;
-    size_t bgra_frame_size;
+    size_t frame_size;
     unsigned width;
     unsigned height;
     unsigned pitch;
-    unsigned y_pitch;
-    unsigned u_pitch;
-    unsigned v_pitch;
-    unsigned y_lines;
-    unsigned u_lines;
-    unsigned v_lines;
-    size_t u_offset;
-    size_t v_offset;
+    unsigned requested_width;
+    unsigned requested_height;
     int frame_ready;
     uint64_t decoded_frames;
     uint64_t displayed_frames;
@@ -472,69 +470,81 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     return 1;
 }
 
+static void vlc_memory_output_size(
+    LibVlcPlayer* player,
+    unsigned input_width,
+    unsigned input_height,
+    unsigned* output_width,
+    unsigned* output_height
+) {
+    unsigned requested_width = 0;
+    unsigned requested_height = 0;
+    pthread_mutex_lock(&player->frame_mutex);
+    requested_width = player->requested_width;
+    requested_height = player->requested_height;
+    pthread_mutex_unlock(&player->frame_mutex);
+
+    double scale = 1.0;
+    if (requested_width > 0 && requested_height > 0) {
+        scale = fmin(
+            (double)requested_width / (double)input_width,
+            (double)requested_height / (double)input_height
+        );
+    }
+    scale = fmin(scale, (double)LIBVLC_MEMORY_MAX_DIMENSION / (double)input_width);
+    scale = fmin(scale, (double)LIBVLC_MEMORY_MAX_DIMENSION / (double)input_height);
+    scale = fmin(fmax(scale, 0.0), 1.0);
+
+    unsigned scaled_width = (unsigned)floor((double)input_width * scale);
+    unsigned scaled_height = (unsigned)floor((double)input_height * scale);
+    *output_width = scaled_width < 2u ? 2u : scaled_width & ~1u;
+    *output_height = scaled_height < 2u ? 2u : scaled_height & ~1u;
+}
+
 static unsigned vlc_format_cb(void** opaque, char* chroma, unsigned* width, unsigned* height, unsigned* pitches, unsigned* lines) {
     LibVlcPlayer* player = (LibVlcPlayer*)(*opaque);
     if (!player || !width || !height || *width == 0 || *height == 0) return 0;
 
-    unsigned frame_width = (*width) & ~1u;
-    unsigned frame_height = (*height) & ~1u;
+    unsigned frame_width = 0;
+    unsigned frame_height = 0;
+    vlc_memory_output_size(player, *width, *height, &frame_width, &frame_height);
     if (frame_width == 0 || frame_height == 0) return 0;
+    if (frame_width > (UINT_MAX - 31u) / BGRA_BYTES_PER_PIXEL) return 0;
 
-    memcpy(chroma, "I420", 4);
-    unsigned y_pitch = frame_width;
-    unsigned u_pitch = frame_width / 2u;
-    unsigned v_pitch = frame_width / 2u;
-    unsigned y_lines = frame_height;
-    unsigned u_lines = frame_height / 2u;
-    unsigned v_lines = frame_height / 2u;
-    size_t y_size = (size_t)y_pitch * (size_t)y_lines;
-    size_t u_size = (size_t)u_pitch * (size_t)u_lines;
-    size_t v_size = (size_t)v_pitch * (size_t)v_lines;
-    unsigned bgra_pitch = frame_width * 4u;
+    // Let libVLC's optimized converter both scale and produce native-endian BGRA. The previous
+    // full-resolution I420 + scalar C conversion allocated three 8K frame copies and could not
+    // sustain interactive projection. This output is bounded to the current viewport below.
+    memcpy(chroma, "RV32", 4);
+    unsigned bgra_pitch = (frame_width * BGRA_BYTES_PER_PIXEL + 31u) & ~31u;
+    if ((size_t)frame_height > SIZE_MAX / (size_t)bgra_pitch) return 0;
+    size_t bgra_size = (size_t)bgra_pitch * (size_t)frame_height;
 
     pthread_mutex_lock(&player->frame_mutex);
-    size_t size = y_size + u_size + v_size;
-    size_t bgra_size = (size_t)bgra_pitch * (size_t)frame_height;
-    uint8_t* new_frame = (uint8_t*)malloc(size);
-    uint8_t* new_bgra_frame = (uint8_t*)malloc(bgra_size);
+    uint8_t* new_frame = (uint8_t*)malloc(bgra_size);
     uint8_t* new_read_frame = (uint8_t*)malloc(bgra_size);
-    if (!new_frame || !new_bgra_frame || !new_read_frame) {
+    if (!new_frame || !new_read_frame) {
         free(new_frame);
-        free(new_bgra_frame);
         free(new_read_frame);
         pthread_mutex_unlock(&player->frame_mutex);
         return 0;
     }
     free(player->frame);
-    free(player->bgra_frame);
     free(player->read_frame);
     player->frame = new_frame;
-    player->bgra_frame = new_bgra_frame;
     player->read_frame = new_read_frame;
-    player->bgra_frame_size = bgra_size;
+    player->frame_size = bgra_size;
     player->width = frame_width;
     player->height = frame_height;
     player->pitch = bgra_pitch;
-    player->y_pitch = y_pitch;
-    player->u_pitch = u_pitch;
-    player->v_pitch = v_pitch;
-    player->y_lines = y_lines;
-    player->u_lines = u_lines;
-    player->v_lines = v_lines;
-    player->u_offset = y_size;
-    player->v_offset = y_size + u_size;
     player->frame_ready = 0;
-    memset(player->frame, 0, size);
-    memset(player->bgra_frame, 0, bgra_size);
+    memset(player->frame, 0, bgra_size);
     memset(player->read_frame, 0, bgra_size);
     pthread_mutex_unlock(&player->frame_mutex);
 
-    pitches[0] = y_pitch;
-    pitches[1] = u_pitch;
-    pitches[2] = v_pitch;
-    lines[0] = y_lines;
-    lines[1] = u_lines;
-    lines[2] = v_lines;
+    *width = frame_width;
+    *height = frame_height;
+    pitches[0] = bgra_pitch;
+    lines[0] = frame_height;
     return 1;
 }
 
@@ -547,48 +557,7 @@ static void* vlc_lock_cb(void* opaque, void** planes) {
     if (!player || !planes) return NULL;
     pthread_mutex_lock(&player->frame_mutex);
     planes[0] = player->frame;
-    planes[1] = player->frame ? player->frame + player->u_offset : NULL;
-    planes[2] = player->frame ? player->frame + player->v_offset : NULL;
     return player;
-}
-
-static inline uint8_t clamp_u8(int value) {
-    if (value < 0) return 0;
-    if (value > 255) return 255;
-    return (uint8_t)value;
-}
-
-static void convert_i420_to_bgra(LibVlcPlayer* player) {
-    if (!player || !player->frame || !player->bgra_frame || player->width == 0 || player->height == 0) return;
-
-    const uint8_t* y_plane = player->frame;
-    const uint8_t* u_plane = player->frame + player->u_offset;
-    const uint8_t* v_plane = player->frame + player->v_offset;
-
-    for (unsigned y = 0; y < player->height; y++) {
-        const uint8_t* y_row = y_plane + (size_t)y * (size_t)player->y_pitch;
-        const uint8_t* u_row = u_plane + (size_t)(y / 2u) * (size_t)player->u_pitch;
-        const uint8_t* v_row = v_plane + (size_t)(y / 2u) * (size_t)player->v_pitch;
-        uint8_t* dst = player->bgra_frame + (size_t)y * (size_t)player->pitch;
-
-        for (unsigned x = 0; x < player->width; x++) {
-            int c = (int)y_row[x] - 16;
-            int d = (int)u_row[x / 2u] - 128;
-            int e = (int)v_row[x / 2u] - 128;
-            if (c < 0) c = 0;
-
-            int r = (298 * c + 409 * e + 128) >> 8;
-            int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-            int b = (298 * c + 516 * d + 128) >> 8;
-
-            dst[0] = clamp_u8(b);
-            dst[1] = clamp_u8(g);
-            dst[2] = clamp_u8(r);
-            dst[3] = 255;
-            dst += 4;
-        }
-    }
-    player->frame_ready = 1;
 }
 
 static void vlc_unlock_cb(void* opaque, void* picture, void* const* planes) {
@@ -596,7 +565,7 @@ static void vlc_unlock_cb(void* opaque, void* picture, void* const* planes) {
     (void)planes;
     LibVlcPlayer* player = (LibVlcPlayer*)opaque;
     if (player) {
-        convert_i420_to_bgra(player);
+        player->frame_ready = 1;
         player->decoded_frames++;
         pthread_mutex_unlock(&player->frame_mutex);
     }
@@ -760,10 +729,19 @@ static LibVlcPlayer* create_libvlc_player(const char* libvlc_path, const char* p
         "--no-video-title-show",
         "--no-osd",
         "--quiet",
-        "--codec=avcodec",
-        "--avcodec-hw=none",
-        "--no-avcodec-dr",
-        "--no-videotoolbox",
+        // Prefer VLC's native VideoToolbox decoder. Keeping avcodec first made
+        // every HEVC frame go through the software decoder before the vmem
+        // scaler, which is catastrophic for 8K/60 projection sources.
+        "--codec=videotoolbox,avcodec",
+        // The memory callback still needs an RV32 conversion for Compose/Skia, but decoding an
+        // 8K HEVC source in software can retain gigabytes of reference frames and saturate every
+        // performance core. VideoToolbox keeps the expensive decode in the macOS hardware path;
+        // libVLC's converter only downloads/scales the bounded presentation frame below.
+        // VLC 3 exposes this option as the enum {any, none}; naming the macOS
+        // decoder directly is rejected and silently leaves this vmem path on
+        // the software decoder. On macOS, "any" resolves to VideoToolbox when
+        // the codec and source support it.
+        "--avcodec-hw=any",
         "--aout=auhal"
     };
     const char* native_args[] = {
@@ -815,11 +793,9 @@ static void dispose_libvlc_player(LibVlcPlayer* player) {
     pthread_mutex_lock(&player->frame_mutex);
     free(player->frame);
     player->frame = NULL;
-    free(player->bgra_frame);
-    player->bgra_frame = NULL;
     free(player->read_frame);
     player->read_frame = NULL;
-    player->bgra_frame_size = 0;
+    player->frame_size = 0;
     player->frame_ready = 0;
     pthread_mutex_unlock(&player->frame_mutex);
     pthread_mutex_destroy(&player->frame_mutex);
@@ -1155,6 +1131,29 @@ static void JNICALL jni_Pause(JNIEnv* env, jclass cls, jlong handle) {
     if (ctx) pauseVideo(ctx);
 }
 
+/*
+ * A Tao native child view can outlive the backend that produced it by one Compose disposal
+ * pass. Do not let the retired decoder and its Cocoa/Metal vout keep running during that gap:
+ * an 8K surface consumes enough unified memory for even a short overlap to be destructive.
+ * The handle and NSView are intentionally retained until nDisposeNativeVideoView releases the
+ * last owner, so this operation must only stop work and detach the drawable.
+ */
+static void JNICALL jni_RetirePlayer(JNIEnv* env, jclass cls, jlong handle) {
+    (void)env;
+    (void)cls;
+    NativePlayerHandle* native = toHandle(handle);
+    LibVlcPlayer* vlc = vlcCtx(native);
+    if (vlc && vlc->player) {
+        if (vlc->native_video && vlc->api.media_player_set_nsobject) {
+            vlc->api.media_player_set_nsobject(vlc->player, NULL);
+        }
+        vlc->api.media_player_stop(vlc->player);
+        return;
+    }
+    void* ctx = avCtx(native);
+    if (ctx) pauseVideo(ctx);
+}
+
 static jboolean JNICALL jni_IsReadyForPlayback(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     LibVlcPlayer* vlc = vlcCtx(native);
@@ -1199,13 +1198,13 @@ static jlong JNICALL jni_LockFrame(JNIEnv* env, jclass cls, jlong handle, jintAr
     if (vlc) {
         pthread_mutex_lock(&vlc->frame_mutex);
         if (vlc->frame_ready &&
-            vlc->bgra_frame &&
+            vlc->frame &&
             vlc->read_frame &&
             vlc->width > 0 &&
             vlc->height > 0 &&
             vlc->pitch > 0 &&
-            vlc->bgra_frame_size >= (size_t)vlc->pitch * (size_t)vlc->height) {
-            memcpy(vlc->read_frame, vlc->bgra_frame, (size_t)vlc->pitch * (size_t)vlc->height);
+            vlc->frame_size >= (size_t)vlc->pitch * (size_t)vlc->height) {
+            memcpy(vlc->read_frame, vlc->frame, (size_t)vlc->pitch * (size_t)vlc->height);
             info[0] = (int32_t)vlc->width;
             info[1] = (int32_t)vlc->height;
             info[2] = (int32_t)vlc->pitch;
@@ -1293,7 +1292,15 @@ static jdouble JNICALL jni_GetDisplayAspectRatio(JNIEnv* env, jclass cls, jlong 
 
 static jint JNICALL jni_SetOutputSize(JNIEnv* env, jclass cls, jlong handle, jint width, jint height) {
     NativePlayerHandle* native = toHandle(handle);
-    if (vlcCtx(native)) return 0;
+    LibVlcPlayer* vlc = vlcCtx(native);
+    if (vlc) {
+        if (vlc->native_video || width <= 0 || height <= 0) return 0;
+        pthread_mutex_lock(&vlc->frame_mutex);
+        vlc->requested_width = (unsigned)width;
+        vlc->requested_height = (unsigned)height;
+        pthread_mutex_unlock(&vlc->frame_mutex);
+        return 1;
+    }
     void* ctx = avCtx(native);
     return ctx ? (jint)setOutputSize(ctx, (int32_t)width, (int32_t)height) : 0;
 }
@@ -2118,6 +2125,7 @@ static const JNINativeMethod g_methods[] = {
     { "nCancelUriReplacement",   "(JJ)V",                        (void*)jni_CancelUriReplacement },
     { "nPlay",                   "(J)V",                        (void*)jni_Play },
     { "nPause",                  "(J)V",                        (void*)jni_Pause },
+    { "nRetirePlayer",           "(J)V",                        (void*)jni_RetirePlayer },
     { "nIsReadyForPlayback",     "(J)Z",                        (void*)jni_IsReadyForPlayback },
     { "nSetVolume",              "(JF)V",                       (void*)jni_SetVolume },
     { "nGetVolume",              "(J)F",                        (void*)jni_GetVolume },

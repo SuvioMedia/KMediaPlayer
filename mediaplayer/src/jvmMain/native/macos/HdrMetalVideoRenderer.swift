@@ -670,12 +670,15 @@ final class HdrMetalVideoRenderer {
         let requestedViewport = withTextureOutputStateLock {
             (width: requestedViewportWidth, height: requestedViewportHeight)
         }
-        guard configuration.projectionType > 0.5,
-              requestedViewport.width > 0,
+        guard requestedViewport.width > 0,
               requestedViewport.height > 0
         else {
             return (sourceWidth, sourceHeight)
         }
+        // Kotlin supplies a viewport fitted to the media aspect ratio. Keep that aspect in the
+        // IOSurface for both flat and projected video; TextureView can then implement Fit, Crop,
+        // and FillBounds immediately without changing the projection camera or allocating a full
+        // 8K FP16 intermediate for an ordinary flat source.
         // macOS Metal GPUs support at least 16K 2D textures on the deployment target.
         let maximum = 16_384
         let scale = min(1.0, Double(maximum) / Double(max(requestedViewport.width, requestedViewport.height)))

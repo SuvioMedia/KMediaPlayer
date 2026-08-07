@@ -73,8 +73,8 @@ private fun MpvVideoSurfaceContent(
             height = playerState.metadata.height,
         )
 
-    LaunchedEffect(playerState, contentScale) {
-        playerState.setCropMode(contentScale == ContentScale.Crop)
+    LaunchedEffect(playerState, contentScale, playerState.aspectRatio) {
+        playerState.setContentScaleMode(contentScale)
     }
     LaunchedEffect(
         playerState,

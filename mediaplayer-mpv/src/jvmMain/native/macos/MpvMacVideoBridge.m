@@ -80,6 +80,12 @@ enum {
     KMP_MPV_PROJECTION_PARAMETER_COUNT = 18,
 };
 
+enum {
+    KMP_MPV_CONTENT_SCALE_FIT = 0,
+    KMP_MPV_CONTENT_SCALE_CROP = 1,
+    KMP_MPV_CONTENT_SCALE_FILL = 2,
+};
+
 typedef int (*mpv_render_context_create_fn)(
     mpv_render_context** result,
     mpv_handle* handle,
@@ -141,6 +147,8 @@ struct KMPMpvNativeRenderer {
     atomic_uint_fast64_t maximum_flush_time_ns;
     pthread_mutex_t render_mutex;
     int color_mode;
+    int content_scale_mode;
+    float media_aspect;
     int buffer_depth;
     int last_framebuffer;
     mpv_handle* mpv;
@@ -249,6 +257,9 @@ static const GLchar* KMP_MPV_PROJECTION_FRAGMENT_SHADER =
     "uniform float uViewRollDegrees;\n"
     "uniform float uViewZoom;\n"
     "uniform float uViewportAspect;\n"
+    "uniform float uDestinationAspect;\n"
+    "uniform float uContentAspect;\n"
+    "uniform int uContentScaleMode;\n"
     "in vec2 vUv;\n"
     "out vec4 fragmentColor;\n"
     "const float PI = 3.14159265358979323846264;\n"
@@ -303,9 +314,34 @@ static const GLchar* KMP_MPV_PROJECTION_FRAGMENT_SHADER =
     "    if (direction.y > 0.0) return eacFaceUv(direction.x / direction.y, direction.z / direction.y, 1.0, 1.0);\n"
     "    return eacFaceUv(direction.x / -direction.y, -direction.z / -direction.y, 2.0, 1.0);\n"
     "}\n"
+    "vec2 contentUv(vec2 outputUv) {\n"
+    "    float destinationAspect = max(uDestinationAspect, 0.001);\n"
+    "    float contentAspect = max(uContentAspect, 0.001);\n"
+    "    if (uContentScaleMode == 2) return outputUv;\n"
+    "    if (uContentScaleMode == 1) {\n"
+    "        if (destinationAspect > contentAspect) {\n"
+    "            outputUv.y = (outputUv.y - 0.5) * (contentAspect / destinationAspect) + 0.5;\n"
+    "        } else {\n"
+    "            outputUv.x = (outputUv.x - 0.5) * (destinationAspect / contentAspect) + 0.5;\n"
+    "        }\n"
+    "        return outputUv;\n"
+    "    }\n"
+    "    if (destinationAspect > contentAspect) {\n"
+    "        float occupiedWidth = contentAspect / destinationAspect;\n"
+    "        outputUv.x = (outputUv.x - 0.5) / occupiedWidth + 0.5;\n"
+    "    } else {\n"
+    "        float occupiedHeight = destinationAspect / contentAspect;\n"
+    "        outputUv.y = (outputUv.y - 0.5) / occupiedHeight + 0.5;\n"
+    "    }\n"
+    "    return outputUv;\n"
+    "}\n"
     "void main() {\n"
     // vUv is bottom-up because it is generated in OpenGL clip space; projection screen UV is top-down.
-    "    vec2 screenUv = vec2(vUv.x, 1.0 - vUv.y);\n"
+    "    vec2 screenUv = contentUv(vec2(vUv.x, 1.0 - vUv.y));\n"
+    "    if (screenUv.x < 0.0 || screenUv.x > 1.0 || screenUv.y < 0.0 || screenUv.y > 1.0) {\n"
+    "        fragmentColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "        return;\n"
+    "    }\n"
     "    bool rightEye = false;\n"
     "    if (uStereo != 0) {\n"
     "        if (screenUv.x < 0.5) screenUv.x *= 2.0;\n"
@@ -537,10 +573,24 @@ static void render_projected_frame(
         glGetUniformLocation(renderer->projection_program, "uViewZoom"),
         p[KMP_MPV_PROJECTION_ZOOM]
     );
-    float eye_width = stereo ? (float)width * 0.5f : (float)width;
+    float destination_aspect = (float)width / fmaxf((float)height, 1.0f);
+    float content_aspect = fmaxf(renderer->media_aspect, 0.001f);
+    float viewport_aspect = stereo ? content_aspect * 0.5f : content_aspect;
     glUniform1f(
         glGetUniformLocation(renderer->projection_program, "uViewportAspect"),
-        eye_width / fmaxf((float)height, 1.0f)
+        viewport_aspect
+    );
+    glUniform1f(
+        glGetUniformLocation(renderer->projection_program, "uDestinationAspect"),
+        destination_aspect
+    );
+    glUniform1f(
+        glGetUniformLocation(renderer->projection_program, "uContentAspect"),
+        content_aspect
+    );
+    glUniform1i(
+        glGetUniformLocation(renderer->projection_program, "uContentScaleMode"),
+        renderer->content_scale_mode
     );
     glBindVertexArray(renderer->projection_vertex_array);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1418,6 +1468,8 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nCreateRen
     atomic_init(&renderer->maximum_flush_time_ns, 0);
     pthread_mutex_init(&renderer->render_mutex, NULL);
     renderer->color_mode = color_mode;
+    renderer->content_scale_mode = KMP_MPV_CONTENT_SCALE_FIT;
+    renderer->media_aspect = 16.0f / 9.0f;
     renderer->mpv = (mpv_handle*)(uintptr_t)raw_mpv_handle;
 
     BOOL api_loaded = load_render_api(renderer, library_name);
@@ -1522,6 +1574,39 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nSetProjec
         if (renderer->projection_parameters[KMP_MPV_PROJECTION_ZOOM] <= 0.0f) {
             renderer->projection_parameters[KMP_MPV_PROJECTION_ZOOM] = 1.0f;
         }
+    }
+    pthread_mutex_unlock(&renderer->render_mutex);
+    run_on_appkit_main_sync(request_redraw_on_main, renderer);
+}
+
+JNIEXPORT void JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nSetContentScale(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong native_renderer,
+    jint content_scale_mode,
+    jfloat media_aspect
+) {
+    (void)environment;
+    (void)bridge_class;
+    KMPMpvNativeRenderer* renderer = (KMPMpvNativeRenderer*)(uintptr_t)native_renderer;
+    if (!renderer ||
+        atomic_load_explicit(&renderer->shutting_down, memory_order_acquire)) {
+        return;
+    }
+
+    int normalized_mode = content_scale_mode;
+    if (normalized_mode < KMP_MPV_CONTENT_SCALE_FIT ||
+        normalized_mode > KMP_MPV_CONTENT_SCALE_FILL) {
+        normalized_mode = KMP_MPV_CONTENT_SCALE_FIT;
+    }
+    float normalized_aspect =
+        isfinite(media_aspect) && media_aspect > 0.0f ? media_aspect : (16.0f / 9.0f);
+
+    pthread_mutex_lock(&renderer->render_mutex);
+    if (!atomic_load_explicit(&renderer->shutting_down, memory_order_acquire)) {
+        renderer->content_scale_mode = normalized_mode;
+        renderer->media_aspect = normalized_aspect;
     }
     pthread_mutex_unlock(&renderer->render_mutex);
     run_on_appkit_main_sync(request_redraw_on_main, renderer);

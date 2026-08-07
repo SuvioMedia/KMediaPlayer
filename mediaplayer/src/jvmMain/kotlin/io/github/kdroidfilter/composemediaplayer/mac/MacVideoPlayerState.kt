@@ -107,6 +107,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -120,9 +121,18 @@ private const val PAUSED_SEEK_FRAME_ATTEMPTS = 10
 private const val PAUSED_SEEK_FRAME_RETRY_DELAY_MS = 25L
 private const val AVFOUNDATION_RELOAD_READY_ATTEMPTS = 600
 private const val AVFOUNDATION_RELOAD_READY_DELAY_MS = 50L
+private val LIBVLC_VIDEO_OUTPUT_REFRESH_DEBOUNCE = 75.milliseconds
 
 private data class MacResolvedLibVlcBackend(
     val installation: JvmLibVlcInstallation,
+)
+
+private data class MacLibVlcVideoOutputBookmark(
+    val uri: String,
+    val requestHeaders: Map<String, String>,
+    val position: Duration,
+    val wasPlaying: Boolean,
+    val playbackSpeed: Float,
 )
 
 /** Owns a candidate HLS/CMAF bridge until it is promoted to active playback. */
@@ -167,6 +177,52 @@ internal fun visibleLibVlcFrameDimension(
 
 internal fun shouldUseMacNativeAvFoundationPresentation(surfaceMode: DesktopVideoSurfaceMode): Boolean =
     surfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE
+
+/**
+ * libVLC's AppKit drawable can present ordinary flat video without copying pixels. Projection and
+ * texture cropping, however, must pass decoded frames through our controlled Skia shader because
+ * libVLC 3 has no fisheye projection API for an embedded NSView.
+ */
+internal fun shouldUseMacLibVlcNativeVideoOutput(
+    projection: VideoProjectionSettings,
+    textureCrop: VideoTextureCrop,
+): Boolean = !projection.usesJvmCanvasProjectionRenderer(textureCrop)
+
+internal data class MacProjectionTextureViewport(
+    val width: Int,
+    val height: Int,
+)
+
+/**
+ * The native projection shader renders into a stable media-aspect texture. TextureView then owns
+ * Fit/Crop/FillBounds, so changing scale mode cannot silently turn into a projection-FOV change.
+ */
+internal fun macProjectionTextureViewport(
+    containerWidth: Int,
+    containerHeight: Int,
+    mediaAspectRatio: Float,
+): MacProjectionTextureViewport {
+    if (
+        containerWidth <= 0 ||
+        containerHeight <= 0 ||
+        !mediaAspectRatio.isFinite() ||
+        mediaAspectRatio <= 0f
+    ) {
+        return MacProjectionTextureViewport(containerWidth, containerHeight)
+    }
+    val containerAspectRatio = containerWidth.toFloat() / containerHeight.toFloat()
+    return if (containerAspectRatio > mediaAspectRatio) {
+        MacProjectionTextureViewport(
+            width = (containerHeight * mediaAspectRatio).roundToInt().coerceIn(1, containerWidth),
+            height = containerHeight,
+        )
+    } else {
+        MacProjectionTextureViewport(
+            width = containerWidth,
+            height = (containerWidth / mediaAspectRatio).roundToInt().coerceIn(1, containerHeight),
+        )
+    }
+}
 
 /**
  * Describes the renderer that actually consumes AVPlayerItemVideoOutput frames.
@@ -248,6 +304,7 @@ class MacVideoPlayerState(
         set(value) {
             _projection = value.normalized()
             requestProjectionColorRouteRefresh()
+            requestLibVlcVideoOutputRefresh()
             updateProjectionRenderingInfo()
         }
     private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
@@ -269,6 +326,7 @@ class MacVideoPlayerState(
         set(value) {
             _projectionTextureCrop = value.normalized()
             requestProjectionColorRouteRefresh()
+            requestLibVlcVideoOutputRefresh()
             updateProjectionRenderingInfo()
         }
 
@@ -363,6 +421,10 @@ class MacVideoPlayerState(
     private var libVlcSelectedAudioStreamIndex: Int? = null
     private var libVlcSelectedSubtitleStreamIndex: Int? = null
     private var nativeBackendUsesLibVlc: Boolean = false
+    private var libVlcUsesNativeVideoOutput: Boolean = false
+    private val libVlcVideoOutputRefreshJob = AtomicReference<Job?>(null)
+    private val libVlcPlaybackRateGuard = MacLibVlcPlaybackRateGuard()
+    private val libVlcPlaybackRateRecoveryActive = AtomicBoolean(false)
     internal var libVlcNativeSurfaceRequested: Boolean by mutableStateOf(false)
         private set
     private val libAssLock = Any()
@@ -537,6 +599,7 @@ class MacVideoPlayerState(
             lifecycle.ensureUsable()
             val newValue = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             if (_playbackSpeedState.value != newValue) {
+                libVlcPlaybackRateGuard.reset()
                 _playbackSpeedState.value = newValue
                 lifecycle.launchSourceBoundControlOperation {
                     applyPlaybackSpeed()
@@ -821,6 +884,7 @@ class MacVideoPlayerState(
                 val reuseLibVlcNativeView =
                     hasMedia &&
                         nativeBackendUsesLibVlc &&
+                        libVlcUsesNativeVideoOutput &&
                         playerPtr != 0L &&
                         desktopVideoBackend.requestsLibVlcExplicitly()
 
@@ -928,6 +992,11 @@ class MacVideoPlayerState(
                     } else if (isPlaying) {
                         playInBackground()
                     }
+                    if (libVlcBackend != null) {
+                        // Projection state may have been supplied while this asynchronous open was
+                        // between native-player creation and publishing hasMedia.
+                        requestLibVlcVideoOutputRefresh()
+                    }
                 } else {
                     macLogger.e { "Failed to open URI" }
                     closePreparedPipelineSource()
@@ -982,6 +1051,7 @@ class MacVideoPlayerState(
         }
 
         nativeBackendUsesLibVlc = false
+        libVlcUsesNativeVideoOutput = false
         hdrMetalSurfaceAllowed = false
         nativeHdrSurfaceAttached = false
         metalTextureNativeView = 0L
@@ -1137,6 +1207,75 @@ class MacVideoPlayerState(
         projectionColorRouteWorker.request()
     }
 
+    /**
+     * The libVLC video callback mode is selected when its native player is created. A projection
+     * can still arrive after opening (for example from a screen presenter), so move between the
+     * zero-copy NSView and controlled projection frames by reopening the same source. Debouncing
+     * folds the projection and texture-crop setters into one replacement and restores the user's
+     * position, play state, and speed after the new decoder is ready.
+     */
+    private fun requestLibVlcVideoOutputRefresh() {
+        if (lifecycle.isDisposed) return
+        val desiredNativeOutput = shouldUseMacLibVlcNativeVideoOutput(projection, projectionTextureCrop)
+        val needsRefresh =
+            synchronized(nativeInstanceLock) {
+                nativeBackendUsesLibVlc && libVlcUsesNativeVideoOutput != desiredNativeOutput
+            }
+        if (!needsRefresh) return
+
+        lateinit var refreshJob: Job
+        refreshJob =
+            ioScope.launch(start = CoroutineStart.LAZY) {
+                delay(LIBVLC_VIDEO_OUTPUT_REFRESH_DEBOUNCE)
+                val bookmark =
+                    withContext(Dispatchers.Main) {
+                        val stillNeedsRefresh =
+                            synchronized(nativeInstanceLock) {
+                                nativeBackendUsesLibVlc &&
+                                    libVlcUsesNativeVideoOutput !=
+                                    shouldUseMacLibVlcNativeVideoOutput(projection, projectionTextureCrop)
+                            }
+                        if (!stillNeedsRefresh || !hasMedia || isLoading) {
+                            null
+                        } else {
+                            lastUri?.let { uri ->
+                                MacLibVlcVideoOutputBookmark(
+                                    uri = uri,
+                                    requestHeaders = lastRequestHeaders,
+                                    position = preciseCurrentTime,
+                                    wasPlaying = isPlaying,
+                                    playbackSpeed = playbackSpeed,
+                                )
+                            }
+                        }
+                    } ?: return@launch
+
+                withContext(Dispatchers.Main) {
+                    openUri(
+                        uri = bookmark.uri,
+                        initializePlayerState =
+                            if (bookmark.wasPlaying) InitialPlayerState.PLAY else InitialPlayerState.PAUSE,
+                        requestHeaders = bookmark.requestHeaders,
+                    )
+                    lifecycle.launchSourceBoundControlOperation { generation ->
+                        withContext(Dispatchers.Main) {
+                            _playbackSpeedState.value = bookmark.playbackSpeed
+                        }
+                        applyPlaybackSpeed()
+                        if (bookmark.position > Duration.ZERO) {
+                            seekToTimeAsync(bookmark.position, generation)
+                        }
+                    }
+                }
+            }
+        val previous = libVlcVideoOutputRefreshJob.getAndSet(refreshJob)
+        previous?.cancel()
+        refreshJob.invokeOnCompletion {
+            libVlcVideoOutputRefreshJob.compareAndSet(refreshJob, null)
+        }
+        refreshJob.start()
+    }
+
     private fun refreshColorPipelineOutput(verification: ColorPipelineVerification = colorOutputVerification) {
         colorOutputVerification = verification
         val wantsNativeSurface = shouldUseHdrMetalSurface()
@@ -1223,7 +1362,8 @@ class MacVideoPlayerState(
         !lifecycle.isDisposed &&
             libVlcNativeSurfaceRequested &&
             libVlcBackendActive &&
-            nativeBackendUsesLibVlc
+            nativeBackendUsesLibVlc &&
+            libVlcUsesNativeVideoOutput
 
     private fun shouldUseNativeVideoSurface(): Boolean = shouldUseHdrMetalSurface() || shouldUseLibVlcNativeSurface()
 
@@ -1490,6 +1630,11 @@ class MacVideoPlayerState(
     internal fun usesProjectedMetalTexture(): Boolean = usesMacMetalProjectionRenderer()
 
     private fun retireNativePlayerLocked(ptr: Long) {
+        // NativeView disposal is asynchronous with respect to a backend switch. Stop the old
+        // decoder/vout immediately; otherwise two 8K native renderers can overlap until Compose
+        // releases the old child view and exhaust macOS unified memory.
+        runCatching { MacNativeBridge.nRetirePlayer(ptr) }
+            .onFailure { error -> macLogger.e { "Failed to retire native player: ${error.message}" } }
         if (nativeVideoViewOwners.containsValue(ptr)) {
             nativePlayersPendingDisposal += ptr
         } else {
@@ -1662,6 +1807,11 @@ class MacVideoPlayerState(
             ffmpegHlsFallback != null ->
                 projection.jvmCanvasRendererLabel(
                     baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
+                    textureCrop = projectionTextureCrop,
+                )
+            nativeBackendUsesLibVlc ->
+                projection.jvmCanvasRendererLabel(
+                    baseRenderer = "libVLC viewport BGRA -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )
             hasMedia -> avFoundationVideoRenderer()
@@ -1941,18 +2091,33 @@ class MacVideoPlayerState(
         setNativeHdrMetalPreferred(false)
         setNativeHdrToneMappingEnabled(false)
         libVlcSourceUri = uri
+        val usesNativeVideoOutput = libVlcUsesNativeVideoOutput
         withContext(Dispatchers.Main) {
-            libVlcNativeSurfaceRequested = true
+            libVlcNativeSurfaceRequested = usesNativeVideoOutput
             renderingInfo.update(
-                backend = "libVLC native-view backend",
+                backend =
+                    if (usesNativeVideoOutput) {
+                        "libVLC native-view backend"
+                    } else {
+                        "libVLC controlled projection backend"
+                    },
                 container = "Source through user-installed libVLC",
                 videoDecoder = "libVLC",
-                videoRenderer = "libVLC native NSView",
+                videoRenderer =
+                    if (usesNativeVideoOutput) {
+                        "libVLC native NSView"
+                    } else {
+                        projection.jvmCanvasRendererLabel(projectionTextureCrop)
+                    },
                 audioRenderer = "libVLC / AUHAL",
                 subtitleRenderer = null,
                 subtitleSource = null,
                 notes =
-                    "VLC renders into an AppKit child view embedded in the current Tao window below Compose controls.",
+                    if (usesNativeVideoOutput) {
+                        "VLC renders into an AppKit child view embedded in the current Tao window below Compose controls."
+                    } else {
+                        "VLC decodes a viewport-bounded frame for the controlled fisheye/VR projection shader."
+                    },
             )
         }
         val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
@@ -2542,9 +2707,15 @@ class MacVideoPlayerState(
         }
 
         val wantsLibVlc = libVlcBackend != null
+        val wantsLibVlcNativeVideoOutput =
+            wantsLibVlc && shouldUseMacLibVlcNativeVideoOutput(projection, projectionTextureCrop)
         val needsBackendReplacement =
             synchronized(nativeInstanceLock) {
-                playerPtr != 0L && nativeBackendUsesLibVlc != wantsLibVlc
+                playerPtr != 0L &&
+                    (
+                        nativeBackendUsesLibVlc != wantsLibVlc ||
+                            (wantsLibVlc && libVlcUsesNativeVideoOutput != wantsLibVlcNativeVideoOutput)
+                    )
             }
         if (needsBackendReplacement) {
             cancelAndResetPlayerScope(recreate = true)
@@ -2555,6 +2726,7 @@ class MacVideoPlayerState(
                         retireNativePlayerLocked(ptrToDispose)
                     }
                     nativeBackendUsesLibVlc = false
+                    libVlcUsesNativeVideoOutput = false
                 }
             }
         }
@@ -2565,7 +2737,7 @@ class MacVideoPlayerState(
                     MacNativeBridge.nCreateLibVlcPlayer(
                         libVlcPath = libVlcBackend.installation.libVlcPath,
                         pluginPath = libVlcBackend.installation.pluginPath,
-                        nativeVideoOutput = true,
+                        nativeVideoOutput = wantsLibVlcNativeVideoOutput,
                     )
                 } else {
                     MacNativeBridge.nCreatePlayer()
@@ -2578,6 +2750,7 @@ class MacVideoPlayerState(
                             false
                         } else if (playerPtrAtomic.compareAndSet(0L, ptr)) {
                             nativeBackendUsesLibVlc = wantsLibVlc
+                            libVlcUsesNativeVideoOutput = wantsLibVlcNativeVideoOutput
                             nativeSurfaceGeneration += 1L
                             true
                         } else {
@@ -2617,6 +2790,9 @@ class MacVideoPlayerState(
         return try {
             // Open video asynchronously
             val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
+            if (nativeBackendUsesLibVlc && !libVlcUsesNativeVideoOutput && surfaceWidth > 0 && surfaceHeight > 0) {
+                MacNativeBridge.nSetOutputSize(ptr, surfaceWidth, surfaceHeight)
+            }
             if (sanitizedHeaders.isEmpty()) {
                 MacNativeBridge.nOpenUri(ptr, uri)
             } else if (nativeBackendUsesLibVlc) {
@@ -3299,6 +3475,7 @@ class MacVideoPlayerState(
             if (duration <= 0) return
 
             val current = getPositionSafely()
+            recoverUnsustainableLibVlcPlaybackRate(ptr = playerPtr, currentPositionSeconds = current)
             val currentDuration = current.secondsAsDuration()
             val totalDuration = duration.secondsAsDuration()
 
@@ -3341,6 +3518,65 @@ class MacVideoPlayerState(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error in updatePositionAsync: ${e.message}" }
+        }
+    }
+
+    /**
+     * libVLC accepts a requested rate based on its media clock even when its decoder/vout cannot
+     * sustain that rate. At very high resolutions the Cocoa OpenGL/Metal bridge can then retain
+     * enough late work to exhaust unified memory. Recover the current player in place as soon as
+     * native loss counters prove that accelerated playback is not producing useful frames.
+     */
+    private suspend fun recoverUnsustainableLibVlcPlaybackRate(
+        ptr: Long,
+        currentPositionSeconds: Double,
+    ) {
+        val requestedSpeed = _playbackSpeedState.value
+        if (
+            ptr == 0L ||
+            !nativeBackendUsesLibVlc ||
+            !isPlaying ||
+            requestedSpeed <= 1.0f
+        ) {
+            libVlcPlaybackRateGuard.reset()
+            return
+        }
+
+        val nativeDiagnostics =
+            runCatching { MacNativeBridge.nGetPlaybackDiagnostics(ptr) }
+                .getOrNull()
+                ?.toMacNativePlaybackDiagnostics()
+        val shouldRecover =
+            libVlcPlaybackRateGuard.shouldRecover(
+                MacLibVlcPlaybackRateSample(
+                    playbackSpeed = requestedSpeed,
+                    positionSeconds = currentPositionSeconds,
+                    decodedFrames = nativeDiagnostics?.totalFrames,
+                    droppedFrames = nativeDiagnostics?.droppedFrames,
+                    videoWidth = metadata.width ?: libVlcTrackInfo?.videoWidth,
+                    videoHeight = metadata.height ?: libVlcTrackInfo?.videoHeight,
+                ),
+            )
+        if (!shouldRecover || !libVlcPlaybackRateRecoveryActive.compareAndSet(false, true)) return
+
+        try {
+            if (ptr != playerPtr || !nativeBackendUsesLibVlc || !isPlaying) return
+            macLogger.w {
+                "libVLC cannot sustain ${requestedSpeed}x for the active native surface; " +
+                    "recovering at 1.0x before its Metal queue exhausts unified memory"
+            }
+            MacNativeBridge.nSetPlaybackSpeed(ptr, 1.0f)
+            MacNativeBridge.nPause(ptr)
+            MacNativeBridge.nSeekTo(ptr, currentPositionSeconds)
+            MacNativeBridge.nPlay(ptr)
+            withContext(Dispatchers.Main) {
+                if (ptr == playerPtr && nativeBackendUsesLibVlc) {
+                    _playbackSpeedState.value = 1.0f
+                }
+            }
+        } finally {
+            libVlcPlaybackRateGuard.reset()
+            libVlcPlaybackRateRecoveryActive.set(false)
         }
     }
 
@@ -3992,6 +4228,7 @@ class MacVideoPlayerState(
 
     override fun dispose() {
         macLogger.d { "dispose() - Releasing resources" }
+        libVlcVideoOutputRefreshJob.getAndSet(null)?.cancel()
         clearPendingSeekRequests()
         frameEpoch.incrementAndGet()
         val cleanupJob =
@@ -4020,6 +4257,7 @@ class MacVideoPlayerState(
                 libVlcSelectedAudioStreamIndex = null
                 libVlcSelectedSubtitleStreamIndex = null
                 libVlcNativeSurfaceRequested = false
+                libVlcUsesNativeVideoOutput = false
 
                 val ptrToDispose =
                     withContext(frameDispatcher) {
@@ -4041,6 +4279,7 @@ class MacVideoPlayerState(
                 }
 
                 nativeBackendUsesLibVlc = false
+                libVlcUsesNativeVideoOutput = false
                 fallbackToClose?.close()
                 preparedSourceToClose?.close()
                 resetState()
@@ -4737,7 +4976,8 @@ class MacVideoPlayerState(
             lifecycle.launchSourceBoundControlOperation {
                 delay(METAL_TEXTURE_RESIZE_DEBOUNCE)
                 if (resizeRequestToken.get() == requestToken) {
-                    applyMetalTextureViewportSize(width, height)
+                    val viewport = macProjectionTextureViewport(width, height, aspectRatio)
+                    applyMetalTextureViewportSize(viewport.width, viewport.height)
                 }
             }
     }

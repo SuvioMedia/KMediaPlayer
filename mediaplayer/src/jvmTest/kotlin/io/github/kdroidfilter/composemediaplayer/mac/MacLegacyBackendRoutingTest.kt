@@ -4,6 +4,9 @@ import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
 import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionType
+import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -123,5 +126,33 @@ class MacLegacyBackendRoutingTest {
         assertEquals(180, visibleLibVlcFrameDimension(decodedDimension = 192, probedDimension = 180))
         assertEquals(192, visibleLibVlcFrameDimension(decodedDimension = 192, probedDimension = null))
         assertEquals(192, visibleLibVlcFrameDimension(decodedDimension = 192, probedDimension = 216))
+    }
+
+    @Test
+    fun `libVLC keeps native view for flat media and uses controlled frames for fisheye`() {
+        assertTrue(
+            shouldUseMacLibVlcNativeVideoOutput(
+                projection = VideoProjectionSettings(),
+                textureCrop = VideoTextureCrop(),
+            ),
+        )
+        assertFalse(
+            shouldUseMacLibVlcNativeVideoOutput(
+                projection = VideoProjectionSettings(projectionType = VideoProjectionType.Fisheye190),
+                textureCrop = VideoTextureCrop(),
+            ),
+        )
+    }
+
+    @Test
+    fun `projection texture retains media aspect inside every container`() {
+        assertEquals(
+            MacProjectionTextureViewport(width = 1600, height = 800),
+            macProjectionTextureViewport(containerWidth = 1600, containerHeight = 1000, mediaAspectRatio = 2f),
+        )
+        assertEquals(
+            MacProjectionTextureViewport(width = 1600, height = 800),
+            macProjectionTextureViewport(containerWidth = 1800, containerHeight = 800, mediaAspectRatio = 2f),
+        )
     }
 }

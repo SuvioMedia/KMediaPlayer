@@ -12,12 +12,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.IntSize
 import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
 import org.jetbrains.skia.FilterTileMode
-import org.jetbrains.skia.Image
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
 import org.jetbrains.skia.RuntimeEffect
 import org.jetbrains.skia.RuntimeShaderBuilder
 import org.jetbrains.skia.SamplingMode
+import org.jetbrains.skia.Shader
 import kotlin.math.floor
 
 internal fun VideoProjectionSettings.usesJvmCanvasProjectionRenderer(textureCrop: VideoTextureCrop): Boolean =
@@ -104,47 +104,63 @@ private fun DrawScope.drawProjectedVideoFrame(
         normalized.toVideoProjectionRenderPlan(
             VideoProjectionRenderOptions(textureCrop = textureCrop),
         )
-    val skiaImage = Image.makeFromBitmap(frame.asSkiaBitmap())
-    val textureShader =
-        skiaImage.makeShader(
+    frame.asSkiaBitmap()
+        .makeShader(
             tmx = FilterTileMode.CLAMP,
             tmy = FilterTileMode.CLAMP,
             sampling = SamplingMode.LINEAR,
             localMatrix = null,
         )
-
-    if (plan.stereo) {
-        val leftWidth = floor(width / 2f)
-        drawProjectedEye(
-            textureShader = textureShader,
-            projection = normalized,
-            projectionView = normalizedView,
-            eyeWindow = plan.leftEyeTexture,
-            frameSize = frame.size,
-            viewport = ProjectionViewport(0f, 0f, leftWidth, height),
-        )
-        drawProjectedEye(
-            textureShader = textureShader,
-            projection = normalized,
-            projectionView = normalizedView,
-            eyeWindow = plan.rightEyeTexture,
-            frameSize = frame.size,
-            viewport = ProjectionViewport(leftWidth, 0f, width - leftWidth, height),
-        )
-    } else {
-        drawProjectedEye(
-            textureShader = textureShader,
-            projection = normalized,
-            projectionView = normalizedView,
-            eyeWindow = plan.leftEyeTexture,
-            frameSize = frame.size,
-            viewport = ProjectionViewport(0f, 0f, width, height),
-        )
-    }
+        .use { textureShader ->
+            if (plan.stereo) {
+                val leftWidth = floor(width / 2f)
+                drawProjectedEye(
+                    textureShader = textureShader,
+                    projection = normalized,
+                    projectionView = normalizedView,
+                    eyeWindow = plan.leftEyeTexture,
+                    frameSize = frame.size,
+                    viewport = ProjectionViewport(0f, 0f, leftWidth, height),
+                )
+                drawProjectedEye(
+                    textureShader = textureShader,
+                    projection = normalized,
+                    projectionView = normalizedView,
+                    eyeWindow = plan.rightEyeTexture,
+                    frameSize = frame.size,
+                    viewport = ProjectionViewport(leftWidth, 0f, width - leftWidth, height),
+                )
+            } else {
+                drawProjectedEye(
+                    textureShader = textureShader,
+                    projection = normalized,
+                    projectionView = normalizedView,
+                    eyeWindow = plan.leftEyeTexture,
+                    frameSize = frame.size,
+                    viewport = ProjectionViewport(0f, 0f, width, height),
+                )
+            }
+        }
 }
 
+internal inline fun <T> withJvmProjectionPaint(
+    textureShader: Shader,
+    configure: (RuntimeShaderBuilder) -> Unit,
+    draw: (Paint, Shader) -> T,
+): T =
+    RuntimeShaderBuilder(jvmProjectionRuntimeEffect).use { builder ->
+        builder.child("uTexture", textureShader)
+        configure(builder)
+        builder.makeShader().use { projectionShader ->
+            Paint().use { paint ->
+                paint.shader = projectionShader
+                draw(paint, projectionShader)
+            }
+        }
+    }
+
 private fun DrawScope.drawProjectedEye(
-    textureShader: org.jetbrains.skia.Shader,
+    textureShader: Shader,
     projection: VideoProjectionSettings,
     projectionView: VideoProjectionViewSettings,
     eyeWindow: VideoTextureWindow,
@@ -153,26 +169,26 @@ private fun DrawScope.drawProjectedEye(
 ) {
     if (viewport.width <= 0f || viewport.height <= 0f) return
 
-    val builder = RuntimeShaderBuilder(jvmProjectionRuntimeEffect)
-    builder.child("uTexture", textureShader)
-    builder.uniform("uProjectionType", projection.projectionType.projectionShaderCode)
-    builder.uniform("uFovDegrees", projection.fovDegrees)
-    builder.uniform("uSourceSize", frameSize.width, frameSize.height)
-    builder.uniform("uEyeWindow", eyeWindow.left, eyeWindow.top, eyeWindow.right, eyeWindow.bottom)
-    builder.uniform("uRotation", eyeWindow.rotation.ordinal)
-    builder.uniform("uViewport", viewport.left, viewport.top, viewport.width, viewport.height)
-    builder.uniform("uViewYawDegrees", projectionView.yawDegrees)
-    builder.uniform("uViewPitchDegrees", projectionView.pitchDegrees)
-    builder.uniform("uViewRollDegrees", projectionView.rollDegrees)
-    builder.uniform("uViewZoom", projectionView.zoom)
-
-    val paint =
-        Paint().apply {
-            shader = builder.makeShader()
-        }
-    drawContext.canvas.skiaCanvas.drawRect(
-        Rect.makeXYWH(viewport.left, viewport.top, viewport.width, viewport.height),
-        paint,
+    withJvmProjectionPaint(
+        textureShader = textureShader,
+        configure = { builder ->
+            builder.uniform("uProjectionType", projection.projectionType.projectionShaderCode)
+            builder.uniform("uFovDegrees", projection.fovDegrees)
+            builder.uniform("uSourceSize", frameSize.width, frameSize.height)
+            builder.uniform("uEyeWindow", eyeWindow.left, eyeWindow.top, eyeWindow.right, eyeWindow.bottom)
+            builder.uniform("uRotation", eyeWindow.rotation.ordinal)
+            builder.uniform("uViewport", viewport.left, viewport.top, viewport.width, viewport.height)
+            builder.uniform("uViewYawDegrees", projectionView.yawDegrees)
+            builder.uniform("uViewPitchDegrees", projectionView.pitchDegrees)
+            builder.uniform("uViewRollDegrees", projectionView.rollDegrees)
+            builder.uniform("uViewZoom", projectionView.zoom)
+        },
+        draw = { paint, _ ->
+            drawContext.canvas.skiaCanvas.drawRect(
+                Rect.makeXYWH(viewport.left, viewport.top, viewport.width, viewport.height),
+                paint,
+            )
+        },
     )
 }
 
