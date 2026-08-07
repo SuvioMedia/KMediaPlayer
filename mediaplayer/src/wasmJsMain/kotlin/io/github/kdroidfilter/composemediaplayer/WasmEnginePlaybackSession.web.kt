@@ -964,12 +964,14 @@ internal fun VideoProjectionSettings.toWasmEngineProjection(
         yawDegrees = normalizedView.yawDegrees,
         pitchDegrees = normalizedView.pitchDegrees,
         fieldOfViewDegrees = (baseFov / normalizedView.zoom).coerceIn(20f, 150f),
-        cropLeft = monoscopicWindow?.left ?: crop.left,
-        cropTop = monoscopicWindow?.top ?: crop.top,
-        cropRight = monoscopicWindow?.let { 1f - it.right } ?: crop.right,
-        cropBottom = monoscopicWindow?.let { 1f - it.bottom } ?: crop.bottom,
+        cropLeft = (monoscopicWindow?.left ?: crop.left).toWasmEngineCropEdge(),
+        cropTop = (monoscopicWindow?.top ?: crop.top).toWasmEngineCropEdge(),
+        cropRight = (monoscopicWindow?.let { 1f - it.right } ?: crop.right).toWasmEngineCropEdge(),
+        cropBottom = (monoscopicWindow?.let { 1f - it.bottom } ?: crop.bottom).toWasmEngineCropEdge(),
     )
 }
+
+private fun Float.toWasmEngineCropEdge(): Float = coerceIn(0f, WASM_ENGINE_MAX_PROJECTION_CROP)
 
 internal fun VideoProjectionSettings.toWasmEngineRotationDegrees(): Int =
     when (normalized().rotation) {
@@ -978,6 +980,8 @@ internal fun VideoProjectionSettings.toWasmEngineRotationDegrees(): Int =
         VideoProjectionRotation.Rotate180 -> 180
         VideoProjectionRotation.Rotate270 -> 270
     }
+
+private const val WASM_ENGINE_MAX_PROJECTION_CROP: Float = 0.49f
 
 private fun DynamicRangePolicy.toWasmEngineToneMapping(): ToneMappingMode =
     when (this) {

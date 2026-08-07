@@ -145,7 +145,7 @@ class WasmEnginePlaybackAdapterTest {
         assertEquals(io.github.shusek.kmedia.engine.wasm.ProjectionStereoLayout.MONO, mapped.stereoLayout)
         assertEquals(0.05f, mapped.cropLeft)
         assertEquals(0f, mapped.cropTop)
-        assertEquals(0.55f, mapped.cropRight)
+        assertEquals(0.49f, mapped.cropRight)
         assertEquals(0f, mapped.cropBottom)
     }
 
