@@ -929,15 +929,14 @@ static void renderer_update_callback(void* context) {
                 };
                 int flip_y = 1;
                 int depth = renderer->buffer_depth;
-                // CAOpenGLLayer already invokes this draw on its display-driven render thread.
-                // During live resize, waiting again for libmpv's target time can miss the
-                // current Core Animation transaction and make otherwise smooth window motion
-                // advance in visible steps. Keep libmpv's normal A/V scheduling everywhere
-                // else and only remove that duplicate wait while AppKit is resizing the view.
-                int block_for_target_time = atomic_load_explicit(
-                    &renderer->live_resize_active,
-                    memory_order_acquire
-                ) ? 0 : 1;
+                // CAOpenGLLayer already invokes this draw on its display-driven render thread,
+                // while libmpv's update callback tells us when a frame is ready. Waiting again
+                // inside mpv_render_context_render() holds this native render callback for
+                // almost a complete refresh interval. That competes with the sibling Tao scene
+                // which presents Compose controls and makes ordinary UI interactions visibly
+                // late. Keep presentation timing in Core Animation and audio synchronization in
+                // libmpv, but never sleep inside the layer callback.
+                int block_for_target_time = 0;
                 mpv_render_param parameters[] = {
                     {MPV_RENDER_PARAM_OPENGL_FBO, &target},
                     {MPV_RENDER_PARAM_FLIP_Y, &flip_y},
