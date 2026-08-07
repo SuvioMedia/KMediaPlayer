@@ -1882,6 +1882,15 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoPlayerSurfaceP
 	public static final fun RenderVideoPlayerSurface$default (Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lio/github/kdroidfilter/composemediaplayer/VideoPlayerSurfaceProvider;Landroidx/compose/runtime/Composer;II)V
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode : java/lang/Enum {
+	public static final field MonoscopicLeft Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;
+	public static final field MonoscopicRight Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;
+	public static final field Stereo Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/VideoProjectionKt {
 	public static final fun defaultFovDegrees (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;)F
 	public static final fun getProjectionShaderCode (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;)I
@@ -1977,18 +1986,20 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoProjectionRota
 public final class io/github/kdroidfilter/composemediaplayer/VideoProjectionSettings {
 	public static final field $stable I
 	public fun <init> ()V
-	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;FFLio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;)V
-	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;FFLio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;FFLio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;FFLio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;
 	public final fun component2 ()Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;
 	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;
 	public final fun component4 ()F
 	public final fun component5 ()F
 	public final fun component6 ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;
-	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;FFLio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;)Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;FFLio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;
+	public final fun component7 ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;FFLio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;)Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;Lio/github/kdroidfilter/composemediaplayer/VideoStereoLayout;Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;FFLio/github/kdroidfilter/composemediaplayer/VideoProjectionRotation;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAspectRatio ()F
+	public final fun getDisplayMode ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionDisplayMode;
 	public final fun getEyeOrder ()Lio/github/kdroidfilter/composemediaplayer/VideoEyeOrder;
 	public final fun getFovDegrees ()F
 	public final fun getProjectionType ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionType;

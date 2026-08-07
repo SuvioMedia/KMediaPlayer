@@ -223,11 +223,28 @@ class MpvRuntimeTest {
     }
 
     @Test
-    fun boundsVerifiedRuntimeSourcesToLocalFiles() {
-        assertTrue("/private/video.mkv".isLocalMpvSource())
-        assertTrue("relative/video.mkv".isLocalMpvSource())
-        assertTrue("file:///private/video.mkv".isLocalMpvSource())
-        assertFalse("https://example.invalid/video.mkv".isLocalMpvSource())
-        assertFalse("rtsp://example.invalid/live".isLocalMpvSource())
+    fun boundsVerifiedRuntimeSourcesToLocalFilesAndNumericLoopbackHttp() {
+        assertTrue("/private/video.mkv".isVerifiedBundledMpvSource())
+        assertTrue("relative/video.mkv".isVerifiedBundledMpvSource())
+        assertTrue("file:///private/video.mkv".isVerifiedBundledMpvSource())
+        assertTrue("http://127.0.0.1:49152/hls/1".isVerifiedBundledMpvSource())
+        assertTrue("http://[::1]:49152/hls/1".isVerifiedBundledMpvSource())
+        assertFalse("http://localhost:49152/hls/1".isVerifiedBundledMpvSource())
+        assertFalse("https://127.0.0.1:49152/hls/1".isVerifiedBundledMpvSource())
+        assertFalse("https://example.invalid/video.mkv".isVerifiedBundledMpvSource())
+        assertFalse("rtsp://example.invalid/live".isVerifiedBundledMpvSource())
+    }
+
+    @Test
+    fun canonicalizesSingleSlashFileUrisBeforePassingThemToLibMpv() {
+        val media = Files.createTempFile("kmediampv-file-uri-", ".mp4")
+        try {
+            val canonicalUri = media.toUri().toASCIIString()
+            val legacyFileUri = canonicalUri.replaceFirst("file:///", "file:/")
+
+            assertEquals(canonicalUri, legacyFileUri.normalizedMpvMediaUri())
+        } finally {
+            Files.deleteIfExists(media)
+        }
     }
 }

@@ -133,6 +133,16 @@ float3 source_primaries_to_bt2020(float3 color, float primaries) {
     );
 }
 
+// Nucleus' FP16 Tao swapchain is extended-linear sRGB (scRGB). HDR values stay
+// scene-referred and may remain above 1.0; only the RGB basis changes here.
+float3 linear_bt2020_to_scrgb(float3 color) {
+    return float3(
+        1.660491002 * color.r - 0.587641139 * color.g - 0.072849863 * color.b,
+        -0.124550475 * color.r + 1.132899897 * color.g - 0.008349422 * color.b,
+        -0.018150763 * color.r - 0.100578898 * color.g + 1.118729661 * color.b
+    );
+}
+
 float3 gamut_map_to_bt709(
     float3 normalized_bt2020,
     texture3d<float, access::sample> gamut_lut
@@ -201,7 +211,10 @@ float3 color_manage(
             linear_source = max(encoded, float3(0.0));
         }
         const float3 linear_bt2020 = source_primaries_to_bt2020(linear_source, p[59]);
-        if (p[20] > 0.5) return max(linear_bt2020, float3(0.0));
+        if (p[20] > 0.5) {
+            const float3 hdr = max(linear_bt2020, float3(0.0));
+            return p[60] > 0.5 ? linear_bt2020_to_scrgb(hdr) : hdr;
+        }
         return gamut_map_to_bt709(linear_bt2020, gamut_lut);
     }
     float3 linear_nits;
@@ -217,7 +230,10 @@ float3 color_manage(
     }
     linear_nits = source_primaries_to_bt2020(linear_nits, p[59]);
     linear_nits = apply_hdr10_plus(linear_nits, p);
-    if (p[20] > 0.5) return max(linear_nits / 100.0, 0.0);
+    if (p[20] > 0.5) {
+        const float3 hdr = max(linear_nits / 100.0, 0.0);
+        return p[60] > 0.5 ? linear_bt2020_to_scrgb(hdr) : hdr;
+    }
 
     const float luminance = max(dot(linear_nits, float3(0.2627, 0.6780, 0.0593)), 0.000001);
     const float mapped = p[24] > 0.5

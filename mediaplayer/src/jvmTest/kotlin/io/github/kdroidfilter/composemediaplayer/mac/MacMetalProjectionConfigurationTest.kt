@@ -8,6 +8,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoColorPrimaries
 import io.github.kdroidfilter.composemediaplayer.VideoColorRange
 import io.github.kdroidfilter.composemediaplayer.VideoColorTransfer
 import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionDisplayMode
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionType
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
@@ -82,6 +83,28 @@ class MacMetalProjectionConfigurationTest {
 
         assertContains(configuration, "outputHdr=0")
         assertContains(configuration, "tenBit=1")
+    }
+
+    @Test
+    fun `monoscopic desktop preview sends one fisheye eye to the full Metal viewport`() {
+        val configuration =
+            macMetalProjectionConfiguration(
+                projection =
+                    VideoProjectionSettings(
+                        projectionType = VideoProjectionType.Fisheye190,
+                        stereoLayout = VideoStereoLayout.SideBySide,
+                        displayMode = VideoProjectionDisplayMode.MonoscopicLeft,
+                    ),
+                projectionView = VideoProjectionViewSettings(),
+                textureCrop = VideoTextureCrop(),
+                source = hdr10Source(),
+                outputDynamicRange = VideoDynamicRange.HDR10,
+            )
+
+        assertContains(configuration, "type=4")
+        assertContains(configuration, "stereo=0")
+        assertContains(configuration, "left=0.0,0.0,0.5,1.0,0")
+        assertContains(configuration, "right=0.0,0.0,0.5,1.0,0")
     }
 
     @Test

@@ -85,6 +85,37 @@ class VideoProjectionRenderPlanTest {
     }
 
     @Test
+    fun monoscopicLeftUsesTheLogicalLeftEyeAcrossOneViewport() {
+        val plan =
+            VideoProjectionSettings(
+                projectionType = VideoProjectionType.Fisheye190,
+                stereoLayout = VideoStereoLayout.SideBySide,
+                displayMode = VideoProjectionDisplayMode.MonoscopicLeft,
+            ).toVideoProjectionRenderPlan()
+
+        assertFalse(plan.stereo)
+        assertEquals(VideoTextureWindow(0f, 0f, 0.5f, 1f, VideoProjectionRotation.None), plan.leftEyeTexture)
+        assertEquals(plan.leftEyeTexture, plan.rightEyeTexture)
+    }
+
+    @Test
+    fun monoscopicRightHonoursRightLeftSourceOrderAndPerEyeCrop() {
+        val plan =
+            VideoProjectionSettings(
+                projectionType = VideoProjectionType.Fisheye190,
+                stereoLayout = VideoStereoLayout.SideBySide,
+                eyeOrder = VideoEyeOrder.RightLeft,
+                displayMode = VideoProjectionDisplayMode.MonoscopicRight,
+            ).toVideoProjectionRenderPlan(
+                VideoProjectionRenderOptions(textureCrop = VideoTextureCrop(left = 0.1f, right = 0.1f)),
+            )
+
+        assertFalse(plan.stereo)
+        assertEquals(VideoTextureWindow(0.05f, 0f, 0.45f, 1f, VideoProjectionRotation.None), plan.leftEyeTexture)
+        assertEquals(plan.leftEyeTexture, plan.rightEyeTexture)
+    }
+
+    @Test
     fun overUnderLayoutSplitsTextureVertically() {
         val plan =
             VideoProjectionSettings(

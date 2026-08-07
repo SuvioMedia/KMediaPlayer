@@ -5,7 +5,12 @@ package io.github.kdroidfilter.composemediaplayer.mpv
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -16,10 +21,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
@@ -57,36 +64,64 @@ private fun MpvVideoSurfaceContent(
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
     var nativeAttachFailed by remember(playerState) { mutableStateOf(false) }
     val useNativeMacSurface =
-        playerState.hasMedia && playerState.canUseNativeMacSurface && !nativeAttachFailed
+        playerState.canUseNativeMacSurface &&
+            !nativeAttachFailed
+    val videoModifier =
+        contentScale.toMpvSurfaceModifier(
+            aspectRatio = playerState.aspectRatio,
+            width = playerState.metadata.width,
+            height = playerState.metadata.height,
+        )
 
     LaunchedEffect(playerState, contentScale) {
         playerState.setCropMode(contentScale == ContentScale.Crop)
     }
+    LaunchedEffect(
+        playerState,
+        playerState.projection,
+        playerState.projectionView,
+        playerState.projectionTextureCrop,
+    ) {
+        playerState.updateNativeMacProjection()
+    }
     LaunchedEffect(playerState.hasMedia) {
         if (playerState.hasMedia) nativeAttachFailed = false
     }
-
-    if (useNativeMacSurface) {
-        val surface =
-            remember(playerState, useNativeMacSurface) {
-                TaoNativeVideoSurface(
-                    kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
-                    createHandle = playerState::createNativeMacView,
-                    disposeHandle = playerState::disposeNativeMacView,
-                )
+    Box(
+        modifier = modifier.background(Color.Black),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (useNativeMacSurface) {
+            val surface =
+                remember(playerState, useNativeMacSurface) {
+                    TaoNativeVideoSurface(
+                        kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
+                        createHandle = playerState::createNativeMacView,
+                        disposeHandle = playerState::disposeNativeMacView,
+                    )
+                }
+            TaoNativeVideoView(
+                surface = surface,
+                // Keep the Nucleus native-view host and its sibling Compose scene on the complete
+                // player viewport. An NSView mounted only at the media's aspect-ratio rectangle
+                // would sit above the root Skia scene and hide every control intersecting video.
+                // Ordinary video lets libmpv apply keep-aspect/panscan in this framebuffer. A
+                // projected source fills the intermediate texture instead, so the native GPU
+                // projection pass owns the only aspect-ratio transform.
+                modifier = Modifier.fillMaxSize().background(Color.Black),
+                overlay = { Box(modifier = Modifier.fillMaxSize()) { overlay() } },
+                onAttached = {
+                    playerState.onNativeMacSurfaceAttached()
+                    latestOnSurfaceAttached()
+                },
+                onUnavailable = { nativeAttachFailed = true },
+            )
+        } else {
+            MpvSoftwareVideoPlayerSurface(playerState, videoModifier, overlay)
+            DisposableEffect(playerState) {
+                latestOnSurfaceAttached()
+                onDispose { }
             }
-        TaoNativeVideoView(
-            surface = surface,
-            modifier = modifier.background(Color.Black),
-            overlay = overlay,
-            onAttached = { latestOnSurfaceAttached() },
-            onUnavailable = { nativeAttachFailed = true },
-        )
-    } else {
-        MpvSoftwareVideoPlayerSurface(playerState, modifier, overlay)
-        DisposableEffect(playerState) {
-            latestOnSurfaceAttached()
-            onDispose { }
         }
     }
 }
@@ -138,3 +173,24 @@ private fun MpvSoftwareVideoPlayerSurface(
 
 private const val PAUSED_REFRESH_INTERVAL_MS = 250L
 private const val IDLE_REFRESH_INTERVAL_MS = 100L
+
+@Composable
+private fun ContentScale.toMpvSurfaceModifier(
+    aspectRatio: Float,
+    width: Int?,
+    height: Int?,
+): Modifier =
+    when (this) {
+        ContentScale.Fit,
+        ContentScale.Inside,
+        -> Modifier.fillMaxHeight().aspectRatio(aspectRatio)
+
+        ContentScale.FillWidth -> Modifier.fillMaxWidth().aspectRatio(aspectRatio)
+        ContentScale.FillHeight -> Modifier.fillMaxHeight().aspectRatio(aspectRatio)
+        ContentScale.Crop,
+        ContentScale.FillBounds,
+        -> Modifier.fillMaxSize()
+
+        ContentScale.None -> Modifier.width((width ?: 0).dp).height((height ?: 0).dp)
+        else -> Modifier
+    }

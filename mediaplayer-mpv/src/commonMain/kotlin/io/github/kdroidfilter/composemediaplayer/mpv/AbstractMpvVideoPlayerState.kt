@@ -67,7 +67,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
     protected var _subtitleOffset by mutableStateOf(Duration.ZERO)
 
     final override val metadata = VideoMetadata()
-    final override val diagnostics: PlaybackDiagnostics
+    override val diagnostics: PlaybackDiagnostics
         get() =
             PlaybackDiagnostics(
                 videoWidth = metadata.width,

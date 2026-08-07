@@ -7,8 +7,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #import <AppKit/AppKit.h>
+#import <CoreFoundation/CoreFoundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreVideo/CoreVideo.h>
 #import <OpenGL/OpenGL.h>
@@ -35,6 +37,11 @@ typedef struct {
     int internal_format;
 } mpv_opengl_fbo;
 
+typedef struct {
+    uint64_t flags;
+    int64_t target_time;
+} mpv_render_frame_info;
+
 enum {
     MPV_RENDER_PARAM_INVALID = 0,
     MPV_RENDER_PARAM_API_TYPE = 1,
@@ -42,11 +49,35 @@ enum {
     MPV_RENDER_PARAM_OPENGL_FBO = 3,
     MPV_RENDER_PARAM_FLIP_Y = 4,
     MPV_RENDER_PARAM_DEPTH = 5,
+    MPV_RENDER_PARAM_ADVANCED_CONTROL = 10,
+    MPV_RENDER_PARAM_NEXT_FRAME_INFO = 11,
     MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME = 12,
 };
 
 enum {
     MPV_RENDER_UPDATE_FRAME = 1 << 0,
+};
+
+enum {
+    MPV_RENDER_FRAME_INFO_PRESENT = 1 << 0,
+    MPV_RENDER_FRAME_INFO_REDRAW = 1 << 1,
+    MPV_RENDER_FRAME_INFO_REPEAT = 1 << 2,
+};
+
+enum {
+    KMP_MPV_PROJECTION_ENABLED = 0,
+    KMP_MPV_PROJECTION_TYPE = 1,
+    KMP_MPV_PROJECTION_FOV = 2,
+    KMP_MPV_PROJECTION_STEREO = 3,
+    KMP_MPV_PROJECTION_LEFT_WINDOW = 4,
+    KMP_MPV_PROJECTION_LEFT_ROTATION = 8,
+    KMP_MPV_PROJECTION_RIGHT_WINDOW = 9,
+    KMP_MPV_PROJECTION_RIGHT_ROTATION = 13,
+    KMP_MPV_PROJECTION_YAW = 14,
+    KMP_MPV_PROJECTION_PITCH = 15,
+    KMP_MPV_PROJECTION_ROLL = 16,
+    KMP_MPV_PROJECTION_ZOOM = 17,
+    KMP_MPV_PROJECTION_PARAMETER_COUNT = 18,
 };
 
 typedef int (*mpv_render_context_create_fn)(
@@ -60,6 +91,10 @@ typedef void (*mpv_render_context_set_update_callback_fn)(
     void* callback_context
 );
 typedef uint64_t (*mpv_render_context_update_fn)(mpv_render_context* context);
+typedef int (*mpv_render_context_get_info_fn)(
+    mpv_render_context* context,
+    mpv_render_param parameter
+);
 typedef int (*mpv_render_context_render_fn)(
     mpv_render_context* context,
     mpv_render_param* parameters
@@ -71,6 +106,7 @@ typedef struct {
     mpv_render_context_create_fn create;
     mpv_render_context_set_update_callback_fn set_update_callback;
     mpv_render_context_update_fn update;
+    mpv_render_context_get_info_fn get_info;
     mpv_render_context_render_fn render;
     mpv_render_context_report_swap_fn report_swap;
     mpv_render_context_free_fn free;
@@ -85,7 +121,24 @@ struct KMPMpvNativeRenderer {
     atomic_bool shutting_down;
     atomic_bool update_pending;
     atomic_bool redraw_requested;
+    atomic_bool display_request_queued;
     atomic_bool live_resize_active;
+    atomic_uint_fast64_t update_callback_count;
+    atomic_uint_fast64_t draw_callback_count;
+    atomic_uint_fast64_t rendered_frame_count;
+    atomic_uint_fast64_t presented_frame_count;
+    atomic_uint_fast64_t new_video_frame_count;
+    atomic_uint_fast64_t repeated_video_frame_count;
+    atomic_uint_fast64_t redraw_frame_count;
+    atomic_uint_fast64_t empty_draw_count;
+    atomic_uint_fast64_t display_wakeup_count;
+    atomic_uint_fast64_t live_resize_display_wakeup_count;
+    atomic_uint_fast64_t live_resize_geometry_update_count;
+    atomic_uint_fast64_t maximum_live_resize_aspect_error_ppm;
+    atomic_uint_fast64_t render_time_ns;
+    atomic_uint_fast64_t maximum_render_time_ns;
+    atomic_uint_fast64_t flush_time_ns;
+    atomic_uint_fast64_t maximum_flush_time_ns;
     pthread_mutex_t render_mutex;
     int color_mode;
     int buffer_depth;
@@ -96,6 +149,14 @@ struct KMPMpvNativeRenderer {
     mpv_render_context* render_context;
     CGLPixelFormatObj pixel_format;
     CGLContextObj gl_context;
+    float projection_parameters[KMP_MPV_PROJECTION_PARAMETER_COUNT];
+    GLuint projection_program;
+    GLuint projection_vertex_array;
+    GLuint projection_texture;
+    GLuint projection_framebuffer;
+    int projection_width;
+    int projection_height;
+    int projection_depth;
     // The renderer owns the native view and layer while Nucleus Tao mounts the view.
     KMPMpvOpenGLLayer* layer;
     KMPMpvVideoView* view;
@@ -128,6 +189,8 @@ static void gl_flush_noop(void) {
 static void* resolve_opengl_function(void* context, const char* name) {
     (void)context;
     if (!name) return NULL;
+    // CAOpenGLLayer is flushed exactly once after mpv finishes drawing. Letting libmpv flush its
+    // command stream first makes every 8K frame wait twice for the same GPU work on macOS.
     if (strcmp(name, "glFlush") == 0) return (void*)&gl_flush_noop;
 
     CFBundleRef bundle = CFBundleGetBundleWithIdentifier(CFSTR("com.apple.opengl"));
@@ -137,6 +200,353 @@ static void* resolve_opengl_function(void* context, const char* name) {
     void* address = CFBundleGetFunctionPointerForName(bundle, symbol);
     CFRelease(symbol);
     return address;
+}
+
+static uint64_t monotonic_nanos(void) {
+    struct timespec time = {0};
+    if (clock_gettime(CLOCK_MONOTONIC, &time) != 0) return 0;
+    return ((uint64_t)time.tv_sec * 1000000000ULL) + (uint64_t)time.tv_nsec;
+}
+
+static void atomic_update_maximum(atomic_uint_fast64_t* maximum, uint64_t value) {
+    uint64_t observed = atomic_load_explicit(maximum, memory_order_relaxed);
+    while (observed < value &&
+           !atomic_compare_exchange_weak_explicit(
+               maximum,
+               &observed,
+               value,
+               memory_order_relaxed,
+               memory_order_relaxed
+           )) {
+    }
+}
+
+static const GLchar* KMP_MPV_PROJECTION_VERTEX_SHADER =
+    "#version 150 core\n"
+    "out vec2 vUv;\n"
+    "void main() {\n"
+    "    vec2 positions[4] = vec2[4](\n"
+    "        vec2(-1.0, -1.0), vec2(1.0, -1.0),\n"
+    "        vec2(-1.0, 1.0), vec2(1.0, 1.0)\n"
+    "    );\n"
+    "    vec2 position = positions[gl_VertexID];\n"
+    "    gl_Position = vec4(position, 0.0, 1.0);\n"
+    "    vUv = (position + 1.0) * 0.5;\n"
+    "}\n";
+
+static const GLchar* KMP_MPV_PROJECTION_FRAGMENT_SHADER =
+    "#version 150 core\n"
+    "uniform sampler2D uTexture;\n"
+    "uniform int uProjectionType;\n"
+    "uniform float uFovDegrees;\n"
+    "uniform int uStereo;\n"
+    "uniform vec4 uLeftWindow;\n"
+    "uniform int uLeftRotation;\n"
+    "uniform vec4 uRightWindow;\n"
+    "uniform int uRightRotation;\n"
+    "uniform float uViewYawDegrees;\n"
+    "uniform float uViewPitchDegrees;\n"
+    "uniform float uViewRollDegrees;\n"
+    "uniform float uViewZoom;\n"
+    "uniform float uViewportAspect;\n"
+    "in vec2 vUv;\n"
+    "out vec4 fragmentColor;\n"
+    "const float PI = 3.14159265358979323846264;\n"
+    "const float CAMERA_FOV_DEGREES = 95.0;\n"
+    "vec2 rotateUv(vec2 uv, int rotation) {\n"
+    "    if (rotation == 1) return vec2(1.0 - uv.y, uv.x);\n"
+    "    if (rotation == 2) return vec2(1.0 - uv.x, 1.0 - uv.y);\n"
+    "    if (rotation == 3) return vec2(uv.y, 1.0 - uv.x);\n"
+    "    return uv;\n"
+    "}\n"
+    "vec4 sampleLocal(vec2 localUv, bool rightEye) {\n"
+    "    if (localUv.x < 0.0 || localUv.x > 1.0 || localUv.y < 0.0 || localUv.y > 1.0) {\n"
+    "        return vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "    }\n"
+    "    vec4 window = rightEye ? uRightWindow : uLeftWindow;\n"
+    "    int rotation = rightEye ? uRightRotation : uLeftRotation;\n"
+    "    vec2 sourceUv = mix(window.xy, window.zw, rotateUv(localUv, rotation));\n"
+    // Public projection UVs use a top-left origin. The OpenGL texture uses a bottom-left origin.
+    "    return texture(uTexture, vec2(sourceUv.x, 1.0 - sourceUv.y));\n"
+    "}\n"
+    "vec3 rayForScreenUv(vec2 screenUv) {\n"
+    "    vec2 p = vec2(screenUv.x * 2.0 - 1.0, 1.0 - screenUv.y * 2.0);\n"
+    "    float tanHalfFov = tan((CAMERA_FOV_DEGREES * PI / 180.0) * 0.5 / max(uViewZoom, 0.01));\n"
+    "    vec3 direction = normalize(vec3(p.x * uViewportAspect * tanHalfFov, p.y * tanHalfFov, -1.0));\n"
+    "    float yaw = uViewYawDegrees * PI / 180.0;\n"
+    "    float pitch = uViewPitchDegrees * PI / 180.0;\n"
+    "    float roll = uViewRollDegrees * PI / 180.0;\n"
+    "    float cy = cos(yaw);\n"
+    "    float sy = sin(yaw);\n"
+    "    direction = vec3(cy * direction.x + sy * direction.z, direction.y, -sy * direction.x + cy * direction.z);\n"
+    "    float cp = cos(pitch);\n"
+    "    float sp = sin(pitch);\n"
+    "    direction = vec3(direction.x, cp * direction.y - sp * direction.z, sp * direction.y + cp * direction.z);\n"
+    "    float cr = cos(roll);\n"
+    "    float sr = sin(roll);\n"
+    "    return normalize(vec3(cr * direction.x - sr * direction.y, sr * direction.x + cr * direction.y, direction.z));\n"
+    "}\n"
+    "vec2 eacFaceUv(float sc, float tc, float cellX, float cellY) {\n"
+    "    vec2 local = vec2(0.5 + atan(sc) / (0.5 * PI), 0.5 - atan(tc) / (0.5 * PI));\n"
+    "    return vec2((cellX + local.x) / 3.0, (cellY + local.y) / 2.0);\n"
+    "}\n"
+    "vec2 eacUv(vec3 direction) {\n"
+    "    vec3 ad = abs(direction);\n"
+    "    if (ad.z >= ad.x && ad.z >= ad.y) {\n"
+    "        if (direction.z < 0.0) return eacFaceUv(direction.x / -direction.z, direction.y / -direction.z, 0.0, 0.0);\n"
+    "        return eacFaceUv(-direction.x / direction.z, direction.y / direction.z, 2.0, 0.0);\n"
+    "    }\n"
+    "    if (ad.x >= ad.y) {\n"
+    "        if (direction.x > 0.0) return eacFaceUv(direction.z / direction.x, direction.y / direction.x, 1.0, 0.0);\n"
+    "        return eacFaceUv(-direction.z / -direction.x, direction.y / -direction.x, 0.0, 1.0);\n"
+    "    }\n"
+    "    if (direction.y > 0.0) return eacFaceUv(direction.x / direction.y, direction.z / direction.y, 1.0, 1.0);\n"
+    "    return eacFaceUv(direction.x / -direction.y, -direction.z / -direction.y, 2.0, 1.0);\n"
+    "}\n"
+    "void main() {\n"
+    // vUv is bottom-up because it is generated in OpenGL clip space; projection screen UV is top-down.
+    "    vec2 screenUv = vec2(vUv.x, 1.0 - vUv.y);\n"
+    "    bool rightEye = false;\n"
+    "    if (uStereo != 0) {\n"
+    "        if (screenUv.x < 0.5) screenUv.x *= 2.0;\n"
+    "        else { screenUv.x = (screenUv.x - 0.5) * 2.0; rightEye = true; }\n"
+    "    }\n"
+    "    if (uProjectionType == 0) { fragmentColor = sampleLocal(screenUv, rightEye); return; }\n"
+    "    vec3 direction = rayForScreenUv(screenUv);\n"
+    "    if (uProjectionType == 1 || uProjectionType == 2) {\n"
+    "        float horizontalFov = max(uFovDegrees, 1.0) * PI / 180.0;\n"
+    "        float yaw = atan(direction.x, -direction.z);\n"
+    "        float pitch = asin(clamp(direction.y, -1.0, 1.0));\n"
+    "        if (abs(yaw) > horizontalFov * 0.5) fragmentColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "        else fragmentColor = sampleLocal(vec2(yaw / horizontalFov + 0.5, 0.5 - pitch / PI), rightEye);\n"
+    "        return;\n"
+    "    }\n"
+    "    if (uProjectionType >= 3 && uProjectionType <= 6) {\n"
+    "        float maxTheta = max(uFovDegrees, 1.0) * PI / 180.0 * 0.5;\n"
+    "        float theta = acos(clamp(-direction.z, -1.0, 1.0));\n"
+    "        if (theta > maxTheta) fragmentColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "        else {\n"
+    "            float phi = atan(direction.y, direction.x);\n"
+    "            float radius = theta / maxTheta * 0.5;\n"
+    "            fragmentColor = sampleLocal(vec2(0.5 + cos(phi) * radius, 0.5 - sin(phi) * radius), rightEye);\n"
+    "        }\n"
+    "        return;\n"
+    "    }\n"
+    "    fragmentColor = sampleLocal(eacUv(direction), rightEye);\n"
+    "}\n";
+
+static GLuint compile_projection_shader(GLenum type, const GLchar* source) {
+    GLuint shader = glCreateShader(type);
+    if (!shader) return 0;
+    glShaderSource(shader, 1, &source, NULL);
+    glCompileShader(shader);
+    GLint compiled = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (compiled != GL_TRUE) {
+        glDeleteShader(shader);
+        return 0;
+    }
+    return shader;
+}
+
+static BOOL ensure_projection_program(KMPMpvNativeRenderer* renderer) {
+    if (!renderer) return NO;
+    if (renderer->projection_program && renderer->projection_vertex_array) return YES;
+
+    GLuint vertex_shader =
+        compile_projection_shader(GL_VERTEX_SHADER, KMP_MPV_PROJECTION_VERTEX_SHADER);
+    GLuint fragment_shader =
+        compile_projection_shader(GL_FRAGMENT_SHADER, KMP_MPV_PROJECTION_FRAGMENT_SHADER);
+    if (!vertex_shader || !fragment_shader) {
+        if (vertex_shader) glDeleteShader(vertex_shader);
+        if (fragment_shader) glDeleteShader(fragment_shader);
+        return NO;
+    }
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        glDeleteProgram(program);
+        return NO;
+    }
+
+    GLuint vertex_array = 0;
+    glGenVertexArrays(1, &vertex_array);
+    if (!vertex_array) {
+        glDeleteProgram(program);
+        return NO;
+    }
+    renderer->projection_program = program;
+    renderer->projection_vertex_array = vertex_array;
+    return YES;
+}
+
+static void destroy_projection_target(KMPMpvNativeRenderer* renderer) {
+    if (!renderer) return;
+    if (renderer->projection_framebuffer) {
+        glDeleteFramebuffers(1, &renderer->projection_framebuffer);
+        renderer->projection_framebuffer = 0;
+    }
+    if (renderer->projection_texture) {
+        glDeleteTextures(1, &renderer->projection_texture);
+        renderer->projection_texture = 0;
+    }
+    renderer->projection_width = 0;
+    renderer->projection_height = 0;
+    renderer->projection_depth = 0;
+}
+
+static void destroy_projection_resources(KMPMpvNativeRenderer* renderer) {
+    if (!renderer) return;
+    destroy_projection_target(renderer);
+    if (renderer->projection_vertex_array) {
+        glDeleteVertexArrays(1, &renderer->projection_vertex_array);
+        renderer->projection_vertex_array = 0;
+    }
+    if (renderer->projection_program) {
+        glDeleteProgram(renderer->projection_program);
+        renderer->projection_program = 0;
+    }
+}
+
+static BOOL ensure_projection_target(
+    KMPMpvNativeRenderer* renderer,
+    int width,
+    int height,
+    int depth
+) {
+    if (!renderer || width <= 0 || height <= 0) return NO;
+    if (!ensure_projection_program(renderer)) return NO;
+    if (renderer->projection_framebuffer && renderer->projection_texture &&
+        renderer->projection_width == width && renderer->projection_height == height &&
+        renderer->projection_depth == depth) {
+        return YES;
+    }
+
+    destroy_projection_target(renderer);
+    GLenum internal_format = depth > 8 ? GL_RGBA16F : GL_RGBA8;
+    GLenum component_type = depth > 8 ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
+    glGenTextures(1, &renderer->projection_texture);
+    glBindTexture(GL_TEXTURE_2D, renderer->projection_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        (GLint)internal_format,
+        width,
+        height,
+        0,
+        GL_RGBA,
+        component_type,
+        NULL
+    );
+
+    glGenFramebuffers(1, &renderer->projection_framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, renderer->projection_framebuffer);
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D,
+        renderer->projection_texture,
+        0
+    );
+    BOOL complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (!complete) {
+        destroy_projection_target(renderer);
+        return NO;
+    }
+    renderer->projection_width = width;
+    renderer->projection_height = height;
+    renderer->projection_depth = depth;
+    return YES;
+}
+
+static void render_projected_frame(
+    KMPMpvNativeRenderer* renderer,
+    GLuint destination_framebuffer,
+    int width,
+    int height
+) {
+    if (!renderer || !renderer->projection_program || !renderer->projection_texture) return;
+    const float* p = renderer->projection_parameters;
+    BOOL stereo = p[KMP_MPV_PROJECTION_STEREO] > 0.5f;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, destination_framebuffer);
+    glViewport(0, 0, width, height);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glUseProgram(renderer->projection_program);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, renderer->projection_texture);
+    glUniform1i(glGetUniformLocation(renderer->projection_program, "uTexture"), 0);
+    glUniform1i(
+        glGetUniformLocation(renderer->projection_program, "uProjectionType"),
+        (GLint)llroundf(p[KMP_MPV_PROJECTION_TYPE])
+    );
+    glUniform1f(
+        glGetUniformLocation(renderer->projection_program, "uFovDegrees"),
+        p[KMP_MPV_PROJECTION_FOV]
+    );
+    glUniform1i(
+        glGetUniformLocation(renderer->projection_program, "uStereo"),
+        stereo ? 1 : 0
+    );
+    glUniform4fv(
+        glGetUniformLocation(renderer->projection_program, "uLeftWindow"),
+        1,
+        &p[KMP_MPV_PROJECTION_LEFT_WINDOW]
+    );
+    glUniform1i(
+        glGetUniformLocation(renderer->projection_program, "uLeftRotation"),
+        (GLint)llroundf(p[KMP_MPV_PROJECTION_LEFT_ROTATION])
+    );
+    glUniform4fv(
+        glGetUniformLocation(renderer->projection_program, "uRightWindow"),
+        1,
+        &p[KMP_MPV_PROJECTION_RIGHT_WINDOW]
+    );
+    glUniform1i(
+        glGetUniformLocation(renderer->projection_program, "uRightRotation"),
+        (GLint)llroundf(p[KMP_MPV_PROJECTION_RIGHT_ROTATION])
+    );
+    glUniform1f(
+        glGetUniformLocation(renderer->projection_program, "uViewYawDegrees"),
+        p[KMP_MPV_PROJECTION_YAW]
+    );
+    glUniform1f(
+        glGetUniformLocation(renderer->projection_program, "uViewPitchDegrees"),
+        p[KMP_MPV_PROJECTION_PITCH]
+    );
+    glUniform1f(
+        glGetUniformLocation(renderer->projection_program, "uViewRollDegrees"),
+        p[KMP_MPV_PROJECTION_ROLL]
+    );
+    glUniform1f(
+        glGetUniformLocation(renderer->projection_program, "uViewZoom"),
+        p[KMP_MPV_PROJECTION_ZOOM]
+    );
+    float eye_width = stereo ? (float)width * 0.5f : (float)width;
+    glUniform1f(
+        glGetUniformLocation(renderer->projection_program, "uViewportAspect"),
+        eye_width / fmaxf((float)height, 1.0f)
+    );
+    glBindVertexArray(renderer->projection_vertex_array);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
 }
 
 static BOOL load_render_api(KMPMpvNativeRenderer* renderer, const char* library_name) {
@@ -151,6 +561,7 @@ static BOOL load_render_api(KMPMpvNativeRenderer* renderer, const char* library_
     KMP_LOAD_MPV_SYMBOL(create, mpv_render_context_create);
     KMP_LOAD_MPV_SYMBOL(set_update_callback, mpv_render_context_set_update_callback);
     KMP_LOAD_MPV_SYMBOL(update, mpv_render_context_update);
+    KMP_LOAD_MPV_SYMBOL(get_info, mpv_render_context_get_info);
     KMP_LOAD_MPV_SYMBOL(render, mpv_render_context_render);
     KMP_LOAD_MPV_SYMBOL(report_swap, mpv_render_context_report_swap);
     KMP_LOAD_MPV_SYMBOL(free, mpv_render_context_free);
@@ -159,27 +570,31 @@ static BOOL load_render_api(KMPMpvNativeRenderer* renderer, const char* library_
 }
 
 static BOOL choose_pixel_format(
+    int color_mode,
     CGLPixelFormatObj* output,
     GLint* output_depth
 ) {
     if (!output || !output_depth) return NO;
 
-    const CGLPixelFormatAttribute hdr_attributes[] = {
-        kCGLPFAOpenGLProfile,
-        (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
-        kCGLPFAAccelerated,
-        kCGLPFADoubleBuffer,
-        kCGLPFAColorSize,
-        (CGLPixelFormatAttribute)64,
-        kCGLPFAColorFloat,
-        kCGLPFAAllowOfflineRenderers,
-        (CGLPixelFormatAttribute)0,
-    };
     GLint count = 0;
-    CGLError error = CGLChoosePixelFormat(hdr_attributes, output, &count);
-    if (error == kCGLNoError && *output) {
-        *output_depth = 16;
-        return YES;
+    CGLError error = kCGLNoError;
+    if (color_mode != 0) {
+        const CGLPixelFormatAttribute hdr_attributes[] = {
+            kCGLPFAOpenGLProfile,
+            (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
+            kCGLPFAAccelerated,
+            kCGLPFADoubleBuffer,
+            kCGLPFAColorSize,
+            (CGLPixelFormatAttribute)64,
+            kCGLPFAColorFloat,
+            kCGLPFAAllowOfflineRenderers,
+            (CGLPixelFormatAttribute)0,
+        };
+        error = CGLChoosePixelFormat(hdr_attributes, output, &count);
+        if (error == kCGLNoError && *output) {
+            *output_depth = 16;
+            return YES;
+        }
     }
 
     const CGLPixelFormatAttribute sdr_attributes[] = {
@@ -256,8 +671,60 @@ static void apply_output_color_space(KMPMpvNativeRenderer* renderer) {
     }
     [renderer->layer setWantsExtendedDynamicRangeContent:extended_range];
     if (renderer->view) {
-        [renderer->view setWantsExtendedDynamicRangeOpenGLSurface:YES];
+        [renderer->view setWantsExtendedDynamicRangeOpenGLSurface:extended_range];
     }
+}
+
+static void schedule_layer_display(KMPMpvNativeRenderer* renderer) {
+    if (!renderer ||
+        atomic_load_explicit(&renderer->shutting_down, memory_order_acquire) ||
+        atomic_exchange_explicit(
+            &renderer->display_request_queued,
+            true,
+            memory_order_acq_rel
+        )) {
+        return;
+    }
+
+    renderer_retain(renderer);
+    void (^display_layer)(void) = ^{
+        if (!atomic_load_explicit(&renderer->shutting_down, memory_order_acquire) &&
+            renderer->layer) {
+            [renderer->layer setNeedsDisplay];
+            atomic_fetch_add_explicit(
+                &renderer->display_wakeup_count,
+                1,
+                memory_order_relaxed
+            );
+            if (atomic_load_explicit(&renderer->live_resize_active, memory_order_acquire)) {
+                atomic_fetch_add_explicit(
+                    &renderer->live_resize_display_wakeup_count,
+                    1,
+                    memory_order_relaxed
+                );
+            }
+        }
+        atomic_store_explicit(
+            &renderer->display_request_queued,
+            false,
+            memory_order_release
+        );
+        renderer_release(renderer);
+    };
+
+    if (pthread_main_np()) {
+        display_layer();
+        return;
+    }
+
+    // AppKit runs a nested NSEventTrackingRunLoopMode while the user drags a window edge.
+    // Blocks sent to the ordinary GCD main queue can remain pending until that tracking loop
+    // exits, leaving CAOpenGLLayer on its last drawable even though libmpv keeps decoding.
+    // Cocoa includes event-tracking mode in its common modes, so this wake-up continues to run
+    // during live resize while all CALayer mutations still stay on the AppKit main thread.
+    CFRunLoopRef main_run_loop = CFRunLoopGetMain();
+    CFRunLoopPerformBlock(main_run_loop, kCFRunLoopCommonModes, display_layer);
+    CFRunLoopWakeUp(main_run_loop);
 }
 
 static void renderer_update_callback(void* context) {
@@ -267,11 +734,16 @@ static void renderer_update_callback(void* context) {
         return;
     }
 
-    // libmpv permits coalescing multiple callbacks into one update() call. CAOpenGLLayer polls
-    // canDrawInCGLContext at the display cadence when asynchronous=YES, so this callback only
-    // publishes work. It never waits on the render mutex and never queues work on AppKit's main
-    // thread, both of which used to make live resize drop frames and contend with window events.
+    atomic_fetch_add_explicit(
+        &renderer->update_callback_count,
+        1,
+        memory_order_relaxed
+    );
     atomic_store_explicit(&renderer->update_pending, true, memory_order_release);
+
+    // Wake the asynchronous layer as soon as libmpv publishes work. Coalesce AppKit requests so
+    // the main queue cannot grow without bound during a 60 fps presentation.
+    schedule_layer_display(renderer);
 }
 
 @implementation KMPMpvOpenGLLayer
@@ -343,6 +815,7 @@ static void renderer_update_callback(void* context) {
     BOOL can_draw =
         renderer &&
         !atomic_load_explicit(&renderer->shutting_down, memory_order_acquire) &&
+        renderer->render_context &&
         (atomic_load_explicit(&renderer->update_pending, memory_order_acquire) ||
             atomic_load_explicit(&renderer->redraw_requested, memory_order_acquire));
     renderer_release(renderer);
@@ -359,6 +832,12 @@ static void renderer_update_callback(void* context) {
     KMPMpvNativeRenderer* renderer = [self retainedRenderer];
     if (!renderer) return;
 
+    atomic_fetch_add_explicit(
+        &renderer->draw_callback_count,
+        1,
+        memory_order_relaxed
+    );
+
     pthread_mutex_lock(&renderer->render_mutex);
     if (!atomic_load_explicit(&renderer->shutting_down, memory_order_acquire) &&
         renderer->render_context && context) {
@@ -373,6 +852,9 @@ static void renderer_update_callback(void* context) {
             false,
             memory_order_acq_rel
         );
+        // With advanced control enabled every callback must be acknowledged with update().
+        // Rendering a reused 8K frame on every Core Animation poll starves VideoToolbox and the
+        // GPU; draw only when libmpv publishes a frame or the host explicitly requests a redraw.
         uint64_t update_flags = update_pending
             ? renderer->api.update(renderer->render_context)
             : 0;
@@ -380,6 +862,43 @@ static void renderer_update_callback(void* context) {
             redraw_requested || (update_flags & MPV_RENDER_UPDATE_FRAME) != 0;
 
         if (should_render) {
+            mpv_render_frame_info frame_info = {0};
+            mpv_render_param frame_info_parameter = {
+                MPV_RENDER_PARAM_NEXT_FRAME_INFO,
+                &frame_info,
+            };
+            if (renderer->api.get_info(
+                    renderer->render_context,
+                    frame_info_parameter
+                ) >= 0 &&
+                (frame_info.flags & MPV_RENDER_FRAME_INFO_PRESENT) != 0) {
+                if ((frame_info.flags & MPV_RENDER_FRAME_INFO_REDRAW) != 0) {
+                    atomic_fetch_add_explicit(
+                        &renderer->redraw_frame_count,
+                        1,
+                        memory_order_relaxed
+                    );
+                } else if ((frame_info.flags & MPV_RENDER_FRAME_INFO_REPEAT) != 0) {
+                    atomic_fetch_add_explicit(
+                        &renderer->repeated_video_frame_count,
+                        1,
+                        memory_order_relaxed
+                    );
+                } else {
+                    atomic_fetch_add_explicit(
+                        &renderer->new_video_frame_count,
+                        1,
+                        memory_order_relaxed
+                    );
+                }
+            } else {
+                atomic_fetch_add_explicit(
+                    &renderer->empty_draw_count,
+                    1,
+                    memory_order_relaxed
+                );
+            }
+
             GLint viewport[4] = {0, 0, 0, 0};
             glGetIntegerv(GL_VIEWPORT, viewport);
             GLint framebuffer = 0;
@@ -393,11 +912,20 @@ static void renderer_update_callback(void* context) {
                 height = (int)llround(self.bounds.size.height * self.contentsScale);
             }
             if (width > 0 && height > 0) {
+                GLuint destination_framebuffer = (GLuint)renderer->last_framebuffer;
+                BOOL projection_active =
+                    renderer->projection_parameters[KMP_MPV_PROJECTION_ENABLED] > 0.5f &&
+                    ensure_projection_target(renderer, width, height, renderer->buffer_depth);
+                GLenum projection_internal_format =
+                    renderer->buffer_depth > 8 ? GL_RGBA16F : GL_RGBA8;
                 mpv_opengl_fbo target = {
-                    .fbo = renderer->last_framebuffer,
+                    .fbo =
+                        projection_active
+                            ? (int)renderer->projection_framebuffer
+                            : (int)destination_framebuffer,
                     .width = width,
                     .height = height,
-                    .internal_format = 0,
+                    .internal_format = projection_active ? (int)projection_internal_format : 0,
                 };
                 int flip_y = 1;
                 int depth = renderer->buffer_depth;
@@ -417,13 +945,58 @@ static void renderer_update_callback(void* context) {
                     {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time},
                     {MPV_RENDER_PARAM_INVALID, NULL},
                 };
-                (void)renderer->api.render(renderer->render_context, parameters);
-                CGLFlushDrawable(context);
-                renderer->api.report_swap(renderer->render_context);
+                uint64_t render_started_ns = monotonic_nanos();
+                if (renderer->api.render(renderer->render_context, parameters) >= 0) {
+                    if (projection_active) {
+                        render_projected_frame(
+                            renderer,
+                            destination_framebuffer,
+                            width,
+                            height
+                        );
+                    }
+                    uint64_t render_finished_ns = monotonic_nanos();
+                    uint64_t render_elapsed_ns = render_finished_ns - render_started_ns;
+                    atomic_fetch_add_explicit(
+                        &renderer->render_time_ns,
+                        render_elapsed_ns,
+                        memory_order_relaxed
+                    );
+                    atomic_update_maximum(
+                        &renderer->maximum_render_time_ns,
+                        render_elapsed_ns
+                    );
+                    atomic_fetch_add_explicit(
+                        &renderer->rendered_frame_count,
+                        1,
+                        memory_order_relaxed
+                    );
+                    uint64_t flush_started_ns = monotonic_nanos();
+                    CGLFlushDrawable(context);
+                    uint64_t flush_elapsed_ns = monotonic_nanos() - flush_started_ns;
+                    atomic_fetch_add_explicit(
+                        &renderer->flush_time_ns,
+                        flush_elapsed_ns,
+                        memory_order_relaxed
+                    );
+                    atomic_update_maximum(
+                        &renderer->maximum_flush_time_ns,
+                        flush_elapsed_ns
+                    );
+                    renderer->api.report_swap(renderer->render_context);
+                    atomic_fetch_add_explicit(
+                        &renderer->presented_frame_count,
+                        1,
+                        memory_order_relaxed
+                    );
+                }
             }
         }
     }
     pthread_mutex_unlock(&renderer->render_mutex);
+    if (atomic_load_explicit(&renderer->update_pending, memory_order_acquire)) {
+        schedule_layer_display(renderer);
+    }
     renderer_release(renderer);
 }
 
@@ -465,6 +1038,7 @@ static void renderer_update_callback(void* context) {
     _videoLayer = [videoLayer retain];
     [self setWantsLayer:YES];
     [[self layer] setMasksToBounds:YES];
+    [[self layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
     if (_videoLayer) [[self layer] addSublayer:_videoLayer];
     [self refreshNativeGeometry];
 }
@@ -570,6 +1144,12 @@ static void renderer_update_callback(void* context) {
         // Keep libmpv's OpenGL drawable stable while AppKit is delivering intermediate resize
         // steps. Core Animation scales the most recent surface, so playback keeps presenting
         // without reallocating and rerendering a different FBO for every mouse movement.
+        //
+        // The transform must be uniform. Scaling X and Y independently makes the cached frame
+        // temporarily inherit the window's intermediate aspect ratio; libmpv only corrects it
+        // after live resize ends and the drawable is rebuilt. A centered aspect-fit transform
+        // preserves the exact pixel aspect throughout the gesture, with the host's black layer
+        // covering any temporary letterbox/pillarbox area.
         [_videoLayer setBounds:CGRectMake(
             0.0,
             0.0,
@@ -578,7 +1158,34 @@ static void renderer_update_callback(void* context) {
         )];
         CGFloat scale_x = bounds.size.width / _liveResizeRenderSize.width;
         CGFloat scale_y = bounds.size.height / _liveResizeRenderSize.height;
-        [_videoLayer setTransform:CATransform3DMakeScale(scale_x, scale_y, 1.0)];
+        CGFloat uniform_scale = MIN(scale_x, scale_y);
+        if (!isfinite(uniform_scale) || uniform_scale <= 0.0) uniform_scale = 1.0;
+        [_videoLayer setTransform:CATransform3DMakeScale(
+            uniform_scale,
+            uniform_scale,
+            1.0
+        )];
+
+        KMPMpvNativeRenderer* geometry_renderer = [_videoLayer retainedRenderer];
+        if (geometry_renderer) {
+            atomic_fetch_add_explicit(
+                &geometry_renderer->live_resize_geometry_update_count,
+                1,
+                memory_order_relaxed
+            );
+            CATransform3D applied_transform = [_videoLayer transform];
+            double applied_x = fabs(applied_transform.m11);
+            double applied_y = fabs(applied_transform.m22);
+            uint64_t aspect_error_ppm =
+                applied_y > 0.0
+                    ? (uint64_t)llround(fabs((applied_x / applied_y) - 1.0) * 1000000.0)
+                    : UINT64_MAX;
+            atomic_update_maximum(
+                &geometry_renderer->maximum_live_resize_aspect_error_ppm,
+                aspect_error_ppm
+            );
+            renderer_release(geometry_renderer);
+        }
     } else {
         [_videoLayer setTransform:CATransform3DIdentity];
         [_videoLayer setBounds:CGRectMake(0.0, 0.0, bounds.size.width, bounds.size.height)];
@@ -608,19 +1215,26 @@ static void create_renderer_on_main(void* raw_context) {
         if (!context || !context->renderer) return;
         KMPMpvNativeRenderer* renderer = context->renderer;
 
-        if (!choose_pixel_format(&renderer->pixel_format, &renderer->buffer_depth)) return;
+        if (!choose_pixel_format(
+                renderer->color_mode,
+                &renderer->pixel_format,
+                &renderer->buffer_depth
+            )) {
+            return;
+        }
         if (CGLCreateContext(renderer->pixel_format, NULL, &renderer->gl_context) != kCGLNoError ||
             !renderer->gl_context) {
             return;
         }
-        // CAOpenGLLayer already schedules draw callbacks against the display. Waiting for a
-        // second OpenGL swap interval here serializes Core Animation and libmpv during live
-        // resize, which is visible as a staircase. Flush immediately and let CA present it.
+        // Audio-timed libmpv rendering already blocks each frame until its presentation target.
+        // Core Animation owns the actual display transaction, so a second OpenGL swap wait only
+        // serializes the render thread during live resize without improving presentation timing.
         GLint swap_interval = 0;
         CGLSetParameter(renderer->gl_context, kCGLCPSwapInterval, &swap_interval);
         CGLSetCurrentContext(renderer->gl_context);
 
         const char* api_type = "opengl";
+        int advanced_control = 1;
         mpv_opengl_init_params open_gl = {
             .get_proc_address = resolve_opengl_function,
             .get_proc_address_context = NULL,
@@ -628,6 +1242,7 @@ static void create_renderer_on_main(void* raw_context) {
         mpv_render_param create_parameters[] = {
             {MPV_RENDER_PARAM_API_TYPE, (void*)api_type},
             {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &open_gl},
+            {MPV_RENDER_PARAM_ADVANCED_CONTROL, &advanced_control},
             {MPV_RENDER_PARAM_INVALID, NULL},
         };
         if (renderer->api.create(
@@ -647,7 +1262,6 @@ static void create_renderer_on_main(void* raw_context) {
         // interop transaction during live resize and briefly apply a different rectangle.
         [view setAutoresizingMask:NSViewNotSizable];
         [view setVideoLayer:layer];
-        [view setWantsExtendedDynamicRangeOpenGLSurface:YES];
         apply_output_color_space(renderer);
         renderer->api.set_update_callback(
             renderer->render_context,
@@ -672,6 +1286,10 @@ static void detach_renderer_on_main(void* raw_renderer) {
             renderer->api.set_update_callback(renderer->render_context, NULL, NULL);
             renderer->api.free(renderer->render_context);
             renderer->render_context = NULL;
+        }
+        if (renderer->gl_context) {
+            CGLSetCurrentContext(renderer->gl_context);
+            destroy_projection_resources(renderer);
         }
         pthread_mutex_unlock(&renderer->render_mutex);
 
@@ -708,6 +1326,11 @@ typedef struct {
     int color_mode;
 } KMPMpvColorContext;
 
+typedef struct {
+    KMPMpvNativeRenderer* renderer;
+    double refresh_rate;
+} KMPMpvRefreshRateContext;
+
 static void update_color_mode_on_main(void* raw_context) {
     KMPMpvColorContext* context = (KMPMpvColorContext*)raw_context;
     if (!context || !context->renderer ||
@@ -725,6 +1348,29 @@ static void request_redraw_on_main(void* raw_renderer) {
         !atomic_load_explicit(&renderer->shutting_down, memory_order_acquire)) {
         [renderer->layer requestFrame];
     }
+}
+
+static void read_refresh_rate_on_main(void* raw_context) {
+    KMPMpvRefreshRateContext* context = (KMPMpvRefreshRateContext*)raw_context;
+    if (!context || !context->renderer ||
+        atomic_load_explicit(&context->renderer->shutting_down, memory_order_acquire)) {
+        return;
+    }
+    NSScreen* screen = [[context->renderer->view window] screen] ?: [NSScreen mainScreen];
+    if (!screen) return;
+    if (@available(macOS 12.0, *)) {
+        NSInteger frames_per_second = [screen maximumFramesPerSecond];
+        if (frames_per_second > 0) context->refresh_rate = (double)frames_per_second;
+    }
+    if (context->refresh_rate > 0.0) return;
+
+    NSNumber* screen_number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
+    if (!screen_number) return;
+    CGDisplayModeRef mode = CGDisplayCopyDisplayMode([screen_number unsignedIntValue]);
+    if (!mode) return;
+    double refresh_rate = CGDisplayModeGetRefreshRate(mode);
+    CGDisplayModeRelease(mode);
+    if (refresh_rate > 0.0) context->refresh_rate = refresh_rate;
 }
 
 JNIEXPORT jlong JNICALL
@@ -753,7 +1399,24 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nCreateRen
     atomic_init(&renderer->shutting_down, false);
     atomic_init(&renderer->update_pending, false);
     atomic_init(&renderer->redraw_requested, true);
+    atomic_init(&renderer->display_request_queued, false);
     atomic_init(&renderer->live_resize_active, false);
+    atomic_init(&renderer->update_callback_count, 0);
+    atomic_init(&renderer->draw_callback_count, 0);
+    atomic_init(&renderer->rendered_frame_count, 0);
+    atomic_init(&renderer->presented_frame_count, 0);
+    atomic_init(&renderer->new_video_frame_count, 0);
+    atomic_init(&renderer->repeated_video_frame_count, 0);
+    atomic_init(&renderer->redraw_frame_count, 0);
+    atomic_init(&renderer->empty_draw_count, 0);
+    atomic_init(&renderer->display_wakeup_count, 0);
+    atomic_init(&renderer->live_resize_display_wakeup_count, 0);
+    atomic_init(&renderer->live_resize_geometry_update_count, 0);
+    atomic_init(&renderer->maximum_live_resize_aspect_error_ppm, 0);
+    atomic_init(&renderer->render_time_ns, 0);
+    atomic_init(&renderer->maximum_render_time_ns, 0);
+    atomic_init(&renderer->flush_time_ns, 0);
+    atomic_init(&renderer->maximum_flush_time_ns, 0);
     pthread_mutex_init(&renderer->render_mutex, NULL);
     renderer->color_mode = color_mode;
     renderer->mpv = (mpv_handle*)(uintptr_t)raw_mpv_handle;
@@ -826,6 +1489,46 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nSetColorM
 }
 
 JNIEXPORT void JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nSetProjection(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong native_renderer,
+    jfloatArray parameters
+) {
+    (void)bridge_class;
+    KMPMpvNativeRenderer* renderer = (KMPMpvNativeRenderer*)(uintptr_t)native_renderer;
+    if (!environment || !renderer || !parameters ||
+        (*environment)->GetArrayLength(environment, parameters) <
+            KMP_MPV_PROJECTION_PARAMETER_COUNT ||
+        atomic_load_explicit(&renderer->shutting_down, memory_order_acquire)) {
+        return;
+    }
+
+    jfloat values[KMP_MPV_PROJECTION_PARAMETER_COUNT] = {0};
+    (*environment)->GetFloatArrayRegion(
+        environment,
+        parameters,
+        0,
+        KMP_MPV_PROJECTION_PARAMETER_COUNT,
+        values
+    );
+    if ((*environment)->ExceptionCheck(environment)) return;
+
+    pthread_mutex_lock(&renderer->render_mutex);
+    if (!atomic_load_explicit(&renderer->shutting_down, memory_order_acquire)) {
+        for (int index = 0; index < KMP_MPV_PROJECTION_PARAMETER_COUNT; ++index) {
+            renderer->projection_parameters[index] =
+                isfinite(values[index]) ? values[index] : 0.0f;
+        }
+        if (renderer->projection_parameters[KMP_MPV_PROJECTION_ZOOM] <= 0.0f) {
+            renderer->projection_parameters[KMP_MPV_PROJECTION_ZOOM] = 1.0f;
+        }
+    }
+    pthread_mutex_unlock(&renderer->render_mutex);
+    run_on_appkit_main_sync(request_redraw_on_main, renderer);
+}
+
+JNIEXPORT void JNICALL
 Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nRequestRedraw(
     JNIEnv* environment,
     jclass bridge_class,
@@ -836,4 +1539,68 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nRequestRe
     KMPMpvNativeRenderer* renderer = (KMPMpvNativeRenderer*)(uintptr_t)native_renderer;
     if (!renderer) return;
     run_on_appkit_main_sync(request_redraw_on_main, renderer);
+}
+
+JNIEXPORT jdouble JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nGetDisplayRefreshRate(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong native_renderer
+) {
+    (void)environment;
+    (void)bridge_class;
+    KMPMpvNativeRenderer* renderer = (KMPMpvNativeRenderer*)(uintptr_t)native_renderer;
+    if (!renderer) return 0.0;
+    KMPMpvRefreshRateContext context = {
+        .renderer = renderer,
+        .refresh_rate = 0.0,
+    };
+    run_on_appkit_main_sync(read_refresh_rate_on_main, &context);
+    return context.refresh_rate;
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nGetPresentationDiagnostics(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong native_renderer
+) {
+    (void)bridge_class;
+    KMPMpvNativeRenderer* renderer = (KMPMpvNativeRenderer*)(uintptr_t)native_renderer;
+    if (!environment || !renderer ||
+        atomic_load_explicit(&renderer->shutting_down, memory_order_acquire)) {
+        return NULL;
+    }
+
+    jlong values[] = {
+        (jlong)atomic_load_explicit(&renderer->update_callback_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->draw_callback_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->rendered_frame_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->presented_frame_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->new_video_frame_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->repeated_video_frame_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->redraw_frame_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->empty_draw_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->display_wakeup_count, memory_order_relaxed),
+        (jlong)atomic_load_explicit(
+            &renderer->live_resize_display_wakeup_count,
+            memory_order_relaxed
+        ),
+        (jlong)atomic_load_explicit(&renderer->render_time_ns, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->maximum_render_time_ns, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->flush_time_ns, memory_order_relaxed),
+        (jlong)atomic_load_explicit(&renderer->maximum_flush_time_ns, memory_order_relaxed),
+        (jlong)atomic_load_explicit(
+            &renderer->live_resize_geometry_update_count,
+            memory_order_relaxed
+        ),
+        (jlong)atomic_load_explicit(
+            &renderer->maximum_live_resize_aspect_error_ppm,
+            memory_order_relaxed
+        ),
+    };
+    jlongArray result = (*environment)->NewLongArray(environment, 16);
+    if (!result) return NULL;
+    (*environment)->SetLongArrayRegion(environment, result, 0, 16, values);
+    return result;
 }

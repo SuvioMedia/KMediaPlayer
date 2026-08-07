@@ -2,6 +2,7 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/ComposableS
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/desktop/ComposableSingletons$DesktopPlaybackSurfaceKt;
 	public fun <init> ()V
 	public final fun getLambda$1011957115$io_github_shusek_mediaplayer_desktop_tao ()Lkotlin/jvm/functions/Function2;
+	public final fun getLambda$1629863864$io_github_shusek_mediaplayer_desktop_tao ()Lkotlin/jvm/functions/Function3;
 	public final fun getLambda$1667317230$io_github_shusek_mediaplayer_desktop_tao ()Lkotlin/jvm/functions/Function3;
 	public final fun getLambda$1750207595$io_github_shusek_mediaplayer_desktop_tao ()Lkotlin/jvm/functions/Function3;
 }
@@ -121,8 +122,8 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopPlay
 	public static final field $stable I
 	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackSession$Companion;
 	public static final field DEFAULT_MAX_MATERIALIZED_SOURCE_BYTES J
-	public synthetic fun <init> (Ljava/util/List;JLio/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory;Ljava/nio/file/Path;JILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public synthetic fun <init> (Ljava/util/List;JLio/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory;Ljava/nio/file/Path;JLkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (Ljava/util/List;JLio/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory;Ljava/nio/file/Path;JLio/github/kdroidfilter/composemediaplayer/desktop/JvmHlsMediaProxyFactory;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun <init> (Ljava/util/List;JLio/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory;Ljava/nio/file/Path;JLio/github/kdroidfilter/composemediaplayer/desktop/JvmHlsMediaProxyFactory;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
 	public final fun getBackendIds ()Ljava/util/Set;
 	public final fun getPlayerState ()Lkotlinx/coroutines/flow/StateFlow;
@@ -212,6 +213,21 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopPlay
 public final class io/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackSurfaceKt {
 	public static final fun DesktopPlaybackSurface (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;II)V
 	public static final fun DesktopPlaybackSurface (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackSession;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function3;Landroidx/compose/runtime/Composer;II)V
+	public static final fun DesktopPlaybackSurface (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackSession;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;II)V
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/desktop/JvmHlsMediaProxy : java/io/Closeable {
+	public abstract fun getLocalUri ()Ljava/lang/String;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/desktop/JvmHlsMediaProxyFactory {
+	public abstract fun openProxy (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackRequest;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/JvmHttpHlsMediaProxyFactory : io/github/kdroidfilter/composemediaplayer/desktop/JvmHlsMediaProxyFactory {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun openProxy (Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackRequest;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/desktop/JvmHttpSeekableMediaDataSourceFactory : io/github/kdroidfilter/composemediaplayer/desktop/JvmSeekableMediaDataSourceFactory {

@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer.desktop
 
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerBackendInfo
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
@@ -10,14 +11,24 @@ import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.nio.file.Files
@@ -67,6 +78,7 @@ public class DesktopPlaybackSession(
     private val seekableMediaDataSourceFactory: JvmSeekableMediaDataSourceFactory? = null,
     private val mediaCacheDirectory: Path? = null,
     private val maxMaterializedSourceBytes: Long = DEFAULT_MAX_MATERIALIZED_SOURCE_BYTES,
+    private val hlsMediaProxyFactory: JvmHlsMediaProxyFactory? = null,
 ) : Closeable {
     private val backendsById: Map<String, DesktopPlaybackBackend>
     private val orderedBackends: List<DesktopPlaybackBackend>
@@ -78,8 +90,10 @@ public class DesktopPlaybackSession(
         MutableStateFlow(DesktopPlaybackSessionState.Idle)
     private val retiredPlayerLock: Any = Any()
     private val retiredPlayers: MutableList<VideoPlayerState> = mutableListOf()
+    private val retiredPlayerReleaseQueue = Channel<List<VideoPlayerState>>(Channel.UNLIMITED)
+    private val retiredPlayerReleaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val ownedSourceLock: Any = Any()
-    private val ownedSources: IdentityHashMap<VideoPlayerState, OwnedMaterializedSource> = IdentityHashMap()
+    private val ownedSources: IdentityHashMap<VideoPlayerState, Closeable> = IdentityHashMap()
     private var activeBackend: DesktopPlaybackBackend? = null
     private var activeRequest: DesktopPlaybackRequest? = null
 
@@ -96,6 +110,11 @@ public class DesktopPlaybackSession(
         require(maxMaterializedSourceBytes > 0L) { "maxMaterializedSourceBytes must be positive." }
         backendsById = backends.associateBy { it.info.id }
         orderedBackends = backends.sortedBy(DesktopPlaybackBackend::routingTier)
+        retiredPlayerReleaseScope.launch {
+            for (players in retiredPlayerReleaseQueue) {
+                players.forEach(::releasePlayer)
+            }
+        }
     }
 
     public val playerState: StateFlow<VideoPlayerState?> = mutablePlayerState.asStateFlow()
@@ -126,6 +145,19 @@ public class DesktopPlaybackSession(
             val previousBackend = activeBackend
             val previousRequest = activeRequest
             val bookmark = previous?.captureBookmark()
+            val isSameMedia = previousRequest?.hasSameMediaAs(request) == true
+
+            if (
+                previous != null &&
+                previousBackend != null &&
+                isSameMedia &&
+                backendId != null &&
+                previousBackend.info.id == backendId
+            ) {
+                mutableSessionState.value = DesktopPlaybackSessionState.Ready(previousBackend.info)
+                return@withLock previous
+            }
+
             previous?.pause()
 
             for (backend in candidates) {
@@ -135,9 +167,37 @@ public class DesktopPlaybackSession(
                     } else {
                         DesktopPlaybackSessionState.Switching(previousBackend.info.id, backend.info.id)
                     }
+
+                if (
+                    previous != null &&
+                    previousBackend?.info?.id == backend.info.id &&
+                    !isSameMedia &&
+                    backend.routingTier == DesktopBackendRoutingTier.LIBVLC_NATIVE
+                ) {
+                    val replaced =
+                        replaceActiveLibVlcSource(
+                            player = previous,
+                            request = request,
+                            previousRequest = checkNotNull(previousRequest),
+                            bookmark = checkNotNull(bookmark),
+                        )
+                    if (replaced) {
+                        activeRequest = request
+                        if (request.initialPlayerState == InitialPlayerState.PLAY) previous.play()
+                        mutableSessionState.value = DesktopPlaybackSessionState.Ready(backend.info)
+                        return@withLock previous
+                    }
+                    continue
+                }
+
                 val candidate =
                     try {
-                        createPreparedPlayer(backend, request, bookmark)
+                        createPreparedPlayer(
+                            backend = backend,
+                            request = request,
+                            bookmark = bookmark,
+                            restoreMediaState = isSameMedia,
+                        )
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Throwable) {
@@ -156,8 +216,8 @@ public class DesktopPlaybackSession(
                             retiredPlayers += retired
                         }
                     }
-                    if (bookmark?.wasPlaying == true ||
-                        (bookmark == null && request.initialPlayerState == InitialPlayerState.PLAY)
+                    if ((isSameMedia && bookmark?.wasPlaying == true) ||
+                        (!isSameMedia && request.initialPlayerState == InitialPlayerState.PLAY)
                     ) {
                         candidate.play()
                     }
@@ -194,7 +254,11 @@ public class DesktopPlaybackSession(
      */
     public fun notifySurfaceAttached(player: VideoPlayerState) {
         if (mutablePlayerState.value !== player) return
-        releaseRetiredPlayers()
+        val retired = takeRetiredPlayers()
+        if (retired.isEmpty()) return
+        if (retiredPlayerReleaseQueue.trySend(retired).isFailure) {
+            retired.forEach(::releasePlayer)
+        }
     }
 
     override fun close() {
@@ -208,6 +272,7 @@ public class DesktopPlaybackSession(
         runCatching { player?.pause() }
         player?.let(::releasePlayer)
         releaseRetiredPlayers()
+        retiredPlayerReleaseQueue.close()
         mutableSessionState.value = DesktopPlaybackSessionState.Closed
     }
 
@@ -224,6 +289,7 @@ public class DesktopPlaybackSession(
                 backend.inspectAvailability() is DesktopBackendAvailability.Available &&
                     (
                         backend.probe(request) is DesktopBackendProbeResult.Supported ||
+                            canProxyRemoteForMpv(backend, request) ||
                             canMaterializeForMpv(backend, request)
                     )
             }.also { candidates ->
@@ -238,6 +304,7 @@ public class DesktopPlaybackSession(
         backend: DesktopPlaybackBackend,
         request: DesktopPlaybackRequest,
         bookmark: DesktopPlaybackBookmark?,
+        restoreMediaState: Boolean,
     ): VideoPlayerState {
         val preparedRequest = prepareRequestForBackend(backend, request)
         val candidate = backend.createPlayerState()
@@ -249,8 +316,8 @@ public class DesktopPlaybackSession(
                 requestHeaders = preparedRequest.request.requestHeaders,
             )
             awaitReady(candidate)
-            bookmark?.restoreAfterOpen(candidate)
-            preparedRequest.materializedSource?.let { owned ->
+            if (restoreMediaState) bookmark?.restoreAfterOpen(candidate)
+            preparedRequest.ownedSource?.let { owned ->
                 synchronized(ownedSourceLock) {
                     ownedSources[candidate] = owned
                 }
@@ -259,16 +326,98 @@ public class DesktopPlaybackSession(
         } catch (failure: Exception) {
             runCatching(candidate::releaseSource)
             runCatching(candidate::dispose)
-            preparedRequest.materializedSource?.close()
+            preparedRequest.ownedSource?.close()
             throw failure
         }
     }
+
+    /**
+     * Replaces a libVLC source inside the current state instead of briefly owning two libVLC
+     * instances and two AppKit video outputs. The latter can leave the replacement without a
+     * drawable and manifests as a permanent black `00:00/00:00` surface.
+     */
+    private suspend fun replaceActiveLibVlcSource(
+        player: VideoPlayerState,
+        request: DesktopPlaybackRequest,
+        previousRequest: DesktopPlaybackRequest,
+        bookmark: DesktopPlaybackBookmark,
+    ): Boolean {
+        player.clearExternalSubtitleTracks()
+        return try {
+            openAndAwaitNewSource(player, request)
+            true
+        } catch (failure: Throwable) {
+            if (failure is CancellationException && failure !is TimeoutCancellationException) {
+                throw failure
+            }
+            // A same-instance replacement cannot retain the previous decoder transactionally.
+            // Make a best-effort rollback before reporting failure to the caller.
+            runCatching {
+                openAndAwaitNewSource(player, previousRequest)
+                bookmark.restoreAfterOpen(player)
+            }
+            false
+        }
+    }
+
+    private suspend fun openAndAwaitNewSource(
+        player: VideoPlayerState,
+        request: DesktopPlaybackRequest,
+    ): Unit =
+        coroutineScope {
+            val previousMediaSessionId = player.mediaSessionId
+            val completion =
+                async(start = CoroutineStart.UNDISPATCHED) {
+                    withTimeout(readyTimeout) {
+                        player.playbackEvents.first { event ->
+                            event.mediaSessionId > previousMediaSessionId &&
+                                (event is PlaybackEvent.SourceLoaded || event is PlaybackEvent.Error)
+                        }
+                    }
+                }
+            try {
+                player.openSource(
+                    source = request.source,
+                    initializePlayerState = InitialPlayerState.PAUSE,
+                    requestHeaders = request.requestHeaders,
+                )
+                if (player.mediaSessionId > previousMediaSessionId) {
+                    when (completion.await()) {
+                        is PlaybackEvent.SourceLoaded -> Unit
+                        is PlaybackEvent.Error ->
+                            throw IllegalStateException("The desktop backend rejected the replacement media source.")
+                        else -> error("Unexpected replacement-source event.")
+                    }
+                } else {
+                    completion.cancel()
+                    awaitReady(player)
+                }
+            } finally {
+                completion.cancel()
+            }
+        }
 
     @Suppress("TooGenericExceptionCaught")
     private suspend fun prepareRequestForBackend(
         backend: DesktopPlaybackBackend,
         request: DesktopPlaybackRequest,
     ): PreparedDesktopRequest {
+        if (canProxyRemoteForMpv(backend, request)) {
+            val proxy = checkNotNull(hlsMediaProxyFactory).openProxy(request)
+            try {
+                return PreparedDesktopRequest(
+                    request =
+                        request.copy(
+                            source = request.source.copy(uri = proxy.localUri),
+                            requestHeaders = emptyMap(),
+                        ),
+                    ownedSource = proxy,
+                )
+            } catch (failure: Exception) {
+                proxy.close()
+                throw failure
+            }
+        }
         if (!canMaterializeForMpv(backend, request)) return PreparedDesktopRequest(request)
         val factory = checkNotNull(seekableMediaDataSourceFactory)
         val dataSource = factory.open(request)
@@ -291,7 +440,7 @@ public class DesktopPlaybackSession(
                         source = request.source.copy(uri = path.toUri().toString()),
                         requestHeaders = emptyMap(),
                     ),
-                materializedSource = owned,
+                ownedSource = owned,
             )
         } catch (failure: Exception) {
             owned.close()
@@ -353,7 +502,16 @@ public class DesktopPlaybackSession(
     ): Boolean =
         backend.routingTier == DesktopBackendRoutingTier.MPV_NATIVE &&
             seekableMediaDataSourceFactory != null &&
+            hlsMediaProxyFactory == null &&
             request.source.isProgressiveRemoteSource()
+
+    private fun canProxyRemoteForMpv(
+        backend: DesktopPlaybackBackend,
+        request: DesktopPlaybackRequest,
+    ): Boolean =
+        backend.routingTier == DesktopBackendRoutingTier.MPV_NATIVE &&
+            hlsMediaProxyFactory != null &&
+            request.source.isRemoteHttpSource()
 
     private suspend fun awaitReady(player: VideoPlayerState) {
         val deadline = System.nanoTime() + readyTimeout.inWholeNanoseconds
@@ -370,14 +528,13 @@ public class DesktopPlaybackSession(
     }
 
     private fun releaseRetiredPlayers() {
-        val retired =
-            synchronized(retiredPlayerLock) {
-                retiredPlayers.toList().also { retiredPlayers.clear() }
-            }
-        retired.forEach { player ->
-            releasePlayer(player)
-        }
+        takeRetiredPlayers().forEach(::releasePlayer)
     }
+
+    private fun takeRetiredPlayers(): List<VideoPlayerState> =
+        synchronized(retiredPlayerLock) {
+            retiredPlayers.toList().also { retiredPlayers.clear() }
+        }
 
     private fun releasePlayer(player: VideoPlayerState) {
         runCatching(player::releaseSource)
@@ -398,7 +555,7 @@ public class DesktopPlaybackSession(
 
 private data class PreparedDesktopRequest(
     val request: DesktopPlaybackRequest,
-    val materializedSource: OwnedMaterializedSource? = null,
+    val ownedSource: Closeable? = null,
 )
 
 private class OwnedMaterializedSource(
@@ -426,6 +583,12 @@ private fun io.github.kdroidfilter.composemediaplayer.MediaSourceSpec.isProgress
             normalizedMime == "application/dash+xml"
     return remote && !adaptive
 }
+
+private fun io.github.kdroidfilter.composemediaplayer.MediaSourceSpec.isRemoteHttpSource(): Boolean =
+    uri.startsWith("http://", ignoreCase = true) || uri.startsWith("https://", ignoreCase = true)
+
+private fun DesktopPlaybackRequest.hasSameMediaAs(other: DesktopPlaybackRequest): Boolean =
+    source == other.source && requestHeaders == other.requestHeaders
 
 private fun String.safeMediaSuffix(): String {
     val cleanName = substringBefore('?').substringBefore('#').substringAfterLast('/').substringAfterLast('\\')

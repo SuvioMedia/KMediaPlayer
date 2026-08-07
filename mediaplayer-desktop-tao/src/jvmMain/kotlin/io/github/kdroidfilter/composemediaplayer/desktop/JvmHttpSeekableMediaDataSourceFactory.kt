@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * The application opts into this factory when constructing [DesktopPlaybackSession]. Requests
  * are made by the JVM, redirects fail closed, and neither the source URI nor header values are
- * exposed by exceptions or string representations. The session materializes the bytes into its
- * bounded private cache before passing a header-free local path to MPV.
+ * exposed by exceptions or string representations. This is the bounded materialization fallback
+ * used when a session was not configured with a loopback media proxy.
  */
 public class JvmHttpSeekableMediaDataSourceFactory : JvmSeekableMediaDataSourceFactory {
     private val client: HttpClient =

@@ -1,22 +1,92 @@
 package io.github.kdroidfilter.composemediaplayer.desktop
 
 import io.github.kdroidfilter.composemediaplayer.MediaSourceSpec
+import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.PreviewableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerBackendInfo
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import java.nio.ByteBuffer
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.measureTime
 
 class DesktopPlaybackSessionTest {
+    @Test
+    fun attachingReplacementSurfaceNeverDisposesRetiredPlayerOnCallerThread() =
+        runTest {
+            val disposeStarted = CountDownLatch(1)
+            val allowDispose = CountDownLatch(1)
+            val disposeFinished = CountDownLatch(1)
+            val firstDelegate = PreviewableVideoPlayerState(isPlaying = false)
+            val first =
+                object : VideoPlayerState by firstDelegate {
+                    override fun dispose() {
+                        disposeStarted.countDown()
+                        allowDispose.await(5, TimeUnit.SECONDS)
+                        disposeFinished.countDown()
+                    }
+                }
+            val replacement = PreviewableVideoPlayerState(isPlaying = false)
+            val firstBackend = fakeBackend("platform", DesktopBackendRoutingTier.PLATFORM_DIRECT) { first }
+            val replacementBackend = fakeBackend("mpv", DesktopBackendRoutingTier.MPV_NATIVE) { replacement }
+            val session = DesktopPlaybackSession(listOf(firstBackend, replacementBackend), readyTimeout = 1.seconds)
+
+            try {
+                session.open(DesktopPlaybackRequest(MediaSourceSpec("file:///first.mp4")), "platform")
+                session.switchBackend("mpv")
+
+                val elapsed = measureTime { session.notifySurfaceAttached(replacement) }
+
+                assertTrue(elapsed < 500.milliseconds)
+                assertTrue(disposeStarted.await(1, TimeUnit.SECONDS))
+                assertEquals(1L, disposeFinished.count)
+            } finally {
+                allowDispose.countDown()
+                assertTrue(disposeFinished.await(1, TimeUnit.SECONDS))
+                session.close()
+            }
+        }
+
+    @Test
+    fun replacingLibVlcSourceReusesTheActivePlayer() =
+        runTest {
+            val player = SourceReplacingVideoPlayerState()
+            var createCount = 0
+            val backend =
+                fakeBackend("libvlc", DesktopBackendRoutingTier.LIBVLC_NATIVE) {
+                    createCount += 1
+                    player
+                }
+            val session = DesktopPlaybackSession(listOf(backend), readyTimeout = 1.seconds)
+
+            try {
+                val first = session.open(DesktopPlaybackRequest(MediaSourceSpec("file:///first.mp4")), "libvlc")
+                val second = session.open(DesktopPlaybackRequest(MediaSourceSpec("file:///second.mp4")), "libvlc")
+
+                assertSame(first, second)
+                assertSame(player, second)
+                assertEquals(1, createCount)
+                assertEquals(listOf("file:///first.mp4", "file:///second.mp4"), player.openedUris)
+                assertEquals(2L, player.mediaSessionId)
+                assertEquals(0, player.disposeCount)
+            } finally {
+                session.close()
+            }
+        }
+
     @Test
     fun requestStringRedactsUriAndHeaders() {
         val request =
@@ -207,6 +277,108 @@ class DesktopPlaybackSessionTest {
                 Files.deleteIfExists(cacheDirectory)
             }
         }
+
+    @Test
+    fun bundledMpvRoutesRemoteHlsThroughAnOwnedLoopbackProxy() =
+        runTest {
+            var proxyOpened = false
+            var proxyClosed = false
+            val mpv =
+                fakeBackend(
+                    id = "mpv",
+                    tier = DesktopBackendRoutingTier.MPV_NATIVE,
+                    sourceProbe = { DesktopBackendProbeResult.Unsupported("Direct remote input is disabled.") },
+                ) {
+                    PreviewableVideoPlayerState(isPlaying = false)
+                }
+            val proxyFactory =
+                JvmHlsMediaProxyFactory { request ->
+                    assertTrue(request.source.uri.endsWith("master.m3u8"))
+                    proxyOpened = true
+                    object : JvmHlsMediaProxy {
+                        override val localUri: String = "http://127.0.0.1:49152/hls/1"
+
+                        override fun close() {
+                            proxyClosed = true
+                        }
+                    }
+                }
+            val session =
+                DesktopPlaybackSession(
+                    backends = listOf(mpv),
+                    readyTimeout = 1.seconds,
+                    hlsMediaProxyFactory = proxyFactory,
+                )
+
+            try {
+                session.open(
+                    DesktopPlaybackRequest(
+                        source = MediaSourceSpec("https://media.invalid/master.m3u8"),
+                        requestHeaders = mapOf("Authorization" to "test-only-placeholder"),
+                    ),
+                    backendId = "mpv",
+                )
+                assertTrue(proxyOpened)
+                assertIs<DesktopPlaybackSessionState.Ready>(session.state.value)
+            } finally {
+                session.close()
+                assertTrue(proxyClosed)
+            }
+        }
+
+    @Test
+    fun bundledMpvRoutesProgressiveRemoteMediaThroughLoopbackWithoutMaterializing() =
+        runTest {
+            var proxyOpened = false
+            var proxyClosed = false
+            var dataSourceOpened = false
+            val mpv =
+                fakeBackend(
+                    id = "mpv",
+                    tier = DesktopBackendRoutingTier.MPV_NATIVE,
+                    sourceProbe = { DesktopBackendProbeResult.Unsupported("Direct remote input is disabled.") },
+                ) {
+                    PreviewableVideoPlayerState(isPlaying = false)
+                }
+            val proxyFactory =
+                JvmHlsMediaProxyFactory { request ->
+                    assertTrue(request.source.uri.endsWith("movie.mp4"))
+                    proxyOpened = true
+                    object : JvmHlsMediaProxy {
+                        override val localUri: String = "http://127.0.0.1:49152/media/1"
+
+                        override fun close() {
+                            proxyClosed = true
+                        }
+                    }
+                }
+            val session =
+                DesktopPlaybackSession(
+                    backends = listOf(mpv),
+                    readyTimeout = 1.seconds,
+                    seekableMediaDataSourceFactory = JvmSeekableMediaDataSourceFactory {
+                        dataSourceOpened = true
+                        error("The progressive source must not be materialized when a proxy is available.")
+                    },
+                    hlsMediaProxyFactory = proxyFactory,
+                )
+
+            try {
+                session.open(
+                    DesktopPlaybackRequest(
+                        source = MediaSourceSpec("https://media.invalid/movie.mp4"),
+                        requestHeaders = mapOf("Authorization" to "test-only-placeholder"),
+                    ),
+                    backendId = "mpv",
+                )
+                assertTrue(proxyOpened)
+                assertTrue(!dataSourceOpened)
+                assertIs<DesktopPlaybackSessionState.Ready>(session.state.value)
+            } finally {
+                session.close()
+                assertTrue(proxyClosed)
+            }
+        }
 }
 
 private fun fakeBackend(
@@ -230,3 +402,38 @@ private fun fakeBackend(
 
         override fun createPlayerState(): VideoPlayerState = create()
     }
+
+private class SourceReplacingVideoPlayerState :
+    VideoPlayerState by PreviewableVideoPlayerState(isPlaying = false) {
+    private val mutablePlaybackEvents = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
+    private var mutableMediaSessionId = 0L
+
+    val openedUris = mutableListOf<String>()
+    var disposeCount = 0
+        private set
+
+    override val mediaSessionId: Long
+        get() = mutableMediaSessionId
+    override val playbackEvents: SharedFlow<PlaybackEvent>
+        get() = mutablePlaybackEvents
+
+    override fun openSource(
+        source: MediaSourceSpec,
+        initializePlayerState: io.github.kdroidfilter.composemediaplayer.InitialPlayerState,
+        requestHeaders: Map<String, String>,
+    ) {
+        openedUris += source.uri
+        mutableMediaSessionId += 1L
+        mutablePlaybackEvents.tryEmit(
+            PlaybackEvent.SourceLoaded(
+                mediaSessionId = mutableMediaSessionId,
+                sampledAtMs = 0L,
+                duration = 10.seconds,
+            ),
+        )
+    }
+
+    override fun dispose() {
+        disposeCount += 1
+    }
+}

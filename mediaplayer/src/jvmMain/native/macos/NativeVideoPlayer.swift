@@ -519,6 +519,11 @@ class MacVideoPlayer {
         renderer?.onHdr10PlusObserved = { [weak self] in
             self?.promoteVideoColorInfoToHdr10Plus()
         }
+        renderer?.onFrameRendered = { [weak self] itemTime, hostTime in
+            guard let self = self else { return }
+            self.samplePlaybackMetrics(itemTime: itemTime, hostTime: hostTime)
+            self.recordRenderedVideoFrame()
+        }
         return renderer
     }
 
@@ -2478,7 +2483,44 @@ class MacVideoPlayer {
             return
         }
         hdrMetalRenderer?.setDrawableSize(width: width, height: height, scale: scale)
-        hdrMetalRenderer?.renderCurrentFrame()
+        // The renderer's common-run-loop timer presents the next frame at the new size.
+        // Rendering synchronously here made every AppKit live-resize callback decode and
+        // encode an additional frame, which stalls interaction badly for 8K sources.
+    }
+
+    @discardableResult
+    func setHdrMetalTextureOutput(commandQueue: UnsafeMutableRawPointer?) -> Bool {
+        if commandQueue == nil {
+            return hdrMetalRenderer?.setTextureOutput(commandQueuePointer: nil) ?? true
+        }
+        guard usesMetalProjectionSurface else { return false }
+        if hdrMetalRenderer == nil {
+            hdrMetalRenderer = makeHdrMetalRenderer()
+        }
+        guard let renderer = hdrMetalRenderer else { return false }
+        if let item = player?.currentItem {
+            renderer.attach(to: item)
+        }
+        return renderer.setTextureOutput(commandQueuePointer: commandQueue)
+    }
+
+    func setHdrMetalTextureViewportSize(width: Int32, height: Int32) {
+        hdrMetalRenderer?.setTextureViewportSize(width: width, height: height)
+    }
+
+    func getHdrMetalTextureOutputInfo() -> (
+        surface: UnsafeMutableRawPointer,
+        width: Int32,
+        height: Int32,
+        frameSerial: UInt64
+    )? {
+        guard let info = hdrMetalRenderer?.textureOutputInfo() else { return nil }
+        return (
+            Unmanaged.passUnretained(info.surface).toOpaque(),
+            Int32(clamping: info.width),
+            Int32(clamping: info.height),
+            info.frameSerial
+        )
     }
 
     func setHdrMetalContentScaleMode(_ mode: Int32) {
@@ -2797,6 +2839,50 @@ public func setHdrMetalLayerSize(
     syncOnMain {
         player.setHdrMetalLayerSize(width: width, height: height, scale: scale)
     }
+}
+
+@_cdecl("setHdrMetalTextureOutput")
+public func setHdrMetalTextureOutput(
+    _ context: UnsafeMutableRawPointer?,
+    _ commandQueue: UnsafeMutableRawPointer?
+) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return syncOnMain {
+        player.setHdrMetalTextureOutput(commandQueue: commandQueue) ? 1 : 0
+    }
+}
+
+@_cdecl("setHdrMetalTextureViewportSize")
+public func setHdrMetalTextureViewportSize(
+    _ context: UnsafeMutableRawPointer?,
+    _ width: Int32,
+    _ height: Int32
+) {
+    guard let context = context else { return }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    syncOnMain {
+        player.setHdrMetalTextureViewportSize(width: width, height: height)
+    }
+}
+
+@_cdecl("getHdrMetalTextureOutputInfo")
+public func getHdrMetalTextureOutputInfo(
+    _ context: UnsafeMutableRawPointer?,
+    _ values: UnsafeMutablePointer<Int64>?
+) -> Int32 {
+    guard let context = context, let values = values else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    // TextureView polls this from a worker thread. The renderer publishes its IOSurface snapshot
+    // under its own lock, so dispatching synchronously to AppKit here is both unnecessary and can
+    // deadlock live resize: the poller owns the JVM player lock while AppKit needs that same lock
+    // to deliver the new viewport size.
+    guard let info = player.getHdrMetalTextureOutputInfo() else { return 0 }
+    values[0] = Int64(Int(bitPattern: info.surface))
+    values[1] = Int64(info.width)
+    values[2] = Int64(info.height)
+    values[3] = Int64(bitPattern: info.frameSerial)
+    return 1
 }
 
 @_cdecl("setHdrMetalPreferred")

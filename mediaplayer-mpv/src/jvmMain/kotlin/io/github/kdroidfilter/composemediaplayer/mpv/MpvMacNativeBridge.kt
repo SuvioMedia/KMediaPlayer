@@ -32,7 +32,18 @@ internal object MpvMacNativeBridge {
         colorMode: Int,
     )
 
+    /** Configures libmpv's native GPU post-process projection without crossing Compose/CPU. */
+    @JvmStatic external fun nSetProjection(
+        nativeRenderer: Long,
+        parameters: FloatArray,
+    )
+
     @JvmStatic external fun nRequestRedraw(nativeRenderer: Long)
+
+    @JvmStatic external fun nGetDisplayRefreshRate(nativeRenderer: Long): Double
+
+    /** Frame counters followed by aggregate/max render and drawable-flush times in nanoseconds. */
+    @JvmStatic external fun nGetPresentationDiagnostics(nativeRenderer: Long): LongArray?
 
     private fun loadNativeLibrary(): Boolean {
         if (!isMacArm64()) return false

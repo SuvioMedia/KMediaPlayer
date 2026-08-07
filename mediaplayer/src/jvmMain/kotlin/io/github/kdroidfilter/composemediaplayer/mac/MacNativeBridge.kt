@@ -123,6 +123,24 @@ internal object MacNativeBridge {
         height: Int,
     ): Int
 
+    /** Enables the RGBA16Float IOSurface output on the Tao/Skia Metal queue; queue 0 disables it. */
+    @JvmStatic external fun nSetHdrMetalTextureOutput(
+        handle: Long,
+        commandQueue: Long,
+    ): Boolean
+
+    @JvmStatic external fun nSetHdrMetalTextureViewportSize(
+        handle: Long,
+        width: Int,
+        height: Int,
+    )
+
+    /** outInfo = [IOSurface pointer, width, height, completed-frame serial]. */
+    @JvmStatic external fun nGetHdrMetalTextureOutputInfo(
+        handle: Long,
+        outInfo: LongArray,
+    ): Boolean
+
     @JvmStatic external fun nSetHdrMetalPreferred(
         handle: Long,
         preferred: Boolean,
@@ -142,6 +160,9 @@ internal object MacNativeBridge {
 
     /** Capabilities of the screen currently hosting this player's native layer. */
     @JvmStatic external fun nGetDisplayColorCapabilities(handle: Long): String?
+
+    /** Capabilities of the NSScreen currently hosting a Tao native child view. */
+    @JvmStatic external fun nGetDisplayColorCapabilitiesForView(nativeView: Long): String?
 
     /** Creates an owned AppKit child view for Nucleus `NativeView` embedding. */
     @JvmStatic external fun nCreateNativeVideoView(handle: Long): Long

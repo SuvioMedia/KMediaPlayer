@@ -311,6 +311,18 @@ final enum class io.github.kdroidfilter.composemediaplayer/VideoEyeOrder : kotli
     final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/VideoEyeOrder> // io.github.kdroidfilter.composemediaplayer/VideoEyeOrder.values|values#static(){}[0]
 }
 
+final enum class io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode> { // io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode|null[0]
+    enum entry MonoscopicLeft // io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode.MonoscopicLeft|null[0]
+    enum entry MonoscopicRight // io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode.MonoscopicRight|null[0]
+    enum entry Stereo // io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode.Stereo|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode> // io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode // io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode> // io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode.values|values#static(){}[0]
+}
+
 final enum class io.github.kdroidfilter.composemediaplayer/VideoProjectionMeshType : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/VideoProjectionMeshType> { // io.github.kdroidfilter.composemediaplayer/VideoProjectionMeshType|null[0]
     enum entry CurvedPlane // io.github.kdroidfilter.composemediaplayer/VideoProjectionMeshType.CurvedPlane|null[0]
     enum entry EacCube // io.github.kdroidfilter.composemediaplayer/VideoProjectionMeshType.EacCube|null[0]
@@ -1728,10 +1740,12 @@ final class io.github.kdroidfilter.composemediaplayer/VideoProjectionRenderPlan 
 }
 
 final class io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings { // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings|null[0]
-    constructor <init>(io.github.kdroidfilter.composemediaplayer/VideoProjectionType = ..., io.github.kdroidfilter.composemediaplayer/VideoStereoLayout = ..., io.github.kdroidfilter.composemediaplayer/VideoEyeOrder = ..., kotlin/Float = ..., kotlin/Float = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionRotation = ...) // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.<init>|<init>(io.github.kdroidfilter.composemediaplayer.VideoProjectionType;io.github.kdroidfilter.composemediaplayer.VideoStereoLayout;io.github.kdroidfilter.composemediaplayer.VideoEyeOrder;kotlin.Float;kotlin.Float;io.github.kdroidfilter.composemediaplayer.VideoProjectionRotation){}[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer/VideoProjectionType = ..., io.github.kdroidfilter.composemediaplayer/VideoStereoLayout = ..., io.github.kdroidfilter.composemediaplayer/VideoEyeOrder = ..., kotlin/Float = ..., kotlin/Float = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionRotation = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode = ...) // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.<init>|<init>(io.github.kdroidfilter.composemediaplayer.VideoProjectionType;io.github.kdroidfilter.composemediaplayer.VideoStereoLayout;io.github.kdroidfilter.composemediaplayer.VideoEyeOrder;kotlin.Float;kotlin.Float;io.github.kdroidfilter.composemediaplayer.VideoProjectionRotation;io.github.kdroidfilter.composemediaplayer.VideoProjectionDisplayMode){}[0]
 
     final val aspectRatio // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.aspectRatio|{}aspectRatio[0]
         final fun <get-aspectRatio>(): kotlin/Float // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.aspectRatio.<get-aspectRatio>|<get-aspectRatio>(){}[0]
+    final val displayMode // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.displayMode|{}displayMode[0]
+        final fun <get-displayMode>(): io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.displayMode.<get-displayMode>|<get-displayMode>(){}[0]
     final val eyeOrder // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.eyeOrder|{}eyeOrder[0]
         final fun <get-eyeOrder>(): io.github.kdroidfilter.composemediaplayer/VideoEyeOrder // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.eyeOrder.<get-eyeOrder>|<get-eyeOrder>(){}[0]
     final val fovDegrees // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.fovDegrees|{}fovDegrees[0]
@@ -1749,7 +1763,8 @@ final class io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings { 
     final fun component4(): kotlin/Float // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.component4|component4(){}[0]
     final fun component5(): kotlin/Float // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.component5|component5(){}[0]
     final fun component6(): io.github.kdroidfilter.composemediaplayer/VideoProjectionRotation // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.component6|component6(){}[0]
-    final fun copy(io.github.kdroidfilter.composemediaplayer/VideoProjectionType = ..., io.github.kdroidfilter.composemediaplayer/VideoStereoLayout = ..., io.github.kdroidfilter.composemediaplayer/VideoEyeOrder = ..., kotlin/Float = ..., kotlin/Float = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionRotation = ...): io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.copy|copy(io.github.kdroidfilter.composemediaplayer.VideoProjectionType;io.github.kdroidfilter.composemediaplayer.VideoStereoLayout;io.github.kdroidfilter.composemediaplayer.VideoEyeOrder;kotlin.Float;kotlin.Float;io.github.kdroidfilter.composemediaplayer.VideoProjectionRotation){}[0]
+    final fun component7(): io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.component7|component7(){}[0]
+    final fun copy(io.github.kdroidfilter.composemediaplayer/VideoProjectionType = ..., io.github.kdroidfilter.composemediaplayer/VideoStereoLayout = ..., io.github.kdroidfilter.composemediaplayer/VideoEyeOrder = ..., kotlin/Float = ..., kotlin/Float = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionRotation = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionDisplayMode = ...): io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.copy|copy(io.github.kdroidfilter.composemediaplayer.VideoProjectionType;io.github.kdroidfilter.composemediaplayer.VideoStereoLayout;io.github.kdroidfilter.composemediaplayer.VideoEyeOrder;kotlin.Float;kotlin.Float;io.github.kdroidfilter.composemediaplayer.VideoProjectionRotation;io.github.kdroidfilter.composemediaplayer.VideoProjectionDisplayMode){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.hashCode|hashCode(){}[0]
     final fun normalized(): io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings // io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings.normalized|normalized(){}[0]

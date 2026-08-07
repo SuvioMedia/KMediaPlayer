@@ -91,10 +91,16 @@ fun VideoProjectionSettings.toVideoProjectionRenderPlan(
             rows = normalizedProjection.recommendedRows(normalizedOptions.curvature),
         )
     val eyeWindows = normalizedProjection.eyeTextureWindows(normalizedOptions.textureCrop)
+    val displayWindows =
+        when (normalizedProjection.displayMode) {
+            VideoProjectionDisplayMode.Stereo -> eyeWindows
+            VideoProjectionDisplayMode.MonoscopicLeft -> eyeWindows.first to eyeWindows.first
+            VideoProjectionDisplayMode.MonoscopicRight -> eyeWindows.second to eyeWindows.second
+        }
     return VideoProjectionRenderPlan(
         mesh = mesh,
-        leftEyeTexture = eyeWindows.first,
-        rightEyeTexture = eyeWindows.second,
+        leftEyeTexture = displayWindows.first,
+        rightEyeTexture = displayWindows.second,
     )
 }
 

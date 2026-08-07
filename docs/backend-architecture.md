@@ -54,13 +54,14 @@ val options = VideoPlaybackOptions(
 )
 val session = remember {
     DesktopPlaybackSession(
-        listOf(
+        backends = listOf(
             platformDesktopPlaybackBackend(options),
             kMediaBridgeRemuxDesktopPlaybackBackend(options),
             mpvDesktopPlaybackBackend(),
             libVlcDesktopPlaybackBackend(options),
             kMediaBridgeTranscodeDesktopPlaybackBackend(options),
         ),
+        hlsMediaProxyFactory = JvmHttpHlsMediaProxyFactory(),
     )
 }
 
@@ -73,6 +74,11 @@ DesktopPlaybackSurface(
     modifier = Modifier.fillMaxSize(),
 )
 ```
+
+On macOS ARM64 the HLS proxy accepts a normal internet `http`/`https` URL from
+the application. It keeps the remote URL, TLS, request headers, cookies, and
+playlist references in the JVM and exposes only opaque numeric-loopback routes
+to the verified bundled MPV runtime.
 
 The automatic order is platform direct, KMediaBridge bounded remux, native MPV,
 native libVLC, then KMediaBridge compatibility transcode. Unavailable or

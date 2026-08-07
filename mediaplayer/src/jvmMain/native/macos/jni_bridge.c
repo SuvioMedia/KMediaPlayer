@@ -2,6 +2,7 @@
 // Calls Swift @_cdecl exports and registers them as JNI native methods.
 
 #include <jni.h>
+#include <ctype.h>
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <limits.h>
@@ -47,6 +48,9 @@ extern double  getDisplayAspectRatio(void* ctx);
 extern int32_t setOutputSize(void* ctx, int32_t width, int32_t height);
 extern void*   getHdrMetalLayer(void* ctx);
 extern void    setHdrMetalLayerSize(void* ctx, int32_t width, int32_t height, double scale);
+extern int32_t setHdrMetalTextureOutput(void* ctx, void* commandQueue);
+extern void    setHdrMetalTextureViewportSize(void* ctx, int32_t width, int32_t height);
+extern int32_t getHdrMetalTextureOutputInfo(void* ctx, int64_t* values);
 extern void    setHdrMetalPreferred(void* ctx, int32_t preferred);
 extern void    setHdrToneMappingEnabled(void* ctx, int32_t enabled);
 extern int32_t setHdrMetalProjectionConfiguration(void* ctx, const char* configuration);
@@ -247,17 +251,39 @@ typedef struct libvlc_track_description_t {
     char* psz_name;
     struct libvlc_track_description_t* p_next;
 } libvlc_track_description_t;
+typedef struct libvlc_media_stats_t {
+    int i_read_bytes;
+    float f_input_bitrate;
+    int i_demux_read_bytes;
+    float f_demux_bitrate;
+    int i_demux_corrupted;
+    int i_demux_discontinuity;
+    int i_decoded_video;
+    int i_decoded_audio;
+    int i_displayed_pictures;
+    int i_lost_pictures;
+    int i_played_abuffers;
+    int i_lost_abuffers;
+    int i_sent_packets;
+    int i_sent_bytes;
+    float f_send_bitrate;
+} libvlc_media_stats_t;
 
 typedef struct {
     void* dylib;
     void* core_dylib;
+    int dylib_process_retained;
+    int core_dylib_process_retained;
     libvlc_instance_t* (*new_instance)(int, const char* const*);
     void (*release_instance)(libvlc_instance_t*);
     libvlc_media_t* (*media_new_location)(libvlc_instance_t*, const char*);
     libvlc_media_t* (*media_new_path)(libvlc_instance_t*, const char*);
     void (*media_add_option)(libvlc_media_t*, const char*);
     void (*media_release)(libvlc_media_t*);
+    int (*media_get_stats)(libvlc_media_t*, libvlc_media_stats_t*);
     libvlc_media_player_t* (*media_player_new_from_media)(libvlc_media_t*);
+    libvlc_media_t* (*media_player_get_media)(libvlc_media_player_t*);
+    void (*media_player_set_media)(libvlc_media_player_t*, libvlc_media_t*);
     void (*media_player_release)(libvlc_media_player_t*);
     int (*media_player_play)(libvlc_media_player_t*);
     void (*media_player_pause)(libvlc_media_player_t*);
@@ -272,12 +298,59 @@ typedef struct {
     void (*media_player_set_nsobject)(libvlc_media_player_t*, void*);
     void (*video_set_callbacks)(libvlc_media_player_t*, void* (*)(void*, void**), void (*)(void*, void*, void* const*), void (*)(void*, void*), void*);
     void (*video_set_format_callbacks)(libvlc_media_player_t*, unsigned (*)(void**, char*, unsigned*, unsigned*, unsigned*, unsigned*), void (*)(void*));
+    int (*video_get_size)(libvlc_media_player_t*, unsigned, unsigned*, unsigned*);
     libvlc_track_description_t* (*audio_get_track_description)(libvlc_media_player_t*);
     int (*audio_set_track)(libvlc_media_player_t*, int);
     libvlc_track_description_t* (*video_get_spu_description)(libvlc_media_player_t*);
     int (*video_set_spu)(libvlc_media_player_t*, int);
     void (*track_description_list_release)(libvlc_track_description_t*);
 } LibVlcApi;
+
+typedef struct RetainedDylibHandle {
+    void* handle;
+    struct RetainedDylibHandle* next;
+} RetainedDylibHandle;
+
+/*
+ * libVLC finishes some native worker/TLS teardown after the player and instance have returned
+ * from their public release calls. Unmapping libvlc/libvlccore in that interval can leave those
+ * threads returning through unloaded code, especially when a Compose session immediately creates
+ * another backend. Keep exactly one dlopen reference for each module for the lifetime of the JVM;
+ * later player instances still balance their own extra dlopen references normally.
+ */
+static pthread_mutex_t retained_dylib_mutex = PTHREAD_MUTEX_INITIALIZER;
+static RetainedDylibHandle* retained_dylib_handles = NULL;
+
+static int retain_first_dylib_reference_for_process(void* handle) {
+    if (!handle) return 0;
+
+    pthread_mutex_lock(&retained_dylib_mutex);
+    for (RetainedDylibHandle* item = retained_dylib_handles; item; item = item->next) {
+        if (item->handle == handle) {
+            pthread_mutex_unlock(&retained_dylib_mutex);
+            return 0;
+        }
+    }
+
+    RetainedDylibHandle* retained = (RetainedDylibHandle*)calloc(1, sizeof(RetainedDylibHandle));
+    if (!retained) {
+        pthread_mutex_unlock(&retained_dylib_mutex);
+        return 0;
+    }
+    retained->handle = handle;
+    retained->next = retained_dylib_handles;
+    retained_dylib_handles = retained;
+    pthread_mutex_unlock(&retained_dylib_mutex);
+    return 1;
+}
+
+static void release_libvlc_api_handles(LibVlcApi* api) {
+    if (!api) return;
+    if (api->dylib && !api->dylib_process_retained) dlclose(api->dylib);
+    if (api->core_dylib && !api->core_dylib_process_retained) dlclose(api->core_dylib);
+    api->dylib = NULL;
+    api->core_dylib = NULL;
+}
 
 typedef struct {
     LibVlcApi api;
@@ -350,7 +423,10 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     api->media_new_path = (libvlc_media_t* (*)(libvlc_instance_t*, const char*))vlc_sym(dylib, "libvlc_media_new_path");
     api->media_add_option = (void (*)(libvlc_media_t*, const char*))vlc_sym(dylib, "libvlc_media_add_option");
     api->media_release = (void (*)(libvlc_media_t*))vlc_sym(dylib, "libvlc_media_release");
+    api->media_get_stats = (int (*)(libvlc_media_t*, libvlc_media_stats_t*))vlc_sym(dylib, "libvlc_media_get_stats");
     api->media_player_new_from_media = (libvlc_media_player_t* (*)(libvlc_media_t*))vlc_sym(dylib, "libvlc_media_player_new_from_media");
+    api->media_player_get_media = (libvlc_media_t* (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_media_player_get_media");
+    api->media_player_set_media = (void (*)(libvlc_media_player_t*, libvlc_media_t*))vlc_sym(dylib, "libvlc_media_player_set_media");
     api->media_player_release = (void (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_media_player_release");
     api->media_player_play = (int (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_media_player_play");
     api->media_player_pause = (void (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_media_player_pause");
@@ -365,6 +441,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
     api->media_player_set_nsobject = (void (*)(libvlc_media_player_t*, void*))vlc_sym(dylib, "libvlc_media_player_set_nsobject");
     api->video_set_callbacks = (void (*)(libvlc_media_player_t*, void* (*)(void*, void**), void (*)(void*, void*, void* const*), void (*)(void*, void*), void*))vlc_sym(dylib, "libvlc_video_set_callbacks");
     api->video_set_format_callbacks = (void (*)(libvlc_media_player_t*, unsigned (*)(void**, char*, unsigned*, unsigned*, unsigned*, unsigned*), void (*)(void*)))vlc_sym(dylib, "libvlc_video_set_format_callbacks");
+    api->video_get_size = (int (*)(libvlc_media_player_t*, unsigned, unsigned*, unsigned*))vlc_sym(dylib, "libvlc_video_get_size");
     api->audio_get_track_description = (libvlc_track_description_t* (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_audio_get_track_description");
     api->audio_set_track = (int (*)(libvlc_media_player_t*, int))vlc_sym(dylib, "libvlc_audio_set_track");
     api->video_get_spu_description = (libvlc_track_description_t* (*)(libvlc_media_player_t*))vlc_sym(dylib, "libvlc_video_get_spu_description");
@@ -373,6 +450,7 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
 
     if (!api->new_instance || !api->release_instance || !api->media_new_location ||
         !api->media_new_path || !api->media_add_option || !api->media_release || !api->media_player_new_from_media ||
+        !api->media_player_set_media ||
         !api->media_player_release || !api->media_player_play || !api->media_player_pause ||
         !api->media_player_stop || !api->media_player_get_time || !api->media_player_set_time ||
         !api->media_player_get_length || !api->audio_set_volume || !api->audio_get_volume ||
@@ -387,6 +465,9 @@ static int load_libvlc_api(const char* libvlc_path, LibVlcApi* api) {
         memset(api, 0, sizeof(*api));
         return 0;
     }
+
+    api->dylib_process_retained = retain_first_dylib_reference_for_process(api->dylib);
+    api->core_dylib_process_retained = retain_first_dylib_reference_for_process(api->core_dylib);
 
     return 1;
 }
@@ -650,7 +731,12 @@ static jstring vlc_track_descriptions_to_jstring(
 }
 
 static int has_uri_scheme(const char* uri) {
-    return uri && strstr(uri, "://") != NULL;
+    if (!uri || !isalpha((unsigned char)uri[0])) return 0;
+    for (const unsigned char* cursor = (const unsigned char*)uri + 1; *cursor; cursor++) {
+        if (*cursor == ':') return 1;
+        if (!isalnum(*cursor) && *cursor != '+' && *cursor != '-' && *cursor != '.') return 0;
+    }
+    return 0;
 }
 
 static LibVlcPlayer* create_libvlc_player(const char* libvlc_path, const char* plugin_path, int native_video) {
@@ -692,8 +778,7 @@ static LibVlcPlayer* create_libvlc_player(const char* libvlc_path, const char* p
         : (int)(sizeof(memory_args) / sizeof(memory_args[0]));
     player->instance = player->api.new_instance(arg_count, args);
     if (!player->instance) {
-        dlclose(player->api.dylib);
-        if (player->api.core_dylib) dlclose(player->api.core_dylib);
+        release_libvlc_api_handles(&player->api);
         pthread_mutex_destroy(&player->frame_mutex);
         free(player);
         return NULL;
@@ -738,8 +823,7 @@ static void dispose_libvlc_player(LibVlcPlayer* player) {
     player->frame_ready = 0;
     pthread_mutex_unlock(&player->frame_mutex);
     pthread_mutex_destroy(&player->frame_mutex);
-    if (player->api.dylib) dlclose(player->api.dylib);
-    if (player->api.core_dylib) dlclose(player->api.core_dylib);
+    release_libvlc_api_handles(&player->api);
     free(player);
 }
 
@@ -800,10 +884,13 @@ static void libvlc_add_header_options(libvlc_media_t* media, LibVlcPlayer* playe
 
 static void libvlc_open_uri_with_headers(LibVlcPlayer* player, const char* uri, const char* request_headers) {
     if (!player || !player->instance || !uri) return;
+    int reuse_media_player = player->player != NULL && player->api.media_player_set_media != NULL;
     if (player->player) {
         player->api.media_player_stop(player->player);
-        player->api.media_player_release(player->player);
-        player->player = NULL;
+        if (!reuse_media_player) {
+            player->api.media_player_release(player->player);
+            player->player = NULL;
+        }
     }
     pthread_mutex_lock(&player->frame_mutex);
     player->frame_ready = 0;
@@ -821,12 +908,19 @@ static void libvlc_open_uri_with_headers(LibVlcPlayer* player, const char* uri, 
 
     libvlc_add_header_options(media, player, request_headers);
 
-    player->player = player->api.media_player_new_from_media(media);
+    if (reuse_media_player) {
+        // Keep one media player bound to the AppKit drawable. Releasing it and attaching a newly
+        // created player from this background JNI call races AppKit and can leave the retained
+        // NSView permanently black after opening a second source.
+        player->api.media_player_set_media(player->player, media);
+    } else {
+        player->player = player->api.media_player_new_from_media(media);
+    }
     player->api.media_release(media);
     if (!player->player) return;
 
     if (player->native_video) {
-        if (player->native_view) {
+        if (!reuse_media_player && player->native_view) {
             player->api.media_player_set_nsobject(player->player, player->native_view);
         }
         vlc_apply_pending_tracks(player);
@@ -1145,7 +1239,23 @@ static jobject JNICALL jni_WrapPointer(JNIEnv* env, jclass cls, jlong address, j
 static jint JNICALL jni_GetFrameWidth(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     LibVlcPlayer* vlc = vlcCtx(native);
-    if (vlc) return (jint)vlc->width;
+    if (vlc) {
+        unsigned width = vlc->width;
+        unsigned height = vlc->height;
+        if (vlc->native_video && vlc->player && vlc->api.video_get_size) {
+            unsigned queried_width = 0;
+            unsigned queried_height = 0;
+            if (vlc->api.video_get_size(vlc->player, 0, &queried_width, &queried_height) == 0) {
+                width = queried_width;
+                height = queried_height;
+                pthread_mutex_lock(&vlc->frame_mutex);
+                vlc->width = width;
+                vlc->height = height;
+                pthread_mutex_unlock(&vlc->frame_mutex);
+            }
+        }
+        return (jint)width;
+    }
     void* ctx = avCtx(native);
     return ctx ? (jint)getFrameWidth(ctx) : 0;
 }
@@ -1153,7 +1263,23 @@ static jint JNICALL jni_GetFrameWidth(JNIEnv* env, jclass cls, jlong handle) {
 static jint JNICALL jni_GetFrameHeight(JNIEnv* env, jclass cls, jlong handle) {
     NativePlayerHandle* native = toHandle(handle);
     LibVlcPlayer* vlc = vlcCtx(native);
-    if (vlc) return (jint)vlc->height;
+    if (vlc) {
+        unsigned width = vlc->width;
+        unsigned height = vlc->height;
+        if (vlc->native_video && vlc->player && vlc->api.video_get_size) {
+            unsigned queried_width = 0;
+            unsigned queried_height = 0;
+            if (vlc->api.video_get_size(vlc->player, 0, &queried_width, &queried_height) == 0) {
+                width = queried_width;
+                height = queried_height;
+                pthread_mutex_lock(&vlc->frame_mutex);
+                vlc->width = width;
+                vlc->height = height;
+                pthread_mutex_unlock(&vlc->frame_mutex);
+            }
+        }
+        return (jint)height;
+    }
     void* ctx = avCtx(native);
     return ctx ? (jint)getFrameHeight(ctx) : 0;
 }
@@ -1170,6 +1296,63 @@ static jint JNICALL jni_SetOutputSize(JNIEnv* env, jclass cls, jlong handle, jin
     if (vlcCtx(native)) return 0;
     void* ctx = avCtx(native);
     return ctx ? (jint)setOutputSize(ctx, (int32_t)width, (int32_t)height) : 0;
+}
+
+static jboolean JNICALL jni_SetHdrMetalTextureOutput(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jlong command_queue
+) {
+    (void)env;
+    (void)cls;
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return JNI_FALSE;
+    void* ctx = avCtx(native);
+    if (!ctx) return JNI_FALSE;
+    return setHdrMetalTextureOutput(
+        ctx,
+        (void*)(uintptr_t)(uint64_t)command_queue
+    ) ? JNI_TRUE : JNI_FALSE;
+}
+
+static void JNICALL jni_SetHdrMetalTextureViewportSize(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jint width,
+    jint height
+) {
+    (void)env;
+    (void)cls;
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return;
+    void* ctx = avCtx(native);
+    if (ctx) setHdrMetalTextureViewportSize(ctx, (int32_t)width, (int32_t)height);
+}
+
+static jboolean JNICALL jni_GetHdrMetalTextureOutputInfo(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jlongArray out_info
+) {
+    (void)cls;
+    if (!out_info || (*env)->GetArrayLength(env, out_info) < 4) return JNI_FALSE;
+    NativePlayerHandle* native = toHandle(handle);
+    if (vlcCtx(native)) return JNI_FALSE;
+    void* ctx = avCtx(native);
+    if (!ctx) return JNI_FALSE;
+    int64_t values[4] = { 0, 0, 0, 0 };
+    if (!getHdrMetalTextureOutputInfo(ctx, values)) return JNI_FALSE;
+    jlong result[4] = {
+        (jlong)values[0],
+        (jlong)values[1],
+        (jlong)values[2],
+        (jlong)values[3],
+    };
+    (*env)->SetLongArrayRegion(env, out_info, 0, 4, result);
+    return (*env)->ExceptionCheck(env) ? JNI_FALSE : JNI_TRUE;
 }
 
 static void JNICALL jni_SetHdrMetalPreferred(JNIEnv* env, jclass cls, jlong handle, jboolean preferred) {
@@ -1215,41 +1398,89 @@ static jstring JNICALL jni_GetHdrRendererFailure(JNIEnv* env, jclass cls, jlong 
     return result;
 }
 
+#ifdef __OBJC__
+typedef struct {
+    NSView* view;
+    BOOL available;
+    char value[384];
+} KMPDisplayColorCapabilitiesContext;
+
+static void collect_display_color_capabilities_on_appkit_main(void* raw_context) {
+    KMPDisplayColorCapabilitiesContext* context =
+        (KMPDisplayColorCapabilitiesContext*)raw_context;
+    if (!context || !context->view) return;
+
+    @autoreleasepool {
+        NSScreen* screen = [[context->view window] screen];
+        if (screen) {
+            double potential_edr = [screen maximumPotentialExtendedDynamicRangeColorComponentValue];
+            double current_edr = [screen maximumExtendedDynamicRangeColorComponentValue];
+            BOOL eligible = [AVPlayer eligibleForHDRPlayback];
+            // The TextureView path is a controlled CAMetalLayer/Skia EDR renderer, not an
+            // AVPlayerLayer. AVPlayer's eligibility flag describes system-player presentation
+            // and must not veto a screen that explicitly reports EDR headroom to our renderer.
+            int native_hdr = potential_edr > 1.0 ? 1 : 0;
+            int dolby_vision_decode =
+                VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC) ? 1 : 0;
+            NSNumber* screen_number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
+            snprintf(
+                context->value,
+                sizeof(context->value),
+                "known=1;native=%d;eligible=%d;potentialEdr=%.6f;currentEdr=%.6f;screenId=%u;hdr10=%s;hlg=%s;dolbyVision=%s;dolbyVisionHardwareDecode=%d",
+                native_hdr,
+                eligible ? 1 : 0,
+                potential_edr,
+                current_edr,
+                screen_number ? [screen_number unsignedIntValue] : 0u,
+                native_hdr ? "SUPPORTED" : "UNSUPPORTED",
+                native_hdr ? "SUPPORTED" : "UNSUPPORTED",
+                native_hdr && dolby_vision_decode ? "SUPPORTED" : "UNSUPPORTED",
+                dolby_vision_decode
+            );
+            context->available = YES;
+        }
+        [context->view release];
+        context->view = nil;
+    }
+}
+
+static jstring new_display_color_capabilities(JNIEnv* env, NSView* view) {
+    if (!view) return NULL;
+    KMPDisplayColorCapabilitiesContext context = {
+        .view = [view retain],
+        .available = NO,
+        .value = {0},
+    };
+    run_on_appkit_main_sync(collect_display_color_capabilities_on_appkit_main, &context);
+    return context.available ? (*env)->NewStringUTF(env, context.value) : NULL;
+}
+#endif
+
 static jstring JNICALL jni_GetDisplayColorCapabilities(JNIEnv* env, jclass cls, jlong handle) {
 #ifdef __OBJC__
     NativePlayerHandle* native = toHandle(handle);
     if (!native || native->kind != PLAYER_KIND_AV) return NULL;
-    NSView* view = (NSView*)native->native_view;
-    NSScreen* screen = [[view window] screen];
-    if (!screen) return NULL;
-
-    double potential_edr = [screen maximumPotentialExtendedDynamicRangeColorComponentValue];
-    double current_edr = [screen maximumExtendedDynamicRangeColorComponentValue];
-    BOOL eligible = [AVPlayer eligibleForHDRPlayback];
-    int native_hdr = eligible && potential_edr > 1.0 ? 1 : 0;
-    int dolby_vision_decode =
-        VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC) ? 1 : 0;
-    NSNumber* screen_number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
-    char value[384];
-    snprintf(
-        value,
-        sizeof(value),
-        "known=1;native=%d;eligible=%d;potentialEdr=%.6f;currentEdr=%.6f;screenId=%u;hdr10=%s;hlg=%s;dolbyVision=%s;dolbyVisionHardwareDecode=%d",
-        native_hdr,
-        eligible ? 1 : 0,
-        potential_edr,
-        current_edr,
-        screen_number ? [screen_number unsignedIntValue] : 0u,
-        native_hdr ? "SUPPORTED" : "UNSUPPORTED",
-        native_hdr ? "SUPPORTED" : "UNSUPPORTED",
-        native_hdr && dolby_vision_decode ? "SUPPORTED" : "UNSUPPORTED",
-        dolby_vision_decode
-    );
-    return (*env)->NewStringUTF(env, value);
+    return new_display_color_capabilities(env, (NSView*)native->native_view);
 #else
     (void)env;
     (void)cls;
     (void)handle;
+    return NULL;
+#endif
+}
+
+static jstring JNICALL jni_GetDisplayColorCapabilitiesForView(
+    JNIEnv* env,
+    jclass cls,
+    jlong native_view
+) {
+#ifdef __OBJC__
+    (void)cls;
+    return new_display_color_capabilities(env, (NSView*)(uintptr_t)(uint64_t)native_view);
+#else
+    (void)env;
+    (void)cls;
+    (void)native_view;
     return NULL;
 #endif
 }
@@ -1293,10 +1524,16 @@ static void create_native_video_view_on_appkit_main(void* raw_context) {
             [[view layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
             vlc->native_view = view;
         }
-        if (vlc->player && vlc->api.media_player_set_nsobject) {
-            vlc->api.media_player_set_nsobject(vlc->player, vlc->native_view);
+        // Nucleus calls the factory before it reparents the returned NSView into the Tao window.
+        // Binding libVLC to that still-detached view is timing-dependent: Cocoa vout may start
+        // without a drawable and keep presenting black even though the playback clock advances.
+        // MacVideoPlayerState calls this entry point again from NativeView's post-attach effect;
+        // only that invocation is allowed to bind the drawable.
+        NSView* native_view = (NSView*)vlc->native_view;
+        if (vlc->player && vlc->api.media_player_set_nsobject && [native_view window] != nil) {
+            vlc->api.media_player_set_nsobject(vlc->player, native_view);
         }
-        context->result = (NSView*)vlc->native_view;
+        context->result = native_view;
     }
 }
 
@@ -1563,6 +1800,7 @@ static void set_native_window_fullscreen_on_appkit_main(void* raw_context) {
         context->result = YES;
     }
 }
+
 #endif
 
 static jboolean JNICALL jni_SetNativeWindowFullscreen(
@@ -1634,9 +1872,28 @@ static jstring JNICALL jni_GetPlaybackDiagnostics(JNIEnv* env, jclass cls, jlong
     NativePlayerHandle* native = toHandle(handle);
     LibVlcPlayer* vlc = vlcCtx(native);
     if (vlc) {
-        // Native-view rendering bypasses the memory callbacks below. Reporting zero frames would
-        // be false telemetry; a future libVLC statistics probe can populate this path.
-        if (vlc->native_video) return NULL;
+        if (vlc->native_video) {
+            if (!vlc->player || !vlc->api.media_player_get_media || !vlc->api.media_get_stats) return NULL;
+            libvlc_media_t* media = vlc->api.media_player_get_media(vlc->player);
+            if (!media) return NULL;
+            libvlc_media_stats_t stats;
+            memset(&stats, 0, sizeof(stats));
+            if (!vlc->api.media_get_stats(media, &stats)) return NULL;
+            uint64_t decoded_frames = stats.i_decoded_video > 0 ? (uint64_t)stats.i_decoded_video : 0;
+            uint64_t dropped_frames = stats.i_lost_pictures > 0 ? (uint64_t)stats.i_lost_pictures : 0;
+            char value[256];
+            snprintf(
+                value,
+                sizeof(value),
+                // With macOS native video output, libVLC's i_displayed_pictures can stop at a
+                // non-zero value while the AppKit drawable continues presenting new frames.
+                // Report it as unavailable instead of exposing a misleading frozen counter.
+                "totalFrames=%llu;renderedFrames=-1;droppedFrames=%llu;maxAvSyncMs=-1;playedSeconds=-1",
+                (unsigned long long)decoded_frames,
+                (unsigned long long)dropped_frames
+            );
+            return (*env)->NewStringUTF(env, value);
+        }
         pthread_mutex_lock(&vlc->frame_mutex);
         uint64_t decoded_frames = vlc->decoded_frames;
         uint64_t displayed_frames = vlc->displayed_frames;
@@ -1871,11 +2128,15 @@ static const JNINativeMethod g_methods[] = {
     { "nGetFrameHeight",         "(J)I",                        (void*)jni_GetFrameHeight },
     { "nGetDisplayAspectRatio",  "(J)D",                        (void*)jni_GetDisplayAspectRatio },
     { "nSetOutputSize",          "(JII)I",                      (void*)jni_SetOutputSize },
+    { "nSetHdrMetalTextureOutput", "(JJ)Z",                     (void*)jni_SetHdrMetalTextureOutput },
+    { "nSetHdrMetalTextureViewportSize", "(JII)V",              (void*)jni_SetHdrMetalTextureViewportSize },
+    { "nGetHdrMetalTextureOutputInfo", "(J[J)Z",                (void*)jni_GetHdrMetalTextureOutputInfo },
     { "nSetHdrMetalPreferred",   "(JZ)V",                       (void*)jni_SetHdrMetalPreferred },
     { "nSetHdrToneMappingEnabled", "(JZ)V",                     (void*)jni_SetHdrToneMappingEnabled },
     { "nSetHdrMetalProjectionConfiguration", "(JLjava/lang/String;)Z", (void*)jni_SetHdrMetalProjectionConfiguration },
     { "nGetHdrRendererFailure", "(J)Ljava/lang/String;",       (void*)jni_GetHdrRendererFailure },
     { "nGetDisplayColorCapabilities", "(J)Ljava/lang/String;",   (void*)jni_GetDisplayColorCapabilities },
+    { "nGetDisplayColorCapabilitiesForView", "(J)Ljava/lang/String;", (void*)jni_GetDisplayColorCapabilitiesForView },
     { "nCreateNativeVideoView",  "(J)J",                        (void*)jni_CreateNativeVideoView },
     { "nDisposeNativeVideoView", "(JJ)V",                       (void*)jni_DisposeNativeVideoView },
     { "nSetNativeWindowFullscreen", "(JZ)Z",                    (void*)jni_SetNativeWindowFullscreen },

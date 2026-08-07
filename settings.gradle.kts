@@ -1,7 +1,26 @@
 import org.gradle.api.initialization.resolve.RepositoriesMode
 
 pluginManagement {
+    val localNucleusRepository = providers.gradleProperty("kmediaNucleusMavenRepository").orNull
+    val localNucleusVersion = providers.gradleProperty("kmediaNucleusVersion").orNull
+
     repositories {
+        localNucleusRepository?.let { repositoryPath ->
+            maven {
+                name = "kmediaNucleusLocal"
+                url = uri(repositoryPath)
+                content {
+                    includeGroup("dev.nucleusframework")
+                }
+            }
+        }
+        maven {
+            name = "suvioNucleusFork"
+            url = uri("https://suviomedia.github.io/Nucleus/maven/")
+            content {
+                includeGroup("dev.nucleusframework")
+            }
+        }
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -12,6 +31,14 @@ pluginManagement {
         }
         gradlePluginPortal()
         mavenCentral()
+    }
+
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "dev.nucleusframework" && localNucleusVersion != null) {
+                useModule("dev.nucleusframework:plugin:$localNucleusVersion")
+            }
+        }
     }
 }
 
@@ -69,6 +96,26 @@ providers.gradleProperty("kmediaBridgeProjectDir").orNull?.let { projectDirector
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        providers.gradleProperty("kmediaNucleusMavenRepository").orNull?.let { repositoryPath ->
+            exclusiveContent {
+                forRepository {
+                    maven {
+                        name = "kmediaNucleusLocal"
+                        url = uri(repositoryPath)
+                    }
+                }
+                filter {
+                    includeGroup("dev.nucleusframework")
+                }
+            }
+        }
+        maven {
+            name = "suvioNucleusFork"
+            url = uri("https://suviomedia.github.io/Nucleus/maven/")
+            content {
+                includeGroup("dev.nucleusframework")
+            }
+        }
         providers.gradleProperty("kmediaBridgeMavenRepository").orNull?.let { repositoryPath ->
             exclusiveContent {
                 forRepository {

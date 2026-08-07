@@ -141,8 +141,18 @@ private fun openPausedAndRender(
     await("MPV did not finish loading the runtime-coexistence fixture.") {
         player.hasMedia && !player.isLoading
     }
+    if (isMacArm64Host()) {
+        await("Bundled MPV did not select the pipelined VideoToolbox decoder for H.264.") {
+            player.renderingInfo.videoDecoder
+                ?.contains("videotoolbox-async", ignoreCase = true) == true
+        }
+    }
     return renderPixels(player)
 }
+
+private fun isMacArm64Host(): Boolean =
+    System.getProperty("os.name").contains("mac", ignoreCase = true) &&
+        System.getProperty("os.arch").lowercase() in setOf("aarch64", "arm64")
 
 private fun assertAssPixelsRendered(
     player: MpvVideoPlayerState,

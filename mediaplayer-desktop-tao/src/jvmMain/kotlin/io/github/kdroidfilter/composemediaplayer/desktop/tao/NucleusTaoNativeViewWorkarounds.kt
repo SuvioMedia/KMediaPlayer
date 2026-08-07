@@ -25,6 +25,8 @@ private const val NUCLEUS_NATIVE_VIEW_CLASS = "dev.nucleusframework.window.tao.N
 private const val NUCLEUS_OVERLAY_LOCAL_GETTER = "getLocalNativeViewOverlayController"
 private const val NUCLEUS_NATIVE_VIEW_HOST_LOCAL_GETTER = "getLocalTaoNativeViewHost"
 private const val NUCLEUS_OVERLAY_SCENE_FIELD = "scene"
+private const val NUCLEUS_PREPARED_VIEWPORT_FIELD =
+    "sceneViewportPreparedBeforeInteropPresentation"
 private const val NUCLEUS_MAC_NATIVE_VIEW_BRIDGE_CLASS =
     "dev.nucleusframework.window.tao.ffi.NativeTaoMacOsNativeViewBridge"
 private const val NUCLEUS_METAL_BRIDGE_CLASS = "dev.nucleusframework.window.tao.ffi.NativeMetalBridge"
@@ -79,12 +81,24 @@ internal fun Modifier.consumeTaoVideoOverlayPointerEvents(cursor: PointerIcon? =
         val nucleusModifier = this.consumeOverlayPointerEvents(cursor)
         val overlayLocal = nucleusOverlayControllerLocal ?: return@composed nucleusModifier
         val overlayController = overlayLocal.current ?: return@composed nucleusModifier
-        val compatibilityKey = remember(overlayController) { Any() }
 
-        DisposableEffect(overlayController, compatibilityKey) {
+        DisposableEffect(overlayController) {
             onDispose {
-                unregisterNucleusOverlayRegion(overlayController, compatibilityKey)
+                resetNucleusRootPointerInput(overlayController)
             }
+        }
+
+        // Nucleus 2.3.1 registers overlay-local bounds itself. Adding the old 2.2 AppKit
+        // compensation as a second region makes the native hit-test and the Compose scene use
+        // different coordinate spaces after a backend switch. Keep that compatibility region only
+        // for controllers that predate the transaction-aware overlay viewport implementation.
+        if (!nucleusOverlayNeedsLegacyMacHitTestRepair(overlayController)) {
+            return@composed nucleusModifier
+        }
+
+        val compatibilityKey = remember(overlayController) { Any() }
+        DisposableEffect(overlayController, compatibilityKey) {
+            onDispose { unregisterNucleusOverlayRegion(overlayController, compatibilityKey) }
         }
 
         nucleusModifier.onGloballyPositioned { coordinates ->
@@ -101,6 +115,15 @@ internal fun Modifier.consumeTaoVideoOverlayPointerEvents(cursor: PointerIcon? =
             registerNucleusOverlayRegion(overlayController, compatibilityKey, hitTestRegion)
         }
     }
+
+private fun nucleusOverlayNeedsLegacyMacHitTestRepair(overlayController: Any): Boolean =
+    overlayController.javaClass.readBooleanField(
+        overlayController,
+        NUCLEUS_PREPARED_VIEWPORT_FIELD,
+    ) != true
+
+internal fun nucleusOverlayNeedsLegacyMacHitTestRepairForTest(overlayController: Any): Boolean =
+    nucleusOverlayNeedsLegacyMacHitTestRepair(overlayController)
 
 @Composable
 internal fun currentNucleusInteropScheduler(): ((() -> Unit) -> Unit)? {
@@ -125,14 +148,69 @@ internal fun syncNucleusNativeViewOverlaySceneViewport(
     return true
 }
 
+/**
+ * Repairs the main Nucleus scene after AppKit returns pointer ownership from a native overlay.
+ *
+ * Nucleus 2.2.0 tracks the primary-button state independently in its main and overlay scenes.
+ * AppKit can route the press to one scene and the release to the other when an overlay removes
+ * itself from a button callback. The main scene then keeps a stale pressed pointer and subsequent
+ * clicks are dispatched along the old hit path even though every native NSView was detached.
+ * Cancelling the main scene's pointer input and clearing that bookkeeping at overlay disposal makes
+ * the ownership hand-off atomic. Reflection keeps this workaround isolated to the affected Nucleus
+ * release and degrades to a no-op when its internals change.
+ */
+@OptIn(InternalComposeUiApi::class)
+internal fun resetNucleusRootPointerInput(overlayController: Any?): Boolean {
+    if (overlayController == null) return false
+    val nativeViewHost = overlayController.javaClass.readObjectField(overlayController, "host") ?: return false
+    val sceneHost =
+        nativeViewHost.javaClass.readObjectField(
+            nativeViewHost,
+            "\$outer",
+            "this\$0",
+            "outer",
+        ) ?: return false
+
+    val pressedReset =
+        runCatching {
+            sceneHost.javaClass
+                .getDeclaredField("isPressed")
+                .also { field -> check(field.trySetAccessible()) }
+                .setBoolean(sceneHost, false)
+            true
+        }.getOrDefault(false)
+    val scene = sceneHost.javaClass.readObjectField(sceneHost, NUCLEUS_OVERLAY_SCENE_FIELD) as? ComposeScene
+    val inputCancelled =
+        scene?.let { rootScene ->
+            runCatching {
+                rootScene.cancelPointerInput()
+                true
+            }.getOrDefault(false)
+        } ?: false
+    return pressedReset || inputCancelled
+}
+
 @OptIn(InternalComposeUiApi::class)
 private fun nucleusOverlayViewportNeedsRepair(
     overlayController: Any?,
     expectedSize: IntSize,
 ): Boolean {
     if (overlayController == null || expectedSize.width <= 0 || expectedSize.height <= 0) return false
+    if (
+        overlayController.javaClass.readBooleanField(
+            overlayController,
+            NUCLEUS_PREPARED_VIEWPORT_FIELD,
+        ) == true
+    ) {
+        return false
+    }
     return nucleusOverlayScene(overlayController)?.size != expectedSize
 }
+
+internal fun nucleusOverlayViewportNeedsRepairForTest(
+    overlayController: Any?,
+    expectedSize: IntSize,
+): Boolean = nucleusOverlayViewportNeedsRepair(overlayController, expectedSize)
 
 /**
  * Runs after Nucleus' own queued resize transaction. Nucleus 2.2.0 compares the captured target
@@ -347,6 +425,28 @@ private fun Class<*>.readFloatField(
             .also { field -> check(field.trySetAccessible()) }
             .getFloat(instance)
     }.getOrNull()
+
+private fun Class<*>.readBooleanField(
+    instance: Any,
+    name: String,
+): Boolean? =
+    runCatching {
+        getDeclaredField(name)
+            .also { field -> check(field.trySetAccessible()) }
+            .getBoolean(instance)
+    }.getOrNull()
+
+private fun Class<*>.readObjectField(
+    instance: Any,
+    vararg names: String,
+): Any? =
+    names.firstNotNullOfOrNull { name ->
+        runCatching {
+            getDeclaredField(name)
+                .also { field -> check(field.trySetAccessible()) }
+                .get(instance)
+        }.getOrNull()
+    }
 
 private fun registerNucleusOverlayRegion(
     overlayController: Any,

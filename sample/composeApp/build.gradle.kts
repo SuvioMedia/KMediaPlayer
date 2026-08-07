@@ -22,6 +22,7 @@ configurations.configureEach {
 }
 
 val desktopSampleMainClass = "sample.app.MainKt"
+val localNucleusVersion = providers.gradleProperty("kmediaNucleusVersion").orNull
 
 // Keep the desktop sample's documented -Dsample.app.* launch controls available through Gradle's
 // forked run task. Reading only this allow-list avoids forwarding unrelated JVM properties.
@@ -45,12 +46,15 @@ val desktopSampleSystemProperties =
         "sample.app.kMediaBridgeRuntimeDirectory",
         "sample.app.mpvLibraryPath",
         "sample.app.projectionType",
+        "sample.app.mpvPerformanceSelfTestSeconds",
+        "sample.app.mpvPerformanceSelfTestResultFile",
         "sample.app.colorSelfTestSeconds",
         "sample.app.colorSelfTestStartTimeoutSeconds",
         "sample.app.colorSelfTestResultFile",
         "sample.app.colorSelfTestExpectedSource",
         "sample.app.colorSelfTestExpectedOutput",
         "sample.app.colorSelfTestRequireAudioSync",
+        "sample.app.windowLifecycleSelfTest",
     )
 
 tasks.withType<JavaExec>().configureEach {
@@ -142,10 +146,17 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
-            implementation(libs.nucleus.application)
-            implementation(libs.nucleus.decorated.window.core)
-            implementation(libs.nucleus.decorated.window.tao)
-            implementation(libs.nucleus.graalvm.runtime)
+            if (localNucleusVersion == null) {
+                implementation(libs.nucleus.application)
+                implementation(libs.nucleus.decorated.window.core)
+                implementation(libs.nucleus.decorated.window.tao)
+                implementation(libs.nucleus.graalvm.runtime)
+            } else {
+                implementation("dev.nucleusframework:nucleus.nucleus-application:$localNucleusVersion")
+                implementation("dev.nucleusframework:nucleus.decorated-window-core:$localNucleusVersion")
+                implementation("dev.nucleusframework:nucleus.decorated-window-tao:$localNucleusVersion")
+                implementation("dev.nucleusframework:nucleus.graalvm-runtime:$localNucleusVersion")
+            }
             implementation(project(":mediaplayer-ass"))
             implementation(project(":mediaplayer-dolbyvision"))
             implementation(project(":mediaplayer-kmediabridge"))

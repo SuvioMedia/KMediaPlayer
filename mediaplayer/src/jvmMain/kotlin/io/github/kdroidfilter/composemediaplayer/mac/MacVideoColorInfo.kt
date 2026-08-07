@@ -119,7 +119,10 @@ internal fun String?.toMacVideoColorInfo(): VideoColorInfo {
 internal fun String?.toMacDisplayColorCapabilities(): DisplayColorCapabilities {
     val values = this.toNativeValueMap()
     if (values["known"] != "1") return DisplayColorCapabilities()
-    val hasHdrOutput = values["native"] == "1" && values["eligible"] != "0"
+    // `native` is derived from the target NSScreen's potential EDR headroom. AVPlayer's
+    // `eligibleForHDRPlayback` describes AVPlayerLayer/system presentation and must not veto our
+    // controlled RGBA16Float Metal renderer hosted by the native Tao child view.
+    val hasHdrOutput = values["native"] == "1"
     val ranges =
         buildSet {
             add(VideoDynamicRange.SDR)

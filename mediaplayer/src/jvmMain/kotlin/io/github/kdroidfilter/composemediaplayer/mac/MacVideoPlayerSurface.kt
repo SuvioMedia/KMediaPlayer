@@ -6,13 +6,22 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import dev.nucleusframework.window.tao.TextureView
+import dev.nucleusframework.window.tao.currentMacMetalTextureHost
+import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
+import dev.nucleusframework.window.tao.rememberTextureViewController
 import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
@@ -20,6 +29,10 @@ import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfa
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Renders macOS video through an AppKit `NSView` or the Java-toolkit-free Skia fallback. */
 @Composable
@@ -42,8 +55,8 @@ private fun MacVideoSurfaceContent(
     onSurfaceAttached: () -> Unit = {},
 ) {
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
-    val nativeSurfaceRequested =
-        playerState.shouldUseHdrMetalSurface() || playerState.shouldUseLibVlcNativeSurface()
+    val metalTextureRequested = playerState.shouldUseHdrMetalSurface()
+    val nativeSurfaceRequested = playerState.shouldUseLibVlcNativeSurface()
     val videoModifier =
         contentScale.toCanvasModifier(
             playerState.aspectRatio,
@@ -52,7 +65,7 @@ private fun MacVideoSurfaceContent(
         )
 
     val hostModifier =
-        if (nativeSurfaceRequested) {
+        if (metalTextureRequested || nativeSurfaceRequested) {
             modifier
         } else {
             modifier.onSizeChanged { size ->
@@ -64,7 +77,27 @@ private fun MacVideoSurfaceContent(
         modifier = hostModifier,
         contentAlignment = Alignment.Center,
     ) {
-        if (nativeSurfaceRequested) {
+        if (metalTextureRequested) {
+            MacMetalTextureVideoView(
+                playerState = playerState,
+                modifier =
+                    videoModifier.onSizeChanged { size ->
+                        playerState.onMetalTextureResized(size.width, size.height)
+                        if (contentScale.preservesMediaAspectRatio()) {
+                            playerState.recordMetalTextureViewportGeometry(
+                                width = size.width,
+                                height = size.height,
+                                expectedAspectRatio = playerState.aspectRatio,
+                            )
+                        }
+                    },
+                contentScale = contentScale,
+                onSurfaceAttached = { latestOnSurfaceAttached() },
+            )
+            // The media follows the same aspect-ratio rectangle as the Canvas path, while player
+            // chrome continues to own the complete viewport.
+            MacVideoOverlayContent(playerState, overlay)
+        } else if (nativeSurfaceRequested) {
             val surface =
                 remember(playerState, playerState.nativeSurfaceGeneration, nativeSurfaceRequested, contentScale) {
                     TaoNativeVideoSurface(
@@ -79,7 +112,10 @@ private fun MacVideoSurfaceContent(
                 // AVPlayerLayer/Metal applies ContentScale to the media inside that viewport.
                 modifier = Modifier.fillMaxSize(),
                 overlay = { MacVideoOverlayContent(playerState, overlay) },
-                onAttached = { latestOnSurfaceAttached() },
+                onAttached = {
+                    playerState.onNativeVideoSurfaceAttached()
+                    latestOnSurfaceAttached()
+                },
                 onUnavailable = { latestOnSurfaceAttached() },
             )
         } else {
@@ -100,6 +136,152 @@ private fun MacVideoSurfaceContent(
                 onDispose { }
             }
         }
+    }
+}
+
+/**
+ * Presents AVFoundation's FP16 IOSurface in the Tao Metal scene. The texture is imported by the
+ * window GPU and is never copied through Compose or the CPU. Keeping it in the same scene as the
+ * controls also lets [ContentScale] preserve the last completed frame while a live resize is
+ * waiting for a newly projected texture with the updated viewport aspect.
+ */
+@Composable
+private fun MacMetalTextureVideoView(
+    playerState: MacVideoPlayerState,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    onSurfaceAttached: () -> Unit,
+) {
+    val host = currentMacMetalTextureHost()
+    val commandQueue = host?.commandQueue ?: 0L
+    val nativeView = host?.nativeView ?: 0L
+    val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
+    if (commandQueue == 0L || nativeView == 0L) {
+        val fallbackSurface =
+            remember(playerState, playerState.nativeSurfaceGeneration, contentScale) {
+                TaoNativeVideoSurface(
+                    kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
+                    createHandle = { playerState.createNativeVideoView(contentScale.toHdrMetalMode()) },
+                    disposeHandle = { handle -> playerState.disposeNativeVideoView(handle) },
+                )
+            }
+        TaoNativeVideoView(
+            surface = fallbackSurface,
+            modifier = modifier,
+            overlay = {},
+            onAttached = { latestOnSurfaceAttached() },
+            onUnavailable = { latestOnSurfaceAttached() },
+        )
+        return
+    }
+
+    val controller = rememberTextureViewController()
+    var source by remember(playerState, playerState.nativeSurfaceGeneration, commandQueue) {
+        mutableStateOf<dev.nucleusframework.window.tao.TextureViewSource?>(null)
+    }
+    var previousSource by remember(playerState, playerState.nativeSurfaceGeneration, commandQueue) {
+        mutableStateOf<dev.nucleusframework.window.tao.TextureViewSource?>(null)
+    }
+    var textureWidth by remember(playerState, playerState.nativeSurfaceGeneration, commandQueue) {
+        mutableIntStateOf(0)
+    }
+    var textureHeight by remember(playerState, playerState.nativeSurfaceGeneration, commandQueue) {
+        mutableIntStateOf(0)
+    }
+    var attached by remember(playerState, playerState.nativeSurfaceGeneration, commandQueue) {
+        mutableStateOf(false)
+    }
+
+    DisposableEffect(playerState, playerState.nativeSurfaceGeneration, commandQueue, nativeView) {
+        val didAttach =
+            commandQueue != 0L &&
+                playerState.attachMetalTextureOutput(
+                    commandQueue = commandQueue,
+                    nativeView = nativeView,
+                )
+        attached = didAttach
+        onDispose {
+            if (didAttach) playerState.detachMetalTextureOutput()
+            attached = false
+        }
+    }
+
+    LaunchedEffect(playerState, playerState.nativeSurfaceGeneration, attached) {
+        if (!attached) return@LaunchedEffect
+        val info = LongArray(METAL_TEXTURE_INFO_SIZE)
+        var lastSurface = 0L
+        var lastWidth = 0
+        var lastHeight = 0
+        var lastFrameSerial = Long.MIN_VALUE
+        while (true) {
+            val frame = withContext(Dispatchers.IO) { playerState.metalTextureFrame(info) }
+            if (frame != null) {
+                if (
+                    frame.ioSurface != lastSurface ||
+                    frame.width != lastWidth ||
+                    frame.height != lastHeight
+                ) {
+                    lastSurface = frame.ioSurface
+                    lastWidth = frame.width
+                    lastHeight = frame.height
+                    textureWidth = frame.width
+                    textureHeight = frame.height
+                    val nextSource =
+                        nucleusIOSurfaceTextureSource(
+                            ioSurface = frame.ioSurface,
+                            widthPx = frame.width,
+                            heightPx = frame.height,
+                        )
+                    previousSource = source
+                    source = nextSource
+                }
+                if (frame.frameSerial != lastFrameSerial) {
+                    lastFrameSerial = frame.frameSerial
+                    controller.markFrameAvailable()
+                }
+            }
+            delay(METAL_TEXTURE_POLL_INTERVAL)
+        }
+    }
+
+    DisposableEffect(source) {
+        if (source != null) latestOnSurfaceAttached()
+        onDispose { }
+    }
+
+    // A fresh IOSurface has a completed producer frame, but TextureView still prepares its first
+    // immutable Skia snapshot asynchronously. Keep the last imported image underneath until that
+    // snapshot starts drawing; the new view is transparent meanwhile. At most two surfaces stay
+    // leased, and the older one is released on the next completed viewport transition.
+    Box(modifier = modifier) {
+        previousSource?.let { completedSource ->
+            TextureView(
+                source = completedSource,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = contentScale,
+            )
+        }
+        TextureView(
+            source = source,
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .onSizeChanged { viewport ->
+                        if (textureWidth <= 0 || textureHeight <= 0 || viewport.width <= 0 || viewport.height <= 0) {
+                            return@onSizeChanged
+                        }
+                        val scale =
+                            contentScale.computeScaleFactor(
+                                srcSize = Size(textureWidth.toFloat(), textureHeight.toFloat()),
+                                dstSize = Size(viewport.width.toFloat(), viewport.height.toFloat()),
+                            )
+                        playerState.recordMetalTextureGeometry(scale.scaleX, scale.scaleY)
+                    },
+            controller = controller,
+            // A projected texture is rebuilt for the final viewport aspect. Until that new texture is
+            // ready, honour the caller's scale mode for the previous one instead of stretching it.
+            contentScale = contentScale,
+        )
     }
 }
 
@@ -144,6 +326,11 @@ private fun ContentScale.toHdrMetalMode(): Int =
         else -> HDR_METAL_SCALE_FIT
     }
 
+private fun ContentScale.preservesMediaAspectRatio(): Boolean =
+    this != ContentScale.Crop && this != ContentScale.FillBounds
+
 private const val HDR_METAL_SCALE_FIT = 0
 private const val HDR_METAL_SCALE_CROP = 1
 private const val HDR_METAL_SCALE_FILL = 2
+private const val METAL_TEXTURE_INFO_SIZE = 4
+private val METAL_TEXTURE_POLL_INTERVAL = 8.milliseconds

@@ -31,6 +31,10 @@ class DesktopPlayerLifecycleTest {
                 file.toString(),
                 normalizeUnixLocalFileUriForPlayback("file://localhost${file.toUri().rawPath}"),
             )
+            assertEquals(
+                file.toString(),
+                normalizeUnixLocalFileUriForPlayback("file:${file.toUri().rawPath}"),
+            )
         } finally {
             Files.deleteIfExists(file)
             Files.deleteIfExists(directory)

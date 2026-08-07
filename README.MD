@@ -422,7 +422,12 @@ The verified bundled runtime supports Android API 28+ on `arm64-v8a` and
 `armeabi-v7a`, Linux on x86_64 and ARM64, macOS on ARM64, and Windows x86_64.
 The exact iOS pod supports ARM64 device/simulator. Android x86, Android x86_64,
 macOS x86_64, Intel iOS simulators, and Windows ARM64 are not supported. The
-bundled runtime has networking disabled, so use local media and subtitle files.
+bundled runtime rejects direct remote input. On macOS ARM64,
+`DesktopPlaybackSession` can nevertheless play internet HLS through
+`JvmHttpHlsMediaProxyFactory`: HTTPS, redirects, headers, cookies, and manifest
+rewriting stay in the JVM, while libmpv receives only an uncredentialed numeric
+loopback URL. Other bundled targets continue to accept local media and subtitle
+files only.
 Desktop applications run on Java 25 with `--enable-native-access=ALL-UNNAMED`.
 
 The core, default player, and adapter code remain under this repository's own

@@ -4,6 +4,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.WindowPlacement
+import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.WindowState
+import dev.nucleusframework.window.tao.LocalTaoWindow
+import dev.nucleusframework.window.tao.TaoWindow
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineRenderer
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
@@ -54,12 +61,15 @@ internal fun DesktopColorPipelineSelfTest(
     durationSeconds: Long,
     resultFilePath: String,
     playbackOptions: VideoPlaybackOptions,
+    windowState: WindowState,
+    verifyWindowLifecycle: Boolean,
     onComplete: () -> Unit,
 ) {
     allowComposeMediaPlayerLogging = true
     composeMediaPlayerLogSink = { line -> println(line) }
     val playerState = rememberRenderableVideoPlayerState(playbackOptions = playbackOptions)
-    LaunchedEffect(playerState, inputUri) {
+    val taoWindow = LocalTaoWindow.current
+    LaunchedEffect(playerState, inputUri, taoWindow) {
         var lastStatus: VideoColorPipelineStatus? = null
         val outcome =
             runCatching {
@@ -98,13 +108,21 @@ internal fun DesktopColorPipelineSelfTest(
                 check(stableStatus.matchesExpectedDesktopColorOutput(expectedSource, expectedOutput)) {
                     "The expected color output did not remain stable."
                 }
+                if (verifyWindowLifecycle) {
+                    runDesktopWindowLifecycleCheck(
+                        playerState = playerState,
+                        windowState = windowState,
+                        taoWindow = checkNotNull(taoWindow) { "The Tao window is unavailable." },
+                    )
+                }
                 runDesktopSustainedPlaybackCheck(
                     playerState = playerState,
                     expectedSource = expectedSource,
                     expectedOutput = expectedOutput,
                     requireAudioSync = requireAudioSync,
                     durationSeconds = durationSeconds,
-                ).also { result -> lastStatus = result.status }
+                ).copy(windowLifecycleVerified = verifyWindowLifecycle)
+                    .also { result -> lastStatus = result.status }
             }
         val summary =
             outcome.fold(
@@ -138,6 +156,96 @@ internal fun DesktopColorPipelineSelfTest(
         playerState = playerState,
         modifier = Modifier.fillMaxSize(),
     )
+}
+
+private suspend fun runDesktopWindowLifecycleCheck(
+    playerState: RenderableVideoPlayerState,
+    windowState: WindowState,
+    taoWindow: TaoWindow,
+) {
+    val originalSize = windowState.size
+    val originalBounds = checkNotNull(taoWindow.outerBoundsPx()) { "The native window bounds are unavailable." }
+
+    suspend fun awaitNativeState(label: String, predicate: () -> Boolean) {
+        withTimeout(WINDOW_TRANSITION_TIMEOUT_MS) {
+            while (!predicate()) delay(WINDOW_STATE_POLL_MS)
+        }
+        delay(WINDOW_STATE_SETTLING_MS)
+        check(predicate()) { "$label did not remain stable." }
+    }
+
+    suspend fun awaitRenderedFrames(label: String) {
+        val baseline = checkNotNull(playerState.diagnostics.renderedVideoFrames) {
+            "Rendered-frame telemetry is unavailable during $label."
+        }
+        withTimeout(WINDOW_FRAME_TIMEOUT_MS) {
+            while ((playerState.diagnostics.renderedVideoFrames ?: baseline) < baseline + WINDOW_MINIMUM_FRESH_FRAMES) {
+                check(playerState.error == null) { "Playback failed during $label: ${playerState.error}" }
+                delay(WINDOW_STATE_POLL_MS)
+            }
+        }
+    }
+
+    playerState.isFullscreen = true
+    windowState.placement = WindowPlacement.Fullscreen
+    awaitNativeState("Fullscreen entry") { taoWindow.isFullscreen }
+    check(windowState.placement == WindowPlacement.Fullscreen) {
+        "WindowState lost Fullscreen during the native entry animation."
+    }
+    awaitRenderedFrames("fullscreen playback")
+
+    playerState.isFullscreen = false
+    windowState.placement = WindowPlacement.Floating
+    awaitNativeState("Fullscreen exit") { !taoWindow.isFullscreen }
+    check(windowState.placement != WindowPlacement.Fullscreen) {
+        "WindowState remained Fullscreen after the native exit animation."
+    }
+    awaitRenderedFrames("post-fullscreen playback")
+
+    windowState.placement = WindowPlacement.Maximized
+    awaitNativeState("Native maximize") { taoWindow.isMaximized && !taoWindow.isFullscreen }
+    awaitRenderedFrames("maximized playback")
+
+    windowState.placement = WindowPlacement.Floating
+    awaitNativeState("Native maximize restore") { !taoWindow.isMaximized && !taoWindow.isFullscreen }
+    awaitRenderedFrames("restored playback")
+
+    val scale = taoWindow.scaleFactor.toDouble().coerceAtLeast(1.0)
+    val movedX = originalBounds[0] / scale + WINDOW_MOVE_OFFSET_DP
+    val movedY = originalBounds[1] / scale + WINDOW_MOVE_OFFSET_DP
+    windowState.position = WindowPosition.Absolute(movedX.dp, movedY.dp)
+    awaitNativeState("Native window move") {
+        taoWindow.outerBoundsPx()?.let { bounds ->
+            bounds[0] != originalBounds[0] || bounds[1] != originalBounds[1]
+        } == true
+    }
+    awaitRenderedFrames("moved-window playback")
+
+    val resizedWidth = (originalSize.width.value - WINDOW_RESIZE_DELTA_DP).coerceAtLeast(WINDOW_MINIMUM_WIDTH_DP)
+    val resizedHeight = (originalSize.height.value - WINDOW_RESIZE_DELTA_DP).coerceAtLeast(WINDOW_MINIMUM_HEIGHT_DP)
+    windowState.size = DpSize(resizedWidth.dp, resizedHeight.dp)
+    awaitNativeState("Native window resize") {
+        taoWindow.outerBoundsPx()?.let { bounds ->
+            bounds[2] != originalBounds[2] || bounds[3] != originalBounds[3]
+        } == true
+    }
+    awaitRenderedFrames("resized-window playback")
+
+    windowState.size = originalSize
+    windowState.position =
+        WindowPosition.Absolute(
+            (originalBounds[0] / scale).dp,
+            (originalBounds[1] / scale).dp,
+        )
+    awaitNativeState("Window geometry restore") {
+        taoWindow.outerBoundsPx()?.let { bounds ->
+            kotlin.math.abs(bounds[0] - originalBounds[0]) <= WINDOW_GEOMETRY_TOLERANCE_PX &&
+                kotlin.math.abs(bounds[1] - originalBounds[1]) <= WINDOW_GEOMETRY_TOLERANCE_PX &&
+                kotlin.math.abs(bounds[2] - originalBounds[2]) <= WINDOW_GEOMETRY_TOLERANCE_PX &&
+                kotlin.math.abs(bounds[3] - originalBounds[3]) <= WINDOW_GEOMETRY_TOLERANCE_PX
+        } == true
+    }
+    awaitRenderedFrames("restored-geometry playback")
 }
 
 private suspend fun runDesktopSustainedPlaybackCheck(
@@ -218,13 +326,11 @@ private suspend fun runDesktopSustainedPlaybackCheck(
             "(rendered=$renderedFrames, dropped=$droppedFrames)."
     }
     if (requireAudioSync) {
-        checkNotNull(maximumAvSyncOffsetMs) {
+        val measuredMaximumAvSyncOffsetMs = checkNotNull(maximumAvSyncOffsetMs) {
             "A/V sync telemetry unavailable because the source has no active audio track."
         }
-    }
-    maximumAvSyncOffsetMs?.let { offsetMs ->
-        check(offsetMs <= MAXIMUM_AV_SYNC_OFFSET_MS) {
-            "Maximum A/V sync offset $offsetMs ms exceeds $MAXIMUM_AV_SYNC_OFFSET_MS ms."
+        check(measuredMaximumAvSyncOffsetMs <= MAXIMUM_AV_SYNC_OFFSET_MS) {
+            "Maximum A/V sync offset $measuredMaximumAvSyncOffsetMs ms exceeds $MAXIMUM_AV_SYNC_OFFSET_MS ms."
         }
     }
     check(residentSetGrowthKib <= MAXIMUM_RESIDENT_SET_GROWTH_KIB) {
@@ -267,6 +373,7 @@ private data class DesktopSustainedPlaybackResult(
     val initialResidentSetMib: Double,
     val peakResidentSetMib: Double,
     val residentSetGrowthMib: Double,
+    val windowLifecycleVerified: Boolean = false,
 ) {
     fun summary(): String =
         String.format(
@@ -277,7 +384,7 @@ private data class DesktopSustainedPlaybackResult(
                 "maximumDroppedFrameRatio=%.4f sourceFps=%s requiredAverageFps=%.3f " +
                 "requiredWindowFps=%.3f " +
                 "maxAvSyncMs=%s initialRssMiB=%.3f peakRssMiB=%.3f " +
-                "residentSetGrowthMiB=%.3f boundedMemory=true",
+                "residentSetGrowthMiB=%.3f boundedMemory=true windowLifecycle=%s",
             status.source.dynamicRange,
             status.outputDynamicRange,
             status.renderer,
@@ -298,8 +405,20 @@ private data class DesktopSustainedPlaybackResult(
             initialResidentSetMib,
             peakResidentSetMib,
             residentSetGrowthMib,
+            if (windowLifecycleVerified) "PASS" else "SKIPPED",
         )
 }
+
+private const val WINDOW_TRANSITION_TIMEOUT_MS = 20_000L
+private const val WINDOW_FRAME_TIMEOUT_MS = 8_000L
+private const val WINDOW_STATE_POLL_MS = 50L
+private const val WINDOW_STATE_SETTLING_MS = 350L
+private const val WINDOW_MINIMUM_FRESH_FRAMES = 8L
+private const val WINDOW_MOVE_OFFSET_DP = 24.0
+private const val WINDOW_RESIZE_DELTA_DP = 96f
+private const val WINDOW_MINIMUM_WIDTH_DP = 640f
+private const val WINDOW_MINIMUM_HEIGHT_DP = 480f
+private const val WINDOW_GEOMETRY_TOLERANCE_PX = 8L
 
 internal data class DesktopFrameRateThresholds(
     val sourceFrameRate: Double?,

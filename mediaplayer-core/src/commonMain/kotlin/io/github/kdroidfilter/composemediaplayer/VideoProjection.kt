@@ -13,6 +13,7 @@ data class VideoProjectionSettings(
     val fovDegrees: Float = VideoProjectionType.Flat.defaultFovDegrees(),
     val aspectRatio: Float = DEFAULT_FLAT_PROJECTION_ASPECT_RATIO,
     val rotation: VideoProjectionRotation = VideoProjectionRotation.None,
+    val displayMode: VideoProjectionDisplayMode = VideoProjectionDisplayMode.Stereo,
 ) {
     fun normalized(): VideoProjectionSettings {
         val requestedFovDegrees =
@@ -111,6 +112,19 @@ enum class VideoEyeOrder {
     RightLeft,
 }
 
+/**
+ * Selects how stereoscopic source eyes are presented on a non-headset display.
+ *
+ * [Stereo] preserves both eyes in separate viewports. [MonoscopicLeft] and
+ * [MonoscopicRight] project one logical eye across the complete output surface,
+ * which is the useful default for previewing VR material on a regular screen.
+ */
+enum class VideoProjectionDisplayMode {
+    Stereo,
+    MonoscopicLeft,
+    MonoscopicRight,
+}
+
 enum class VideoProjectionRotation {
     None,
     Rotate90,
@@ -178,7 +192,8 @@ val VideoProjectionSettings.isDefaultProjectionSettings: Boolean
                 projection.eyeOrder == VideoEyeOrder.LeftRight &&
                 projection.fovDegrees == VideoProjectionType.Flat.defaultFovDegrees() &&
                 projection.aspectRatio == DEFAULT_FLAT_PROJECTION_ASPECT_RATIO &&
-                projection.rotation == VideoProjectionRotation.None
+                projection.rotation == VideoProjectionRotation.None &&
+                projection.displayMode == VideoProjectionDisplayMode.Stereo
         }
 
 @ExperimentalComposeMediaPlayerBackendApi
@@ -214,7 +229,13 @@ fun VideoProjectionSettings.renderingInfoLabel(): String? {
             VideoStereoLayout.SideBySide -> "SBS ${normalized.eyeOrder.label}"
             VideoStereoLayout.OverUnder -> "OU ${normalized.eyeOrder.label}"
         }
-    return "$projectionLabel $stereoLabel"
+    val displayLabel =
+        when (normalized.displayMode) {
+            VideoProjectionDisplayMode.Stereo -> ""
+            VideoProjectionDisplayMode.MonoscopicLeft -> " · left-eye preview"
+            VideoProjectionDisplayMode.MonoscopicRight -> " · right-eye preview"
+        }
+    return "$projectionLabel $stereoLabel$displayLabel"
 }
 
 private val VideoEyeOrder.label: String

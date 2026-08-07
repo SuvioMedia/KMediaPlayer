@@ -34,6 +34,7 @@ tasks.matching { it.name == "checkKotlinAbi" }.configureEach {
 
 val projectVersion = providers.gradleProperty("publicationVersion").orNull ?: "dev"
 val projectGroup = "io.github.shusek"
+val localNucleusVersion = providers.gradleProperty("kmediaNucleusVersion").orNull
 val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val releaseSigningEnabled =
     providers
@@ -63,7 +64,11 @@ kotlin {
         jvmMain.dependencies {
             api(project(":mediaplayer-core"))
             api(libs.compose.ui)
-            api(libs.nucleus.decorated.window.tao)
+            if (localNucleusVersion == null) {
+                api(libs.nucleus.decorated.window.tao)
+            } else {
+                api("dev.nucleusframework:nucleus.decorated-window-tao:$localNucleusVersion")
+            }
             implementation(libs.compose.foundation)
             implementation(libs.kotlinx.coroutines.core)
         }

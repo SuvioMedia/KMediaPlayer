@@ -165,18 +165,41 @@ internal fun visibleLibVlcFrameDimension(
     probedDimension: Int?,
 ): Int = probedDimension?.takeIf { it in 1..decodedDimension } ?: decodedDimension
 
-internal fun shouldUseMacNativeAvFoundationPresentation(
-    surfaceMode: DesktopVideoSurfaceMode,
-    dynamicRangePolicy: DynamicRangePolicy,
-    usesMetalProjection: Boolean,
-    sourceAlreadyConvertedForAvFoundation: Boolean,
-): Boolean =
-    surfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE &&
-        (
-            dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR ||
-                usesMetalProjection ||
-                sourceAlreadyConvertedForAvFoundation
+internal fun shouldUseMacNativeAvFoundationPresentation(surfaceMode: DesktopVideoSurfaceMode): Boolean =
+    surfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE
+
+/**
+ * Describes the renderer that actually consumes AVPlayerItemVideoOutput frames.
+ *
+ * The native Tao child view hosts our controlled Metal renderer for both flat and projected video.
+ * It is not an AVPlayerLayer passthrough surface, so advertising native HDR here would let the
+ * planner select a passthrough route that the FP16 shader does not perform. Keeping the distinction
+ * explicit also lets ordinary flat HDR use the same verified renderer capabilities as 180/360 video.
+ */
+internal fun macControlledMetalRendererCapabilities(
+    base: RendererColorCapabilities,
+    rendererEnabled: Boolean,
+    unavailableHdrRanges: Set<VideoDynamicRange> = emptySet(),
+): RendererColorCapabilities {
+    if (!rendererEnabled) {
+        return base.copy(
+            controlledHdrDynamicRanges = emptySet(),
+            supportsToneMappingToSdr = false,
+            supportsHdrProjection = false,
+            supportsHdr10PlusApplication = false,
+            supportsDolbyVisionToneMappingToSdr = false,
         )
+    }
+    val controlled = base.controlledHdrDynamicRanges - unavailableHdrRanges
+    return base.copy(
+        nativeSurfaceDynamicRanges = emptySet(),
+        controlledHdrDynamicRanges = controlled,
+        supportsNativeToneMappingToSdr = false,
+        supportsHdrProjection = controlled.isNotEmpty(),
+        supportsDolbyVisionMetadata = false,
+        supportsDolbyVisionToneMappingToSdr = false,
+    )
+}
 
 private fun DesktopVideoBackend.requestsLibVlcExplicitly(): Boolean =
     this == DesktopVideoBackend.LIBVLC || this == DesktopVideoBackend.LIBVLC_NATIVE
@@ -196,6 +219,13 @@ private data class MacLibVlcRuntimeTrackDescription(
     val label: String,
 )
 
+internal data class MacMetalTextureFrame(
+    val ioSurface: Long,
+    val width: Int,
+    val height: Int,
+    val frameSerial: Long,
+)
+
 /**
  * MacVideoPlayerState handles the native Mac video player state.
  *
@@ -210,13 +240,14 @@ class MacVideoPlayerState(
     private var activeDisplayColorCapabilities = DisplayColorCapabilities()
     private var activeDecoderColorCapabilities = DecoderColorCapabilities()
     private var activeSourceColorInfo = VideoColorInfo()
+    private var activeRendererColorInfo = VideoColorInfo()
     private var colorOutputVerification = ColorPipelineVerification.NONE
     private var _projection by mutableStateOf(playbackOptions.projection.normalized())
     override var projection: VideoProjectionSettings
         get() = _projection
         set(value) {
             _projection = value.normalized()
-            applyProjectionColorRoute()
+            requestProjectionColorRouteRefresh()
             updateProjectionRenderingInfo()
         }
     private var _projectionView by mutableStateOf(playbackOptions.projectionView.normalized())
@@ -224,7 +255,7 @@ class MacVideoPlayerState(
         get() = _projectionView
         set(value) {
             _projectionView = value.normalized()
-            configureNativeMetalProjection()
+            requestProjectionColorRouteRefresh()
         }
     private var _projectionViewControlMode by mutableStateOf(playbackOptions.projectionViewControlMode)
     override var projectionViewControlMode: VideoProjectionViewControlMode
@@ -237,7 +268,7 @@ class MacVideoPlayerState(
         get() = _projectionTextureCrop
         set(value) {
             _projectionTextureCrop = value.normalized()
-            applyProjectionColorRoute()
+            requestProjectionColorRouteRefresh()
             updateProjectionRenderingInfo()
         }
 
@@ -297,9 +328,12 @@ class MacVideoPlayerState(
     // Surface display size (pixels) — used to scale native output resolution
     private var surfaceWidth = 0
     private var surfaceHeight = 0
+    private val metalTextureViewportSize = AtomicLong(0L)
     private val isResizing = AtomicBoolean(false)
     private var resizeJob: Job? = null
     private val resizeRequestToken = AtomicLong(0L)
+    private val metalTextureGeometryUpdates = AtomicLong(0L)
+    private val metalTextureMaximumAspectErrorPpm = AtomicLong(0L)
 
     // Background worker threads and jobs
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -341,15 +375,17 @@ class MacVideoPlayerState(
     private val desktopVideoBackend: DesktopVideoBackend = playbackOptions.desktopVideoBackend
     private val nativeAvFoundationSurfaceRequested: Boolean =
         playbackOptions.desktopVideoSurfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE
-    private val hdrMetalRequested: Boolean =
-        nativeAvFoundationSurfaceRequested && dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR
     private val hdrToneMappingRequested: Boolean =
         dynamicRangePolicy == DynamicRangePolicy.AUTO ||
             dynamicRangePolicy == DynamicRangePolicy.PREFER_HDR ||
             dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR
     private var hdrMetalSurfaceAllowed: Boolean by mutableStateOf(false)
     private var nativeHdrSurfaceAttached: Boolean = false
+    private var metalTextureNativeView: Long = 0L
+    private val metalTextureAttachmentMutex = Mutex()
+    private val metalTextureAttachmentToken = AtomicLong(0L)
     private val hdrColorRefreshWorker = ConflatedBackgroundAction(ioScope, ::refreshAttachedHdrColorPipeline)
+    private val projectionColorRouteWorker = ConflatedBackgroundAction(ioScope, ::applyProjectionColorRoute)
     private val unavailableMetalProjectionHdrRanges = mutableSetOf<VideoDynamicRange>()
     private var metalProjectionFallbackDetail: String? = null
     private var metalProjectionRendererDisabled: Boolean = false
@@ -440,7 +476,7 @@ class MacVideoPlayerState(
                 bitrate = metadata.bitrate?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt(),
                 currentHlsQuality = currentHlsQuality,
                 bufferedRanges = bufferedRanges,
-                notes = renderingInfo.notes,
+                notes = playbackDiagnosticsNotes(),
             )
         }
     private var _isFullscreen by mutableStateOf(false)
@@ -451,7 +487,7 @@ class MacVideoPlayerState(
             if (_isFullscreen == value) return
             _isFullscreen = value
             colorOutputVerification = ColorPipelineVerification.NONE
-            refreshColorPipelineOutput(ColorPipelineVerification.NONE)
+            requestAttachedHdrColorPipelineRefresh()
         }
     internal var usesLibAssSubtitleOverlay: Boolean by mutableStateOf(false)
         private set
@@ -522,9 +558,6 @@ class MacVideoPlayerState(
     private val bufferingTimeoutThreshold = 500L
 
     init {
-        if (hdrMetalRequested && System.getProperty("compose.interop.blending").isNullOrBlank()) {
-            System.setProperty("compose.interop.blending", "true")
-        }
         macLogger.d { "Initializing video player" }
         lifecycle.launchControlOperation {
             initPlayer()
@@ -680,6 +713,7 @@ class MacVideoPlayerState(
         }
 
         activeSourceColorInfo = sourceProbe.videoColorInfo
+        activeRendererColorInfo = sourceProbe.videoColorInfo
         activeDecoderColorCapabilities = DecoderColorCapabilities()
         val hlsSource = uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)
         val isLiveSource = hlsSource && sourceProbe.durationSeconds == null
@@ -756,9 +790,9 @@ class MacVideoPlayerState(
                 lastRequestHeaders = sanitizedHeaders
                 invalidateLibAssSelection()
                 activeSourceColorInfo = VideoColorInfo()
+                activeRendererColorInfo = VideoColorInfo()
                 activeDecoderColorCapabilities = DecoderColorCapabilities()
                 activeDisplayColorCapabilities = DisplayColorCapabilities()
-                nativeHdrSurfaceAttached = false
                 colorOutputVerification = ColorPipelineVerification.NONE
                 unavailableMetalProjectionHdrRanges.clear()
                 metalProjectionFallbackDetail = null
@@ -784,8 +818,19 @@ class MacVideoPlayerState(
 
             // Ensure heavy operations are performed in the background
             try {
-                // Stop and clean up any existing playback
-                if (hasMedia || ffmpegHlsFallback != null) {
+                val reuseLibVlcNativeView =
+                    hasMedia &&
+                        nativeBackendUsesLibVlc &&
+                        playerPtr != 0L &&
+                        desktopVideoBackend.requestsLibVlcExplicitly()
+
+                // libVLC can replace its media player while retaining the instance and AppKit
+                // drawable. Destroying the native handle here leaves the replacement competing
+                // with the still-attached retired NSView and can produce a permanent 00:00/00:00
+                // surface. Other backend transitions retain the full cleanup path.
+                if (reuseLibVlcNativeView) {
+                    prepareCurrentLibVlcForSourceReplacement()
+                } else if (hasMedia || ffmpegHlsFallback != null) {
                     cleanupCurrentPlayback()
                 }
                 closePreparedPipelineSource()
@@ -796,7 +841,7 @@ class MacVideoPlayerState(
                 ffmpegHlsSelectedAudioStreamIndex = null
                 ffmpegHlsSelectedSubtitleStreamIndex = null
                 ffmpegHlsPlaybackOffsetSeconds = 0.0
-                clearLibVlcTrackState()
+                clearLibVlcTrackState(preserveNativeSurface = reuseLibVlcNativeView)
 
                 // The native libVLC view is not a verified color path. Probe before backend selection so
                 // HDR and ambiguous high-precision input can only use AVFoundation or the controlled bridge.
@@ -806,6 +851,9 @@ class MacVideoPlayerState(
                     return@launchSourceOperation
                 }
                 val libVlcBackend = resolvedSource.libVlcBackend
+                if (reuseLibVlcNativeView && libVlcBackend == null) {
+                    clearLibVlcTrackState()
+                }
                 ensurePlayerInitialized(libVlcBackend)
                 lifecycle.ensureCurrentSource(generation)
 
@@ -936,6 +984,7 @@ class MacVideoPlayerState(
         nativeBackendUsesLibVlc = false
         hdrMetalSurfaceAllowed = false
         nativeHdrSurfaceAttached = false
+        metalTextureNativeView = 0L
         lastMetalProjectionConfiguration = null
         activeDisplayColorCapabilities = DisplayColorCapabilities()
         colorOutputVerification = ColorPipelineVerification.NONE
@@ -944,6 +993,32 @@ class MacVideoPlayerState(
         closeFfmpegHlsFallback()
         closePreparedPipelineSource()
         clearLibVlcTrackState()
+    }
+
+    /**
+     * Stops source-bound work without retiring the libVLC instance or its attached NSView. The
+     * native `nOpenUri` path replaces only libVLC's media player and reattaches it to this view.
+     */
+    private suspend fun prepareCurrentLibVlcForSourceReplacement() {
+        val ptr = playerPtr
+        check(ptr != 0L && nativeBackendUsesLibVlc) {
+            "The current libVLC player is not available for source replacement"
+        }
+        runCatching { MacNativeBridge.nPause(ptr) }
+        cancelAndResetPlayerScope(recreate = true)
+        invalidateLibAssSelection()
+        clearLibAssSubtitleRenderer()
+        closeFfmpegHlsFallback()
+        withContext(Dispatchers.Main) {
+            hasMedia = false
+            isPlaying = false
+            isLoading = true
+            _currentTime.value = Duration.ZERO
+            _duration.value = Duration.ZERO
+            sliderPos = 0f
+            _positionText.value = "00:00"
+            _durationText.value = "00:00"
+        }
     }
 
     private suspend fun cancelAndResetPlayerScope(recreate: Boolean) {
@@ -982,25 +1057,12 @@ class MacVideoPlayerState(
     private fun usesMacMetalProjectionRenderer(): Boolean =
         projection.usesJvmCanvasProjectionRenderer(projectionTextureCrop)
 
-    private fun activeMacRendererColorCapabilities(): RendererColorCapabilities {
-        val base = platformCapabilities.rendererColorCapabilities
-        if (!usesMacMetalProjectionRenderer()) {
-            return base.copy(
-                controlledHdrDynamicRanges = emptySet(),
-                supportsToneMappingToSdr = false,
-                supportsHdrProjection = false,
-                supportsHdr10PlusApplication = false,
-                supportsDolbyVisionToneMappingToSdr = false,
-            )
-        }
-        val controlled = base.controlledHdrDynamicRanges - unavailableMetalProjectionHdrRanges
-        return base.copy(
-            controlledHdrDynamicRanges = controlled,
-            supportsHdrProjection = controlled.isNotEmpty() && !metalProjectionRendererDisabled,
-            supportsDolbyVisionMetadata = false,
-            supportsDolbyVisionToneMappingToSdr = false,
+    private fun activeMacRendererColorCapabilities(): RendererColorCapabilities =
+        macControlledMetalRendererCapabilities(
+            base = platformCapabilities.rendererColorCapabilities,
+            rendererEnabled = shouldUseHdrMetalSurface() && !metalProjectionRendererDisabled,
+            unavailableHdrRanges = unavailableMetalProjectionHdrRanges,
         )
-    }
 
     private fun configureNativeMetalProjection(
         plannedOutput: VideoDynamicRange = colorPipelineStatus.value.plannedOutputDynamicRange,
@@ -1012,14 +1074,13 @@ class MacVideoPlayerState(
             if (
                 !forceDisabled &&
                 nativeAvFoundationSurfaceRequested &&
-                usesMacMetalProjectionRenderer() &&
                 !metalProjectionRendererDisabled
             ) {
                 macMetalProjectionConfiguration(
                     projection = projection,
                     projectionView = projectionView,
                     textureCrop = projectionTextureCrop,
-                    source = activeSourceColorInfo,
+                    source = activeRendererColorInfo,
                     outputDynamicRange = plannedOutput,
                     metadataHandling = plannedMetadataHandling,
                     displayPeakLuminanceNits = activeDisplayColorCapabilities.maxLuminanceNits,
@@ -1039,27 +1100,17 @@ class MacVideoPlayerState(
     }
 
     private fun applyProjectionColorRoute() {
-        val projectedSurface = usesMacMetalProjectionRenderer() && !metalProjectionRendererDisabled
         val nativeSurfaceAllowed =
             shouldUseMacNativeAvFoundationPresentation(
                 surfaceMode = playbackOptions.desktopVideoSurfaceMode,
-                dynamicRangePolicy = dynamicRangePolicy,
-                usesMetalProjection = projectedSurface,
-                sourceAlreadyConvertedForAvFoundation = ffmpegHlsFallback != null,
             ) &&
                 !nativeBackendUsesLibVlc &&
                 !usesLibAssSubtitleOverlay
         hdrMetalSurfaceAllowed = nativeSurfaceAllowed
-        nativeHdrSurfaceAttached = false
         colorOutputVerification = ColorPipelineVerification.NONE
         if (!configureNativeMetalProjection()) {
-            metalProjectionRendererDisabled = projectedSurface
-            hdrMetalSurfaceAllowed =
-                nativeAvFoundationSurfaceRequested &&
-                !nativeBackendUsesLibVlc &&
-                !usesLibAssSubtitleOverlay &&
-                hdrMetalRequested &&
-                !usesMacMetalProjectionRenderer()
+            metalProjectionRendererDisabled = true
+            hdrMetalSurfaceAllowed = false
             metalProjectionFallbackDetail = "The macOS Metal projection shader or pipeline could not be configured."
         }
         setNativeHdrMetalPreferred(hdrMetalSurfaceAllowed)
@@ -1076,14 +1127,23 @@ class MacVideoPlayerState(
         }
     }
 
+    /**
+     * Projection and subtitle controls are Compose callbacks. Native projection configuration can
+     * synchronously enter AppKit, so those callbacks only enqueue the latest route here. This keeps
+     * Tao's event thread free while macOS is moving, resizing, or transitioning the window.
+     */
+    private fun requestProjectionColorRouteRefresh() {
+        if (lifecycle.isDisposed) return
+        projectionColorRouteWorker.request()
+    }
+
     private fun refreshColorPipelineOutput(verification: ColorPipelineVerification = colorOutputVerification) {
         colorOutputVerification = verification
         val wantsNativeSurface = shouldUseHdrMetalSurface()
         val surfaceKind =
             when {
-                wantsNativeSurface && nativeHdrSurfaceAttached && usesMacMetalProjectionRenderer() ->
+                wantsNativeSurface && nativeHdrSurfaceAttached ->
                     VideoSurfaceKind.CONTROLLED_GPU_SURFACE
-                wantsNativeSurface && nativeHdrSurfaceAttached -> VideoSurfaceKind.NATIVE_LAYER
                 wantsNativeSurface -> VideoSurfaceKind.UNKNOWN
                 shouldUseLibVlcNativeSurface() -> VideoSurfaceKind.NATIVE_LAYER
                 else -> VideoSurfaceKind.COMPOSE_CANVAS
@@ -1095,17 +1155,20 @@ class MacVideoPlayerState(
                     rendererCapabilities = activeMacRendererColorCapabilities(),
                     conversionCapabilities = platformCapabilities.colorConversionCapabilities,
                     surfaceKind = surfaceKind,
-                    nativeSurfaceAvailable = wantsNativeSurface && nativeHdrSurfaceAttached,
+                    // AVFoundation decodes the source, but presentation is our controlled FP16
+                    // Metal renderer in a native CAMetalLayer hosted by Tao. Never let the planner
+                    // mistake it for an AVPlayerLayer/system-native passthrough surface.
+                    nativeSurfaceAvailable = false,
                     isProjection = usesMacMetalProjectionRenderer(),
                     verification = verification,
                     platformRuntimeFallbackReason =
-                        metalProjectionFallbackDetail.takeIf { usesMacMetalProjectionRenderer() }?.let {
+                        metalProjectionFallbackDetail.takeIf { wantsNativeSurface }?.let {
                             ColorPipelineFallbackReason.RENDERER_CONFIGURATION_FAILED
                         },
-                    platformRuntimeDetail = metalProjectionFallbackDetail.takeIf { usesMacMetalProjectionRenderer() },
+                    platformRuntimeDetail = metalProjectionFallbackDetail.takeIf { wantsNativeSurface },
                 )
             }
-        if (wantsNativeSurface && usesMacMetalProjectionRenderer()) {
+        if (wantsNativeSurface) {
             configureNativeMetalProjection(
                 plannedOutput = plan?.outputDynamicRange ?: VideoDynamicRange.SDR,
                 plannedMetadataHandling = plan?.metadataHandling ?: DynamicMetadataHandling.NONE,
@@ -1198,13 +1261,43 @@ class MacVideoPlayerState(
         }
     }
 
-    private fun handleNativeHdrAttachmentFailure(detail: String) {
-        if (usesMacMetalProjectionRenderer()) {
-            metalProjectionRendererDisabled = true
-            metalProjectionFallbackDetail = detail
+    /**
+     * Completes the libVLC drawable handshake after Nucleus has actually parented the NSView.
+     *
+     * Creating a native view happens before Tao attaches it to an NSWindow. libVLC's Cocoa vout
+     * can permanently select a black output when `set_nsobject` and `play` both happen during that
+     * detached interval. Re-entering the native factory returns the retained view and binds it now
+     * that it has a window; replaying is idempotent and wakes a vout that started too early.
+     */
+    internal fun onNativeVideoSurfaceAttached() {
+        val ptr =
+            synchronized(nativeInstanceLock) {
+                playerPtr.takeIf { current ->
+                    current != 0L &&
+                        nativeBackendUsesLibVlc &&
+                        shouldUseLibVlcNativeSurface()
+                }
+            } ?: return
+        val reboundView = runCatching { MacNativeBridge.nCreateNativeVideoView(ptr) }.getOrDefault(0L)
+        if (reboundView == 0L) return
+        synchronized(nativeInstanceLock) {
+            if (ptr == playerPtr) nativeVideoViewOwners[reboundView] = ptr
         }
+        if (hasMedia && isPlaying) {
+            lifecycle.launchControlOperation {
+                if (ptr == playerPtr && nativeBackendUsesLibVlc && hasMedia && isPlaying) {
+                    MacNativeBridge.nPlay(ptr)
+                }
+            }
+        }
+    }
+
+    private fun handleNativeHdrAttachmentFailure(detail: String) {
+        metalProjectionRendererDisabled = true
+        metalProjectionFallbackDetail = detail
         hdrMetalSurfaceAllowed = false
         nativeHdrSurfaceAttached = false
+        metalTextureNativeView = 0L
         activeDisplayColorCapabilities = DisplayColorCapabilities()
         setNativeHdrMetalPreferred(false)
         setNativeHdrToneMappingEnabled(hdrToneMappingRequested)
@@ -1224,6 +1317,7 @@ class MacVideoPlayerState(
                 MacNativeBridge.nDisposeNativeVideoView(owner, nativeView)
                 if (owner == playerPtr) {
                     nativeHdrSurfaceAttached = false
+                    metalTextureNativeView = 0L
                     activeDisplayColorCapabilities = DisplayColorCapabilities()
                     refreshColorPipelineOutput(ColorPipelineVerification.NONE)
                 }
@@ -1233,6 +1327,167 @@ class MacVideoPlayerState(
             finalizeRetiredNativePlayerIfUnownedLocked(owner)
         }
     }
+
+    internal fun attachMetalTextureOutput(
+        commandQueue: Long,
+        nativeView: Long,
+    ): Boolean {
+        if (commandQueue == 0L || nativeView == 0L) return false
+        val requestToken = metalTextureAttachmentToken.incrementAndGet()
+        // A Tao composition can run while AppKit is synchronously delivering a move/fullscreen
+        // event. Never dispatch back to AppKit from that composition callback. The handshake runs
+        // on an I/O worker; the composable may start polling immediately and simply sees no frame
+        // until the queue has been joined.
+        ioScope.launch {
+            metalTextureAttachmentMutex.withLock {
+                if (requestToken != metalTextureAttachmentToken.get() || !shouldUseHdrMetalSurface()) {
+                    return@withLock
+                }
+                val displayCapabilities =
+                    runCatching {
+                        MacNativeBridge
+                            .nGetDisplayColorCapabilitiesForView(nativeView)
+                            .toMacDisplayColorCapabilities()
+                    }.onFailure { failure ->
+                        macLogger.e { "Failed to resolve the Metal TextureView display: ${failure.message}" }
+                    }.getOrDefault(DisplayColorCapabilities())
+                macLogger.d { "Metal TextureView display capabilities: $displayCapabilities" }
+                val attached =
+                    synchronized(nativeInstanceLock) {
+                        val ptr = playerPtr
+                        if (
+                            ptr == 0L ||
+                            requestToken != metalTextureAttachmentToken.get() ||
+                            !shouldUseHdrMetalSurface()
+                        ) {
+                            return@synchronized false
+                        }
+                        runCatching {
+                            MacNativeBridge.nSetHdrMetalTextureOutput(ptr, commandQueue)
+                        }.onFailure { failure ->
+                            macLogger.e { "Failed to attach the Metal TextureView output: ${failure.message}" }
+                        }.getOrDefault(false)
+                    }
+                if (requestToken != metalTextureAttachmentToken.get()) return@withLock
+                if (attached) {
+                    metalTextureNativeView = nativeView
+                    activeDisplayColorCapabilities = displayCapabilities
+                    nativeHdrSurfaceAttached = true
+                    requestAttachedHdrColorPipelineRefresh()
+                } else if (shouldUseHdrMetalSurface()) {
+                    val rendererFailure =
+                        synchronized(nativeInstanceLock) {
+                            val ptr = playerPtr
+                            if (ptr == 0L) {
+                                null
+                            } else {
+                                runCatching { MacNativeBridge.nGetHdrRendererFailure(ptr) }.getOrNull()
+                            }
+                        }
+                    handleNativeHdrAttachmentFailure(
+                        rendererFailure
+                            ?: "The macOS FP16 Metal TextureView output could not join the Tao command queue.",
+                    )
+                }
+            }
+        }
+        return true
+    }
+
+    internal fun detachMetalTextureOutput() {
+        val requestToken = metalTextureAttachmentToken.incrementAndGet()
+        ioScope.launch {
+            metalTextureAttachmentMutex.withLock {
+                if (requestToken != metalTextureAttachmentToken.get()) return@withLock
+                synchronized(nativeInstanceLock) {
+                    val ptr = playerPtr
+                    if (ptr != 0L && !nativeBackendUsesLibVlc) {
+                        runCatching { MacNativeBridge.nSetHdrMetalTextureOutput(ptr, 0L) }
+                    }
+                }
+                if (requestToken != metalTextureAttachmentToken.get()) return@withLock
+                nativeHdrSurfaceAttached = false
+                metalTextureNativeView = 0L
+                activeDisplayColorCapabilities = DisplayColorCapabilities()
+                refreshColorPipelineOutput(ColorPipelineVerification.NONE)
+            }
+        }
+    }
+
+    internal fun setMetalTextureViewportSize(
+        width: Int,
+        height: Int,
+    ) {
+        if (width <= 0 || height <= 0) return
+        synchronized(nativeInstanceLock) {
+            val ptr = playerPtr
+            if (ptr != 0L && !nativeBackendUsesLibVlc) {
+                runCatching { MacNativeBridge.nSetHdrMetalTextureViewportSize(ptr, width, height) }
+            }
+        }
+    }
+
+    internal fun recordMetalTextureGeometry(
+        scaleX: Float,
+        scaleY: Float,
+    ) {
+        if (!scaleX.isFinite() || !scaleY.isFinite()) return
+        val maximumScale = maxOf(abs(scaleX), abs(scaleY))
+        if (maximumScale <= 0f) return
+        val aspectErrorPpm =
+            (abs(abs(scaleX) - abs(scaleY)) / maximumScale * ASPECT_ERROR_PARTS_PER_MILLION)
+                .toLong()
+        metalTextureGeometryUpdates.incrementAndGet()
+        metalTextureMaximumAspectErrorPpm.updateAndGet { previous ->
+            maxOf(previous, aspectErrorPpm)
+        }
+    }
+
+    /**
+     * Verifies the geometry of the media viewport itself. A uniformly scaled TextureView can still
+     * hide a projection bug when its backing IOSurface was first rendered at the aspect ratio of
+     * the whole window. In that case pixel scaling is square, but a `Fit` video incorrectly expands
+     * across an ultrawide viewport instead of retaining its media rectangle.
+     */
+    internal fun recordMetalTextureViewportGeometry(
+        width: Int,
+        height: Int,
+        expectedAspectRatio: Float,
+    ) {
+        if (width <= 0 || height <= 0 || !expectedAspectRatio.isFinite() || expectedAspectRatio <= 0f) return
+        val actualAspectRatio = width.toFloat() / height.toFloat()
+        val aspectErrorPpm =
+            (abs(actualAspectRatio - expectedAspectRatio) /
+                expectedAspectRatio * ASPECT_ERROR_PARTS_PER_MILLION)
+                .toLong()
+        metalTextureMaximumAspectErrorPpm.updateAndGet { previous ->
+            maxOf(previous, aspectErrorPpm)
+        }
+    }
+
+    internal fun metalTextureFrame(outInfo: LongArray): MacMetalTextureFrame? {
+        require(outInfo.size >= METAL_TEXTURE_INFO_SIZE)
+        return synchronized(nativeInstanceLock) {
+            val ptr = playerPtr
+            if (ptr == 0L || nativeBackendUsesLibVlc) return@synchronized null
+            val available =
+                runCatching { MacNativeBridge.nGetHdrMetalTextureOutputInfo(ptr, outInfo) }
+                    .getOrDefault(false)
+            if (!available) return@synchronized null
+            val width = outInfo[1].toInt()
+            val height = outInfo[2].toInt()
+            val ioSurface = outInfo[0]
+            if (ioSurface == 0L || width <= 0 || height <= 0) return@synchronized null
+            MacMetalTextureFrame(
+                ioSurface = ioSurface,
+                width = width,
+                height = height,
+                frameSerial = outInfo[3],
+            )
+        }
+    }
+
+    internal fun usesProjectedMetalTexture(): Boolean = usesMacMetalProjectionRenderer()
 
     private fun retireNativePlayerLocked(ptr: Long) {
         if (nativeVideoViewOwners.containsValue(ptr)) {
@@ -1259,35 +1514,45 @@ class MacVideoPlayerState(
         hdrColorRefreshWorker.request()
     }
 
-    /** Re-evaluates the NSScreen and frame readiness from a background worker. */
+    /** Re-evaluates renderer readiness from a background worker. */
     private fun refreshAttachedHdrColorPipeline() {
+        val nativeView = metalTextureNativeView
+        val refreshedDisplayCapabilities =
+            if (nativeView != 0L) {
+                runCatching {
+                    MacNativeBridge
+                        .nGetDisplayColorCapabilitiesForView(nativeView)
+                        .toMacDisplayColorCapabilities()
+                }.onFailure { failure ->
+                    macLogger.e { "Failed to refresh the Metal TextureView display: ${failure.message}" }
+                }.getOrNull()
+            } else {
+                null
+            }
         synchronized(nativeInstanceLock) {
             val ptr = playerPtr
             if (ptr == 0L || !nativeHdrSurfaceAttached) return
-            val observedDisplayCapabilities =
-                MacNativeBridge.nGetDisplayColorCapabilities(ptr).toMacDisplayColorCapabilities()
-            val displayChanged = observedDisplayCapabilities != activeDisplayColorCapabilities
-            activeDisplayColorCapabilities = observedDisplayCapabilities
-
-            if (usesMacMetalProjectionRenderer()) {
-                val failure = runCatching { MacNativeBridge.nGetHdrRendererFailure(ptr) }.getOrNull()
-                if (!failure.isNullOrBlank()) {
-                    handleMetalProjectionRendererFailure(failure)
-                    return
-                }
+            val displayChanged =
+                nativeView == metalTextureNativeView &&
+                    refreshedDisplayCapabilities != null &&
+                    refreshedDisplayCapabilities != activeDisplayColorCapabilities
+            if (displayChanged) {
+                activeDisplayColorCapabilities = refreshedDisplayCapabilities
+                macLogger.d { "Metal TextureView display capabilities changed: $refreshedDisplayCapabilities" }
+            }
+            val failure = runCatching { MacNativeBridge.nGetHdrRendererFailure(ptr) }.getOrNull()
+            if (!failure.isNullOrBlank()) {
+                handleMetalProjectionRendererFailure(failure)
+                return
             }
 
             val nextVerification =
                 if (runCatching { MacNativeBridge.nIsHdrOutputReady(ptr) }.getOrDefault(false)) {
-                    if (usesMacMetalProjectionRenderer()) {
-                        ColorPipelineVerification.RENDERER_CONFIGURED
-                    } else {
-                        ColorPipelineVerification.SYSTEM_REPORTED
-                    }
+                    ColorPipelineVerification.RENDERER_CONFIGURED
                 } else {
                     ColorPipelineVerification.NONE
                 }
-            if (displayChanged || nextVerification != colorOutputVerification) {
+            if (nextVerification != colorOutputVerification || displayChanged) {
                 refreshColorPipelineOutput(nextVerification)
             }
         }
@@ -1315,6 +1580,7 @@ class MacVideoPlayerState(
         metalProjectionRendererDisabled = true
         hdrMetalSurfaceAllowed = false
         nativeHdrSurfaceAttached = false
+        metalTextureNativeView = 0L
         setNativeHdrMetalPreferred(false)
         setNativeHdrToneMappingEnabled(hdrToneMappingRequested)
         refreshColorPipelineOutput(ColorPipelineVerification.NONE)
@@ -1355,6 +1621,8 @@ class MacVideoPlayerState(
     }
 
     private suspend fun prepareUriForAvFoundationPlayback(uri: String): String {
+        metalTextureGeometryUpdates.set(0L)
+        metalTextureMaximumAspectErrorPpm.set(0L)
         unavailableMetalProjectionHdrRanges.clear()
         metalProjectionFallbackDetail = null
         metalProjectionRendererDisabled = false
@@ -1362,11 +1630,7 @@ class MacVideoPlayerState(
         hdrMetalSurfaceAllowed =
             shouldUseMacNativeAvFoundationPresentation(
                 surfaceMode = playbackOptions.desktopVideoSurfaceMode,
-                dynamicRangePolicy = dynamicRangePolicy,
-                usesMetalProjection = usesMacMetalProjectionRenderer(),
-                sourceAlreadyConvertedForAvFoundation = false,
             )
-        nativeHdrSurfaceAttached = false
         configureNativeMetalProjection(forceDisabled = !nativeAvFoundationSurfaceRequested)
         setNativeHdrMetalPreferred(hdrMetalSurfaceAllowed)
         setNativeHdrToneMappingEnabled(hdrToneMappingRequested && !hdrMetalSurfaceAllowed)
@@ -1407,8 +1671,9 @@ class MacVideoPlayerState(
     private fun avFoundationVideoRenderer(): String =
         when {
             shouldUseHdrMetalSurface() && usesMacMetalProjectionRenderer() ->
-                "AVPlayerItemVideoOutput P010/NV12 -> FP16 Metal projection"
-            shouldUseHdrMetalSurface() -> "AVPlayerLayer native AppKit surface (HDR/EDR capable)"
+                "AVPlayerItemVideoOutput P010/NV12 -> FP16 Metal projection -> Tao TextureView"
+            shouldUseHdrMetalSurface() ->
+                "AVPlayerItemVideoOutput P010/NV12 -> FP16 Metal -> Tao TextureView"
             hdrToneMappingRequested ->
                 projection.jvmCanvasRendererLabel(
                     baseRenderer = "AVPlayerItemVideoOutput tone-mapped BT.709 -> Compose Canvas",
@@ -1423,13 +1688,23 @@ class MacVideoPlayerState(
 
     private fun avFoundationNotes(): String =
         when {
-            shouldUseHdrMetalSurface() && usesMacMetalProjectionRenderer() ->
-                "Projected video uses a per-player FP16 Metal layer embedded in the current Tao window below Compose controls."
             shouldUseHdrMetalSurface() ->
-                "Native macOS HDR uses an AppKit child view embedded in the current Tao window below Compose controls."
+                "macOS video is presented from an FP16 IOSurface through Tao TextureView; Compose controls share the same scene."
             hdrToneMappingRequested -> "HDR sources are tone-mapped to SDR for stable Compose rendering."
             else -> "No external GPL components are bundled or linked."
         }
+
+    private fun playbackDiagnosticsNotes(): String? =
+        listOfNotNull(
+            renderingInfo.notes,
+            metalTextureGeometryUpdates
+                .get()
+                .takeIf { updates -> updates > 0L }
+                ?.let { updates ->
+                    "liveResizeGeometry=$updates " +
+                        "liveResizeAspectErrorPpm=${metalTextureMaximumAspectErrorPpm.get()}"
+                },
+        ).joinToString(" ").ifEmpty { null }
 
     private suspend fun prepareUriForExternalHlsPlayback(
         uri: String,
@@ -1455,7 +1730,6 @@ class MacVideoPlayerState(
             )
         activateExternalHlsPlaybackSessionCore(
             session = session,
-            preserveNativeSurfaceAttachment = false,
         )
         finishActivatingExternalHlsPlaybackSession(session)
         return session.source.playlistUrl
@@ -1493,10 +1767,7 @@ class MacVideoPlayerState(
     }
 
     /** Promotes bridge ownership without suspending, so it can share the native commit boundary. */
-    private fun activateExternalHlsPlaybackSessionCore(
-        session: MacExternalHlsPlaybackSession,
-        preserveNativeSurfaceAttachment: Boolean,
-    ) {
+    private fun activateExternalHlsPlaybackSessionCore(session: MacExternalHlsPlaybackSession) {
         val startedFallback = session.startedFallback
         val hlsSource = session.source
         ffmpegHlsFallback = startedFallback.fallback
@@ -1511,6 +1782,7 @@ class MacVideoPlayerState(
         ffmpegHlsSelectedSubtitleStreamIndex = hlsSource.selectedSubtitleStreamIndex
         ffmpegHlsPlaybackOffsetSeconds = hlsSource.playbackOffsetSeconds
         activeSourceColorInfo = hlsSource.inputColorInfo
+        activeRendererColorInfo = hlsSource.outputColorInfo
         activeDecoderColorCapabilities = hlsSource.outputColorInfo.toConfirmedDecoderCapabilities()
         synchronized(colorPipelineController) {
             colorPipelineController.updateSource(
@@ -1536,23 +1808,15 @@ class MacVideoPlayerState(
         hdrMetalSurfaceAllowed =
             shouldUseMacNativeAvFoundationPresentation(
                 surfaceMode = playbackOptions.desktopVideoSurfaceMode,
-                dynamicRangePolicy = dynamicRangePolicy,
-                usesMetalProjection = usesMacMetalProjectionRenderer(),
-                sourceAlreadyConvertedForAvFoundation = true,
             )
-        if (!preserveNativeSurfaceAttachment) {
-            nativeHdrSurfaceAttached = false
-        }
         lastMetalProjectionConfiguration = null
         if (
-            !configureNativeMetalProjection(
-                forceDisabled = !nativeAvFoundationSurfaceRequested || !hlsSource.hdrCmafPassthrough,
-            )
+            !configureNativeMetalProjection(forceDisabled = !nativeAvFoundationSurfaceRequested)
         ) {
-            metalProjectionRendererDisabled = usesMacMetalProjectionRenderer()
+            metalProjectionRendererDisabled = true
             metalProjectionFallbackDetail =
                 "The macOS Metal projection shader or pipeline could not be configured for remuxed HDR."
-            hdrMetalSurfaceAllowed = nativeAvFoundationSurfaceRequested && !usesMacMetalProjectionRenderer()
+            hdrMetalSurfaceAllowed = false
         }
         setNativeHdrMetalPreferred(hdrMetalSurfaceAllowed)
         setNativeHdrToneMappingEnabled(hdrToneMappingRequested && !hdrMetalSurfaceAllowed)
@@ -1694,7 +1958,7 @@ class MacVideoPlayerState(
         val trackInfo = withContext(Dispatchers.IO) { JvmLibVlcMediaProbe.probe(uri, requestHeaders) }
         libVlcTrackInfo = trackInfo
         updateLibVlcTracks(trackInfo)
-        return uri
+        return normalizeLocalFileUriForPlayback(uri)
     }
 
     private suspend fun updateLibVlcTracks(trackInfo: JvmLibVlcTrackInfo) {
@@ -1800,14 +2064,14 @@ class MacVideoPlayerState(
             }?.toList()
             ?: emptyList()
 
-    private suspend fun clearLibVlcTrackState() {
-        libVlcBackendActive = false
+    private suspend fun clearLibVlcTrackState(preserveNativeSurface: Boolean = false) {
+        if (!preserveNativeSurface) libVlcBackendActive = false
         libVlcSourceUri = null
         libVlcTrackInfo = null
         libVlcSelectedAudioStreamIndex = null
         libVlcSelectedSubtitleStreamIndex = null
         withContext(Dispatchers.Main) {
-            libVlcNativeSurfaceRequested = false
+            if (!preserveNativeSurface) libVlcNativeSurfaceRequested = false
             _availableAudioTracks.removeAll { isMacLibVlcAudioTrackId(it.id) }
             if (currentAudioTrack?.id?.let(::isMacLibVlcAudioTrackId) == true) {
                 currentAudioTrack = null
@@ -1847,7 +2111,7 @@ class MacVideoPlayerState(
             if (!isCurrentLibAssSelection(selectionToken)) return@withContext
             val routeChanged = usesLibAssSubtitleOverlay
             usesLibAssSubtitleOverlay = false
-            if (routeChanged) applyProjectionColorRoute()
+            if (routeChanged) requestProjectionColorRouteRefresh()
             libAssSubtitleSource = sourceLabel
             renderingInfo.subtitleRenderer = "libass dynamic overlay (preparing)"
             renderingInfo.subtitleSource = sourceLabel
@@ -1860,7 +2124,7 @@ class MacVideoPlayerState(
             if (selectionToken != null && !isCurrentLibAssSelection(selectionToken)) return@withContext
             val routeChanged = usesLibAssSubtitleOverlay
             usesLibAssSubtitleOverlay = false
-            if (routeChanged) applyProjectionColorRoute()
+            if (routeChanged) requestProjectionColorRouteRefresh()
             libAssSubtitleSource = null
             renderingInfo.subtitleRenderer = null
             renderingInfo.subtitleSource = null
@@ -2022,7 +2286,7 @@ class MacVideoPlayerState(
                     currentSubtitleTrack = track
                     subtitlesEnabled = true
                     usesLibAssSubtitleOverlay = true
-                    applyProjectionColorRoute()
+                    requestProjectionColorRouteRefresh()
                     libAssSubtitleSource = sourceLabel
                     renderingInfo.subtitleRenderer =
                         if (subtitleData.isPartial) {
@@ -2545,6 +2809,7 @@ class MacVideoPlayerState(
             return
         }
         activeSourceColorInfo = sourceColor.colorInfo
+        activeRendererColorInfo = sourceColor.colorInfo
         activeDecoderColorCapabilities = sourceColor.decoderCapabilities
         synchronized(colorPipelineController) {
             colorPipelineController.updateSource(
@@ -2601,6 +2866,7 @@ class MacVideoPlayerState(
             val sourceColor = resolveMacSourceColor(ptr)
 
             activeSourceColorInfo = sourceColor.colorInfo
+            activeRendererColorInfo = sourceColor.colorInfo
             activeDecoderColorCapabilities = sourceColor.decoderCapabilities
             val currentStatus = colorPipelineStatus.value
             if (
@@ -2695,9 +2961,6 @@ class MacVideoPlayerState(
                     val ptr = playerPtr
                     if (ptr != 0L) {
                         refreshNativeAdaptiveColorPipeline(ptr)
-                    }
-                    if (shouldUseHdrMetalSurface()) {
-                        refreshAttachedHdrColorPipeline()
                     }
                     if (!userDragging) {
                         updatePositionAsync()
@@ -2905,7 +3168,7 @@ class MacVideoPlayerState(
                         withContext(Dispatchers.Main) {
                             if (isCurrentLibAssSelection(subtitleFailureSelectionToken)) {
                                 usesLibAssSubtitleOverlay = false
-                                applyProjectionColorRoute()
+                                requestProjectionColorRouteRefresh()
                                 renderingInfo.subtitleRenderer =
                                     "Compose dialogue fallback (authored renderer failed)"
                             }
@@ -3083,15 +3346,18 @@ class MacVideoPlayerState(
 
     private suspend fun refreshNativeSurfaceAspectRatio() {
         val ptr = playerPtr
-        if (ptr == 0L || nativeBackendUsesLibVlc) return
+        if (ptr == 0L) return
         val width = MacNativeBridge.nGetFrameWidth(ptr)
         val height = MacNativeBridge.nGetFrameHeight(ptr)
         if (width <= 0 || height <= 0) return
 
         val refreshedAspectRatio = displayAspectRatio(ptr, width, height)
-        if (abs(_aspectRatio.value - refreshedAspectRatio) <= ASPECT_RATIO_CHANGE_EPSILON) return
         withContext(Dispatchers.Main) {
-            _aspectRatio.value = refreshedAspectRatio
+            if (metadata.width != width) metadata.width = width
+            if (metadata.height != height) metadata.height = height
+            if (abs(_aspectRatio.value - refreshedAspectRatio) > ASPECT_RATIO_CHANGE_EPSILON) {
+                _aspectRatio.value = refreshedAspectRatio
+            }
         }
     }
 
@@ -3584,7 +3850,6 @@ class MacVideoPlayerState(
                             candidatePromoted = true
                             activateExternalHlsPlaybackSessionCore(
                                 session = session,
-                                preserveNativeSurfaceAttachment = true,
                             )
                             MacNativeBridge.nConsumeDidPlayToEnd(ptr)
                             lastFrameHash = Int.MIN_VALUE
@@ -4390,7 +4655,7 @@ class MacVideoPlayerState(
                 commitCurrentSourceOnMain(generation) {
                     if (!isCurrentLibAssSelection(selectionToken)) return@commitCurrentSourceOnMain
                     usesLibAssSubtitleOverlay = false
-                    applyProjectionColorRoute()
+                    requestProjectionColorRouteRefresh()
                     renderingInfo.subtitleRenderer = null
                     renderingInfo.subtitleSource = null
                 }
@@ -4446,6 +4711,44 @@ class MacVideoPlayerState(
         lifecycle.ensureUsable()
         // Update the state immediately for test synchronization
         isFullscreen = !isFullscreen
+    }
+
+    /**
+     * Keeps the last completed IOSurface alive for the whole AppKit live-resize gesture. Compose
+     * scales that immutable texture with the caller's content scale, so video keeps playing with
+     * square pixels while the pointer is down. Reallocating even quantized intermediate surfaces
+     * replaced TextureView's imported image before its asynchronous Metal snapshot was ready and
+     * produced black frames during the drag. The projected viewport is rebuilt once, after the
+     * geometry settles.
+     */
+    internal fun onMetalTextureResized(
+        width: Int,
+        height: Int,
+    ) {
+        lifecycle.ensureUsable()
+        if (width <= 0 || height <= 0) return
+        if (width == surfaceWidth && height == surfaceHeight) return
+        surfaceWidth = width
+        surfaceHeight = height
+
+        val requestToken = resizeRequestToken.incrementAndGet()
+        resizeJob?.cancel()
+        resizeJob =
+            lifecycle.launchSourceBoundControlOperation {
+                delay(METAL_TEXTURE_RESIZE_DEBOUNCE)
+                if (resizeRequestToken.get() == requestToken) {
+                    applyMetalTextureViewportSize(width, height)
+                }
+            }
+    }
+
+    private fun applyMetalTextureViewportSize(
+        width: Int,
+        height: Int,
+    ) {
+        val packed = (width.toLong() shl Int.SIZE_BITS) or height.toLong().and(0xFFFF_FFFFL)
+        if (metalTextureViewportSize.getAndSet(packed) == packed) return
+        setMetalTextureViewportSize(width, height)
     }
 
     /**
@@ -4527,3 +4830,6 @@ private fun String?.nonNegativeLongOrNull(): Long? = this?.toLongOrNull()?.takeI
 private fun String?.nonNegativeFloatOrNull(): Float? = this?.toFloatOrNull()?.takeIf { it >= 0f && it.isFinite() }
 
 private const val MAC_HDR10_PLUS_METADATA_FAILURE_PREFIX = "HDR10_PLUS_METADATA:"
+private const val METAL_TEXTURE_INFO_SIZE = 4
+private val METAL_TEXTURE_RESIZE_DEBOUNCE = 120.milliseconds
+private const val ASPECT_ERROR_PARTS_PER_MILLION = 1_000_000f

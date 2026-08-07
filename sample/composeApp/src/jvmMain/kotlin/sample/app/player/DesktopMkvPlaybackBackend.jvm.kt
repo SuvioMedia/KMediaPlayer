@@ -30,12 +30,17 @@ import io.github.kdroidfilter.composemediaplayer.vlcHlsDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackRequest
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackSession
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackSessionState
+import io.github.kdroidfilter.composemediaplayer.desktop.JvmHttpHlsMediaProxyFactory
 import io.github.kdroidfilter.composemediaplayer.desktop.JvmHttpSeekableMediaDataSourceFactory
 import io.github.vinceglb.filekit.path
 import kotlinx.coroutines.launch
 
 internal actual val desktopMkvPlaybackBackendSelectionAvailable: Boolean
     get() = true
+
+internal class DesktopSamplePlaybackSurfaceHost(
+    val session: DesktopPlaybackSession,
+) : SamplePlaybackSurfaceHost
 
 private const val MPV_LIBRARY_PATH_PROPERTY = "sample.app.mpvLibraryPath"
 
@@ -109,6 +114,8 @@ internal actual fun rememberSampleVideoPlayer(
             DesktopPlaybackSession(
                 backends = backends,
                 seekableMediaDataSourceFactory = JvmHttpSeekableMediaDataSourceFactory(),
+                hlsMediaProxyFactory =
+                    JvmHttpHlsMediaProxyFactory().takeIf { isMacOs() },
             )
         }
     val scope = rememberCoroutineScope()
@@ -207,12 +214,12 @@ internal actual fun rememberSampleVideoPlayer(
                 }
             },
             surfaceAttachedAction = { attachedPlayer ->
-                session.notifySurfaceAttached(attachedPlayer)
                 if (session.playerState.value === attachedPlayer) {
                     surfaceTransitionPending = false
                 }
             },
             clearPlaybackTransitionErrorAction = { playbackTransitionError = null },
+            playbackSurfaceHost = DesktopSamplePlaybackSurfaceHost(session),
         )
     }
 }

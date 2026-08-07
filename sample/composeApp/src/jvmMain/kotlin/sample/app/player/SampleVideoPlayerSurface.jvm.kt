@@ -24,8 +24,9 @@ internal actual fun SampleVideoPlayerSurface(
     overlay: @Composable () -> Unit,
 ) {
     val playerState = player.playerState
+    val desktopSurfaceHost = player.playbackSurfaceHost as? DesktopSamplePlaybackSurfaceHost
     Box(modifier = modifier.background(Color.Black)) {
-        if (playerState is PreviewableVideoPlayerState) {
+        if (playerState is PreviewableVideoPlayerState || desktopSurfaceHost == null) {
             VideoPlayerSurface(
                 playerState = playerState,
                 modifier = Modifier.fillMaxSize(),
@@ -34,7 +35,7 @@ internal actual fun SampleVideoPlayerSurface(
             )
         } else {
             DesktopPlaybackSurface(
-                playerState = playerState,
+                session = desktopSurfaceHost.session,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = contentScale,
                 overlay = {
@@ -46,7 +47,7 @@ internal actual fun SampleVideoPlayerSurface(
                         }
                     }
                 },
-                onSurfaceAttached = { player.notifySurfaceAttached() },
+                onSurfaceAttached = player::notifySurfaceAttached,
             )
         }
     }

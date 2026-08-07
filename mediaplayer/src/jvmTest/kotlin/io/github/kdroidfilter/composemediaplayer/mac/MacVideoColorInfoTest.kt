@@ -102,12 +102,12 @@ class MacVideoColorInfoTest {
     }
 
     @Test
-    fun `display parser requires current EDR AVPlayer eligibility and explicit DV decode support`() {
+    fun `display parser uses EDR headroom independently of AVPlayerLayer eligibility`() {
         assertFalse(null.toMacDisplayColorCapabilities().isKnown)
         assertFalse("known=1;native=0;eligible=1".toMacDisplayColorCapabilities().supportsHdr)
 
         val hdr =
-            "known=1;native=1;eligible=1;potentialEdr=4;hdr10=SUPPORTED;hlg=SUPPORTED;dolbyVision=SUPPORTED"
+            "known=1;native=1;eligible=0;potentialEdr=4;hdr10=SUPPORTED;hlg=SUPPORTED;dolbyVision=SUPPORTED"
                 .toMacDisplayColorCapabilities()
         assertTrue(hdr.isKnown)
         assertEquals(

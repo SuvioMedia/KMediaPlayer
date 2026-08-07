@@ -4,6 +4,7 @@ import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Foundation
+import IOSurface
 import Metal
 import QuartzCore
 
@@ -123,12 +124,25 @@ final class HdrMetalVideoRenderer {
     let layer: CAMetalLayer
 
     private let device: MTLDevice
-    private let commandQueue: MTLCommandQueue
+    private let defaultCommandQueue: MTLCommandQueue
+    private var commandQueue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let textureCache: CVMetalTextureCache
     private let gamutLut: MTLTexture
     private let hdrColorSpace: CGColorSpace
     private let sdrColorSpace: CGColorSpace
+    // Bound both CAMetalLayer and TextureView submissions. TextureView renders into one shared
+    // IOSurface and therefore does not get CAMetalLayer's drawable back-pressure for free. Without
+    // this gate an 8K/60 Hz timer can enqueue decoded CVPixelBuffers faster than Metal consumes
+    // them, retaining hundreds of megabytes per pending frame.
+    private let frameInFlightSemaphore = DispatchSemaphore(value: 2)
+    // CoreVideo textures must not be destroyed from Metal's IOGPU completion callback. Retire
+    // them on a dedicated serial queue instead of the AppKit main queue: the latter can stop
+    // draining during window tracking and previously accumulated an unbounded 8K-frame backlog.
+    private let frameRetirementQueue = DispatchQueue(
+        label: "io.github.kdroidfilter.composemediaplayer.macos.metal-frame-retirement",
+        qos: .userInteractive
+    )
     private weak var item: AVPlayerItem?
     private var output: AVPlayerItemVideoOutput?
     private var configuration: HdrMetalProjectionConfiguration?
@@ -139,9 +153,27 @@ final class HdrMetalVideoRenderer {
     private var skippedFrameCount = 0
     private var generation: UInt64 = 0
     private var failureDetail: String?
+    private let textureOutputStateLock = NSLock()
+    private var textureOutputEnabled = false
+    private var textureOutputSurface: IOSurfaceRef?
+    private var textureOutputTexture: MTLTexture?
+    private var textureOutputWidth = 0
+    private var textureOutputHeight = 0
+    private var textureOutputFrameSerial: UInt64 = 0
+    private var requestedViewportWidth = 0
+    private var requestedViewportHeight = 0
+    // A viewport transition may happen while AVPlayerItemVideoOutput reports no *new* decoded
+    // frame (paused playback and AppKit fullscreen transitions are the common cases). Track the
+    // requested geometry separately so the display timer can redraw the current frame once,
+    // without doing any decode/Metal work synchronously from an AppKit layout callback.
+    private var requestedViewportRevision: UInt64 = 0
+    private var completedViewportRevision: UInt64 = 0
 
     /** Called only after a decoded PQ frame contains a fully validated ST 2094-40 payload. */
     var onHdr10PlusObserved: (() -> Void)?
+
+    /** Reports frames that completed on the GPU so public playback diagnostics cover TextureView. */
+    var onFrameRendered: ((CMTime, CFTimeInterval) -> Void)?
 
     var hasRenderedFrame: Bool { renderedFrameCount > 0 && failureDetail == nil }
     var rendererFailureDetail: String? { failureDetail }
@@ -199,6 +231,7 @@ final class HdrMetalVideoRenderer {
         }
 
         self.device = device
+        self.defaultCommandQueue = commandQueue
         self.commandQueue = commandQueue
         self.pipeline = pipeline
         self.textureCache = textureCache
@@ -212,8 +245,16 @@ final class HdrMetalVideoRenderer {
         layer.isOpaque = true
         layer.colorspace = sdrColorSpace
         layer.wantsExtendedDynamicRangeContent = false
+        // During live resize Core Animation may briefly scale the last drawable while the next
+        // Metal frame is still in flight. Preserve that drawable's aspect ratio instead of
+        // stretching it to the new window bounds.
+        layer.contentsGravity = .resizeAspect
         layer.presentsWithTransaction = false
         layer.displaySyncEnabled = true
+        // Keep one drawable free so nextDrawable() cannot throttle AppKit when an 8K
+        // projection takes longer than a display interval. A late video frame is cheaper
+        // than blocking every Compose control and native window-resize event.
+        layer.maximumDrawableCount = 3
         layer.backgroundColor = NSColor.black.cgColor
     }
 
@@ -287,6 +328,14 @@ final class HdrMetalVideoRenderer {
 
     func setContentScaleMode(_ mode: Int32) {
         contentScaleMode = mode
+        switch HdrMetalScaleMode(rawValue: mode) ?? .fit {
+        case .fit:
+            layer.contentsGravity = .resizeAspect
+        case .crop:
+            layer.contentsGravity = .resizeAspectFill
+        case .fill:
+            layer.contentsGravity = .resize
+        }
     }
 
     func setDrawableSize(width: Int32, height: Int32, scale: Double) {
@@ -300,6 +349,85 @@ final class HdrMetalVideoRenderer {
             width: logicalSize.width * backingScale,
             height: logicalSize.height * backingScale
         )
+    }
+
+    /**
+     * Routes rendering into an IOSurface-backed RGBA16Float texture and, when supplied,
+     * submits it on the Tao/Skia command queue. Sharing the queue serializes decoder writes
+     * with TextureView's GPU snapshot without a CPU readback or a blocking GPU wait.
+     */
+    @discardableResult
+    func setTextureOutput(commandQueuePointer: UnsafeMutableRawPointer?) -> Bool {
+        guard let commandQueuePointer = commandQueuePointer else {
+            withTextureOutputStateLock {
+                textureOutputEnabled = false
+            }
+            commandQueue = defaultCommandQueue
+            releaseTextureOutput()
+            return true
+        }
+        let object = Unmanaged<AnyObject>.fromOpaque(commandQueuePointer).takeUnretainedValue()
+        guard let sharedQueue = object as? MTLCommandQueue else {
+            reportFailure("The Tao Metal queue pointer is not an MTLCommandQueue.")
+            return false
+        }
+        // MTLCreateSystemDefaultDevice() and Skia may expose distinct Objective-C wrapper
+        // identities for the same physical GPU. Metal resources are compatible by registry ID;
+        // pointer identity is unnecessarily strict and made a valid Tao queue look foreign.
+        guard sharedQueue.device.registryID == device.registryID else {
+            reportFailure("The Tao Metal queue belongs to a different GPU device.")
+            return false
+        }
+        commandQueue = sharedQueue
+        let needsCurrentFrame = withTextureOutputStateLock {
+            textureOutputEnabled = true
+            guard requestedViewportWidth > 0, requestedViewportHeight > 0 else { return false }
+            requestedViewportRevision &+= 1
+            return true
+        }
+        failureDetail = nil
+        if needsCurrentFrame {
+            output?.requestNotificationOfMediaDataChange(withAdvanceInterval: 0.03)
+        }
+        start()
+        return true
+    }
+
+    func setTextureViewportSize(width: Int32, height: Int32) {
+        guard width > 0, height > 0 else { return }
+        let didChange = withTextureOutputStateLock {
+            let nextWidth = Int(width)
+            let nextHeight = Int(height)
+            guard requestedViewportWidth != nextWidth || requestedViewportHeight != nextHeight else {
+                return false
+            }
+            requestedViewportWidth = nextWidth
+            requestedViewportHeight = nextHeight
+            requestedViewportRevision &+= 1
+            return true
+        }
+        if didChange {
+            output?.requestNotificationOfMediaDataChange(withAdvanceInterval: 0.03)
+        }
+        // The 60 Hz render tick adopts the requested size. Releasing and rebuilding the IOSurface
+        // synchronously from every Compose layout callback made live resize enter AppKit/Metal
+        // recursively and exposed an uninitialised surface to TextureView. The revision above
+        // makes the timer redraw the current decoded frame even when playback is paused or
+        // AVPlayerItemVideoOutput has no newly decoded frame after a fullscreen transition.
+    }
+
+    func textureOutputInfo() -> (surface: IOSurfaceRef, width: Int, height: Int, frameSerial: UInt64)? {
+        withTextureOutputStateLock {
+            guard textureOutputEnabled,
+                  let surface = textureOutputSurface,
+                  textureOutputWidth > 0,
+                  textureOutputHeight > 0,
+                  textureOutputFrameSerial > 0
+            else {
+                return nil
+            }
+            return (surface, textureOutputWidth, textureOutputHeight, textureOutputFrameSerial)
+        }
     }
 
     func start() {
@@ -318,16 +446,42 @@ final class HdrMetalVideoRenderer {
 
     func renderCurrentFrame() {
         guard let item = item else { return }
-        renderFrame(at: item.currentTime())
+        renderFrame(
+            at: item.currentTime(),
+            onlyIfNew: false,
+            viewportRevision: pendingTextureViewportRevision()
+        )
     }
 
     private func renderFrame() {
         guard let output = output else { return }
-        renderFrame(at: output.itemTime(forHostTime: CACurrentMediaTime()))
+        if let viewportRevision = pendingTextureViewportRevision(), let item = item {
+            renderFrame(
+                at: item.currentTime(),
+                onlyIfNew: false,
+                viewportRevision: viewportRevision
+            )
+            return
+        }
+        renderFrame(
+            at: output.itemTime(forHostTime: CACurrentMediaTime()),
+            onlyIfNew: true,
+            viewportRevision: nil
+        )
     }
 
-    private func renderFrame(at itemTime: CMTime) {
+    private func renderFrame(
+        at itemTime: CMTime,
+        onlyIfNew: Bool,
+        viewportRevision: UInt64?
+    ) {
         guard failureDetail == nil, let output = output else { return }
+        // The display timer can run at 60/120 Hz while the asset contains 24/30 fps video.
+        // Submitting the same decoded 8K buffer repeatedly wastes GPU time and amplifies memory
+        // pressure. Explicit redraws (configuration changes and paused seeks) bypass this check.
+        if onlyIfNew && !output.hasNewPixelBuffer(forItemTime: itemTime) {
+            return
+        }
         var displayTime = CMTime.invalid
         guard let pixelBuffer = output.copyPixelBuffer(
             forItemTime: itemTime,
@@ -340,10 +494,20 @@ final class HdrMetalVideoRenderer {
             return
         }
         skippedFrameCount = 0
-        render(pixelBuffer)
+        render(
+            pixelBuffer,
+            itemTime: itemTime,
+            hostTime: CACurrentMediaTime(),
+            viewportRevision: viewportRevision
+        )
     }
 
-    private func render(_ pixelBuffer: CVPixelBuffer) {
+    private func render(
+        _ pixelBuffer: CVPixelBuffer,
+        itemTime: CMTime,
+        hostTime: CFTimeInterval,
+        viewportRevision: UInt64?
+    ) {
         guard CVPixelBufferGetPlaneCount(pixelBuffer) == 2 else {
             reportFailure("AVFoundation returned a non-bi-planar frame to the macOS Metal projection renderer.")
             return
@@ -357,14 +521,49 @@ final class HdrMetalVideoRenderer {
             reportFailure("Unsupported AVFoundation projection pixel format \(format); expected P010 or NV12.")
             return
         }
-        guard layer.drawableSize.width > 0,
-              layer.drawableSize.height > 0,
-              let drawable = layer.nextDrawable(),
-              let commandBuffer = commandQueue.makeCommandBuffer(),
+        guard frameInFlightSemaphore.wait(timeout: .now()) == .success else {
+            // This is a video renderer, so dropping a late frame is preferable to retaining an
+            // unbounded queue of 8K CVPixelBuffers and eventually stalling the whole process.
+            return
+        }
+        var submittedFrame = false
+        defer {
+            if !submittedFrame {
+                frameInFlightSemaphore.signal()
+            }
+        }
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let configuration = configuration,
               let textures = makePlaneTextures(pixelBuffer, tenBit: tenBit)
         else {
             return
+        }
+        let drawable: CAMetalDrawable?
+        let targetTexture: MTLTexture
+        let rendersToTexture = withTextureOutputStateLock { textureOutputEnabled }
+        if rendersToTexture {
+            // Projection output is viewport-dependent. Waiting for the first real viewport avoids
+            // allocating a temporary full-resolution FP16 IOSurface (256 MB for an 8000x4000
+            // source) only to replace it on the next Compose layout pass.
+            let hasViewport = withTextureOutputStateLock {
+                requestedViewportWidth > 0 && requestedViewportHeight > 0
+            }
+            guard hasViewport else { return }
+            let targetSize = textureOutputSize(for: pixelBuffer, configuration: configuration)
+            guard let texture = ensureTextureOutput(width: targetSize.width, height: targetSize.height) else {
+                return
+            }
+            drawable = nil
+            targetTexture = texture
+        } else {
+            guard layer.drawableSize.width > 0,
+                  layer.drawableSize.height > 0,
+                  let nextDrawable = layer.nextDrawable()
+            else {
+                return
+            }
+            drawable = nextDrawable
+            targetTexture = nextDrawable.texture
         }
         let parsedHdr10Plus: (curve: Hdr10PlusToneCurve?, error: String?) =
             configuration.transfer == hdr10PlusPqTransferCode
@@ -385,7 +584,7 @@ final class HdrMetalVideoRenderer {
             hdr10PlusCurve = nil
         }
         let descriptor = MTLRenderPassDescriptor()
-        descriptor.colorAttachments[0].texture = drawable.texture
+        descriptor.colorAttachments[0].texture = targetTexture
         descriptor.colorAttachments[0].loadAction = .clear
         descriptor.colorAttachments[0].storeAction = .store
         descriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
@@ -399,7 +598,10 @@ final class HdrMetalVideoRenderer {
             configuration,
             tenBit: tenBit,
             fullRange: fullRange,
-            hdr10PlusCurve: hdr10PlusCurve
+            hdr10PlusCurve: hdr10PlusCurve,
+            targetWidth: targetTexture.width,
+            targetHeight: targetTexture.height,
+            outputScRgb: rendersToTexture
         )
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentTexture(textures.luma, index: 0)
@@ -410,21 +612,153 @@ final class HdrMetalVideoRenderer {
         }
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         encoder.endEncoding()
-        commandBuffer.present(drawable)
+        if let drawable = drawable {
+            commandBuffer.present(drawable)
+        }
         let submittedGeneration = generation
-        commandBuffer.addCompletedHandler { [weak self, pixelBuffer, textures] completed in
-            _ = pixelBuffer
-            _ = textures
-            DispatchQueue.main.async {
-                guard let self = self, self.generation == submittedGeneration else { return }
-                if let error = completed.error {
-                    self.reportFailure("Metal projection command failed: \(error.localizedDescription)")
-                } else {
-                    self.renderedFrameCount += 1
+        let submittedToTexture = rendersToTexture
+        let frameSemaphore = frameInFlightSemaphore
+        let retirementQueue = frameRetirementQueue
+        let retainedTextureCache = textureCache
+        commandBuffer.addCompletedHandler { [weak self, pixelBuffer, textures, retainedTextureCache, frameSemaphore, retirementQueue] completed in
+            let completionError = completed.error?.localizedDescription
+            // Releasing CVMetalTexture from inside Metal's IOGPU completion callback can re-enter
+            // CoreVideo while the command queue is still unwinding. A renderer/surface replacement
+            // during fullscreen made that race observable as CVMetalTexture::finalize crashing in
+            // CoreFoundation. Retire the heavy frame resources off-main, then enqueue only the
+            // tiny state notification on AppKit. Signal after retirement so this queue is the
+            // authoritative two-frame memory bound for both native output modes.
+            retirementQueue.async { [weak self, pixelBuffer, textures, retainedTextureCache, frameSemaphore] in
+                autoreleasepool {
+                    _ = pixelBuffer
+                    _ = textures
+                    _ = retainedTextureCache
+                }
+                frameSemaphore.signal()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, self.generation == submittedGeneration else { return }
+                    if let completionError = completionError {
+                        self.reportFailure("Metal projection command failed: \(completionError)")
+                    } else {
+                        self.renderedFrameCount += 1
+                        if submittedToTexture {
+                            self.withTextureOutputStateLock {
+                                self.textureOutputFrameSerial &+= 1
+                                if let viewportRevision = viewportRevision {
+                                    self.completedViewportRevision = max(
+                                        self.completedViewportRevision,
+                                        viewportRevision
+                                    )
+                                }
+                            }
+                        }
+                        self.onFrameRendered?(itemTime, hostTime)
+                    }
                 }
             }
         }
+        submittedFrame = true
         commandBuffer.commit()
+    }
+
+    private func textureOutputSize(
+        for pixelBuffer: CVPixelBuffer,
+        configuration: HdrMetalProjectionConfiguration
+    ) -> (width: Int, height: Int) {
+        let sourceWidth = max(CVPixelBufferGetWidth(pixelBuffer), 1)
+        let sourceHeight = max(CVPixelBufferGetHeight(pixelBuffer), 1)
+        let requestedViewport = withTextureOutputStateLock {
+            (width: requestedViewportWidth, height: requestedViewportHeight)
+        }
+        guard configuration.projectionType > 0.5,
+              requestedViewport.width > 0,
+              requestedViewport.height > 0
+        else {
+            return (sourceWidth, sourceHeight)
+        }
+        // macOS Metal GPUs support at least 16K 2D textures on the deployment target.
+        let maximum = 16_384
+        let scale = min(1.0, Double(maximum) / Double(max(requestedViewport.width, requestedViewport.height)))
+        return (
+            max(Int(Double(requestedViewport.width) * scale), 1),
+            max(Int(Double(requestedViewport.height) * scale), 1)
+        )
+    }
+
+    private func ensureTextureOutput(width: Int, height: Int) -> MTLTexture? {
+        withTextureOutputStateLock {
+            if textureOutputWidth == width,
+               textureOutputHeight == height,
+               let texture = textureOutputTexture
+            {
+                return texture
+            }
+            let bytesPerElement = 8
+            let minimumRowBytes = width * bytesPerElement
+            let rowBytes = IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, minimumRowBytes)
+            let properties: [String: Any] = [
+                kIOSurfaceWidth as String: width,
+                kIOSurfaceHeight as String: height,
+                kIOSurfaceBytesPerElement as String: bytesPerElement,
+                kIOSurfaceBytesPerRow as String: rowBytes,
+                kIOSurfaceAllocSize as String: rowBytes * height,
+                kIOSurfacePixelFormat as String: Int(kCVPixelFormatType_64RGBAHalf),
+            ]
+            guard let surface = IOSurfaceCreate(properties as CFDictionary) else {
+                reportFailure("IOSurface could not allocate the RGBA16Float TextureView output.")
+                return nil
+            }
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .rgba16Float,
+                width: width,
+                height: height,
+                mipmapped: false
+            )
+            descriptor.storageMode = .shared
+            descriptor.usage = [.renderTarget, .shaderRead]
+            guard let texture = device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0) else {
+                reportFailure("Metal could not map the RGBA16Float TextureView IOSurface.")
+                return nil
+            }
+            generation &+= 1
+            textureOutputSurface = surface
+            textureOutputTexture = texture
+            textureOutputWidth = width
+            textureOutputHeight = height
+            textureOutputFrameSerial = 0
+            return texture
+        }
+    }
+
+    private func releaseTextureOutput() {
+        withTextureOutputStateLock {
+            generation &+= 1
+            textureOutputTexture = nil
+            textureOutputSurface = nil
+            textureOutputWidth = 0
+            textureOutputHeight = 0
+            textureOutputFrameSerial = 0
+            completedViewportRevision = requestedViewportRevision
+        }
+    }
+
+    private func pendingTextureViewportRevision() -> UInt64? {
+        withTextureOutputStateLock {
+            guard textureOutputEnabled,
+                  requestedViewportWidth > 0,
+                  requestedViewportHeight > 0,
+                  requestedViewportRevision > completedViewportRevision
+            else {
+                return nil
+            }
+            return requestedViewportRevision
+        }
+    }
+
+    private func withTextureOutputStateLock<T>(_ body: () -> T) -> T {
+        textureOutputStateLock.lock()
+        defer { textureOutputStateLock.unlock() }
+        return body()
     }
 
     private static func makeIctcpGamutLut(device: MTLDevice) -> MTLTexture? {
@@ -512,10 +846,13 @@ final class HdrMetalVideoRenderer {
         _ configuration: HdrMetalProjectionConfiguration,
         tenBit: Bool,
         fullRange: Bool,
-        hdr10PlusCurve: Hdr10PlusToneCurve?
+        hdr10PlusCurve: Hdr10PlusToneCurve?,
+        targetWidth: Int,
+        targetHeight: Int,
+        outputScRgb: Bool
     ) -> [Float] {
-        let eyeWidth = configuration.stereo > 0.5 ? Float(layer.drawableSize.width / 2) : Float(layer.drawableSize.width)
-        let viewportAspect = eyeWidth / max(Float(layer.drawableSize.height), 1)
+        let eyeWidth = configuration.stereo > 0.5 ? Float(targetWidth) / 2 : Float(targetWidth)
+        let viewportAspect = eyeWidth / max(Float(targetHeight), 1)
         var values: [Float] = [
             configuration.projectionType, configuration.fieldOfView, configuration.stereo, viewportAspect,
             configuration.leftEye.left, configuration.leftEye.top,
@@ -530,6 +867,7 @@ final class HdrMetalVideoRenderer {
         values.append(hdr10PlusCurve?.sourcePeakNits ?? 0)
         values.append(contentsOf: hdr10PlusCurve?.normalizedOutputLuminance ?? hdr10PlusEmptyCurve)
         values.append(configuration.primaries)
+        values.append(outputScRgb ? 1 : 0)
         return values
     }
 

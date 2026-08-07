@@ -46,6 +46,14 @@ kernel void kmp_primaries_reference(
     output[index] = float4(source_primaries_to_bt2020(value.xyz, value.w), 1.0);
 }
 
+kernel void kmp_bt2020_to_scrgb_reference(
+    const device float4 *input [[buffer(0)]],
+    device float4 *output [[buffer(1)]],
+    uint index [[thread_position_in_grid]]
+) {
+    output[index] = float4(linear_bt2020_to_scrgb(input[index].xyz), 1.0);
+}
+
 kernel void kmp_hdr10_plus_reference(
     const device float4 *input [[buffer(0)]],
     device float4 *output [[buffer(1)]],
@@ -119,6 +127,7 @@ private final class HdrMetalShaderReferenceTest {
         try verifyPqAndBt2390()
         try verifyHlgBt2446Ootf()
         try verifyBt2020PrimaryConversion()
+        try verifyBt2020ToScRgbConversion()
         try verifyLimitedAndFullRangeYuv()
         try verifyHdr10PlusCurves()
     }
@@ -190,6 +199,38 @@ private final class HdrMetalShaderReferenceTest {
         }
     }
 
+    private func verifyBt2020ToScRgbConversion() throws {
+        let cases = [
+            SIMD4<Float>(4.0, 0.0, 0.0, 0.0),
+            SIMD4<Float>(0.0, 4.0, 0.0, 0.0),
+            SIMD4<Float>(0.0, 0.0, 4.0, 0.0),
+            SIMD4<Float>(4.0, 4.0, 4.0, 0.0),
+        ]
+        let output = try runVectorKernel("kmp_bt2020_to_scrgb_reference", input: cases)
+        let matrix: [[Float]] = [
+            [1.660491002, -0.587641139, -0.072849863],
+            [-0.124550475, 1.132899897, -0.008349422],
+            [-0.018150763, -0.100578898, 1.118729661],
+        ]
+        for index in cases.indices {
+            for channel in 0..<3 {
+                let expected =
+                    matrix[channel][0] * cases[index].x +
+                    matrix[channel][1] * cases[index].y +
+                    matrix[channel][2] * cases[index].z
+                try near(
+                    output[index][channel],
+                    expected,
+                    absolute: 0.000_01,
+                    label: "BT.2020 to scRGB case \(index) channel \(channel)"
+                )
+            }
+        }
+        try near(output[3].x, 4.0, absolute: 0.000_01, label: "scRGB neutral red")
+        try near(output[3].y, 4.0, absolute: 0.000_01, label: "scRGB neutral green")
+        try near(output[3].z, 4.0, absolute: 0.000_01, label: "scRGB neutral blue")
+    }
+
     private func verifyLimitedAndFullRangeYuv() throws {
         try verifyYuv(tenBit: true, fullRange: false, yCode: 502, cbCode: 512, crCode: 512)
         try verifyYuv(tenBit: true, fullRange: true, yCode: 700, cbCode: 512, crCode: 512)
@@ -215,7 +256,7 @@ private final class HdrMetalShaderReferenceTest {
             try replace(texture: luma, values: [UInt8(yCode)])
             try replace(texture: chroma, values: [UInt8(cbCode), UInt8(crCode)])
         }
-        var parameters = [Float](repeating: 0, count: 60)
+        var parameters = [Float](repeating: 0, count: 61)
         parameters[19] = 1
         parameters[22] = tenBit ? 1 : 0
         parameters[23] = fullRange ? 1 : 0
@@ -251,7 +292,7 @@ private final class HdrMetalShaderReferenceTest {
     private func verifyHdr10PlusCurves() throws {
         for maxSclBase in [10_000, 40_000] {
             let parsed = try hdr10PlusCurve(maxSclBase: UInt32(maxSclBase))
-            var parameters = [Float](repeating: 0, count: 60)
+            var parameters = [Float](repeating: 0, count: 61)
             parameters[24] = 1
             parameters[25] = parsed.sourcePeak
             for index in parsed.curve.indices {

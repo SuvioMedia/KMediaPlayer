@@ -922,6 +922,11 @@ internal fun VideoProjectionSettings.toWasmEngineProjection(
     val normalized = normalized()
     val normalizedView = projectionView.normalized()
     val crop = textureCrop.normalized()
+    val renderPlan =
+        normalized.toVideoProjectionRenderPlan(
+            VideoProjectionRenderOptions(textureCrop = crop),
+        )
+    val monoscopicWindow = renderPlan.leftEyeTexture.takeUnless { renderPlan.stereo }
     val mode =
         when (normalized.projectionType) {
             VideoProjectionType.Flat -> ProjectionMode.FLAT
@@ -942,10 +947,14 @@ internal fun VideoProjectionSettings.toWasmEngineProjection(
     return ProjectionConfiguration(
         mode = mode,
         stereoLayout =
-            when (normalized.stereoLayout) {
-                VideoStereoLayout.Mono -> ProjectionStereoLayout.MONO
-                VideoStereoLayout.SideBySide -> ProjectionStereoLayout.SIDE_BY_SIDE
-                VideoStereoLayout.OverUnder -> ProjectionStereoLayout.OVER_UNDER
+            if (monoscopicWindow != null) {
+                ProjectionStereoLayout.MONO
+            } else {
+                when (normalized.stereoLayout) {
+                    VideoStereoLayout.Mono -> ProjectionStereoLayout.MONO
+                    VideoStereoLayout.SideBySide -> ProjectionStereoLayout.SIDE_BY_SIDE
+                    VideoStereoLayout.OverUnder -> ProjectionStereoLayout.OVER_UNDER
+                }
             },
         eyeOrder =
             when (normalized.eyeOrder) {
@@ -955,10 +964,10 @@ internal fun VideoProjectionSettings.toWasmEngineProjection(
         yawDegrees = normalizedView.yawDegrees,
         pitchDegrees = normalizedView.pitchDegrees,
         fieldOfViewDegrees = (baseFov / normalizedView.zoom).coerceIn(20f, 150f),
-        cropLeft = crop.left,
-        cropTop = crop.top,
-        cropRight = crop.right,
-        cropBottom = crop.bottom,
+        cropLeft = monoscopicWindow?.left ?: crop.left,
+        cropTop = monoscopicWindow?.top ?: crop.top,
+        cropRight = monoscopicWindow?.let { 1f - it.right } ?: crop.right,
+        cropBottom = monoscopicWindow?.let { 1f - it.bottom } ?: crop.bottom,
     )
 }
 

@@ -1,7 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
-import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
+import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
 import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
 import kotlin.test.Test
@@ -15,39 +15,71 @@ class MacLegacyBackendRoutingTest {
         assertTrue(
             shouldUseMacNativeAvFoundationPresentation(
                 surfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
-                dynamicRangePolicy = DynamicRangePolicy.AUTO,
-                usesMetalProjection = false,
-                sourceAlreadyConvertedForAvFoundation = false,
             ),
         )
         assertFalse(
             shouldUseMacNativeAvFoundationPresentation(
                 surfaceMode = DesktopVideoSurfaceMode.COMPOSE,
-                dynamicRangePolicy = DynamicRangePolicy.AUTO,
-                usesMetalProjection = true,
-                sourceAlreadyConvertedForAvFoundation = true,
             ),
         )
     }
 
     @Test
-    fun `FORCE SDR stays native after an HLS source bridge already converted the video`() {
-        assertFalse(
+    fun `FORCE SDR uses the same native CAMetalLayer route as HDR and bridged media`() {
+        assertTrue(
             shouldUseMacNativeAvFoundationPresentation(
                 surfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
-                dynamicRangePolicy = DynamicRangePolicy.FORCE_SDR,
-                usesMetalProjection = false,
-                sourceAlreadyConvertedForAvFoundation = false,
             ),
         )
         assertTrue(
             shouldUseMacNativeAvFoundationPresentation(
                 surfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
-                dynamicRangePolicy = DynamicRangePolicy.FORCE_SDR,
-                usesMetalProjection = false,
-                sourceAlreadyConvertedForAvFoundation = true,
             ),
         )
+    }
+
+    @Test
+    fun `flat and projected video advertise the same controlled FP16 HDR renderer`() {
+        val base =
+            RendererColorCapabilities(
+                nativeSurfaceDynamicRanges = setOf(VideoDynamicRange.HDR10, VideoDynamicRange.DOLBY_VISION),
+                controlledHdrDynamicRanges =
+                    setOf(VideoDynamicRange.HDR10, VideoDynamicRange.HDR10_PLUS, VideoDynamicRange.HLG),
+                supportsToneMappingToSdr = true,
+                supportsNativeToneMappingToSdr = true,
+                supportsHdrProjection = true,
+                supportsHdr10PlusApplication = true,
+                supportsDolbyVisionMetadata = true,
+                supportsDolbyVisionToneMappingToSdr = true,
+            )
+
+        val active = macControlledMetalRendererCapabilities(base, rendererEnabled = true)
+
+        assertEquals(emptySet(), active.nativeSurfaceDynamicRanges)
+        assertEquals(base.controlledHdrDynamicRanges, active.controlledHdrDynamicRanges)
+        assertTrue(active.supportsToneMappingToSdr)
+        assertFalse(active.supportsNativeToneMappingToSdr)
+        assertTrue(active.supportsHdrProjection)
+        assertFalse(active.supportsDolbyVisionMetadata)
+    }
+
+    @Test
+    fun `failed HDR range is removed without disabling SDR Metal output`() {
+        val active =
+            macControlledMetalRendererCapabilities(
+                base =
+                    RendererColorCapabilities(
+                        controlledHdrDynamicRanges = setOf(VideoDynamicRange.HDR10, VideoDynamicRange.HLG),
+                        supportsToneMappingToSdr = true,
+                        supportsHdrProjection = true,
+                    ),
+                rendererEnabled = true,
+                unavailableHdrRanges = setOf(VideoDynamicRange.HDR10),
+            )
+
+        assertEquals(setOf(VideoDynamicRange.HLG), active.controlledHdrDynamicRanges)
+        assertTrue(active.supportsToneMappingToSdr)
+        assertTrue(active.supportsHdrProjection)
     }
 
     @Test

@@ -27,27 +27,96 @@ public fun DesktopPlaybackSurface(
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable (VideoPlayerState) -> Unit = {},
 ) {
+    DesktopPlaybackSessionSurface(
+        session = session,
+        modifier = modifier,
+        contentScale = contentScale,
+        overlay = overlay,
+        onSurfaceAttached = {},
+    )
+}
+
+/**
+ * Renders a desktop playback session and reports when its active native surface is attached.
+ * The session still owns the attachment handshake and backend retirement.
+ */
+@Composable
+public fun DesktopPlaybackSurface(
+    session: DesktopPlaybackSession,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    overlay: @Composable (VideoPlayerState) -> Unit = {},
+    onSurfaceAttached: (VideoPlayerState) -> Unit,
+) {
+    DesktopPlaybackSessionSurface(
+        session = session,
+        modifier = modifier,
+        contentScale = contentScale,
+        overlay = overlay,
+        onSurfaceAttached = onSurfaceAttached,
+    )
+}
+
+@Composable
+private fun DesktopPlaybackSessionSurface(
+    session: DesktopPlaybackSession,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    overlay: @Composable (VideoPlayerState) -> Unit,
+    onSurfaceAttached: (VideoPlayerState) -> Unit,
+) {
     val playerState by session.playerState.collectAsState()
     playerState?.let { player ->
-        DesktopPlaybackSurface(
+        DesktopBackendPlaybackSurface(
             playerState = player,
             modifier = modifier,
             contentScale = contentScale,
             overlay = overlay,
-            onSurfaceAttached = { session.notifySurfaceAttached(player) },
+            onSurfaceAttached = {
+                session.notifySurfaceAttached(player)
+                onSurfaceAttached(player)
+            },
         )
     }
 }
 
-/** Renders one desktop backend state inside the caller's current Tao window. */
+/**
+ * Renders one desktop backend state inside the caller's current Tao window.
+ *
+ * Prefer [DesktopPlaybackSurface] with a [DesktopPlaybackSession] for full-size desktop playback.
+ * Use `VideoPlayerSurface(playerState)` for an unmanaged individual state or preview.
+ */
 @Composable
 @OptIn(ExperimentalComposeMediaPlayerBackendApi::class)
+@Deprecated(
+    message =
+        "Pass DesktopPlaybackSession to DesktopPlaybackSurface for managed desktop playback, " +
+            "or use VideoPlayerSurface for an individual player state.",
+)
 public fun DesktopPlaybackSurface(
     playerState: VideoPlayerState,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable (VideoPlayerState) -> Unit = {},
     onSurfaceAttached: (VideoPlayerState) -> Unit = {},
+) {
+    DesktopBackendPlaybackSurface(
+        playerState = playerState,
+        modifier = modifier,
+        contentScale = contentScale,
+        overlay = overlay,
+        onSurfaceAttached = onSurfaceAttached,
+    )
+}
+
+@Composable
+@OptIn(ExperimentalComposeMediaPlayerBackendApi::class)
+private fun DesktopBackendPlaybackSurface(
+    playerState: VideoPlayerState,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    overlay: @Composable (VideoPlayerState) -> Unit,
+    onSurfaceAttached: (VideoPlayerState) -> Unit,
 ) {
     val provider = playerState as? TaoPlaybackSurfaceProvider
     if (provider != null) {
