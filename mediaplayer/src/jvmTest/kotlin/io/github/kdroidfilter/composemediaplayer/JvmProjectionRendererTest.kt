@@ -46,9 +46,10 @@ class JvmProjectionRendererTest {
 
     @Test
     fun projectionPaintReleasesEveryPerDrawNativeResource() {
-        val bitmap = Bitmap().apply {
-            allocPixels(ImageInfo(2, 2, ColorType.BGRA_8888, ColorAlphaType.OPAQUE))
-        }
+        val bitmap =
+            Bitmap().apply {
+                allocPixels(ImageInfo(2, 2, ColorType.BGRA_8888, ColorAlphaType.OPAQUE))
+            }
         try {
             bitmap.makeShader().use { textureShader ->
                 lateinit var capturedBuilder: RuntimeShaderBuilder

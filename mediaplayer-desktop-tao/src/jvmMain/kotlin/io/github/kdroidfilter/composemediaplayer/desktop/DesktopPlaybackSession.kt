@@ -11,8 +11,8 @@ import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
@@ -20,14 +20,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.io.Closeable
 import java.nio.ByteBuffer
@@ -122,6 +122,7 @@ public class DesktopPlaybackSession(
     public val backendIds: Set<String> = backendsById.keys
 
     /** Opens [request], selecting the first successful automatic route unless [backendId] is explicit. */
+    @Suppress("CyclomaticComplexMethod")
     public suspend fun open(
         request: DesktopPlaybackRequest,
         backendId: String? = null,
@@ -147,15 +148,9 @@ public class DesktopPlaybackSession(
             val bookmark = previous?.captureBookmark()
             val isSameMedia = previousRequest?.hasSameMediaAs(request) == true
 
-            if (
-                previous != null &&
-                previousBackend != null &&
-                isSameMedia &&
-                backendId != null &&
-                previousBackend.info.id == backendId
-            ) {
-                mutableSessionState.value = DesktopPlaybackSessionState.Ready(previousBackend.info)
-                return@withLock previous
+            if (isSameExplicitBackendSelection(previous, previousBackend, isSameMedia, backendId)) {
+                mutableSessionState.value = DesktopPlaybackSessionState.Ready(checkNotNull(previousBackend).info)
+                return@withLock checkNotNull(previous)
             }
 
             previous?.pause()
@@ -336,6 +331,7 @@ public class DesktopPlaybackSession(
      * instances and two AppKit video outputs. The latter can leave the replacement without a
      * drawable and manifests as a permanent black `00:00/00:00` surface.
      */
+    @Suppress("TooGenericExceptionCaught")
     private suspend fun replaceActiveLibVlcSource(
         player: VideoPlayerState,
         request: DesktopPlaybackRequest,
@@ -358,6 +354,17 @@ public class DesktopPlaybackSession(
             }
             false
         }
+    }
+
+    private fun isSameExplicitBackendSelection(
+        previous: VideoPlayerState?,
+        previousBackend: DesktopPlaybackBackend?,
+        isSameMedia: Boolean,
+        backendId: String?,
+    ): Boolean {
+        if (previous == null || previousBackend == null) return false
+        if (!isSameMedia || backendId == null) return false
+        return previousBackend.info.id == backendId
     }
 
     private suspend fun openAndAwaitNewSource(

@@ -6,9 +6,9 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.PreviewableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerBackendInfo
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.test.runTest
 import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
@@ -356,10 +356,11 @@ class DesktopPlaybackSessionTest {
                 DesktopPlaybackSession(
                     backends = listOf(mpv),
                     readyTimeout = 1.seconds,
-                    seekableMediaDataSourceFactory = JvmSeekableMediaDataSourceFactory {
-                        dataSourceOpened = true
-                        error("The progressive source must not be materialized when a proxy is available.")
-                    },
+                    seekableMediaDataSourceFactory =
+                        JvmSeekableMediaDataSourceFactory {
+                            dataSourceOpened = true
+                            error("The progressive source must not be materialized when a proxy is available.")
+                        },
                     hlsMediaProxyFactory = proxyFactory,
                 )
 
@@ -403,8 +404,7 @@ private fun fakeBackend(
         override fun createPlayerState(): VideoPlayerState = create()
     }
 
-private class SourceReplacingVideoPlayerState :
-    VideoPlayerState by PreviewableVideoPlayerState(isPlaying = false) {
+private class SourceReplacingVideoPlayerState : VideoPlayerState by PreviewableVideoPlayerState(isPlaying = false) {
     private val mutablePlaybackEvents = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
     private var mutableMediaSessionId = 0L
 

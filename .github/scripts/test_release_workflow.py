@@ -103,7 +103,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
             repository_root / "mediaplayer-mpv/ComposeMediaPlayerMpv.podspec"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("MPV_VERSION: 0.3.0-rc.7", build_natives)
+        self.assertIn("MPV_VERSION: 0.3.0-rc.8", build_natives)
         self.assertIn("RUNTIME_VERSION: 0.1.0-rc.6", build_natives)
         self.assertIn("KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.6", verifier)
         self.assertIn('kmediaFfmpegRuntimeVersion = "0.1.0-rc.6"', mpv_build)

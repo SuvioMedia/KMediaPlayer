@@ -46,9 +46,10 @@ private class JvmHttpHlsMediaProxy(
     private val routesByTarget = ConcurrentHashMap<URI, String>()
     private val proxyPathPrefix = "$PROXY_PATH_ROOT${UUID.randomUUID()}/"
     private val headers = requestHeaders.sanitizedProxyRequestHeaders()
-    private val executor = Executors.newCachedThreadPool { task ->
-        Thread(task, "kmedia-hls-proxy").apply { isDaemon = true }
-    }
+    private val executor =
+        Executors.newCachedThreadPool { task ->
+            Thread(task, "kmedia-hls-proxy").apply { isDaemon = true }
+        }
     private val client =
         HttpClient
             .newBuilder()
@@ -117,8 +118,9 @@ private class JvmHttpHlsMediaProxy(
             if (response.statusCode() in REDIRECT_STATUS_CODES) {
                 response.body().close()
                 if (redirectCount == MAX_REDIRECTS) throw IOException("Too many media redirects.")
-                val location = response.headers().firstValue("Location").orElse(null)
-                    ?: throw IOException("The media redirect is incomplete.")
+                val location =
+                    response.headers().firstValue("Location").orElse(null)
+                        ?: throw IOException("The media redirect is incomplete.")
                 target = target.resolve(location).requireRemoteHttpUri()
                 return@repeat
             }
@@ -143,18 +145,20 @@ private class JvmHttpHlsMediaProxy(
             }
         }
         exchange.requestHeaders.getFirst("Range")?.let { range ->
-            if (!VALID_RANGE.matches(range)) throw IOException("The local media range is invalid.")
-            builder.header("Range", range)
+            builder.header("Range", range.requireValidMediaRange())
         }
-        return try {
-            client.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream())
+        return executeRemoteRequest(builder.build())
+    }
+
+    private fun executeRemoteRequest(request: HttpRequest): HttpResponse<InputStream> =
+        try {
+            client.send(request, HttpResponse.BodyHandlers.ofInputStream())
         } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
             throw IOException("The desktop HLS transport was interrupted.", interrupted)
         } catch (failure: IllegalArgumentException) {
             throw IOException("The desktop HLS transport rejected a request.", failure)
         }
-    }
 
     private fun writeResponse(
         exchange: HttpExchange,
@@ -254,13 +258,12 @@ private class JvmHttpHlsMediaProxy(
         return loopbackUri(register(target)).toASCIIString()
     }
 
-    private fun register(target: URI): String {
-        return routesByTarget.computeIfAbsent(target) { registeredTarget ->
+    private fun register(target: URI): String =
+        routesByTarget.computeIfAbsent(target) { registeredTarget ->
             val route = routeSequence.incrementAndGet().toString(ROUTE_RADIX)
             routes[route] = registeredTarget
             route
         }
-    }
 
     private fun loopbackUri(route: String): URI =
         URI(
@@ -316,11 +319,16 @@ private fun URI.effectivePort(): Int =
 private fun Map<String, String>.sanitizedProxyRequestHeaders(): Map<String, String> =
     filterKeys { name -> name.lowercase(Locale.ROOT) !in BLOCKED_REQUEST_HEADERS }
 
+private fun String.requireValidMediaRange(): String {
+    if (!VALID_RANGE.matches(this)) throw IOException("The local media range is invalid.")
+    return this
+}
+
 private fun HttpExchange.sendStatus(status: Int) {
     sendResponseHeaders(status, -1L)
 }
 
-private val REMOTE_REQUEST_TIMEOUT: Duration = Duration.ofSeconds(30)
+private val REMOTE_REQUEST_TIMEOUT: Duration = Duration.ofSeconds(REMOTE_REQUEST_TIMEOUT_SECONDS)
 private val SUPPORTED_METHODS: Set<String> = linkedSetOf("GET", "HEAD")
 private val REMOTE_SCHEMES: Set<String> = setOf("http", "https")
 private val HLS_MEDIA_TYPES: Set<String> =
@@ -349,19 +357,36 @@ private val FORWARDED_RESPONSE_HEADERS: Set<String> =
         "ETag",
         "Last-Modified",
     )
-private val REDIRECT_STATUS_CODES: Set<Int> = setOf(301, 302, 303, 307, 308)
-private val HTTP_SUCCESS_RANGE: IntRange = 200..299
-private val VALID_HTTP_STATUS_RANGE: IntRange = 100..599
+private val REDIRECT_STATUS_CODES: Set<Int> =
+    setOf(
+        HTTP_MOVED_PERMANENTLY,
+        HTTP_FOUND,
+        HTTP_SEE_OTHER,
+        HTTP_TEMPORARY_REDIRECT,
+        HTTP_PERMANENT_REDIRECT,
+    )
+private val HTTP_SUCCESS_RANGE: IntRange = HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX
+private val VALID_HTTP_STATUS_RANGE: IntRange = HTTP_STATUS_MIN..HTTP_STATUS_MAX
 private val VALID_RANGE: Regex = Regex("bytes=[0-9]*-[0-9]*(?:,[0-9]*-[0-9]*)*")
 private val HLS_URI_ATTRIBUTE: Regex = Regex("URI=\"([^\"]+)\"")
 private const val LOOPBACK_ADDRESS: String = "127.0.0.1"
 private const val PROXY_PATH_ROOT: String = "/hls/"
 private const val HLS_CONTENT_TYPE: String = "application/vnd.apple.mpegurl"
+private const val REMOTE_REQUEST_TIMEOUT_SECONDS: Long = 30L
 private const val MAX_PLAYLIST_BYTES: Int = 8 * 1024 * 1024
 private const val MAX_REDIRECTS: Int = 5
 private const val ROUTE_RADIX: Int = 36
 private const val HTTP_DEFAULT_PORT: Int = 80
 private const val HTTPS_DEFAULT_PORT: Int = 443
+private const val HTTP_STATUS_MIN: Int = 100
+private const val HTTP_STATUS_MAX: Int = 599
+private const val HTTP_SUCCESS_MIN: Int = 200
+private const val HTTP_SUCCESS_MAX: Int = 299
+private const val HTTP_MOVED_PERMANENTLY: Int = 301
+private const val HTTP_FOUND: Int = 302
+private const val HTTP_SEE_OTHER: Int = 303
+private const val HTTP_TEMPORARY_REDIRECT: Int = 307
+private const val HTTP_PERMANENT_REDIRECT: Int = 308
 private const val HTTP_NOT_FOUND: Int = 404
 private const val HTTP_METHOD_NOT_ALLOWED: Int = 405
 private const val HTTP_BAD_GATEWAY: Int = 502

@@ -104,14 +104,14 @@ private fun DrawScope.drawProjectedVideoFrame(
         normalized.toVideoProjectionRenderPlan(
             VideoProjectionRenderOptions(textureCrop = textureCrop),
         )
-    frame.asSkiaBitmap()
+    frame
+        .asSkiaBitmap()
         .makeShader(
             tmx = FilterTileMode.CLAMP,
             tmy = FilterTileMode.CLAMP,
             sampling = SamplingMode.LINEAR,
             localMatrix = null,
-        )
-        .use { textureShader ->
+        ).use { textureShader ->
             if (plan.stereo) {
                 val leftWidth = floor(width / 2f)
                 drawProjectedEye(

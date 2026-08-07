@@ -22,12 +22,12 @@ import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
-import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.desktop.TaoPlaybackSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvEngine
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.MpvLoadFailure
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.NativeMpvEvent
+import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.vinceglb.filekit.PlatformFile
 import io.github.vinceglb.filekit.path
 import kotlinx.coroutines.CancellationException
@@ -1413,7 +1413,12 @@ internal fun String.normalizedMpvMediaUri(): String {
     val parsed = runCatching { URI.create(this) }.getOrNull() ?: return this
     if (!parsed.scheme.equals("file", ignoreCase = true) || !parsed.authority.isNullOrEmpty()) return this
     return runCatching {
-        Path.of(parsed).toAbsolutePath().normalize().toUri().toASCIIString()
+        Path
+            .of(parsed)
+            .toAbsolutePath()
+            .normalize()
+            .toUri()
+            .toASCIIString()
     }.getOrDefault(this)
 }
 

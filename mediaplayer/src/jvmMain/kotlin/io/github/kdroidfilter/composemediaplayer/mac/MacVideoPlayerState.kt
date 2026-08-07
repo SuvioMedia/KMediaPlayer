@@ -835,6 +835,7 @@ class MacVideoPlayerState(
         }
     }
 
+    @Suppress("CyclomaticComplexMethod")
     override fun openUri(
         uri: String,
         initializePlayerState: InitialPlayerState,
@@ -1597,9 +1598,10 @@ class MacVideoPlayerState(
         if (width <= 0 || height <= 0 || !expectedAspectRatio.isFinite() || expectedAspectRatio <= 0f) return
         val actualAspectRatio = width.toFloat() / height.toFloat()
         val aspectErrorPpm =
-            (abs(actualAspectRatio - expectedAspectRatio) /
-                expectedAspectRatio * ASPECT_ERROR_PARTS_PER_MILLION)
-                .toLong()
+            (
+                abs(actualAspectRatio - expectedAspectRatio) /
+                    expectedAspectRatio * ASPECT_ERROR_PARTS_PER_MILLION
+            ).toLong()
         metalTextureMaximumAspectErrorPpm.updateAndGet { previous ->
             maxOf(previous, aspectErrorPpm)
         }

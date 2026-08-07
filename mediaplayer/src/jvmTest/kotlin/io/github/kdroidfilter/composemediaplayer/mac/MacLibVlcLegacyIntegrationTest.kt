@@ -65,7 +65,9 @@ class MacLibVlcLegacyIntegrationTest {
                 )
 
             await("libVLC did not reopen through the controlled fisheye renderer.") {
-                player.renderingInfo.backend.orEmpty().contains("controlled projection") &&
+                player.renderingInfo.backend
+                    .orEmpty()
+                    .contains("controlled projection") &&
                     !player.shouldUseLibVlcNativeSurface() &&
                     player.currentFrameState.value != null
             }
