@@ -14,6 +14,7 @@ class PlayerCapabilitiesJvmTest {
             jvmPlayerCapabilities(options)
 
         assertEquals(CurrentPlatform.os == CurrentPlatform.OS.LINUX, capabilities.supportsMkv)
+        assertTrue(capabilities.supportsExternalAudioTracks)
         assertEquals(
             capabilities,
             defaultVideoPlayerBackend(playbackOptions = options).info.capabilities,

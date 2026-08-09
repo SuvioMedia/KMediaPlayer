@@ -109,42 +109,43 @@ private fun VideoPlayerSurfaceInternal(
     surfaceType: SurfaceType,
     overlay: @Composable () -> Unit,
 ) {
-    if (LocalInspectionMode.current || playerState is PreviewableVideoPlayerState) {
+    val surfaceState = playerState.unwrapDelegatingState()
+    if (LocalInspectionMode.current || surfaceState is PreviewableVideoPlayerState) {
         VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
         return
     }
-    if (playerState is VideoPlayerSurfaceProvider) {
-        playerState.RenderVideoPlayerSurface(
+    if (surfaceState is VideoPlayerSurfaceProvider) {
+        surfaceState.RenderVideoPlayerSurface(
             modifier = modifier,
             contentScale = contentScale,
             overlay = overlay,
         )
         return
     }
-    require(playerState is DefaultVideoPlayerState) {
+    require(surfaceState is DefaultVideoPlayerState) {
         "Unsupported renderable player state: ${playerState::class}"
     }
 
     // Single source of truth — no rememberSaveable, drive directly from playerState
-    val isFullscreen = playerState.isFullscreen
-    val isPipFullScreen = playerState.isPipFullScreen
+    val isFullscreen = surfaceState.isFullscreen
+    val isPipFullScreen = surfaceState.isPipFullScreen
 
-    BindAndroidActivity(playerState = playerState)
-    AutoPipEffect(playerState = playerState)
+    BindAndroidActivity(playerState = surfaceState)
+    AutoPipEffect(playerState = surfaceState)
 
     // Exit fullscreen when returning from PiP
-    LaunchedEffect(playerState.isPipActive) {
-        if (!playerState.isPipActive && playerState.isPipFullScreen) {
+    LaunchedEffect(surfaceState.isPipActive) {
+        if (!surfaceState.isPipActive && surfaceState.isPipFullScreen) {
             delay(300.milliseconds)
-            playerState.togglePipFullScreen()
+            surfaceState.togglePipFullScreen()
         }
     }
 
-    DisposableEffect(playerState) {
+    DisposableEffect(surfaceState) {
         onDispose {
             try {
                 // Detach the view from the player
-                playerState.attachPlayerView(null)
+                surfaceState.attachPlayerView(null)
             } catch (e: Exception) {
                 androidVideoLogger.e { "Error detaching PlayerView on dispose: ${e.message}" }
             }
@@ -156,7 +157,7 @@ private fun VideoPlayerSurfaceInternal(
             modifier = Modifier,
             onDismissRequest = {
                 // Call playerState.toggleFullscreen() to ensure proper cleanup
-                playerState.toggleFullscreen()
+                surfaceState.toggleFullscreen()
             },
         ) {
             Box(
@@ -166,7 +167,7 @@ private fun VideoPlayerSurfaceInternal(
                         .background(Color.Black),
             ) {
                 VideoPlayerContent(
-                    playerState = playerState,
+                    playerState = surfaceState,
                     modifier = Modifier.fillMaxHeight(),
                     overlay = overlay,
                     contentScale = contentScale,
@@ -176,7 +177,7 @@ private fun VideoPlayerSurfaceInternal(
         }
     } else {
         VideoPlayerContent(
-            playerState = playerState,
+            playerState = surfaceState,
             modifier = modifier,
             overlay = overlay,
             contentScale = contentScale,

@@ -28,9 +28,21 @@ import kotlin.time.Duration.Companion.seconds
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class VideoPlayerStateTest {
-    private fun createVideoPlayerState(): VideoPlayerState =
-        io.github.kdroidfilter.composemediaplayer
-            .createVideoPlayerState()
+    private fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState(VideoPlaybackOptions())
+
+    @Test
+    fun defaultFactoryAddsSynchronizedExternalAudio() {
+        val playerState =
+            io.github.kdroidfilter.composemediaplayer
+                .createVideoPlayerState()
+
+        try {
+            assertTrue(playerState.capabilities.supportsExternalAudioTracks)
+            assertIs<DefaultVideoPlayerState>(playerState.unwrapDelegatingState())
+        } finally {
+            playerState.dispose()
+        }
+    }
 
     /**
      * Test the creation of VideoPlayerState

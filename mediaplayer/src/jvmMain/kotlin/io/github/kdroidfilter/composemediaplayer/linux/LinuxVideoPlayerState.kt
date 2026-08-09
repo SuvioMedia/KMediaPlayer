@@ -457,7 +457,7 @@ class LinuxVideoPlayerState(
         requestHeaders: Map<String, String>,
     ) {
         lifecycle.ensureUsable()
-        linuxLogger.d { "openUri() - Opening URI: $uri" }
+        linuxLogger.d { "openUri() - Opening redacted URI" }
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
         lifecycle.launchSourceOperation(
             onScheduled = {

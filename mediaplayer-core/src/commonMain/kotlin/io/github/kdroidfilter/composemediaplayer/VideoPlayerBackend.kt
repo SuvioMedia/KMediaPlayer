@@ -45,6 +45,29 @@ interface VideoPlayerSurfaceProvider {
 }
 
 /**
+ * Identifies a state decorator whose video surface is still owned by another player state.
+ *
+ * Surface hosts unwrap this contract while controls continue to use the decorator, so backend-neutral
+ * behavior such as synchronized external audio can be layered around native renderers.
+ */
+@Stable
+interface DelegatingVideoPlayerState {
+    val delegateState: VideoPlayerState
+}
+
+/** Returns the state that owns the native surface beneath backend-neutral decorators. */
+fun VideoPlayerState.unwrapDelegatingState(): VideoPlayerState {
+    var current = this
+    repeat(MAXIMUM_STATE_DECORATOR_DEPTH) {
+        val decorated = current as? DelegatingVideoPlayerState ?: return current
+        val next = decorated.delegateState
+        require(next !== current) { "A player-state decorator cannot delegate to itself." }
+        current = next
+    }
+    error("The player-state decorator chain is too deep.")
+}
+
+/**
  * Renders a state supplied by an optional backend without pulling the default-player module.
  *
  * This is the minimal surface entry point for applications that select an optional backend
@@ -59,15 +82,18 @@ fun BackendVideoPlayerSurface(
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable () -> Unit = {},
 ) {
-    require(playerState is VideoPlayerSurfaceProvider) {
+    val surfaceState = playerState.unwrapDelegatingState()
+    require(surfaceState is VideoPlayerSurfaceProvider) {
         "The player state does not provide a backend-owned video surface: ${playerState::class}"
     }
-    playerState.RenderVideoPlayerSurface(
+    surfaceState.RenderVideoPlayerSurface(
         modifier = modifier,
         contentScale = contentScale,
         overlay = overlay,
     )
 }
+
+private const val MAXIMUM_STATE_DECORATOR_DEPTH = 32
 
 /**
  * Factory boundary used by dependency injection and optional backend modules.

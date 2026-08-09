@@ -13,6 +13,7 @@ import io.github.kdroidfilter.composemediaplayer.BackendVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.consumeTaoVideoOverlayPointerEvents
+import io.github.kdroidfilter.composemediaplayer.unwrapDelegatingState
 
 /**
  * Renders a desktop playback session inside the caller's current Tao window.
@@ -118,7 +119,7 @@ private fun DesktopBackendPlaybackSurface(
     overlay: @Composable (VideoPlayerState) -> Unit,
     onSurfaceAttached: (VideoPlayerState) -> Unit,
 ) {
-    val provider = playerState as? TaoPlaybackSurfaceProvider
+    val provider = playerState.unwrapDelegatingState() as? TaoPlaybackSurfaceProvider
     if (provider != null) {
         provider.RenderTaoPlaybackSurface(
             modifier = modifier,

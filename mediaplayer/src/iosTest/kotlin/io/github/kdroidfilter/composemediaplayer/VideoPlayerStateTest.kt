@@ -166,7 +166,7 @@ class VideoPlayerStateTest {
 
     @Test
     fun releaseSourceDetachesPlayerItemAndKeepsStateReusable() {
-        val playerState = assertIs<DefaultVideoPlayerState>(createVideoPlayerState())
+        val playerState = DefaultVideoPlayerState()
         val metadata = playerState.metadata
 
         playerState.openUri(

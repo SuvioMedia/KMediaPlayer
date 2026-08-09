@@ -757,6 +757,11 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 	public static final fun VideoPlayerSurface (Lio/github/kdroidfilter/composemediaplayer/RenderableVideoPlayerState;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;II)V
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/SynchronizedExternalAudioVideoPlayerStateKt {
+	public static final fun withSynchronizedExternalAudioPlayback (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public static final fun withSynchronizedExternalAudioPlayback (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;Lkotlin/jvm/functions/Function0;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions {
 	public static final field $stable I
 	public fun <init> ()V

@@ -23,11 +23,11 @@ import kotlin.time.Duration.Companion.milliseconds
 internal class EventingVideoPlayerState(
     private val delegate: VideoPlayerState,
     eventCoroutineContext: CoroutineContext,
-) : VideoPlayerState by delegate {
+) : DelegatingVideoPlayerState,
+    VideoPlayerState by delegate {
     constructor(delegate: VideoPlayerState) : this(delegate, Dispatchers.Default)
 
-    /** Underlying platform state used by platform surface hosts. */
-    internal val wrappedState: VideoPlayerState
+    override val delegateState: VideoPlayerState
         get() = delegate
 
     private val eventDispatcher = PlaybackEventDispatcher()

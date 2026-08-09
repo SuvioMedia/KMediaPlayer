@@ -76,9 +76,4 @@ interface WebMediaAdvancedControls {
 }
 
 val VideoPlayerState.webMediaAdvancedControls: WebMediaAdvancedControls?
-    get() =
-        when (this) {
-            is DefaultVideoPlayerState -> webAdvancedControls
-            is EventingVideoPlayerState -> wrappedState.webMediaAdvancedControls
-            else -> null
-        }
+    get() = (unwrapDelegatingState() as? DefaultVideoPlayerState)?.webAdvancedControls

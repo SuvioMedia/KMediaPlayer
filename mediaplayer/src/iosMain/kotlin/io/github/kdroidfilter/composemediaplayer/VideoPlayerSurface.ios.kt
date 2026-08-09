@@ -47,19 +47,20 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
 ) {
-    if (playerState is PreviewableVideoPlayerState) {
+    val surfaceState = playerState.unwrapDelegatingState()
+    if (surfaceState is PreviewableVideoPlayerState) {
         VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
         return
     }
-    if (playerState is VideoPlayerSurfaceProvider) {
-        playerState.RenderVideoPlayerSurface(
+    if (surfaceState is VideoPlayerSurfaceProvider) {
+        surfaceState.RenderVideoPlayerSurface(
             modifier = modifier,
             contentScale = contentScale,
             overlay = overlay,
         )
         return
     }
-    require(playerState is DefaultVideoPlayerState) {
+    require(surfaceState is DefaultVideoPlayerState) {
         "Unsupported video player state: ${playerState::class}"
     }
 
@@ -85,23 +86,25 @@ fun VideoPlayerSurfaceImpl(
     isInFullscreenView: Boolean = false,
     pauseOnDispose: Boolean = true,
 ) {
-    if (playerState is PreviewableVideoPlayerState) {
+    val surfaceState = playerState.unwrapDelegatingState()
+    if (surfaceState is PreviewableVideoPlayerState) {
         VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
         return
     }
-    if (playerState is VideoPlayerSurfaceProvider) {
-        playerState.RenderVideoPlayerSurface(
+    if (surfaceState is VideoPlayerSurfaceProvider) {
+        surfaceState.RenderVideoPlayerSurface(
             modifier = modifier,
             contentScale = contentScale,
             overlay = overlay,
         )
         return
     }
-    require(playerState is DefaultVideoPlayerState) {
+    require(surfaceState is DefaultVideoPlayerState) {
         "Unsupported video player state: ${playerState::class}"
     }
     DefaultVideoPlayerSurfaceImpl(
-        playerState = playerState,
+        playerState = surfaceState,
+        controlState = playerState,
         modifier = modifier,
         contentScale = contentScale,
         overlay = overlay,
@@ -115,6 +118,7 @@ fun VideoPlayerSurfaceImpl(
 @Composable
 private fun DefaultVideoPlayerSurfaceImpl(
     playerState: DefaultVideoPlayerState,
+    controlState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
@@ -128,7 +132,7 @@ private fun DefaultVideoPlayerSurfaceImpl(
             // Only pause if pauseOnDispose is true (prevents pausing during rotation or fullscreen transitions)
             if (pauseOnDispose) {
                 iosSurfaceLogger.d { "[VideoPlayerSurface] Pausing on dispose" }
-                playerState.pause()
+                controlState.pause()
             } else {
                 iosSurfaceLogger.d { "[VideoPlayerSurface] Not pausing on dispose (rotation or fullscreen transition)" }
             }

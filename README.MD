@@ -1202,9 +1202,10 @@ if (subtitleTrack != null) {
 
 `availableSubtitleTracks` can contain both external tracks added by your app through `addSubtitleTrack(...)` and embedded tracks discovered from the current media. Use `replaceExternalSubtitleTracks(...)` to replace app-managed tracks while preserving embedded tracks, or `removeSubtitleTrack(...)` / `clearExternalSubtitleTracks()` to remove app-managed tracks.
 
-Android applications can also attach a timeline-aligned audio source as an alternative to the audio
-embedded in the primary media. Check `capabilities.supportsExternalAudioTracks`, open the primary
-source, and then register the external track:
+Applications can also attach a timeline-aligned audio source as an alternative to the audio embedded
+in the primary media. This is available on Android, iOS, desktop JVM, and browser Wasm. Check
+`capabilities.supportsExternalAudioTracks`, open the primary source, and then register the external
+track:
 
 ```kotlin
 if (playerState.capabilities.supportsExternalAudioTracks) {
@@ -1226,9 +1227,19 @@ External audio is an alternative full mix, not a second signal mixed on the devi
 and period layout must match the primary content. The registry is bound to the current source and is
 cleared when another primary source is opened or the source is released. Use
 `replaceExternalAudioTracks(...)` to update app-managed tracks while preserving embedded tracks.
-Android request headers are sanitized through the same policy as primary media headers; avoid
-putting long-lived credentials in URLs or diagnostic output. External audio bypasses the primary
-media disk cache so session-bound URLs are not retained in its cache index.
+Android merges the alternative source into the Media3 timeline. iOS and desktop JVM use a second
+headless platform transport, while browser Wasm uses a separate `HTMLAudioElement`. For the latter
+routes the primary player remains the timeline authority: play, pause, seek, speed, looping, volume,
+and drift are synchronized, and embedded audio stays audible until the alternative transport is
+ready and playing. Optional backends can opt into the same behavior with
+`withSynchronizedExternalAudioPlayback()`.
+
+Request headers are sanitized through the same policy as primary media headers; avoid putting
+long-lived credentials in URLs or diagnostic output. Browser external audio cannot attach custom
+request headers and therefore requires a short-lived, self-authorizing URL. External audio bypasses
+the primary media disk cache so session-bound URLs are not retained in its cache index. Actual codec
+and channel-layout support still depends on the device, OS, browser, and selected backend; stereo AAC
+is the broadest compatibility profile.
 
 `selectAudioTrack(...)`, `selectSubtitleTrack(...)` and `disableSubtitles()` return `TrackSelectionResult`. `Selected`, `Auto` and `Disabled` mean the request was applied; `NotFound`, `NotSupported` and `Failed` mean the player state was not changed.
 

@@ -31,22 +31,23 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
 ) {
-    if (playerState is PreviewableVideoPlayerState) {
+    val surfaceState = playerState.unwrapDelegatingState()
+    if (surfaceState is PreviewableVideoPlayerState) {
         VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
         return
     }
-    if (playerState is VideoPlayerSurfaceProvider) {
-        playerState.RenderVideoPlayerSurface(
+    if (surfaceState is VideoPlayerSurfaceProvider) {
+        surfaceState.RenderVideoPlayerSurface(
             modifier = modifier,
             contentScale = contentScale,
             overlay = overlay,
         )
         return
     }
-    require(playerState is DefaultVideoPlayerState) {
+    require(surfaceState is DefaultVideoPlayerState) {
         "Unsupported video player state: ${playerState::class}"
     }
-    WasmEngineVideoPlayerSurface(playerState, modifier, contentScale, overlay)
+    WasmEngineVideoPlayerSurface(surfaceState, modifier, contentScale, overlay)
 }
 
 @Composable

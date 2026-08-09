@@ -301,6 +301,10 @@ public final class io/github/kdroidfilter/composemediaplayer/DecoderColorCapabil
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface class io/github/kdroidfilter/composemediaplayer/DelegatingVideoPlayerState {
+	public abstract fun getDelegateState ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities {
 	public static final field $stable I
 	public fun <init> ()V
@@ -1553,6 +1557,7 @@ public final class io/github/kdroidfilter/composemediaplayer/VideoPlayerBackendI
 public final class io/github/kdroidfilter/composemediaplayer/VideoPlayerBackendKt {
 	public static final fun BackendVideoPlayerSurface (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;II)V
 	public static final fun rememberVideoPlayerState (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerBackend;Landroidx/compose/runtime/Composer;I)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public static final fun unwrapDelegatingState (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
 }
 
 public abstract class io/github/kdroidfilter/composemediaplayer/VideoPlayerError {

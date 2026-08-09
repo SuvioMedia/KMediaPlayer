@@ -10,6 +10,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
         CurrentPlatform.OS.WINDOWS ->
             PlayerCapabilities(
                 supportsHls = true,
+                supportsExternalAudioTracks = true,
                 supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(
@@ -22,6 +23,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
             if (CurrentPlatform.isSupportedMacOsArchitecture) {
                 PlayerCapabilities(
                     supportsHls = true,
+                    supportsExternalAudioTracks = true,
                     supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                     supportsMkv =
                         supportsDesktopMkvPlayback(
@@ -40,6 +42,7 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
         CurrentPlatform.OS.LINUX ->
             PlayerCapabilities(
                 supportsHls = true,
+                supportsExternalAudioTracks = true,
                 supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(

@@ -38,7 +38,13 @@ actual fun createVideoPlayerState(
     audioMode: AudioMode,
     cacheConfig: CacheConfig,
     playbackOptions: VideoPlaybackOptions,
-): VideoPlayerState = DefaultVideoPlayerState(playbackOptions)
+): VideoPlayerState =
+    EventingVideoPlayerState(
+        SynchronizedExternalAudioVideoPlayerState(
+            primaryState = DefaultVideoPlayerState(playbackOptions),
+            engineFactory = ::WebExternalAudioPlaybackEngine,
+        ),
+    )
 
 internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOptions): PlayerCapabilities {
     val engine = WasmMediaCapabilities.snapshot()
@@ -46,6 +52,7 @@ internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOpt
         supportsMkv = engine.webGl2 || engine.webCodecs,
         supportsHls = engine.mediaSourceExtensions,
         supportsPiP = isWebPictureInPictureSupported(),
+        supportsExternalAudioTracks = true,
         displayColorCapabilities = queryWebDisplayColorCapabilities(),
         rendererColorCapabilities =
             if (engine.webGl2) queryWebRendererColorCapabilities() else RendererColorCapabilities(),
