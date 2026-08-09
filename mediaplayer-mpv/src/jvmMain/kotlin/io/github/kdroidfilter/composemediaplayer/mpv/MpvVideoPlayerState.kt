@@ -19,6 +19,7 @@ import dev.nucleusframework.window.tao.TextureViewHostPixelFormat
 import dev.nucleusframework.window.tao.TextureViewHostPresentationState
 import dev.nucleusframework.window.tao.TextureViewStreamController
 import dev.nucleusframework.window.tao.WindowsTextureViewProducerInfo
+import dev.nucleusframework.window.tao.nucleusD3D11SharedTextureSource
 import dev.nucleusframework.window.tao.nucleusDmaBufTextureSource
 import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
@@ -87,11 +88,18 @@ import java.nio.file.Path
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.math.sqrt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+
+internal enum class MpvWindowsTextureRenderResult {
+    PRODUCED,
+    IDLE,
+    RETRY,
+}
 
 @Stable
 @OptIn(ExperimentalComposeMediaPlayerBackendApi::class)
@@ -111,7 +119,7 @@ internal class MpvVideoPlayerState(
     private val eventJob: Job
     private val frameState = mutableStateOf<ImageBitmap?>(null)
     private val framePool = MpvFramePool(runtimeConfig.maxRenderPixels)
-    private val windowsTextureOutputState = mutableStateOf<MpvWindowsTextureOutput?>(null)
+    internal val windowsTextureStreamController = TextureViewStreamController()
     internal val macTextureStreamController = TextureViewStreamController()
     internal val linuxTextureStreamController = TextureViewStreamController()
     private val mutableColorPipelineStatus =
@@ -151,6 +159,10 @@ internal class MpvVideoPlayerState(
 
     @Volatile
     private var windowsTextureConfirmedHostGeneration = 0L
+
+    private val windowsTextureRenderCalls = AtomicLong()
+    private val windowsTextureRenderNanos = AtomicLong()
+    private val windowsTextureMaximumRenderNanos = AtomicLong()
 
     @Volatile
     private var sourceColorInfo = VideoColorInfo()
@@ -296,16 +308,28 @@ internal class MpvVideoPlayerState(
     override val diagnostics: PlaybackDiagnostics
         get() {
             val nativePresentation =
-                renderLock.withLock {
-                    nativeMacRenderer
-                        .takeIf { it != 0L }
-                        ?.let { renderer ->
-                            runCatching {
-                                MpvMacNativeBridge.nGetPresentationDiagnostics(renderer)
-                            }.getOrNull()
-                        }
+                if (isMacHost()) {
+                    renderLock.withLock {
+                        nativeMacRenderer
+                            .takeIf { it != 0L }
+                            ?.let { renderer ->
+                                runCatching {
+                                    MpvMacNativeBridge.nGetPresentationDiagnostics(renderer)
+                                }.getOrNull()
+                            }
+                    }
+                } else {
+                    null
                 }
-            val renderedFrames = nativePresentation?.getOrNull(NEW_VIDEO_FRAME_COUNT_INDEX)
+            val producedTextureFrames =
+                when {
+                    isWindowsHost() -> windowsTextureProducerSerial
+                    isMacHost() -> macTextureProducerSerial
+                    else -> linuxTextureProducerSerial
+                }.takeIf { frames -> frames > 0L }
+            val renderedFrames =
+                nativePresentation?.getOrNull(NEW_VIDEO_FRAME_COUNT_INDEX)
+                    ?: producedTextureFrames
             val droppedFrames = droppedVideoFrames
             val presentationNotes =
                 nativePresentation
@@ -325,6 +349,16 @@ internal class MpvVideoPlayerState(
                             "renderAvgUs=$averageRenderMicros renderMaxUs=$maximumRenderMicros " +
                             "flushAvgUs=$averageFlushMicros flushMaxUs=$maximumFlushMicros"
                     }.orEmpty()
+            val windowsRenderCount = windowsTextureRenderCalls.get()
+            val windowsPresentationNotes =
+                if (isWindowsHost() && windowsRenderCount > 0L) {
+                    val averageMicros = windowsTextureRenderNanos.get() / windowsRenderCount / 1_000L
+                    val maximumMicros = windowsTextureMaximumRenderNanos.get() / 1_000L
+                    " windowsTextureRenders=$windowsRenderCount " +
+                        "windowsRenderAvgUs=$averageMicros windowsRenderMaxUs=$maximumMicros"
+                } else {
+                    ""
+                }
             return PlaybackDiagnostics(
                 totalVideoFrames =
                     if (renderedFrames != null && droppedFrames != null) {
@@ -338,7 +372,7 @@ internal class MpvVideoPlayerState(
                 videoWidth = metadata.width,
                 videoHeight = metadata.height,
                 bitrate = metadata.bitrate?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt(),
-                notes = renderingInfo.notes + presentationNotes + mpvTimingNotes,
+                notes = renderingInfo.notes + presentationNotes + windowsPresentationNotes + mpvTimingNotes,
             )
         }
 
@@ -358,9 +392,6 @@ internal class MpvVideoPlayerState(
         get() =
             isLinuxHost() &&
                 runtimeConfig.desktopVideoSurfaceMode != DesktopVideoSurfaceMode.COMPOSE
-
-    internal val currentWindowsTextureOutput: State<MpvWindowsTextureOutput?>
-        get() = windowsTextureOutputState
 
     init {
         initializeNativeMacRendererBeforePlayback()
@@ -473,6 +504,8 @@ internal class MpvVideoPlayerState(
 
         droppedVideoFrames = null
         maximumAvSyncOffsetMs = null
+        sourceColorInfo = VideoColorInfo()
+        updateDesktopColorPipelineStatus()
         beginSourcePreparation(normalizedUri, initializePlayerState)
 
         try {
@@ -581,7 +614,7 @@ internal class MpvVideoPlayerState(
         windowsTextureConfirmedSerial = 0L
         desktopTextureFailurePublished = false
         desktopTextureFailureDetail = null
-        windowsTextureOutputState.value = null
+        windowsTextureStreamController.clear()
         macTextureStreamController.clear()
         macTextureProducerSerial = 0L
         macTextureSubmittedSerial = 0L
@@ -639,12 +672,18 @@ internal class MpvVideoPlayerState(
     internal fun renderWindowsTextureFrame(
         requestedWidth: Int,
         requestedHeight: Int,
-    ): Boolean {
-        if (!usesWindowsColorManagedTexture || disposed.get() || !_hasMedia) return false
-        if (requestedWidth <= 0 || requestedHeight <= 0) return false
+    ): MpvWindowsTextureRenderResult {
+        if (!usesWindowsColorManagedTexture || disposed.get() || !_hasMedia) {
+            return MpvWindowsTextureRenderResult.IDLE
+        }
+        if (requestedWidth <= 0 || requestedHeight <= 0) return MpvWindowsTextureRenderResult.IDLE
         val host = windowsTextureHostCapabilities
-        val producer = host.producerInfo as? WindowsTextureViewProducerInfo ?: return false
-        if (host.presentationState == TextureViewHostPresentationState.UNAVAILABLE) return false
+        val producer =
+            host.producerInfo as? WindowsTextureViewProducerInfo
+                ?: return MpvWindowsTextureRenderResult.RETRY
+        if (host.presentationState == TextureViewHostPresentationState.UNAVAILABLE) {
+            return MpvWindowsTextureRenderResult.RETRY
+        }
         if (runtimeConfig.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR &&
             host.actualDynamicRange != TextureViewHostDynamicRange.HDR
         ) {
@@ -652,7 +691,7 @@ internal class MpvVideoPlayerState(
                 message = "The active Windows output cannot present the required HDR texture pipeline.",
                 reason = ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
             )
-            return false
+            return MpvWindowsTextureRenderResult.IDLE
         }
 
         val (width, height) = constrainMpvRenderSize(requestedWidth, requestedHeight, runtimeConfig.maxRenderPixels)
@@ -664,53 +703,86 @@ internal class MpvVideoPlayerState(
         configureWindowsTextureOutput(configuration)
         return try {
             renderLock.withLock {
-                if (disposed.get() || !_hasMedia) return@withLock false
+                if (disposed.get() || !_hasMedia) return@withLock MpvWindowsTextureRenderResult.IDLE
                 ensureWindowsTextureRendererLocked(
                     adapterLuid = producer.adapterLuid,
                     extendedLinear = configuration.extendedLinear,
                     width = width,
                     height = height,
-                ) ?: return@withLock false
+                ) ?: return@withLock MpvWindowsTextureRenderResult.IDLE
                 // Recreating a context clears the negotiation marker while
                 // detaching the old producer. The properties were already
                 // applied above, outside the render critical section.
                 windowsTextureConfiguration = configuration
+                val renderStartedAtNanos = System.nanoTime()
                 val serial =
-                    onWindowsTextureThread {
-                        MpvWindowsTextureBridge.nRenderFrame(
-                            nativeRenderer = nativeWindowsRenderer,
-                            width = width,
-                            height = height,
-                        )
+                    try {
+                        onWindowsTextureThread {
+                            MpvWindowsTextureBridge.nRenderFrame(
+                                nativeRenderer = nativeWindowsRenderer,
+                                width = width,
+                                height = height,
+                            )
+                        }
+                    } finally {
+                        recordWindowsTextureRenderDuration(System.nanoTime() - renderStartedAtNanos)
                     }
-                if (serial <= 0L) {
+                if (serial < 0L) {
                     onWindowsTextureThread {
                         MpvWindowsTextureBridge.nGetFailure(nativeWindowsRenderer)
                     }?.let(::publishDesktopTextureFailure)
-                    return@withLock false
+                    return@withLock MpvWindowsTextureRenderResult.IDLE
+                }
+                if (serial == 0L) {
+                    // The keyed mutex was busy. Retry promptly on the dedicated
+                    // producer dispatcher rather than waiting for another UI
+                    // frame; no error occurred and the previous texture remains
+                    // valid for composition.
+                    return@withLock MpvWindowsTextureRenderResult.RETRY
                 }
                 val values =
                     onWindowsTextureThread {
                         MpvWindowsTextureBridge.nGetTextureOutputInfo(nativeWindowsRenderer)
                     }
-                        ?: return@withLock false
-                val output = values.toWindowsTextureOutput(configuration.extendedLinear) ?: return@withLock false
+                        ?: return@withLock MpvWindowsTextureRenderResult.RETRY
+                val output =
+                    values.toWindowsTextureOutput(configuration.extendedLinear)
+                        ?: return@withLock MpvWindowsTextureRenderResult.RETRY
                 if (output.adapterLuid != producer.adapterLuid) {
                     publishDesktopTextureFailure(
                         "The MPV texture and Nucleus composition surface use different Windows adapters.",
                     )
-                    return@withLock false
-                }
-                if (windowsTextureOutputState.value != output) {
-                    mutateSnapshotState { windowsTextureOutputState.value = output }
+                    return@withLock MpvWindowsTextureRenderResult.IDLE
                 }
                 val isNewFrame = serial > windowsTextureProducerSerial
                 windowsTextureProducerSerial = maxOf(windowsTextureProducerSerial, serial)
-                isNewFrame
+                if (isNewFrame) {
+                    val colorInfo =
+                        if (output.extendedLinear) {
+                            mpvExtendedLinearColorInfo(configuration.targetPeakNits)
+                        } else {
+                            TextureColorInfo.SRGB_PREMULTIPLIED
+                        }
+                    windowsTextureStreamController.submitFrame(
+                        TextureViewFrame(
+                            source =
+                                nucleusD3D11SharedTextureSource(
+                                    sharedHandle = output.sharedHandle,
+                                    widthPx = output.width,
+                                    heightPx = output.height,
+                                    colorInfo = colorInfo,
+                            ),
+                        ),
+                    )
+                    onWindowsTextureFrameSubmitted()
+                    MpvWindowsTextureRenderResult.PRODUCED
+                } else {
+                    MpvWindowsTextureRenderResult.IDLE
+                }
             }
         } catch (_: Throwable) {
             publishDesktopTextureFailure("libmpv could not render the shared Windows video texture.")
-            false
+            MpvWindowsTextureRenderResult.IDLE
         }
     }
 
@@ -724,6 +796,13 @@ internal class MpvVideoPlayerState(
         windowsTextureSubmittedPresentCount = host.presentedFrameCount
     }
 
+    private fun recordWindowsTextureRenderDuration(durationNanos: Long) {
+        val normalized = durationNanos.coerceAtLeast(0L)
+        windowsTextureRenderCalls.incrementAndGet()
+        windowsTextureRenderNanos.addAndGet(normalized)
+        windowsTextureMaximumRenderNanos.updateAndGet { previous -> maxOf(previous, normalized) }
+    }
+
     /** Applies output changes and confirms a producer frame only after a later system Present. */
     internal fun onWindowsTextureHostCapabilitiesChanged(capabilities: TextureViewHostCapabilities) {
         windowsTextureHostCapabilities = capabilities
@@ -732,7 +811,8 @@ internal class MpvVideoPlayerState(
         if (!renderLock.tryLock()) return
         try {
             if (nativeWindowsRenderer != 0L &&
-                (producer == null || producer.adapterLuid != windowsTextureAdapterLuid)
+                producer != null &&
+                producer.adapterLuid != windowsTextureAdapterLuid
             ) {
                 detachWindowsTextureRendererLocked(restoreSoftwareRenderer = false)
             }
@@ -835,7 +915,7 @@ internal class MpvVideoPlayerState(
         mutateSnapshotState {
             renderingInfo.videoRenderer =
                 if (extendedLinear) {
-                    "libmpv GPU TextureView (D3D11 RGBA16F/scRGB)"
+                    "libmpv GPU TextureView (D3D11 RGBA16F/linear BT.709)"
                 } else {
                     "libmpv GPU TextureView (D3D11 RGBA8/sRGB)"
                 }
@@ -869,7 +949,11 @@ internal class MpvVideoPlayerState(
         runCatching { engine.setProperty("hdr-reference-white", MPV_SDR_REFERENCE_WHITE_NITS.toString()) }
         runCatching { engine.setProperty("target-peak", requested.targetPeakNits.toString()) }
         if (requested.extendedLinear) {
-            runCatching { engine.setProperty("target-trc", "scrgb") }
+            // libmpv's render API still uses the legacy gl_video backend. Its
+            // scRGB target encoding is not the SDR-white-relative linear signal
+            // expected by TextureView. A linear target is normalized to
+            // target-peak; TextureColorInfo above carries that reference.
+            runCatching { engine.setProperty("target-trc", "linear") }
         } else {
             runCatching { engine.setProperty("target-trc", "srgb") }
         }
@@ -887,7 +971,7 @@ internal class MpvVideoPlayerState(
         windowsTextureSubmittedSerial = 0L
         windowsTextureConfirmedSerial = 0L
         windowsTextureConfirmedHostGeneration = 0L
-        mutateSnapshotState { windowsTextureOutputState.value = null }
+        windowsTextureStreamController.clear()
         try {
             onWindowsTextureThread {
                 MpvWindowsTextureBridge.nDetach(renderer)
@@ -961,11 +1045,7 @@ internal class MpvVideoPlayerState(
                                 modifier = output.modifier,
                                 colorInfo =
                                     if (output.extendedLinear) {
-                                        TextureColorInfo(
-                                            encoding = TextureColorEncoding.EXTENDED_LINEAR_SRGB,
-                                            premultipliedAlpha = true,
-                                            sdrWhiteLevelNits = MPV_SDR_REFERENCE_WHITE_NITS,
-                                        )
+                                        mpvExtendedLinearColorInfo(configuration.targetPeakNits)
                                     } else {
                                         TextureColorInfo.SRGB_PREMULTIPLIED
                                     },
@@ -1143,7 +1223,7 @@ internal class MpvVideoPlayerState(
         mutateSnapshotState {
             renderingInfo.videoRenderer =
                 if (configuration.extendedLinear) {
-                    "libmpv GPU TextureView (GBM RGBA16F/scRGB)"
+                    "libmpv GPU TextureView (GBM RGBA16F/linear BT.709)"
                 } else {
                     "libmpv GPU TextureView (GBM RGBA8/sRGB)"
                 }
@@ -1157,7 +1237,7 @@ internal class MpvVideoPlayerState(
         runCatching { engine.setProperty("target-prim", "bt.709") }
         runCatching { engine.setProperty("hdr-reference-white", MPV_SDR_REFERENCE_WHITE_NITS.toString()) }
         runCatching { engine.setProperty("target-peak", configuration.targetPeakNits.toString()) }
-        runCatching { engine.setProperty("target-trc", if (configuration.extendedLinear) "scrgb" else "srgb") }
+        runCatching { engine.setProperty("target-trc", if (configuration.extendedLinear) "linear" else "srgb") }
     }
 
     private fun detachLinuxTextureRendererLocked(restoreSoftwareRenderer: Boolean) {
@@ -1458,10 +1538,8 @@ internal class MpvVideoPlayerState(
                             heightPx = output.height,
                             colorInfo =
                                 if (output.extendedLinear) {
-                                    TextureColorInfo(
-                                        encoding = TextureColorEncoding.EXTENDED_LINEAR_SRGB,
-                                        premultipliedAlpha = true,
-                                        sdrWhiteLevelNits = MPV_SDR_REFERENCE_WHITE_NITS,
+                                    mpvExtendedLinearColorInfo(
+                                        macTextureConfiguration?.peakNits ?: MPV_DEFAULT_HDR_PEAK_NITS,
                                     )
                                 } else {
                                     TextureColorInfo.SRGB_PREMULTIPLIED
@@ -1734,7 +1812,10 @@ internal class MpvVideoPlayerState(
                 codecDescription = listOfNotNull(videoDecoder, videoFormat).joinToString(" "),
                 dolbyVisionProfile = dolbyVisionProfile,
             )
-        if (sourceColorInfo != refreshedColorInfo) {
+        if (sourceColorInfo != refreshedColorInfo &&
+            (sourceColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN ||
+                refreshedColorInfo.dynamicRange != VideoDynamicRange.UNKNOWN)
+        ) {
             sourceColorInfo = refreshedColorInfo
             updateDesktopColorPipelineStatus()
             if (refreshedColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
@@ -1891,6 +1972,7 @@ internal class MpvVideoPlayerState(
                 eventJob.cancelAndJoin()
             }
         }
+        windowsTextureStreamController.close()
         macTextureStreamController.close()
         linuxTextureStreamController.close()
         renderLock.withLock {
@@ -1916,7 +1998,7 @@ internal class MpvVideoPlayerState(
             MpvMacOutputColorMode.EXTENDED_LINEAR -> {
                 runCatching { engine.setProperty("fbo-format", "rgba16f") }
                 runCatching { engine.setProperty("target-prim", "bt.709") }
-                runCatching { engine.setProperty("target-trc", "scrgb") }
+                runCatching { engine.setProperty("target-trc", "linear") }
             }
         }
         runCatching { engine.setProperty("hdr-reference-white", MPV_SDR_REFERENCE_WHITE_NITS.toString()) }
@@ -2115,6 +2197,7 @@ internal data class MpvWindowsTextureOutput(
     val height: Int,
     val dxgiFormat: Int,
     val producerGeneration: Long,
+    val serial: Long,
     val adapterLuid: Long,
     val extendedLinear: Boolean,
 )
@@ -2128,6 +2211,16 @@ private data class MpvMacTextureOutput(
     val serial: Long,
     val extendedLinear: Boolean,
 )
+
+private fun mpvExtendedLinearColorInfo(targetPeakNits: Float): TextureColorInfo =
+    TextureColorInfo(
+        encoding = TextureColorEncoding.EXTENDED_LINEAR_SRGB,
+        premultipliedAlpha = true,
+        // libmpv's legacy GPU render backend emits a linear target normalized
+        // to target-peak. Tell Nucleus what 1.0 represents so it can convert
+        // the frame to its SDR-white-relative linear scene without guessing.
+        sdrWhiteLevelNits = targetPeakNits,
+    )
 
 private data class MpvMacTextureConfiguration(
     val extended: Boolean,
@@ -2185,8 +2278,11 @@ private fun LongArray.toWindowsTextureOutput(extendedLinear: Boolean): MpvWindow
     val height = get(MPV_WINDOWS_TEXTURE_HEIGHT_INDEX).toInt()
     val format = get(MPV_WINDOWS_TEXTURE_FORMAT_INDEX).toInt()
     val generation = get(MPV_WINDOWS_TEXTURE_GENERATION_INDEX)
+    val serial = get(MPV_WINDOWS_TEXTURE_SERIAL_INDEX)
     val adapterLuid = get(MPV_WINDOWS_TEXTURE_ADAPTER_LUID_INDEX)
-    if (handle == 0L || width <= 0 || height <= 0 || generation <= 0L || adapterLuid == 0L) return null
+    if (handle == 0L || width <= 0 || height <= 0 || generation <= 0L || serial <= 0L || adapterLuid == 0L) {
+        return null
+    }
     val expectedFormat =
         if (extendedLinear) DXGI_FORMAT_R16G16B16A16_FLOAT else DXGI_FORMAT_R8G8B8A8_UNORM
     if (format != expectedFormat) return null
@@ -2196,6 +2292,7 @@ private fun LongArray.toWindowsTextureOutput(extendedLinear: Boolean): MpvWindow
         height = height,
         dxgiFormat = format,
         producerGeneration = generation,
+        serial = serial,
         adapterLuid = adapterLuid,
         extendedLinear = extendedLinear,
     )
@@ -2256,6 +2353,7 @@ private const val MPV_WINDOWS_TEXTURE_WIDTH_INDEX = 1
 private const val MPV_WINDOWS_TEXTURE_HEIGHT_INDEX = 2
 private const val MPV_WINDOWS_TEXTURE_FORMAT_INDEX = 3
 private const val MPV_WINDOWS_TEXTURE_GENERATION_INDEX = 4
+private const val MPV_WINDOWS_TEXTURE_SERIAL_INDEX = 5
 private const val MPV_WINDOWS_TEXTURE_ADAPTER_LUID_INDEX = 6
 private const val DXGI_FORMAT_R16G16B16A16_FLOAT = 10
 private const val DXGI_FORMAT_R8G8B8A8_UNORM = 28
@@ -2312,7 +2410,8 @@ private fun mpvVideoColorInfo(
             isDolbyVision -> VideoDynamicRange.DOLBY_VISION
             normalizedTransfer in setOf("pq", "st2084", "smpte2084") -> VideoDynamicRange.HDR10
             normalizedTransfer in setOf("hlg", "arib-std-b67") -> VideoDynamicRange.HLG
-            normalizedTransfer == null -> VideoDynamicRange.UNKNOWN
+            normalizedTransfer.isNullOrBlank() || normalizedTransfer in setOf("unknown", "auto") ->
+                VideoDynamicRange.UNKNOWN
             else -> VideoDynamicRange.SDR
         }
     return VideoColorInfo(

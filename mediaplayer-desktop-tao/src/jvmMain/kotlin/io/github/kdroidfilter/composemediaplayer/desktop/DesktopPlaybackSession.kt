@@ -148,6 +148,11 @@ public class DesktopPlaybackSession(
             val previousRequest = activeRequest
             val bookmark = previous?.captureBookmark()
             val isSameMedia = previousRequest?.hasSameMediaAs(request) == true
+            traceDesktopSession(
+                "SWITCH_CAPTURE from=${previousBackend?.info?.id ?: "none"} " +
+                    "to=${backendId ?: "automatic"} playing=${bookmark?.wasPlaying} " +
+                    "positionMs=${bookmark?.position?.inWholeMilliseconds}",
+            )
 
             if (isSameExplicitBackendSelection(previous, previousBackend, isSameMedia, backendId)) {
                 mutableSessionState.value = DesktopPlaybackSessionState.Ready(checkNotNull(previousBackend).info)
@@ -217,6 +222,11 @@ public class DesktopPlaybackSession(
                     ) {
                         candidate.play()
                     }
+                    traceDesktopSession(
+                        "SWITCH_COMMIT backend=${backend.info.id} " +
+                            "resume=${isSameMedia && bookmark?.wasPlaying == true} " +
+                            "playing=${candidate.isPlaying} positionMs=${candidate.preciseCurrentTime.inWholeMilliseconds}",
+                    )
                     mutableSessionState.value = DesktopPlaybackSessionState.Ready(backend.info)
                     return@withLock candidate
                 }
@@ -574,6 +584,7 @@ private fun traceDesktopBackendOpenFailure(
     val message =
         "[KMEDIA_DESKTOP] BACKEND_OPEN_FAILED " +
             "backend=${backend.info.id} failure=${failure::class.simpleName} " +
+            "failureMessage=${failure.message?.replace(Regex("\\s+"), "_")} " +
             "playerError=${playerError?.let { it::class.simpleName }} " +
             "errorStage=${errorMessage.traceStage()} hresult=${errorMessage.traceHresult()} " +
             "hasMedia=${player.hasMedia} loading=${player.isLoading} " +
@@ -597,6 +608,11 @@ private fun traceDesktopBackendOpenFailure(
                 )
             }
         }
+}
+
+private fun traceDesktopSession(message: String) {
+    if (System.getProperty(DESKTOP_PLAYBACK_TRACE_PROPERTY)?.toBooleanStrictOrNull() != true) return
+    println("[KMEDIA_DESKTOP] $message")
 }
 
 private fun VideoPlayerError?.traceMessageOrNull(): String? =

@@ -7,9 +7,11 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
@@ -58,6 +60,8 @@ constexpr EGLint EGL_DEVICE_EXT_VALUE = 0x322C;
 constexpr EGLint EGL_D3D11_DEVICE_ANGLE_VALUE = 0x33A1;
 constexpr int GL_RGBA8_VALUE = 0x8058;
 constexpr int GL_RGBA16F_VALUE = 0x881A;
+constexpr size_t TEXTURE_POOL_SIZE = 4;
+constexpr size_t RETAINED_POOL_GENERATIONS = 2;
 
 using EglGetProcAddress = void* (__stdcall*)(const char*);
 using EglGetPlatformDisplay = EGLDisplay (__stdcall*)(EGLenum, void*, const EGLint*);
@@ -153,6 +157,17 @@ struct MpvApi {
     MpvFree free = nullptr;
 };
 
+struct TextureTarget {
+    EGLSurface pbuffer = EGL_NO_SURFACE_VALUE;
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<IDXGIKeyedMutex> keyedMutex;
+    HANDLE sharedHandle = nullptr;
+    int width = 0;
+    int height = 0;
+    uint64_t generation = 0;
+    uint64_t serial = 0;
+};
+
 struct Renderer {
     std::mutex lock;
     EglApi egl;
@@ -161,11 +176,11 @@ struct Renderer {
     EGLConfig config = nullptr;
     EGLContext context = EGL_NO_CONTEXT_VALUE;
     EGLSurface controlPbuffer = EGL_NO_SURFACE_VALUE;
-    EGLSurface pbuffer = EGL_NO_SURFACE_VALUE;
     ComPtr<ID3D11Device> device;
-    ComPtr<ID3D11Texture2D> texture;
-    ComPtr<IDXGIKeyedMutex> keyedMutex;
-    HANDLE sharedHandle = nullptr;
+    std::vector<std::unique_ptr<TextureTarget>> activeTargets;
+    std::vector<std::unique_ptr<TextureTarget>> retiredTargets;
+    TextureTarget* lastOutput = nullptr;
+    size_t targetCursor = 0;
     LUID adapterLuid{};
     DXGI_FORMAT textureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     int glInternalFormat = GL_RGBA8_VALUE;
@@ -178,6 +193,7 @@ struct Renderer {
     uint64_t lastReportedSerial = 0;
     DWORD renderThreadId = 0;
     std::atomic<bool> updateRequested{true};
+    std::atomic<bool> redrawRequested{true};
     std::string failure;
 };
 
@@ -301,10 +317,20 @@ bool releaseCurrent(Renderer* renderer) {
             EGL_NO_CONTEXT_VALUE);
 }
 
-void releaseTarget(Renderer* renderer) {
+void destroyTarget(Renderer* renderer, std::unique_ptr<TextureTarget>& target) {
+    if (!renderer || !target) return;
+    if (target->pbuffer != EGL_NO_SURFACE_VALUE && renderer->egl.destroySurface) {
+        renderer->egl.destroySurface(renderer->display, target->pbuffer);
+    }
+    target->pbuffer = EGL_NO_SURFACE_VALUE;
+    target->keyedMutex.Reset();
+    target->texture.Reset();
+    target->sharedHandle = nullptr;
+    target.reset();
+}
+
+void destroyTargets(Renderer* renderer, std::vector<std::unique_ptr<TextureTarget>>& targets) {
     if (!renderer) return;
-    // Switch away from the target before destroying it. The stable control
-    // pbuffer keeps the context current while a resized target is installed.
     if (renderer->egl.getCurrentContext &&
         renderer->egl.getCurrentContext() == renderer->context) {
         if (renderer->controlPbuffer != EGL_NO_SURFACE_VALUE) {
@@ -313,22 +339,17 @@ void releaseTarget(Renderer* renderer) {
             releaseCurrent(renderer);
         }
     }
-    if (renderer->pbuffer != EGL_NO_SURFACE_VALUE && renderer->egl.destroySurface) {
-        renderer->egl.destroySurface(renderer->display, renderer->pbuffer);
-    }
-    renderer->pbuffer = EGL_NO_SURFACE_VALUE;
-    renderer->keyedMutex.Reset();
-    renderer->texture.Reset();
-    renderer->sharedHandle = nullptr;
-    renderer->width = 0;
-    renderer->height = 0;
+    for (auto& target : targets) destroyTarget(renderer, target);
+    targets.clear();
 }
 
-bool ensureTarget(Renderer* renderer, int width, int height) {
-    if (!renderer || width <= 0 || height <= 0) return false;
-    if (renderer->texture && renderer->width == width && renderer->height == height) return true;
-    releaseTarget(renderer);
-
+std::unique_ptr<TextureTarget> createTarget(
+    Renderer* renderer,
+    int width,
+    int height,
+    uint64_t generation) {
+    if (!renderer || width <= 0 || height <= 0) return nullptr;
+    auto target = std::make_unique<TextureTarget>();
     D3D11_TEXTURE2D_DESC description{};
     description.Width = static_cast<UINT>(width);
     description.Height = static_cast<UINT>(height);
@@ -339,15 +360,14 @@ bool ensureTarget(Renderer* renderer, int width, int height) {
     description.Usage = D3D11_USAGE_DEFAULT;
     description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     description.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
-    HRESULT hr = renderer->device->CreateTexture2D(&description, nullptr, renderer->texture.GetAddressOf());
-    if (SUCCEEDED(hr)) hr = renderer->texture.As(&renderer->keyedMutex);
+    HRESULT hr = renderer->device->CreateTexture2D(&description, nullptr, target->texture.GetAddressOf());
+    if (SUCCEEDED(hr)) hr = target->texture.As(&target->keyedMutex);
     ComPtr<IDXGIResource> sharedResource;
-    if (SUCCEEDED(hr)) hr = renderer->texture.As(&sharedResource);
-    if (SUCCEEDED(hr)) hr = sharedResource->GetSharedHandle(&renderer->sharedHandle);
-    if (FAILED(hr) || !renderer->sharedHandle) {
+    if (SUCCEEDED(hr)) hr = target->texture.As(&sharedResource);
+    if (SUCCEEDED(hr)) hr = sharedResource->GetSharedHandle(&target->sharedHandle);
+    if (FAILED(hr) || !target->sharedHandle) {
         setFailure(renderer, "D3D11 could not create the shared MPV video texture");
-        releaseTarget(renderer);
-        return false;
+        return nullptr;
     }
 
     const EGLint pbufferAttributes[] = {
@@ -355,22 +375,55 @@ bool ensureTarget(Renderer* renderer, int width, int height) {
         EGL_TEXTURE_TARGET_VALUE, EGL_TEXTURE_2D_VALUE,
         EGL_NONE_VALUE,
     };
-    renderer->pbuffer = renderer->egl.createPbufferFromClientBuffer(
+    target->pbuffer = renderer->egl.createPbufferFromClientBuffer(
         renderer->display,
         EGL_D3D_TEXTURE_ANGLE_VALUE,
-        static_cast<EGLClientBuffer>(renderer->texture.Get()),
+        static_cast<EGLClientBuffer>(target->texture.Get()),
         renderer->config,
         pbufferAttributes);
-    if (renderer->pbuffer == EGL_NO_SURFACE_VALUE) {
+    if (target->pbuffer == EGL_NO_SURFACE_VALUE) {
         setFailure(renderer, "ANGLE rejected the shared MPV video pbuffer");
-        releaseTarget(renderer);
-        return false;
+        return nullptr;
+    }
+    target->width = width;
+    target->height = height;
+    target->generation = generation;
+    return target;
+}
+
+bool ensureTargets(Renderer* renderer, int width, int height) {
+    if (!renderer || width <= 0 || height <= 0) return false;
+    if (renderer->activeTargets.size() == TEXTURE_POOL_SIZE &&
+        renderer->width == width && renderer->height == height) {
+        return true;
+    }
+    if (renderer->controlPbuffer != EGL_NO_SURFACE_VALUE) {
+        makeCurrent(renderer, renderer->controlPbuffer);
+    }
+    for (auto& target : renderer->activeTargets) {
+        renderer->retiredTargets.push_back(std::move(target));
+    }
+    renderer->activeTargets.clear();
+    while (renderer->retiredTargets.size() > TEXTURE_POOL_SIZE * RETAINED_POOL_GENERATIONS) {
+        destroyTarget(renderer, renderer->retiredTargets.front());
+        renderer->retiredTargets.erase(renderer->retiredTargets.begin());
     }
 
+    const uint64_t generation = ++renderer->generation;
+    for (size_t index = 0; index < TEXTURE_POOL_SIZE; ++index) {
+        auto target = createTarget(renderer, width, height, generation);
+        if (!target) {
+            destroyTargets(renderer, renderer->activeTargets);
+            return false;
+        }
+        renderer->activeTargets.push_back(std::move(target));
+    }
     renderer->width = width;
     renderer->height = height;
-    ++renderer->generation;
+    renderer->targetCursor = 0;
+    renderer->lastOutput = nullptr;
     renderer->updateRequested.store(true, std::memory_order_release);
+    renderer->redrawRequested.store(true, std::memory_order_release);
     return true;
 }
 
@@ -526,11 +579,7 @@ void destroyRenderer(Renderer* renderer) {
         return;
     }
     if (renderer->renderContext && renderer->mpv.free) {
-        const EGLSurface cleanupSurface =
-            renderer->pbuffer != EGL_NO_SURFACE_VALUE
-                ? renderer->pbuffer
-                : renderer->controlPbuffer;
-        const bool current = makeCurrent(renderer, cleanupSurface);
+        const bool current = makeCurrent(renderer, renderer->controlPbuffer);
         if (!current) {
             setFailure(renderer, "ANGLE could not activate the MPV cleanup context");
         }
@@ -542,7 +591,9 @@ void destroyRenderer(Renderer* renderer) {
             releaseCurrent(renderer);
         }
     }
-    releaseTarget(renderer);
+    destroyTargets(renderer, renderer->activeTargets);
+    destroyTargets(renderer, renderer->retiredTargets);
+    renderer->lastOutput = nullptr;
     renderer->device.Reset();
     if (renderer->controlPbuffer != EGL_NO_SURFACE_VALUE && renderer->egl.destroySurface) {
         renderer->egl.destroySurface(renderer->display, renderer->controlPbuffer);
@@ -616,8 +667,8 @@ jlong createRenderer(
         if (!initialized) {
             setFailure(renderer, "ANGLE could not activate the MPV initialization context");
         } else {
-            initialized = ensureTarget(renderer, initialWidth, initialHeight) &&
-                makeCurrent(renderer, renderer->pbuffer) &&
+            initialized = ensureTargets(renderer, initialWidth, initialHeight) &&
+                makeCurrent(renderer, renderer->controlPbuffer) &&
                 initializeMpv(
                     renderer,
                     reinterpret_cast<mpv_handle*>(static_cast<intptr_t>(mpvHandle)));
@@ -641,20 +692,44 @@ jlong renderFrame(jlong rendererHandle, jint width, jint height) {
         return -1;
     }
     if (!renderer->renderContext ||
-        !ensureTarget(renderer, width, height) ||
-        !makeCurrent(renderer, renderer->pbuffer)) {
+        !ensureTargets(renderer, width, height) ||
+        !makeCurrent(renderer, renderer->controlPbuffer)) {
         setFailure(renderer, "ANGLE could not activate the MPV texture target");
         return -1;
     }
     const uint64_t updates = renderer->mpv.update(renderer->renderContext);
-    const bool requested = renderer->updateRequested.exchange(false, std::memory_order_acq_rel);
-    if ((updates & MPV_RENDER_UPDATE_FRAME) == 0 && !requested && renderer->frameSerial > 0) {
-        return static_cast<jlong>(renderer->frameSerial);
+    renderer->updateRequested.exchange(false, std::memory_order_acq_rel);
+    const bool redraw = renderer->redrawRequested.exchange(false, std::memory_order_acq_rel);
+    // With MPV_RENDER_PARAM_ADVANCED_CONTROL the update callback also wakes us
+    // for core dispatch work when there is no frame to draw. Publishing a
+    // redundant pooled target for that wakeup can alternate it with the latest
+    // decoded target and become visible as flicker. Render without a new frame
+    // only when target recreation explicitly requires the current frame to be
+    // redrawn (for example, while resizing a paused video).
+    if (!redraw && (updates & MPV_RENDER_UPDATE_FRAME) == 0) {
+        return renderer->frameSerial > 0
+            ? static_cast<jlong>(renderer->frameSerial)
+            : 0;
     }
-    HRESULT keyedResult = renderer->keyedMutex->AcquireSync(0, 16);
-    if (keyedResult != S_OK) {
+    TextureTarget* target = nullptr;
+    const size_t targetCount = renderer->activeTargets.size();
+    for (size_t attempt = 0; attempt < targetCount; ++attempt) {
+        const size_t index = (renderer->targetCursor + attempt) % targetCount;
+        TextureTarget* candidate = renderer->activeTargets[index].get();
+        if (candidate && candidate->keyedMutex->AcquireSync(0, 0) == S_OK) {
+            target = candidate;
+            renderer->targetCursor = (index + 1) % targetCount;
+            break;
+        }
+    }
+    if (!target) {
         renderer->updateRequested.store(true, std::memory_order_release);
         return 0;
+    }
+    if (!makeCurrent(renderer, target->pbuffer)) {
+        target->keyedMutex->ReleaseSync(0);
+        setFailure(renderer, "ANGLE could not activate a pooled MPV texture target");
+        return -1;
     }
     renderer->egl.viewport(0, 0, width, height);
     mpv_opengl_fbo fbo{
@@ -671,9 +746,12 @@ jlong renderFrame(jlong rendererHandle, jint width, jint height) {
         {MPV_RENDER_PARAM_INVALID, nullptr},
     };
     const int result = renderer->mpv.render(renderer->renderContext, parameters);
+    // Submit ANGLE's D3D11 work before handing the shared resource to the
+    // consumer. ReleaseSync provides the cross-device ownership boundary;
+    // waiting for the whole GPU with eglFinish while holding the mutex makes
+    // interactive window resize serialize video rendering with composition.
     renderer->egl.flush();
-    renderer->egl.finish();
-    const HRESULT releaseResult = renderer->keyedMutex->ReleaseSync(0);
+    const HRESULT releaseResult = target->keyedMutex->ReleaseSync(0);
     if (result < 0) {
         setFailure(renderer, "libmpv failed to render into the shared video texture");
         return -1;
@@ -682,7 +760,15 @@ jlong renderFrame(jlong rendererHandle, jint width, jint height) {
         setFailure(renderer, "D3D11 could not release the shared MPV video texture");
         return -1;
     }
-    ++renderer->frameSerial;
+    target->serial = ++renderer->frameSerial;
+    renderer->lastOutput = target;
+    // Advanced-control pacing must follow producer handoff, not a Compose
+    // callback. During WM_ENTERSIZEMOVE the UI callback that confirms the
+    // eventual system Present may be delayed even though the TextureView
+    // stream is consuming frames. HDR verification remains based solely on
+    // Nucleus' later Present counter; this call only lets mpv schedule decode.
+    renderer->mpv.reportSwap(renderer->renderContext);
+    renderer->lastReportedSerial = renderer->frameSerial;
     return static_cast<jlong>(renderer->frameSerial);
 }
 
@@ -690,17 +776,18 @@ jlongArray textureInfo(JNIEnv* env, jlong rendererHandle) {
     Renderer* renderer = reinterpret_cast<Renderer*>(static_cast<intptr_t>(rendererHandle));
     if (!renderer) return nullptr;
     std::lock_guard<std::mutex> guard(renderer->lock);
-    if (!renderer->texture || !renderer->sharedHandle || renderer->frameSerial == 0) return nullptr;
+    TextureTarget* target = renderer->lastOutput;
+    if (!target || !target->texture || !target->sharedHandle || target->serial == 0) return nullptr;
     const uint64_t luid =
         (static_cast<uint64_t>(static_cast<uint32_t>(renderer->adapterLuid.HighPart)) << 32u) |
         static_cast<uint32_t>(renderer->adapterLuid.LowPart);
     const jlong values[8] = {
-        static_cast<jlong>(reinterpret_cast<intptr_t>(renderer->sharedHandle)),
-        renderer->width,
-        renderer->height,
+        static_cast<jlong>(reinterpret_cast<intptr_t>(target->sharedHandle)),
+        target->width,
+        target->height,
         static_cast<jlong>(renderer->textureFormat),
-        static_cast<jlong>(renderer->generation),
-        static_cast<jlong>(renderer->frameSerial),
+        static_cast<jlong>(target->generation),
+        static_cast<jlong>(target->serial),
         static_cast<jlong>(luid),
         renderer->extendedLinear ? 1 : 0,
     };
@@ -719,7 +806,9 @@ void reportPresented(jlong rendererHandle, jlong frameSerial) {
     }
     if (renderer->renderContext && static_cast<uint64_t>(frameSerial) <= renderer->frameSerial &&
         static_cast<uint64_t>(frameSerial) > renderer->lastReportedSerial) {
-        if (!makeCurrent(renderer, renderer->pbuffer)) {
+        const EGLSurface surface =
+            renderer->lastOutput ? renderer->lastOutput->pbuffer : renderer->controlPbuffer;
+        if (!makeCurrent(renderer, surface)) {
             setFailure(renderer, "ANGLE could not activate the MPV presentation context");
             return;
         }

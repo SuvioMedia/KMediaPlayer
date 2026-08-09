@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,10 +28,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import dev.nucleusframework.window.tao.TextureColorEncoding
-import dev.nucleusframework.window.tao.TextureColorInfo
-import dev.nucleusframework.window.tao.TextureViewController
-import dev.nucleusframework.window.tao.nucleusD3D11SharedTextureSource
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -126,15 +123,20 @@ private fun MpvLinuxTextureVideoSurface(
     onSurfaceAttached: () -> Unit,
 ) {
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
+    val renderSize by rememberStableTextureRenderSize(surfaceSize)
 
-    LaunchedEffect(playerState, surfaceSize) {
-        if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return@LaunchedEffect
+    LaunchedEffect(playerState) {
         while (isActive) {
             withFrameNanos { }
+            val currentRenderSize = renderSize
+            if (currentRenderSize.width <= 0 || currentRenderSize.height <= 0) {
+                delay(IDLE_REFRESH_INTERVAL_MS)
+                continue
+            }
             if (playerState.hasMedia) {
                 val produced =
                     withContext(Dispatchers.Default) {
-                        playerState.renderLinuxTextureFrame(surfaceSize.width, surfaceSize.height)
+                        playerState.renderLinuxTextureFrame(currentRenderSize.width, currentRenderSize.height)
                     }
                 if (!produced && !playerState.isPlaying && !playerState.isLoading && !playerState.isSeeking) {
                     delay(PAUSED_REFRESH_INTERVAL_MS)
@@ -164,15 +166,20 @@ private fun MpvMacTextureVideoSurface(
     onSurfaceAttached: () -> Unit,
 ) {
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
+    val renderSize by rememberStableTextureRenderSize(surfaceSize)
 
-    LaunchedEffect(playerState, surfaceSize) {
-        if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return@LaunchedEffect
+    LaunchedEffect(playerState) {
         while (isActive) {
             withFrameNanos { }
+            val currentRenderSize = renderSize
+            if (currentRenderSize.width <= 0 || currentRenderSize.height <= 0) {
+                delay(IDLE_REFRESH_INTERVAL_MS)
+                continue
+            }
             if (playerState.hasMedia) {
                 val produced =
                     withContext(Dispatchers.Default) {
-                        playerState.renderMacTextureFrame(surfaceSize.width, surfaceSize.height)
+                        playerState.renderMacTextureFrame(currentRenderSize.width, currentRenderSize.height)
                     }
                 if (!produced && !playerState.isPlaying && !playerState.isLoading && !playerState.isSeeking) {
                     delay(PAUSED_REFRESH_INTERVAL_MS)
@@ -205,53 +212,52 @@ private fun MpvWindowsTextureVideoSurface(
     onSurfaceAttached: () -> Unit,
 ) {
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
-    val output by playerState.currentWindowsTextureOutput
-    val controller = remember(playerState) { TextureViewController() }
-    val source =
-        remember(output) {
-            output?.let { texture ->
-                nucleusD3D11SharedTextureSource(
-                    sharedHandle = texture.sharedHandle,
-                    widthPx = texture.width,
-                    heightPx = texture.height,
-                    colorInfo =
-                        if (texture.extendedLinear) {
-                            TextureColorInfo(
-                                encoding = TextureColorEncoding.EXTENDED_LINEAR_SRGB,
-                                premultipliedAlpha = true,
-                                sdrWhiteLevelNits = MPV_SCRGB_REFERENCE_WHITE_NITS,
-                            )
-                        } else {
-                            TextureColorInfo.SRGB_PREMULTIPLIED
-                        },
-                )
-            }
-        }
-
-    LaunchedEffect(playerState, surfaceSize) {
-        if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return@LaunchedEffect
-        while (isActive) {
-            withFrameNanos { }
-            if (playerState.hasMedia) {
-                val produced =
-                    withContext(Dispatchers.Default) {
-                        playerState.renderWindowsTextureFrame(surfaceSize.width, surfaceSize.height)
-                    }
-                if (produced) {
-                    controller.markFrameAvailable()
-                    playerState.onWindowsTextureFrameSubmitted()
-                } else if (!playerState.isPlaying && !playerState.isLoading && !playerState.isSeeking) {
-                    delay(PAUSED_REFRESH_INTERVAL_MS)
-                }
+    val sourceWidth = playerState.metadata.width ?: 0
+    val sourceHeight = playerState.metadata.height ?: 0
+    val renderSize by
+        rememberUpdatedState(
+            if (sourceWidth > 0 && sourceHeight > 0) {
+                IntSize(sourceWidth, sourceHeight)
             } else {
-                delay(IDLE_REFRESH_INTERVAL_MS)
+                surfaceSize
+            },
+        )
+
+    LaunchedEffect(playerState) {
+        // Windows enters a modal WM_ENTERSIZEMOVE loop while the user drags a
+        // window edge. Compose keeps drawing there, but UI-dispatcher coroutine
+        // continuations are not guaranteed to run at video cadence. Keep mpv's
+        // producer on a background dispatcher; TextureViewStreamController is
+        // explicitly thread-safe and wakes the Tao scene for every new frame.
+        withContext(Dispatchers.Default) {
+            while (isActive) {
+                val currentRenderSize = renderSize
+                if (currentRenderSize.width <= 0 || currentRenderSize.height <= 0) {
+                    delay(IDLE_REFRESH_INTERVAL_MS)
+                    continue
+                }
+                if (playerState.hasMedia) {
+                    val renderResult =
+                        playerState.renderWindowsTextureFrame(currentRenderSize.width, currentRenderSize.height)
+                    delay(
+                        if (!playerState.isPlaying && !playerState.isLoading && !playerState.isSeeking) {
+                            PAUSED_REFRESH_INTERVAL_MS
+                        } else {
+                            when (renderResult) {
+                                MpvWindowsTextureRenderResult.RETRY -> CONTENDED_TEXTURE_RETRY_INTERVAL_MS
+                                else -> ACTIVE_TEXTURE_REFRESH_INTERVAL_MS
+                            }
+                        },
+                    )
+                } else {
+                    delay(IDLE_REFRESH_INTERVAL_MS)
+                }
             }
         }
     }
 
     DesktopColorManagedTextureVideoView(
-        source = source,
-        controller = controller,
+        streamController = playerState.windowsTextureStreamController,
         modifier = Modifier.fillMaxSize().onSizeChanged { surfaceSize = it },
         contentScale = contentScale,
         onHostCapabilitiesChanged = playerState::onWindowsTextureHostCapabilitiesChanged,
@@ -307,7 +313,21 @@ private fun MpvSoftwareVideoPlayerSurface(
 
 private const val PAUSED_REFRESH_INTERVAL_MS = 250L
 private const val IDLE_REFRESH_INTERVAL_MS = 100L
-private const val MPV_SCRGB_REFERENCE_WHITE_NITS = 203f
+private const val ACTIVE_TEXTURE_REFRESH_INTERVAL_MS = 8L
+private const val CONTENDED_TEXTURE_RETRY_INTERVAL_MS = 1L
+private const val TEXTURE_RESIZE_SETTLE_INTERVAL_MS = 200L
+@Composable
+private fun rememberStableTextureRenderSize(surfaceSize: IntSize): State<IntSize> {
+    val stableSize = remember { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(surfaceSize) {
+        if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return@LaunchedEffect
+        if (stableSize.value != IntSize.Zero) {
+            delay(TEXTURE_RESIZE_SETTLE_INTERVAL_MS)
+        }
+        stableSize.value = surfaceSize
+    }
+    return stableSize
+}
 
 @Composable
 private fun ContentScale.toMpvSurfaceModifier(
