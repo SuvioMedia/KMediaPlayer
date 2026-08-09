@@ -17,6 +17,9 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotIn("\n  pull_request:", build_test)
         self.assertIn("on:\n  push:\n    tags:\n      - 'v*'\n", release)
         self.assertNotIn("\n    branches:", release)
+        self.assertIn(r"^4\.1\.[0-9]+", release)
+        self.assertIn("KMediaPlayer 4.1 line", release)
+        self.assertNotIn("KMediaPlayer 4.0 line", release)
 
         for relative_path in (
             ".github/workflows/build-documentation-and-sample.yml",
@@ -74,6 +77,9 @@ class ReleaseWorkflowTest(unittest.TestCase):
         consumer = (
             repository_root / ".github/public-maven-consumer/build.gradle.kts"
         ).read_text(encoding="utf-8")
+        ads_build = (
+            repository_root / "mediaplayer-ads-core/build.gradle.kts"
+        ).read_text(encoding="utf-8")
 
         for task in (
             ":mediaplayer-ads-core:jvmTest",
@@ -106,6 +112,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertIn(artifact, verifier)
         self.assertIn("composemediaplayer-ads-core-jvm", consumer)
         self.assertIn("composemediaplayer-ads-core-android", consumer)
+        self.assertIn('tasks.register("validateReleaseVersion")', ads_build)
+        self.assertIn("dependsOn(validateReleaseVersion)", ads_build)
 
     def test_all_apple_ass_consumers_restore_the_complete_build_tree(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]

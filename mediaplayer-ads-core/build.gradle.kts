@@ -140,3 +140,36 @@ mavenPublishing {
         signAllPublications()
     }
 }
+
+val validateReleaseVersion =
+    tasks.register("validateReleaseVersion") {
+        group = "verification"
+        description = "Rejects mutable or non-SemVer versions before publishing ads core remotely."
+        inputs.property("releaseVersion", projectVersion)
+
+        doLast {
+            val releaseVersion = inputs.properties.getValue("releaseVersion") as String
+            val semver =
+                Regex(
+                    "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
+                        "(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?" +
+                        "(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+                )
+            check(semver.matches(releaseVersion)) {
+                "Release version '$releaseVersion' is not a valid immutable SemVer version."
+            }
+            check(releaseVersion.substringBefore('.').toInt() >= 4) {
+                "The ads core API belongs to KMediaPlayer 4.x and cannot be published as $releaseVersion."
+            }
+        }
+    }
+
+tasks.configureEach {
+    val publishesRemoteRelease =
+        name.contains("MavenCentral", ignoreCase = true) ||
+            name.contains("ReleaseStaging", ignoreCase = true) ||
+            name == "publishAndReleaseToMavenCentral"
+    if (publishesRemoteRelease) {
+        dependsOn(validateReleaseVersion)
+    }
+}
