@@ -29,10 +29,12 @@ val androidBackends = configurations.create("androidBackends") {
 }
 
 dependencies {
+    add(desktopBackends.name, "io.github.shusek:composemediaplayer-ads-core-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-desktop-tao-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-mpv-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-kmediabridge-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-ass-jvm:$testedVersion")
+    add(androidBackends.name, "io.github.shusek:composemediaplayer-ads-core-android:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-mpv-android:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-kmediabridge-android:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-ass-android:$testedVersion")
@@ -53,10 +55,12 @@ tasks.register("verifyPublicBackends") {
         val desktopComponents = desktopBackends.kmediaComponents()
         val androidComponents = androidBackends.kmediaComponents()
 
+        check("io.github.shusek:composemediaplayer-ads-core-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-mpv-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-desktop-tao-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-kmediabridge-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-ass-jvm:$testedVersion" in desktopComponents)
+        check("io.github.shusek:composemediaplayer-ads-core-android:$testedVersion" in androidComponents)
         check("io.github.shusek:composemediaplayer-mpv-android:$testedVersion" in androidComponents)
         check("io.github.shusek:composemediaplayer-kmediabridge-android:$testedVersion" in androidComponents)
         check("io.github.shusek:composemediaplayer-ass-android:$testedVersion" in androidComponents)
