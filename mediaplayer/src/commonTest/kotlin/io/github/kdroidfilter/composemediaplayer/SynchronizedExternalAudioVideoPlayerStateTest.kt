@@ -18,11 +18,12 @@ class SynchronizedExternalAudioVideoPlayerStateTest {
         val primary = FakePrimaryVideoPlayerState(initialVolume = 0.8f)
         val engine = FakeExternalAudioPlaybackEngine(ready = true)
         val state = synchronizedState(primary, engine)
-        val narration = narrationTrack().copy(
-            playbackMode = ExternalAudioPlaybackMode.OVERLAY,
-            duckingIntervals = listOf(ExternalAudioDuckingInterval(5.seconds, 7.seconds)),
-            duckingVolumeMultiplier = 0.5f,
-        )
+        val narration =
+            narrationTrack().copy(
+                playbackMode = ExternalAudioPlaybackMode.OVERLAY,
+                duckingIntervals = listOf(ExternalAudioDuckingInterval(5.seconds, 7.seconds)),
+                duckingVolumeMultiplier = 0.5f,
+            )
 
         try {
             state.addExternalAudioTrack(narration)
@@ -39,6 +40,66 @@ class SynchronizedExternalAudioVideoPlayerStateTest {
             state.seekTo(8.seconds)
             assertEquals(0.8f, primary.volume)
             assertEquals(0.8f, engine.volume)
+        } finally {
+            state.dispose()
+        }
+    }
+
+    @Test
+    fun automaticPolicyPreservesRecognizedAtmosInsteadOfDuckingIt() {
+        val atmos = AudioTrack(id = "atmos", label = "Atmos", mimeType = "audio/eac3-joc", channels = 6)
+        val primary = FakePrimaryVideoPlayerState(embeddedTrack = atmos, initialVolume = 0.8f)
+        val engine = FakeExternalAudioPlaybackEngine(ready = true)
+        val state = synchronizedState(primary, engine)
+        val narration =
+            narrationTrack().copy(
+                playbackMode = ExternalAudioPlaybackMode.OVERLAY,
+                duckingIntervals = listOf(ExternalAudioDuckingInterval(5.seconds, 7.seconds)),
+                duckingVolumeMultiplier = 0.5f,
+            )
+
+        try {
+            state.addExternalAudioTrack(narration)
+            state.selectAudioTrack(narration.id)
+            state.synchronizeExternalAudio()
+
+            assertEquals(0.8f, primary.volume)
+            assertEquals(
+                ExternalAudioPrimaryAudioHandling.PRESERVED,
+                state.externalAudioPlaybackStatus.primaryAudioHandling,
+            )
+            assertEquals(AudioSpatialFormat.DOLBY_ATMOS, state.externalAudioPlaybackStatus.spatialAudioFormat)
+            assertFalse(state.externalAudioPlaybackStatus.encodedPassthroughSuppressed)
+        } finally {
+            state.dispose()
+        }
+    }
+
+    @Test
+    fun localMixPolicyDucksAtmosWhenNarrationHasPriority() {
+        val atmos = AudioTrack(id = "atmos", label = "Atmos", mimeType = "audio/eac3-joc", channels = 6)
+        val primary = FakePrimaryVideoPlayerState(embeddedTrack = atmos, initialVolume = 0.8f)
+        val engine = FakeExternalAudioPlaybackEngine(ready = true)
+        val state = synchronizedState(primary, engine)
+        val narration =
+            narrationTrack().copy(
+                playbackMode = ExternalAudioPlaybackMode.OVERLAY,
+                duckingIntervals = listOf(ExternalAudioDuckingInterval(5.seconds, 7.seconds)),
+                duckingVolumeMultiplier = 0.5f,
+                mixingPolicy = ExternalAudioMixingPolicy.PREFER_LOCAL_MIX,
+            )
+
+        try {
+            state.addExternalAudioTrack(narration)
+            state.selectAudioTrack(narration.id)
+            state.synchronizeExternalAudio()
+
+            assertEquals(0.4f, primary.volume)
+            assertEquals(
+                ExternalAudioPrimaryAudioHandling.DUCKED,
+                state.externalAudioPlaybackStatus.primaryAudioHandling,
+            )
+            assertEquals(atmos, state.externalAudioPlaybackStatus.primaryAudioTrack)
         } finally {
             state.dispose()
         }

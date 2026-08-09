@@ -11,6 +11,8 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
             PlayerCapabilities(
                 supportsHls = true,
                 supportsExternalAudioTracks = true,
+                supportsExternalAudioOverlay = true,
+                supportsExternalAudioDucking = true,
                 supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(
@@ -24,6 +26,8 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                 PlayerCapabilities(
                     supportsHls = true,
                     supportsExternalAudioTracks = true,
+                    supportsExternalAudioOverlay = true,
+                    supportsExternalAudioDucking = true,
                     supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                     supportsMkv =
                         supportsDesktopMkvPlayback(
@@ -43,6 +47,8 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
             PlayerCapabilities(
                 supportsHls = true,
                 supportsExternalAudioTracks = true,
+                supportsExternalAudioOverlay = true,
+                supportsExternalAudioDucking = true,
                 supportedUriSchemes = JVM_SUPPORTED_URI_SCHEMES,
                 supportsMkv =
                     supportsDesktopMkvPlayback(

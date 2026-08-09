@@ -19,6 +19,9 @@ data class PlayerCapabilities(
     val colorConversionCapabilities: ColorConversionCapabilities = ColorConversionCapabilities(),
     val supportedUriSchemes: Set<String> = DEFAULT_SUPPORTED_URI_SCHEMES,
     val supportsHls: Boolean = false,
+    val supportsExternalAudioOverlay: Boolean = false,
+    val supportsExternalAudioDucking: Boolean = false,
+    val supportsEncodedAudioPassthroughSuppression: Boolean = false,
 ) {
     fun canPlaySource(
         uri: String,

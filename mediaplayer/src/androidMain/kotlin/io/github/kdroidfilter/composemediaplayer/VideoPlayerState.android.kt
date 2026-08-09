@@ -84,7 +84,10 @@ actual fun createVideoPlayerState(
 ): VideoPlayerState =
     createAndroidVideoPlayerState {
         requireSupportedAndroidRuntime()
-        DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions)
+        SynchronizedExternalAudioVideoPlayerState(
+            primaryState = DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions),
+            engineFactory = ::createPlatformExternalAudioPlaybackEngine,
+        )
     }
 
 @UnstableApi
@@ -151,11 +154,15 @@ private fun createConfiguredVideoPlayerState(
 ): VideoPlayerState =
     createAndroidVideoPlayerState {
         requireSupportedAndroidRuntime()
-        ConfiguredAndroidVideoPlayerState(
-            audioMode = audioMode,
-            cacheConfig = cacheConfig,
-            playbackOptions = playbackOptions,
-            androidMediaSourceProvider = androidMediaSourceProvider,
+        SynchronizedExternalAudioVideoPlayerState(
+            primaryState =
+                ConfiguredAndroidVideoPlayerState(
+                    audioMode = audioMode,
+                    cacheConfig = cacheConfig,
+                    playbackOptions = playbackOptions,
+                    androidMediaSourceProvider = androidMediaSourceProvider,
+                ),
+            engineFactory = ::createPlatformExternalAudioPlaybackEngine,
         )
     }
 
@@ -758,6 +765,7 @@ open class DefaultVideoPlayerState(
     private val audioTrackSelectionCoordinates = mutableMapOf<String, Pair<Int, Int>>()
     private var pendingAudioTrackSelectionId: String? = null
     private var pendingEmbeddedSubtitleTrackSelectionId: String? = null
+    private var externalAudioLocalMixingEnabled = false
 
     private var playerView: PlayerView? = null
     private var projectionVideoSurfaceView: SurfaceView? = null
@@ -903,6 +911,19 @@ open class DefaultVideoPlayerState(
                 if (selectedTrack?.isExternal == true && selectionToRestore == null) currentAudioTrack = null
                 rebuildCurrentSourceForExternalAudio(selectionToRestore)
             }
+        }
+    }
+
+    /** Recreates the Media3 audio sink so encoded passthrough cannot bypass app-controlled ducking. */
+    internal fun setExternalAudioLocalMixingEnabled(enabled: Boolean): Boolean {
+        if (!isOnPlayerThread()) {
+            return runOnPlayerThreadBlocking { setExternalAudioLocalMixingEnabled(enabled) }
+        }
+        synchronized(playerInitializationLock) {
+            checkNotDisposed()
+            if (externalAudioLocalMixingEnabled == enabled) return true
+            externalAudioLocalMixingEnabled = enabled
+            return recreatePlayerForExternalAudioMixing()
         }
     }
 
@@ -2668,10 +2689,7 @@ open class DefaultVideoPlayerState(
 
             val rendererPlayerGeneration = ++playerInstanceGeneration
 
-            val audioSink =
-                DefaultAudioSink
-                    .Builder(context)
-                    .build()
+            val audioSink = createAndroidAudioSink()
 
             val renderersFactory =
                 AndroidColorManagedRenderersFactory(
@@ -2758,6 +2776,54 @@ open class DefaultVideoPlayerState(
                             view.subtitleView?.setStyle(CaptionStyleCompat.DEFAULT)
                         }
                     }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun createAndroidAudioSink(): DefaultAudioSink =
+        if (externalAudioLocalMixingEnabled) {
+            // The context-free builder intentionally uses Media3's default PCM-only capabilities. Encoded programme
+            // audio is decoded before volume ducking instead of bypassing the app through direct passthrough.
+            DefaultAudioSink.Builder().build()
+        } else {
+            DefaultAudioSink.Builder(context).build()
+        }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun recreatePlayerForExternalAudioMixing(): Boolean {
+        val player = exoPlayer ?: return true
+        val sourceSpec = currentSourceSpec
+        val positionMs = player.currentPosition.coerceAtLeast(0L)
+        val playWhenReady = player.playWhenReady
+        pendingAudioTrackSelectionId = pendingAudioTrackSelectionId ?: currentAudioTrack?.id
+        pendingEmbeddedSubtitleTrackSelectionId =
+            pendingEmbeddedSubtitleTrackSelectionId ?: currentSubtitleTrack?.takeIf(SubtitleTrack::isEmbedded)?.id
+        return try {
+            invalidateSourceCallbacks(player)
+            playerView?.player = null
+            runCatching { player.stop() }
+            try {
+                player.release()
+            } finally {
+                exoPlayer = null
+            }
+            initializePlayer()
+            exoPlayer?.apply {
+                if (sourceSpec != null) {
+                    installSourceListener(this)
+                    setSource(sourceSpec)
+                    prepare()
+                    seekTo(positionMs)
+                }
+                repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+                playbackParameters = PlaybackParameters(playbackSpeed)
+                if (sourceSpec != null && playWhenReady && requestDuckAudioFocus()) play() else pause()
+            }
+            true
+        } catch (failure: Exception) {
+            androidVideoLogger.e { "Failed to recreate Android audio output: ${failure.message}" }
+            setError(VideoPlayerError.UnknownError("Audio output restart failed: ${failure.message}"))
+            false
         }
     }
 
@@ -4010,6 +4076,8 @@ open class DefaultVideoPlayerState(
                     bitrate = format.bitrate.takeIf { it > 0 } ?: externalTrack?.bitrate,
                     isDefault = externalTrack?.isDefault == true,
                     isEmbedded = externalTrack == null,
+                    mimeType = format.sampleMimeType ?: externalTrack?.source?.mimeType,
+                    codec = format.codecs,
                 )
         }
         return selectedTrackId

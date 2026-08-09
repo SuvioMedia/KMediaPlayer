@@ -156,6 +156,8 @@ open class DefaultVideoPlayerState(
 
     override val externalAudioTracks: List<ExternalAudioTrack>
         get() = delegate.externalAudioTracks
+    override val externalAudioPlaybackStatus: ExternalAudioPlaybackStatus
+        get() = delegate.externalAudioPlaybackStatus
 
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult = delegate.selectAudioTrack(track)
 

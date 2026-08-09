@@ -33,6 +33,7 @@ class ExternalAudioTrackTest {
         assertTrue(audio.isDefault)
         assertTrue(audio.isExternal)
         assertFalse(audio.isEmbedded)
+        assertEquals("audio/mp4", audio.mimeType)
     }
 
     @Test
@@ -78,10 +79,11 @@ class ExternalAudioTrackTest {
                 label = "Polish narration",
                 source = MediaSourceSpec("https://media.invalid/narration.m4a"),
                 playbackMode = ExternalAudioPlaybackMode.OVERLAY,
-                duckingIntervals = listOf(
-                    ExternalAudioDuckingInterval(2.seconds, 4.seconds),
-                    ExternalAudioDuckingInterval(3.seconds, 5.seconds),
-                ),
+                duckingIntervals =
+                    listOf(
+                        ExternalAudioDuckingInterval(2.seconds, 4.seconds),
+                        ExternalAudioDuckingInterval(3.seconds, 5.seconds),
+                    ),
             )
         }
     }

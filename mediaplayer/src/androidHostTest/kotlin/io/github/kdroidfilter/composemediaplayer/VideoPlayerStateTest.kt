@@ -97,7 +97,7 @@ class VideoPlayerStateTest {
     @Test
     fun releaseSourceDetachesMediaAndKeepsEngineReusable() {
         withPlayerState { playerState ->
-            val androidState = playerState as DefaultVideoPlayerState
+            val androidState = playerState.unwrapDelegatingState() as DefaultVideoPlayerState
             playerState.openUri("https://example.invalid/first.mp4", InitialPlayerState.PAUSE)
             assertTrue(playerState.hasMedia)
             assertEquals(1, androidState.exoPlayer?.mediaItemCount)
@@ -119,7 +119,7 @@ class VideoPlayerStateTest {
     @Test
     fun stopRetainsSourceForLaterPlayback() {
         withPlayerState { playerState ->
-            val androidState = playerState as DefaultVideoPlayerState
+            val androidState = playerState.unwrapDelegatingState() as DefaultVideoPlayerState
             playerState.openUri("https://example.invalid/video.mp4", InitialPlayerState.PAUSE)
 
             playerState.stop()
@@ -169,7 +169,7 @@ class VideoPlayerStateTest {
     @Suppress("LongMethod", "MagicNumber")
     fun disposeIsIdempotentAndCommandsFailAfterwards() {
         val playerState = createVideoPlayerState()
-        val androidState = playerState as DefaultVideoPlayerState
+        val androidState = playerState.unwrapDelegatingState() as DefaultVideoPlayerState
         val audioTrack = AudioTrack(id = "audio", label = "Audio")
         val subtitleTrack = SubtitleTrack(label = "Subtitle", language = "en", src = "subtitle.vtt")
         playerState.dispose()

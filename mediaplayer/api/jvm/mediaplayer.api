@@ -66,6 +66,7 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
 	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
@@ -662,6 +663,7 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
 	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
@@ -978,6 +980,7 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
 	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
@@ -1126,6 +1129,7 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
 	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
@@ -1357,6 +1361,7 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
 	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;

@@ -53,6 +53,8 @@ internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOpt
         supportsHls = engine.mediaSourceExtensions,
         supportsPiP = isWebPictureInPictureSupported(),
         supportsExternalAudioTracks = true,
+        supportsExternalAudioOverlay = true,
+        supportsExternalAudioDucking = true,
         displayColorCapabilities = queryWebDisplayColorCapabilities(),
         rendererColorCapabilities =
             if (engine.webGl2) queryWebRendererColorCapabilities() else RendererColorCapabilities(),

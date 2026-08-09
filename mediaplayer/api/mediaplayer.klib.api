@@ -535,6 +535,8 @@ final class io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState
         final fun <get-durationText>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.durationText.<get-durationText>|<get-durationText>(){}[0]
     final val error // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.error|{}error[0]
         final fun <get-error>(): io.github.kdroidfilter.composemediaplayer/VideoPlayerError? // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.error.<get-error>|<get-error>(){}[0]
+    final val externalAudioPlaybackStatus // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.externalAudioPlaybackStatus|{}externalAudioPlaybackStatus[0]
+        final fun <get-externalAudioPlaybackStatus>(): io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.externalAudioPlaybackStatus.<get-externalAudioPlaybackStatus>|<get-externalAudioPlaybackStatus>(){}[0]
     final val externalAudioTracks // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.externalAudioTracks|{}externalAudioTracks[0]
         final fun <get-externalAudioTracks>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack> // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.externalAudioTracks.<get-externalAudioTracks>|<get-externalAudioTracks>(){}[0]
     final val hasMedia // io.github.kdroidfilter.composemediaplayer/RenderableVideoPlayerState.hasMedia|{}hasMedia[0]

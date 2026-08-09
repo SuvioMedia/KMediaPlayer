@@ -8,6 +8,8 @@ internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOpt
         supportsHls = true,
         supportsPiP = AVPictureInPictureController.isPictureInPictureSupported(),
         supportsExternalAudioTracks = true,
+        supportsExternalAudioOverlay = true,
+        supportsExternalAudioDucking = true,
         rendererColorCapabilities = queryAppleProjectionRendererColorCapabilities(),
         supportedUriSchemes = IOS_SUPPORTED_URI_SCHEMES,
     )

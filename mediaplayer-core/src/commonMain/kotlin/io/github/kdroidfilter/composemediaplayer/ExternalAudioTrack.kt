@@ -9,6 +9,42 @@ enum class ExternalAudioPlaybackMode {
     OVERLAY,
 }
 
+/** Controls the trade-off between encoded spatial audio and reliable local overlay mixing. */
+enum class ExternalAudioMixingPolicy {
+    /** Preserve recognized object-based spatial audio; otherwise use local ducking. */
+    AUTO,
+
+    /** Leave the primary audio path and volume unchanged while the overlay plays. */
+    PRESERVE_PRIMARY_AUDIO,
+
+    /** Prefer decoded, locally controllable programme audio so overlay ducking remains reliable. */
+    PREFER_LOCAL_MIX,
+}
+
+/** Describes how programme audio is handled while an external track is selected. */
+enum class ExternalAudioPrimaryAudioHandling {
+    INACTIVE,
+    REPLACED,
+    PRESERVED,
+    DUCKED,
+}
+
+/** Live, backend-neutral information about selected external audio and its primary-audio trade-off. */
+@Stable
+data class ExternalAudioPlaybackStatus(
+    val selectedTrackId: String? = null,
+    val primaryAudioTrack: AudioTrack? = null,
+    val primaryAudioHandling: ExternalAudioPrimaryAudioHandling = ExternalAudioPrimaryAudioHandling.INACTIVE,
+    val encodedPassthroughSuppressed: Boolean = false,
+) {
+    val spatialAudioFormat: AudioSpatialFormat
+        get() = primaryAudioTrack?.spatialAudioFormat ?: AudioSpatialFormat.NONE
+
+    companion object {
+        val Inactive = ExternalAudioPlaybackStatus()
+    }
+}
+
 /** A timeline interval during which programme audio should be ducked for an overlay track. */
 @Stable
 data class ExternalAudioDuckingInterval(
@@ -44,6 +80,7 @@ data class ExternalAudioTrack(
     val playbackMode: ExternalAudioPlaybackMode = ExternalAudioPlaybackMode.REPLACE,
     val duckingIntervals: List<ExternalAudioDuckingInterval> = emptyList(),
     val duckingVolumeMultiplier: Float = 1f,
+    val mixingPolicy: ExternalAudioMixingPolicy = ExternalAudioMixingPolicy.AUTO,
 ) {
     init {
         require(id.isNotBlank()) { "External audio track id must not be blank." }
@@ -68,11 +105,13 @@ data class ExternalAudioTrack(
             bitrate = bitrate,
             isDefault = isDefault,
             isEmbedded = false,
+            mimeType = source.mimeType,
         )
 
     override fun toString(): String =
         "ExternalAudioTrack(id=$id, label=$label, language=$language, " +
             "source=<redacted>, requestHeaderCount=${requestHeaders.size}, channels=$channels, " +
             "sampleRate=$sampleRate, bitrate=$bitrate, isDefault=$isDefault, playbackMode=$playbackMode, " +
-            "duckingIntervalCount=${duckingIntervals.size}, duckingVolumeMultiplier=$duckingVolumeMultiplier)"
+            "duckingIntervalCount=${duckingIntervals.size}, duckingVolumeMultiplier=$duckingVolumeMultiplier, " +
+            "mixingPolicy=$mixingPolicy)"
 }

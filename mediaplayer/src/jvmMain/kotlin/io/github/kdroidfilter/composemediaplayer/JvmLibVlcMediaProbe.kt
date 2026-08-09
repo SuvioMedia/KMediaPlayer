@@ -128,6 +128,7 @@ internal object JvmLibVlcMediaProbe {
                                 channels = track.audioChannels,
                                 sampleRate = track.audioSampleRate,
                                 isDefault = track.isDefault,
+                                codec = track.codecId.takeIf(String::isNotBlank),
                             ),
                     )
                 },
@@ -205,6 +206,7 @@ internal object JvmLibVlcMediaProbe {
                                 sampleRate = stream.sampleRate,
                                 bitrate = stream.bitRate,
                                 isDefault = stream.isDefault,
+                                codec = stream.codecName,
                             ),
                     )
                 }

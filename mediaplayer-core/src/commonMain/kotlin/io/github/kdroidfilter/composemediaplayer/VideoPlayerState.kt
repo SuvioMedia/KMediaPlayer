@@ -406,12 +406,16 @@ interface VideoPlayerState {
     /**
      * App-provided audio sources currently attached to this content session.
      *
-     * These tracks are alternatives to the embedded audio tracks, not additional sounds mixed by the player. A new
-     * primary source or [releaseSource] clears them. Callers must check [PlayerCapabilities.supportsExternalAudioTracks]
-     * before registering tracks.
+     * A track can replace programme audio or play as an overlay according to [ExternalAudioTrack.playbackMode]. A new
+     * primary source or [releaseSource] clears these session-bound tracks. Callers must check
+     * [PlayerCapabilities.supportsExternalAudioTracks] before registering tracks.
      */
     val externalAudioTracks: List<ExternalAudioTrack>
         get() = emptyList()
+
+    /** Current primary-audio handling while an app-provided audio track is selected. */
+    val externalAudioPlaybackStatus: ExternalAudioPlaybackStatus
+        get() = ExternalAudioPlaybackStatus.Inactive
 
     fun addExternalAudioTrack(track: ExternalAudioTrack) = Unit
 

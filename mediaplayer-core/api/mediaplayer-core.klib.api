@@ -21,6 +21,22 @@ final enum class io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode :
     final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode> // io.github.kdroidfilter.composemediaplayer/AdaptiveQualityMode.values|values#static(){}[0]
 }
 
+final enum class io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat> { // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat|null[0]
+    enum entry DOLBY_ATMOS // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.DOLBY_ATMOS|null[0]
+    enum entry MULTICHANNEL // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.MULTICHANNEL|null[0]
+    enum entry NONE // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.NONE|null[0]
+    enum entry OTHER_SPATIAL_AUDIO // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.OTHER_SPATIAL_AUDIO|null[0]
+    enum entry POSSIBLE_DOLBY_ATMOS // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.POSSIBLE_DOLBY_ATMOS|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat> // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.entries.<get-entries>|<get-entries>#static(){}[0]
+    final val mayCarryObjectBasedMetadata // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.mayCarryObjectBasedMetadata|{}mayCarryObjectBasedMetadata[0]
+        final fun <get-mayCarryObjectBasedMetadata>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.mayCarryObjectBasedMetadata.<get-mayCarryObjectBasedMetadata>|<get-mayCarryObjectBasedMetadata>(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat> // io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat.values|values#static(){}[0]
+}
+
 final enum class io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason> { // io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason|null[0]
     enum entry DECODER_DOES_NOT_SUPPORT_SOURCE // io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason.DECODER_DOES_NOT_SUPPORT_SOURCE|null[0]
     enum entry DISPLAY_CAPABILITIES_UNKNOWN // io.github.kdroidfilter.composemediaplayer/ColorPipelineFallbackReason.DISPLAY_CAPABILITIES_UNKNOWN|null[0]
@@ -147,6 +163,18 @@ final enum class io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy : 
     final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy> // io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy.values|values#static(){}[0]
 }
 
+final enum class io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy> { // io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy|null[0]
+    enum entry AUTO // io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy.AUTO|null[0]
+    enum entry PREFER_LOCAL_MIX // io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy.PREFER_LOCAL_MIX|null[0]
+    enum entry PRESERVE_PRIMARY_AUDIO // io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy.PRESERVE_PRIMARY_AUDIO|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy> // io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy // io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy> // io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy.values|values#static(){}[0]
+}
+
 final enum class io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode> { // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode|null[0]
     enum entry OVERLAY // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode.OVERLAY|null[0]
     enum entry REPLACE // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode.REPLACE|null[0]
@@ -156,6 +184,19 @@ final enum class io.github.kdroidfilter.composemediaplayer/ExternalAudioPlayback
 
     final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode.valueOf|valueOf#static(kotlin.String){}[0]
     final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode> // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode.values|values#static(){}[0]
+}
+
+final enum class io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling> { // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling|null[0]
+    enum entry DUCKED // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling.DUCKED|null[0]
+    enum entry INACTIVE // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling.INACTIVE|null[0]
+    enum entry PRESERVED // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling.PRESERVED|null[0]
+    enum entry REPLACED // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling.REPLACED|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling> // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling> // io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling.values|values#static(){}[0]
 }
 
 final enum class io.github.kdroidfilter.composemediaplayer/HlsQualityMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/HlsQualityMode> { // io.github.kdroidfilter.composemediaplayer/HlsQualityMode|null[0]
@@ -488,6 +529,8 @@ abstract interface io.github.kdroidfilter.composemediaplayer/VideoPlayerState { 
         open fun <get-diagnostics>(): io.github.kdroidfilter.composemediaplayer/PlaybackDiagnostics // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.diagnostics.<get-diagnostics>|<get-diagnostics>(){}[0]
     open val durationMs // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.durationMs|{}durationMs[0]
         open fun <get-durationMs>(): kotlin/Long // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.durationMs.<get-durationMs>|<get-durationMs>(){}[0]
+    open val externalAudioPlaybackStatus // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.externalAudioPlaybackStatus|{}externalAudioPlaybackStatus[0]
+        open fun <get-externalAudioPlaybackStatus>(): io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.externalAudioPlaybackStatus.<get-externalAudioPlaybackStatus>|<get-externalAudioPlaybackStatus>(){}[0]
     open val externalAudioTracks // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.externalAudioTracks|{}externalAudioTracks[0]
         open fun <get-externalAudioTracks>(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack> // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.externalAudioTracks.<get-externalAudioTracks>|<get-externalAudioTracks>(){}[0]
     open val hlsQualityMode // io.github.kdroidfilter.composemediaplayer/VideoPlayerState.hlsQualityMode|{}hlsQualityMode[0]
@@ -689,12 +732,14 @@ final class io.github.kdroidfilter.composemediaplayer/AdaptiveQualityVariant { /
 }
 
 final class io.github.kdroidfilter.composemediaplayer/AudioTrack { // io.github.kdroidfilter.composemediaplayer/AudioTrack|null[0]
-    constructor <init>(kotlin/String, kotlin/String, kotlin/String = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., kotlin/Boolean = ...) // io.github.kdroidfilter.composemediaplayer/AudioTrack.<init>|<init>(kotlin.String;kotlin.String;kotlin.String;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean;kotlin.Boolean){}[0]
+    constructor <init>(kotlin/String, kotlin/String, kotlin/String = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/String? = ..., kotlin/String? = ...) // io.github.kdroidfilter.composemediaplayer/AudioTrack.<init>|<init>(kotlin.String;kotlin.String;kotlin.String;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean;kotlin.Boolean;kotlin.String?;kotlin.String?){}[0]
 
     final val bitrate // io.github.kdroidfilter.composemediaplayer/AudioTrack.bitrate|{}bitrate[0]
         final fun <get-bitrate>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AudioTrack.bitrate.<get-bitrate>|<get-bitrate>(){}[0]
     final val channels // io.github.kdroidfilter.composemediaplayer/AudioTrack.channels|{}channels[0]
         final fun <get-channels>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AudioTrack.channels.<get-channels>|<get-channels>(){}[0]
+    final val codec // io.github.kdroidfilter.composemediaplayer/AudioTrack.codec|{}codec[0]
+        final fun <get-codec>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AudioTrack.codec.<get-codec>|<get-codec>(){}[0]
     final val id // io.github.kdroidfilter.composemediaplayer/AudioTrack.id|{}id[0]
         final fun <get-id>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AudioTrack.id.<get-id>|<get-id>(){}[0]
     final val isDefault // io.github.kdroidfilter.composemediaplayer/AudioTrack.isDefault|{}isDefault[0]
@@ -707,10 +752,15 @@ final class io.github.kdroidfilter.composemediaplayer/AudioTrack { // io.github.
         final fun <get-label>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AudioTrack.label.<get-label>|<get-label>(){}[0]
     final val language // io.github.kdroidfilter.composemediaplayer/AudioTrack.language|{}language[0]
         final fun <get-language>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AudioTrack.language.<get-language>|<get-language>(){}[0]
+    final val mimeType // io.github.kdroidfilter.composemediaplayer/AudioTrack.mimeType|{}mimeType[0]
+        final fun <get-mimeType>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AudioTrack.mimeType.<get-mimeType>|<get-mimeType>(){}[0]
     final val sampleRate // io.github.kdroidfilter.composemediaplayer/AudioTrack.sampleRate|{}sampleRate[0]
         final fun <get-sampleRate>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AudioTrack.sampleRate.<get-sampleRate>|<get-sampleRate>(){}[0]
+    final val spatialAudioFormat // io.github.kdroidfilter.composemediaplayer/AudioTrack.spatialAudioFormat|{}spatialAudioFormat[0]
+        final fun <get-spatialAudioFormat>(): io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat // io.github.kdroidfilter.composemediaplayer/AudioTrack.spatialAudioFormat.<get-spatialAudioFormat>|<get-spatialAudioFormat>(){}[0]
 
     final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AudioTrack.component1|component1(){}[0]
+    final fun component10(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AudioTrack.component10|component10(){}[0]
     final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AudioTrack.component2|component2(){}[0]
     final fun component3(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AudioTrack.component3|component3(){}[0]
     final fun component4(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AudioTrack.component4|component4(){}[0]
@@ -718,7 +768,8 @@ final class io.github.kdroidfilter.composemediaplayer/AudioTrack { // io.github.
     final fun component6(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/AudioTrack.component6|component6(){}[0]
     final fun component7(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AudioTrack.component7|component7(){}[0]
     final fun component8(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AudioTrack.component8|component8(){}[0]
-    final fun copy(kotlin/String = ..., kotlin/String = ..., kotlin/String = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/AudioTrack // io.github.kdroidfilter.composemediaplayer/AudioTrack.copy|copy(kotlin.String;kotlin.String;kotlin.String;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean;kotlin.Boolean){}[0]
+    final fun component9(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/AudioTrack.component9|component9(){}[0]
+    final fun copy(kotlin/String = ..., kotlin/String = ..., kotlin/String = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/String? = ..., kotlin/String? = ...): io.github.kdroidfilter.composemediaplayer/AudioTrack // io.github.kdroidfilter.composemediaplayer/AudioTrack.copy|copy(kotlin.String;kotlin.String;kotlin.String;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean;kotlin.Boolean;kotlin.String?;kotlin.String?){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/AudioTrack.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/AudioTrack.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/AudioTrack.toString|toString(){}[0]
@@ -924,8 +975,37 @@ final class io.github.kdroidfilter.composemediaplayer/ExternalAudioDuckingInterv
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/ExternalAudioDuckingInterval.toString|toString(){}[0]
 }
 
+final class io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus { // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus|null[0]
+    constructor <init>(kotlin/String? = ..., io.github.kdroidfilter.composemediaplayer/AudioTrack? = ..., io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling = ..., kotlin/Boolean = ...) // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.<init>|<init>(kotlin.String?;io.github.kdroidfilter.composemediaplayer.AudioTrack?;io.github.kdroidfilter.composemediaplayer.ExternalAudioPrimaryAudioHandling;kotlin.Boolean){}[0]
+
+    final val encodedPassthroughSuppressed // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.encodedPassthroughSuppressed|{}encodedPassthroughSuppressed[0]
+        final fun <get-encodedPassthroughSuppressed>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.encodedPassthroughSuppressed.<get-encodedPassthroughSuppressed>|<get-encodedPassthroughSuppressed>(){}[0]
+    final val primaryAudioHandling // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.primaryAudioHandling|{}primaryAudioHandling[0]
+        final fun <get-primaryAudioHandling>(): io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.primaryAudioHandling.<get-primaryAudioHandling>|<get-primaryAudioHandling>(){}[0]
+    final val primaryAudioTrack // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.primaryAudioTrack|{}primaryAudioTrack[0]
+        final fun <get-primaryAudioTrack>(): io.github.kdroidfilter.composemediaplayer/AudioTrack? // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.primaryAudioTrack.<get-primaryAudioTrack>|<get-primaryAudioTrack>(){}[0]
+    final val selectedTrackId // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.selectedTrackId|{}selectedTrackId[0]
+        final fun <get-selectedTrackId>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.selectedTrackId.<get-selectedTrackId>|<get-selectedTrackId>(){}[0]
+    final val spatialAudioFormat // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.spatialAudioFormat|{}spatialAudioFormat[0]
+        final fun <get-spatialAudioFormat>(): io.github.kdroidfilter.composemediaplayer/AudioSpatialFormat // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.spatialAudioFormat.<get-spatialAudioFormat>|<get-spatialAudioFormat>(){}[0]
+
+    final fun component1(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.component1|component1(){}[0]
+    final fun component2(): io.github.kdroidfilter.composemediaplayer/AudioTrack? // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.component2|component2(){}[0]
+    final fun component3(): io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.component3|component3(){}[0]
+    final fun component4(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.component4|component4(){}[0]
+    final fun copy(kotlin/String? = ..., io.github.kdroidfilter.composemediaplayer/AudioTrack? = ..., io.github.kdroidfilter.composemediaplayer/ExternalAudioPrimaryAudioHandling = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.copy|copy(kotlin.String?;io.github.kdroidfilter.composemediaplayer.AudioTrack?;io.github.kdroidfilter.composemediaplayer.ExternalAudioPrimaryAudioHandling;kotlin.Boolean){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.toString|toString(){}[0]
+
+    final object Companion { // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.Companion|null[0]
+        final val Inactive // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.Companion.Inactive|{}Inactive[0]
+            final fun <get-Inactive>(): io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus // io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackStatus.Companion.Inactive.<get-Inactive>|<get-Inactive>(){}[0]
+    }
+}
+
 final class io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack { // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack|null[0]
-    constructor <init>(kotlin/String, kotlin/String, io.github.kdroidfilter.composemediaplayer/MediaSourceSpec, kotlin/String = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/ExternalAudioDuckingInterval> = ..., kotlin/Float = ...) // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.<init>|<init>(kotlin.String;kotlin.String;io.github.kdroidfilter.composemediaplayer.MediaSourceSpec;kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String>;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.ExternalAudioPlaybackMode;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.ExternalAudioDuckingInterval>;kotlin.Float){}[0]
+    constructor <init>(kotlin/String, kotlin/String, io.github.kdroidfilter.composemediaplayer/MediaSourceSpec, kotlin/String = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/ExternalAudioDuckingInterval> = ..., kotlin/Float = ..., io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy = ...) // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.<init>|<init>(kotlin.String;kotlin.String;io.github.kdroidfilter.composemediaplayer.MediaSourceSpec;kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String>;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.ExternalAudioPlaybackMode;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.ExternalAudioDuckingInterval>;kotlin.Float;io.github.kdroidfilter.composemediaplayer.ExternalAudioMixingPolicy){}[0]
 
     final val bitrate // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.bitrate|{}bitrate[0]
         final fun <get-bitrate>(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.bitrate.<get-bitrate>|<get-bitrate>(){}[0]
@@ -943,6 +1023,8 @@ final class io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack { // io
         final fun <get-label>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.label.<get-label>|<get-label>(){}[0]
     final val language // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.language|{}language[0]
         final fun <get-language>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.language.<get-language>|<get-language>(){}[0]
+    final val mixingPolicy // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.mixingPolicy|{}mixingPolicy[0]
+        final fun <get-mixingPolicy>(): io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.mixingPolicy.<get-mixingPolicy>|<get-mixingPolicy>(){}[0]
     final val playbackMode // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.playbackMode|{}playbackMode[0]
         final fun <get-playbackMode>(): io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.playbackMode.<get-playbackMode>|<get-playbackMode>(){}[0]
     final val requestHeaders // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.requestHeaders|{}requestHeaders[0]
@@ -957,6 +1039,7 @@ final class io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack { // io
     final fun component10(): io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component10|component10(){}[0]
     final fun component11(): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/ExternalAudioDuckingInterval> // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component11|component11(){}[0]
     final fun component12(): kotlin/Float // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component12|component12(){}[0]
+    final fun component13(): io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component13|component13(){}[0]
     final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component2|component2(){}[0]
     final fun component3(): io.github.kdroidfilter.composemediaplayer/MediaSourceSpec // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component3|component3(){}[0]
     final fun component4(): kotlin/String // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component4|component4(){}[0]
@@ -965,7 +1048,7 @@ final class io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack { // io
     final fun component7(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component7|component7(){}[0]
     final fun component8(): kotlin/Int? // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component8|component8(){}[0]
     final fun component9(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.component9|component9(){}[0]
-    final fun copy(kotlin/String = ..., kotlin/String = ..., io.github.kdroidfilter.composemediaplayer/MediaSourceSpec = ..., kotlin/String = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/ExternalAudioDuckingInterval> = ..., kotlin/Float = ...): io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.copy|copy(kotlin.String;kotlin.String;io.github.kdroidfilter.composemediaplayer.MediaSourceSpec;kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String>;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.ExternalAudioPlaybackMode;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.ExternalAudioDuckingInterval>;kotlin.Float){}[0]
+    final fun copy(kotlin/String = ..., kotlin/String = ..., io.github.kdroidfilter.composemediaplayer/MediaSourceSpec = ..., kotlin/String = ..., kotlin.collections/Map<kotlin/String, kotlin/String> = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Int? = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/ExternalAudioPlaybackMode = ..., kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/ExternalAudioDuckingInterval> = ..., kotlin/Float = ..., io.github.kdroidfilter.composemediaplayer/ExternalAudioMixingPolicy = ...): io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.copy|copy(kotlin.String;kotlin.String;io.github.kdroidfilter.composemediaplayer.MediaSourceSpec;kotlin.String;kotlin.collections.Map<kotlin.String,kotlin.String>;kotlin.Int?;kotlin.Int?;kotlin.Int?;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.ExternalAudioPlaybackMode;kotlin.collections.List<io.github.kdroidfilter.composemediaplayer.ExternalAudioDuckingInterval>;kotlin.Float;io.github.kdroidfilter.composemediaplayer.ExternalAudioMixingPolicy){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/ExternalAudioTrack.toString|toString(){}[0]
@@ -1225,7 +1308,7 @@ final class io.github.kdroidfilter.composemediaplayer/PlaybackSnapshot { // io.g
 }
 
 final class io.github.kdroidfilter.composemediaplayer/PlayerCapabilities { // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities|null[0]
-    constructor <init>(kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/DecoderColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/DisplayColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/RendererColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities = ..., kotlin.collections/Set<kotlin/String> = ..., kotlin/Boolean = ...) // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.<init>|<init>(kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities;io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities;io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities;io.github.kdroidfilter.composemediaplayer.ColorConversionCapabilities;kotlin.collections.Set<kotlin.String>;kotlin.Boolean){}[0]
+    constructor <init>(kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/DecoderColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/DisplayColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/RendererColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities = ..., kotlin.collections/Set<kotlin/String> = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ...) // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.<init>|<init>(kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities;io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities;io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities;io.github.kdroidfilter.composemediaplayer.ColorConversionCapabilities;kotlin.collections.Set<kotlin.String>;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean){}[0]
 
     final val colorConversionCapabilities // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.colorConversionCapabilities|{}colorConversionCapabilities[0]
         final fun <get-colorConversionCapabilities>(): io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.colorConversionCapabilities.<get-colorConversionCapabilities>|<get-colorConversionCapabilities>(){}[0]
@@ -1237,6 +1320,12 @@ final class io.github.kdroidfilter.composemediaplayer/PlayerCapabilities { // io
         final fun <get-rendererColorCapabilities>(): io.github.kdroidfilter.composemediaplayer/RendererColorCapabilities // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.rendererColorCapabilities.<get-rendererColorCapabilities>|<get-rendererColorCapabilities>(){}[0]
     final val supportedUriSchemes // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportedUriSchemes|{}supportedUriSchemes[0]
         final fun <get-supportedUriSchemes>(): kotlin.collections/Set<kotlin/String> // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportedUriSchemes.<get-supportedUriSchemes>|<get-supportedUriSchemes>(){}[0]
+    final val supportsEncodedAudioPassthroughSuppression // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsEncodedAudioPassthroughSuppression|{}supportsEncodedAudioPassthroughSuppression[0]
+        final fun <get-supportsEncodedAudioPassthroughSuppression>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsEncodedAudioPassthroughSuppression.<get-supportsEncodedAudioPassthroughSuppression>|<get-supportsEncodedAudioPassthroughSuppression>(){}[0]
+    final val supportsExternalAudioDucking // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsExternalAudioDucking|{}supportsExternalAudioDucking[0]
+        final fun <get-supportsExternalAudioDucking>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsExternalAudioDucking.<get-supportsExternalAudioDucking>|<get-supportsExternalAudioDucking>(){}[0]
+    final val supportsExternalAudioOverlay // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsExternalAudioOverlay|{}supportsExternalAudioOverlay[0]
+        final fun <get-supportsExternalAudioOverlay>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsExternalAudioOverlay.<get-supportsExternalAudioOverlay>|<get-supportsExternalAudioOverlay>(){}[0]
     final val supportsExternalAudioTracks // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsExternalAudioTracks|{}supportsExternalAudioTracks[0]
         final fun <get-supportsExternalAudioTracks>(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsExternalAudioTracks.<get-supportsExternalAudioTracks>|<get-supportsExternalAudioTracks>(){}[0]
     final val supportsHls // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.supportsHls|{}supportsHls[0]
@@ -1249,6 +1338,9 @@ final class io.github.kdroidfilter.composemediaplayer/PlayerCapabilities { // io
     final fun canPlaySource(io.github.kdroidfilter.composemediaplayer/MediaSourceSpec): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.canPlaySource|canPlaySource(io.github.kdroidfilter.composemediaplayer.MediaSourceSpec){}[0]
     final fun canPlaySource(kotlin/String, kotlin/String? = ...): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.canPlaySource|canPlaySource(kotlin.String;kotlin.String?){}[0]
     final fun component1(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component1|component1(){}[0]
+    final fun component10(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component10|component10(){}[0]
+    final fun component11(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component11|component11(){}[0]
+    final fun component12(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component12|component12(){}[0]
     final fun component2(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component2|component2(){}[0]
     final fun component3(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component3|component3(){}[0]
     final fun component4(): io.github.kdroidfilter.composemediaplayer/DecoderColorCapabilities // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component4|component4(){}[0]
@@ -1257,7 +1349,7 @@ final class io.github.kdroidfilter.composemediaplayer/PlayerCapabilities { // io
     final fun component7(): io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component7|component7(){}[0]
     final fun component8(): kotlin.collections/Set<kotlin/String> // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component8|component8(){}[0]
     final fun component9(): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.component9|component9(){}[0]
-    final fun copy(kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/DecoderColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/DisplayColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/RendererColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities = ..., kotlin.collections/Set<kotlin/String> = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/PlayerCapabilities // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.copy|copy(kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities;io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities;io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities;io.github.kdroidfilter.composemediaplayer.ColorConversionCapabilities;kotlin.collections.Set<kotlin.String>;kotlin.Boolean){}[0]
+    final fun copy(kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., io.github.kdroidfilter.composemediaplayer/DecoderColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/DisplayColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/RendererColorCapabilities = ..., io.github.kdroidfilter.composemediaplayer/ColorConversionCapabilities = ..., kotlin.collections/Set<kotlin/String> = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ..., kotlin/Boolean = ...): io.github.kdroidfilter.composemediaplayer/PlayerCapabilities // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.copy|copy(kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities;io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities;io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities;io.github.kdroidfilter.composemediaplayer.ColorConversionCapabilities;kotlin.collections.Set<kotlin.String>;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean;kotlin.Boolean){}[0]
     final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.equals|equals(kotlin.Any?){}[0]
     final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.hashCode|hashCode(){}[0]
     final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/PlayerCapabilities.toString|toString(){}[0]
@@ -2548,6 +2640,7 @@ final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_compo
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_DolbyVisionInfo$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_DolbyVisionInfo$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_DolbyVisionInfo$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_DolbyVisionProfileMapping$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_DolbyVisionProfileMapping$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_DolbyVisionProfileMapping$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioDuckingInterval$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioDuckingInterval$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_ExternalAudioDuckingInterval$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioPlaybackStatus$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioPlaybackStatus$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_ExternalAudioPlaybackStatus$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioTrack$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioTrack$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_ExternalAudioTrack$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_Hdr10PlusInfo$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_Hdr10PlusInfo$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_Hdr10PlusInfo$stableprop[0]
 final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_HlsQualitySelectionResult$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_HlsQualitySelectionResult$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_HlsQualitySelectionResult$stableprop[0]
@@ -2664,6 +2757,7 @@ final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_compo
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_DolbyVisionInfo$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_DolbyVisionInfo$stableprop_getter|io_github_kdroidfilter_composemediaplayer_DolbyVisionInfo$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_DolbyVisionProfileMapping$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_DolbyVisionProfileMapping$stableprop_getter|io_github_kdroidfilter_composemediaplayer_DolbyVisionProfileMapping$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioDuckingInterval$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioDuckingInterval$stableprop_getter|io_github_kdroidfilter_composemediaplayer_ExternalAudioDuckingInterval$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioPlaybackStatus$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioPlaybackStatus$stableprop_getter|io_github_kdroidfilter_composemediaplayer_ExternalAudioPlaybackStatus$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioTrack$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_ExternalAudioTrack$stableprop_getter|io_github_kdroidfilter_composemediaplayer_ExternalAudioTrack$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_Hdr10PlusInfo$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_Hdr10PlusInfo$stableprop_getter|io_github_kdroidfilter_composemediaplayer_Hdr10PlusInfo$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_HlsQualitySelectionResult$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_HlsQualitySelectionResult$stableprop_getter|io_github_kdroidfilter_composemediaplayer_HlsQualitySelectionResult$stableprop_getter(){}[0]

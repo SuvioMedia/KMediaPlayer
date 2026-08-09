@@ -39,6 +39,9 @@ internal class SynchronizedExternalAudioVideoPlayerState(
     private var externalAudioActive = false
     private var disposed = false
     private var requestedVolume = primaryState.volume
+    private var programmeAudioTrack by mutableStateOf<AudioTrack?>(null)
+    private var primaryAudioHandling by mutableStateOf(ExternalAudioPrimaryAudioHandling.INACTIVE)
+    private var encodedPassthroughSuppressed by mutableStateOf(false)
     private var synchronizationScope: CoroutineScope? = null
     private var syncJob: Job? = null
 
@@ -46,10 +49,24 @@ internal class SynchronizedExternalAudioVideoPlayerState(
         get() = primaryState
 
     override val capabilities: PlayerCapabilities
-        get() = primaryState.capabilities.copy(supportsExternalAudioTracks = true)
+        get() =
+            primaryState.capabilities.copy(
+                supportsExternalAudioTracks = true,
+                supportsExternalAudioOverlay = true,
+                supportsExternalAudioDucking = true,
+            )
 
     override val externalAudioTracks: List<ExternalAudioTrack>
         get() = registeredTracks
+
+    override val externalAudioPlaybackStatus: ExternalAudioPlaybackStatus
+        get() =
+            ExternalAudioPlaybackStatus(
+                selectedTrackId = selectedExternalTrack?.id,
+                primaryAudioTrack = programmeAudioTrack,
+                primaryAudioHandling = primaryAudioHandling,
+                encodedPassthroughSuppressed = encodedPassthroughSuppressed,
+            )
 
     override val availableAudioTracks: List<AudioTrack>
         get() {
@@ -109,13 +126,15 @@ internal class SynchronizedExternalAudioVideoPlayerState(
         }
     }
 
-    override fun selectAudioTrack(trackId: String?): TrackSelectionResult =
-        trackId
+    override fun selectAudioTrack(trackId: String?): TrackSelectionResult {
+        ensureOpen()
+        return trackId
             ?.let { id ->
                 availableAudioTracks.firstOrNull { it.id == id }?.let(::selectAudioTrack)
                     ?: TrackSelectionResult.NotFound(id)
             }
             ?: selectAudioTrack(null as AudioTrack?)
+    }
 
     override fun addExternalAudioTrack(track: ExternalAudioTrack) {
         ensureOpen()
@@ -306,6 +325,14 @@ internal class SynchronizedExternalAudioVideoPlayerState(
         try {
             deactivateExternalAudio(clearSelection = false)
             externalError = null
+            programmeAudioTrack = primaryState.currentAudioTrack
+            primaryAudioHandling = track.resolvePrimaryAudioHandling(programmeAudioTrack)
+            encodedPassthroughSuppressed =
+                if (primaryAudioHandling.requiresLocalVolumeControl) {
+                    configurePrimaryAudioForExternalMixing(primaryState, enabled = true)
+                } else {
+                    false
+                }
             selectedExternalTrack = track
             val currentEngine = engine ?: engineFactory().also { engine = it }
             currentEngine.prepare(
@@ -342,6 +369,12 @@ internal class SynchronizedExternalAudioVideoPlayerState(
 
     private fun deactivateExternalAudio(clearSelection: Boolean = true) {
         externalAudioActive = false
+        if (encodedPassthroughSuppressed || primaryAudioHandling.requiresLocalVolumeControl) {
+            runCatching { configurePrimaryAudioForExternalMixing(primaryState, enabled = false) }
+        }
+        encodedPassthroughSuppressed = false
+        primaryAudioHandling = ExternalAudioPrimaryAudioHandling.INACTIVE
+        programmeAudioTrack = null
         primaryState.volume = requestedVolume
         runCatching { engine?.release() }
         if (clearSelection) selectedExternalTrack = null
@@ -349,7 +382,12 @@ internal class SynchronizedExternalAudioVideoPlayerState(
 
     private fun applyPrimaryMixVolume(position: Duration) {
         val track = selectedExternalTrack
-        val multiplier = track?.primaryVolumeMultiplierAt(position) ?: 1f
+        val multiplier =
+            if (primaryAudioHandling == ExternalAudioPrimaryAudioHandling.PRESERVED) {
+                1f
+            } else {
+                track?.primaryVolumeMultiplierAt(position) ?: 1f
+            }
         primaryState.volume = requestedVolume * multiplier
     }
 
@@ -380,6 +418,28 @@ internal class SynchronizedExternalAudioVideoPlayerState(
     }
 }
 
+private val ExternalAudioPrimaryAudioHandling.requiresLocalVolumeControl: Boolean
+    get() = this == ExternalAudioPrimaryAudioHandling.REPLACED || this == ExternalAudioPrimaryAudioHandling.DUCKED
+
+private fun ExternalAudioTrack.resolvePrimaryAudioHandling(
+    programmeAudioTrack: AudioTrack?,
+): ExternalAudioPrimaryAudioHandling {
+    if (playbackMode == ExternalAudioPlaybackMode.REPLACE) return ExternalAudioPrimaryAudioHandling.REPLACED
+    val preservePrimaryAudio =
+        when (mixingPolicy) {
+            ExternalAudioMixingPolicy.AUTO ->
+                programmeAudioTrack?.spatialAudioFormat?.mayCarryObjectBasedMetadata == true
+
+            ExternalAudioMixingPolicy.PRESERVE_PRIMARY_AUDIO -> true
+            ExternalAudioMixingPolicy.PREFER_LOCAL_MIX -> false
+        }
+    return if (preservePrimaryAudio) {
+        ExternalAudioPrimaryAudioHandling.PRESERVED
+    } else {
+        ExternalAudioPrimaryAudioHandling.DUCKED
+    }
+}
+
 private fun ExternalAudioTrack.primaryVolumeMultiplierAt(position: Duration): Float {
     if (playbackMode == ExternalAudioPlaybackMode.REPLACE) return 0f
     if (duckingIntervals.isEmpty()) return 1f
@@ -400,14 +460,14 @@ private fun ExternalAudioTrack.primaryVolumeMultiplierAt(position: Duration): Fl
         val startMs = previous.start.inWholeMilliseconds
         val endMs = previous.endExclusive.inWholeMilliseconds
         if (positionMs in startMs until endMs) return duckingVolumeMultiplier
-        if (positionMs >= endMs && positionMs < endMs + ExternalAudioDuckingReleaseMs) {
-            val progress = (positionMs - endMs).toFloat() / ExternalAudioDuckingReleaseMs.toFloat()
+        if (positionMs >= endMs && positionMs < endMs + EXTERNAL_AUDIO_DUCKING_RELEASE_MS) {
+            val progress = (positionMs - endMs).toFloat() / EXTERNAL_AUDIO_DUCKING_RELEASE_MS.toFloat()
             multiplier = duckingVolumeMultiplier + (1f - duckingVolumeMultiplier) * progress
         }
     }
     duckingIntervals.getOrNull(low)?.let { next ->
         val startMs = next.start.inWholeMilliseconds
-        val attackStartMs = (startMs - ExternalAudioDuckingAttackMs).coerceAtLeast(0L)
+        val attackStartMs = (startMs - EXTERNAL_AUDIO_DUCKING_ATTACK_MS).coerceAtLeast(0L)
         if (positionMs >= attackStartMs && positionMs < startMs) {
             val progress = (positionMs - attackStartMs).toFloat() / (startMs - attackStartMs).coerceAtLeast(1L)
             multiplier = min(multiplier, 1f - (1f - duckingVolumeMultiplier) * progress)
@@ -416,8 +476,8 @@ private fun ExternalAudioTrack.primaryVolumeMultiplierAt(position: Duration): Fl
     return multiplier.coerceIn(duckingVolumeMultiplier, 1f)
 }
 
-private const val ExternalAudioDuckingAttackMs = 100L
-private const val ExternalAudioDuckingReleaseMs = 300L
+private const val EXTERNAL_AUDIO_DUCKING_ATTACK_MS = 100L
+private const val EXTERNAL_AUDIO_DUCKING_RELEASE_MS = 300L
 
 /** Decorates an alternative backend with the platform's synchronized replacement/overlay audio transport. */
 @ExperimentalComposeMediaPlayerBackendApi
