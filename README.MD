@@ -1202,8 +1202,8 @@ if (subtitleTrack != null) {
 
 `availableSubtitleTracks` can contain both external tracks added by your app through `addSubtitleTrack(...)` and embedded tracks discovered from the current media. Use `replaceExternalSubtitleTracks(...)` to replace app-managed tracks while preserving embedded tracks, or `removeSubtitleTrack(...)` / `clearExternalSubtitleTracks()` to remove app-managed tracks.
 
-Applications can also attach a timeline-aligned audio source as an alternative to the audio embedded
-in the primary media. This is available on Android, iOS, desktop JVM, and browser Wasm. Check
+Applications can also attach a timeline-aligned replacement or overlay audio source to the primary
+media. This is available on Android, iOS, desktop JVM, and browser Wasm. Check
 `capabilities.supportsExternalAudioTracks`, open the primary source, and then register the external
 track:
 
@@ -1217,21 +1217,27 @@ if (playerState.capabilities.supportsExternalAudioTracks) {
             uri = "https://example.com/narration.m4a",
             mimeType = "audio/mp4",
         ),
+        playbackMode = ExternalAudioPlaybackMode.OVERLAY,
+        duckingIntervals = listOf(
+            ExternalAudioDuckingInterval(12.seconds, 16.seconds),
+        ),
+        duckingVolumeMultiplier = 0.35f,
     )
     playerState.addExternalAudioTrack(narration)
     playerState.selectAudioTrack(narration.id)
 }
 ```
 
-External audio is an alternative full mix, not a second signal mixed on the device. Its timestamps
-and period layout must match the primary content. The registry is bound to the current source and is
-cleared when another primary source is opened or the source is released. Use
+`REPLACE` tracks are alternative full mixes and mute the programme audio after the auxiliary transport
+is ready. `OVERLAY` tracks are mixed locally with programme audio; configured ducking intervals lower
+the programme volume with short attack/release ramps while keeping the overlay at the requested player
+volume. Both modes require timestamps aligned to the primary content. The registry is bound to the
+current source and is cleared when another primary source is opened or the source is released. Use
 `replaceExternalAudioTracks(...)` to update app-managed tracks while preserving embedded tracks.
-Android merges the alternative source into the Media3 timeline. iOS and desktop JVM use a second
-headless platform transport, while browser Wasm uses a separate `HTMLAudioElement`. For the latter
-routes the primary player remains the timeline authority: play, pause, seek, speed, looping, volume,
-and drift are synchronized, and embedded audio stays audible until the alternative transport is
-ready and playing. Optional backends can opt into the same behavior with
+Native Android replacement tracks can be merged into the Media3 timeline. Overlay tracks, iOS and
+desktop JVM use a second headless platform transport, while browser Wasm uses a separate
+`HTMLAudioElement`. On synchronized routes the primary player remains the timeline authority: play,
+pause, seek, speed, looping, volume, and drift are synchronized. Optional backends can opt into the same behavior with
 `withSynchronizedExternalAudioPlayback()`.
 
 Request headers are sanitized through the same policy as primary media headers; avoid putting

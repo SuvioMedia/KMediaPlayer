@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 class ExternalAudioTrackTest {
     @Test
@@ -69,6 +70,18 @@ class ExternalAudioTrackTest {
                 label = "Polish narration",
                 source = MediaSourceSpec("https://media.invalid/narration.m4a"),
                 channels = 0,
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            ExternalAudioTrack(
+                id = "narration-pl",
+                label = "Polish narration",
+                source = MediaSourceSpec("https://media.invalid/narration.m4a"),
+                playbackMode = ExternalAudioPlaybackMode.OVERLAY,
+                duckingIntervals = listOf(
+                    ExternalAudioDuckingInterval(2.seconds, 4.seconds),
+                    ExternalAudioDuckingInterval(3.seconds, 5.seconds),
+                ),
             )
         }
     }

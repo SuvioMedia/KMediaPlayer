@@ -15,14 +15,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.min
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Adds synchronized external audio to a backend by running an audio-only transport beside the primary player.
  *
- * The primary player remains the timeline authority. Its embedded audio is muted only after the external transport is
- * ready, and is restored immediately when the external track is removed or fails.
+ * The primary player remains the timeline authority. A replacement track mutes embedded audio only after the external
+ * transport is ready. An overlay track keeps embedded audio active and can lower it during configured timeline
+ * intervals. The requested primary volume is restored immediately when the external track is removed or fails.
  */
 internal class SynchronizedExternalAudioVideoPlayerState(
     internal val primaryState: VideoPlayerState,
@@ -68,7 +70,7 @@ internal class SynchronizedExternalAudioVideoPlayerState(
             val normalized = value.coerceIn(0f, 1f)
             requestedVolume = normalized
             if (externalAudioActive) {
-                primaryState.volume = 0f
+                applyPrimaryMixVolume(primaryState.preciseCurrentTime)
                 engine?.setVolume(normalized)
             } else {
                 primaryState.volume = normalized
@@ -183,12 +185,14 @@ internal class SynchronizedExternalAudioVideoPlayerState(
     override fun restart() {
         primaryState.restart()
         engine?.seekTo(Duration.ZERO)
+        if (externalAudioActive) applyPrimaryMixVolume(Duration.ZERO)
         if (primaryState.isPlaying) engine?.play()
     }
 
     override fun seekTo(time: Duration) {
         primaryState.seekTo(time)
         engine?.seekTo(time)
+        if (externalAudioActive) applyPrimaryMixVolume(time)
     }
 
     override fun seekToMs(timeMs: Long) {
@@ -293,8 +297,8 @@ internal class SynchronizedExternalAudioVideoPlayerState(
         if (selectedExternalTrack?.id != selected.id) return
         if (!externalAudioActive) {
             externalAudioActive = true
-            primaryState.volume = 0f
         }
+        applyPrimaryMixVolume(primaryPosition)
         currentEngine.setVolume(requestedVolume)
     }
 
@@ -343,6 +347,12 @@ internal class SynchronizedExternalAudioVideoPlayerState(
         if (clearSelection) selectedExternalTrack = null
     }
 
+    private fun applyPrimaryMixVolume(position: Duration) {
+        val track = selectedExternalTrack
+        val multiplier = track?.primaryVolumeMultiplierAt(position) ?: 1f
+        primaryState.volume = requestedVolume * multiplier
+    }
+
     private fun failExternalAudio() {
         deactivateExternalAudio()
         externalError = VideoPlayerError.SourceError(EXTERNAL_AUDIO_FAILURE_MESSAGE)
@@ -364,13 +374,52 @@ internal class SynchronizedExternalAudioVideoPlayerState(
     }
 
     private companion object {
-        const val SYNC_INTERVAL_MS = 250L
+        const val SYNC_INTERVAL_MS = 50L
         const val MAXIMUM_DRIFT_MS = 250L
         const val EXTERNAL_AUDIO_FAILURE_MESSAGE = "External audio playback failed."
     }
 }
 
-/** Decorates an alternative backend with the platform's synchronized external-audio transport. */
+private fun ExternalAudioTrack.primaryVolumeMultiplierAt(position: Duration): Float {
+    if (playbackMode == ExternalAudioPlaybackMode.REPLACE) return 0f
+    if (duckingIntervals.isEmpty()) return 1f
+    val positionMs = position.inWholeMilliseconds.coerceAtLeast(0L)
+    var low = 0
+    var high = duckingIntervals.size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (duckingIntervals[middle].start.inWholeMilliseconds <= positionMs) {
+            low = middle + 1
+        } else {
+            high = middle
+        }
+    }
+
+    var multiplier = 1f
+    duckingIntervals.getOrNull(low - 1)?.let { previous ->
+        val startMs = previous.start.inWholeMilliseconds
+        val endMs = previous.endExclusive.inWholeMilliseconds
+        if (positionMs in startMs until endMs) return duckingVolumeMultiplier
+        if (positionMs >= endMs && positionMs < endMs + ExternalAudioDuckingReleaseMs) {
+            val progress = (positionMs - endMs).toFloat() / ExternalAudioDuckingReleaseMs.toFloat()
+            multiplier = duckingVolumeMultiplier + (1f - duckingVolumeMultiplier) * progress
+        }
+    }
+    duckingIntervals.getOrNull(low)?.let { next ->
+        val startMs = next.start.inWholeMilliseconds
+        val attackStartMs = (startMs - ExternalAudioDuckingAttackMs).coerceAtLeast(0L)
+        if (positionMs >= attackStartMs && positionMs < startMs) {
+            val progress = (positionMs - attackStartMs).toFloat() / (startMs - attackStartMs).coerceAtLeast(1L)
+            multiplier = min(multiplier, 1f - (1f - duckingVolumeMultiplier) * progress)
+        }
+    }
+    return multiplier.coerceIn(duckingVolumeMultiplier, 1f)
+}
+
+private const val ExternalAudioDuckingAttackMs = 100L
+private const val ExternalAudioDuckingReleaseMs = 300L
+
+/** Decorates an alternative backend with the platform's synchronized replacement/overlay audio transport. */
 @ExperimentalComposeMediaPlayerBackendApi
 fun VideoPlayerState.withSynchronizedExternalAudioPlayback(): VideoPlayerState =
     withSynchronizedExternalAudioEngine(::createPlatformExternalAudioPlaybackEngine)

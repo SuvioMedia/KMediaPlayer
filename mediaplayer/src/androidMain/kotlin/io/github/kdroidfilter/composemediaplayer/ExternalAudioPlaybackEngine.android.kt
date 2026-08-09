@@ -1,4 +1,9 @@
 package io.github.kdroidfilter.composemediaplayer
 
 internal actual fun createPlatformExternalAudioPlaybackEngine(): ExternalAudioPlaybackEngine =
-    VideoPlayerStateExternalAudioPlaybackEngine(createVideoPlayerState(cacheConfig = CacheConfig()))
+    VideoPlayerStateExternalAudioPlaybackEngine(
+        DefaultVideoPlayerState(
+            audioMode = AudioMode(interruptionMode = InterruptionMode.MixWithOthers),
+            cacheConfig = CacheConfig(),
+        ),
+    )

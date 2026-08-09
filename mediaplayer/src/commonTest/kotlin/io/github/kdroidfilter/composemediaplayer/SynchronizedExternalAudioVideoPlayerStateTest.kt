@@ -8,10 +8,42 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 @Suppress("MagicNumber")
 class SynchronizedExternalAudioVideoPlayerStateTest {
+    @Test
+    fun overlayAudioKeepsProgrammeAudioAndDucksOnlyInsideConfiguredIntervals() {
+        val primary = FakePrimaryVideoPlayerState(initialVolume = 0.8f)
+        val engine = FakeExternalAudioPlaybackEngine(ready = true)
+        val state = synchronizedState(primary, engine)
+        val narration = narrationTrack().copy(
+            playbackMode = ExternalAudioPlaybackMode.OVERLAY,
+            duckingIntervals = listOf(ExternalAudioDuckingInterval(5.seconds, 7.seconds)),
+            duckingVolumeMultiplier = 0.5f,
+        )
+
+        try {
+            state.addExternalAudioTrack(narration)
+            state.selectAudioTrack(narration.id)
+            state.synchronizeExternalAudio()
+
+            assertEquals(0.4f, primary.volume)
+            assertEquals(0.8f, engine.volume)
+            assertTrue(engine.isPlaying)
+
+            state.seekTo(7_150.milliseconds)
+            assertEquals(0.6f, primary.volume)
+
+            state.seekTo(8.seconds)
+            assertEquals(0.8f, primary.volume)
+            assertEquals(0.8f, engine.volume)
+        } finally {
+            state.dispose()
+        }
+    }
+
     @Test
     fun externalAudioActivatesOnlyAfterTheAuxiliaryTransportIsReady() {
         val embedded = AudioTrack(id = "embedded", label = "Embedded")
