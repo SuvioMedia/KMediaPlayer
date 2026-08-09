@@ -25,6 +25,11 @@ import androidx.compose.runtime.remember
  * to extract the verified bundled desktop runtime. Desktop applications whose default temporary
  * directory is shared or otherwise rejected can provision a secure directory and pass it here.
  * Other targets ignore this option.
+ * @param dynamicRangePolicy requested desktop HDR/SDR behavior.
+ * @param dolbyVisionPolicy requested Dolby Vision compatibility behavior. Native Dolby Vision
+ * desktop presentation is unsupported; MPV uses a compatible HDR base layer or conversion.
+ * @param desktopVideoSurfaceMode desktop GPU texture mode. [DesktopVideoSurfaceMode.COMPOSE]
+ * remains the explicit CPU/SDR compatibility route.
  */
 @Stable
 data class MpvPlaybackOptions(
@@ -35,6 +40,10 @@ data class MpvPlaybackOptions(
     val maxDesktopRenderPixels: Int = DEFAULT_MAX_DESKTOP_RENDER_PIXELS,
     val runtimeSource: MpvRuntimeSource = MpvRuntimeSource.Bundled,
     val desktopRuntimeDirectory: String? = null,
+    val dynamicRangePolicy: DynamicRangePolicy = DynamicRangePolicy.AUTO,
+    val dolbyVisionPolicy: DolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+    val desktopVideoSurfaceMode: DesktopVideoSurfaceMode =
+        DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
 ) {
     init {
         require(subtitleFontsDirectory == null || subtitleFontsDirectory.isNotBlank()) {

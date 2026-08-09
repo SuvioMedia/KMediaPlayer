@@ -8,6 +8,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import dev.nucleusframework.window.tao.LinuxTextureViewProducerInfo
+import dev.nucleusframework.window.tao.NucleusDrmFormat
+import dev.nucleusframework.window.tao.TextureColorEncoding
+import dev.nucleusframework.window.tao.TextureColorInfo
+import dev.nucleusframework.window.tao.TextureViewFrame
+import dev.nucleusframework.window.tao.TextureViewHostCapabilities
+import dev.nucleusframework.window.tao.TextureViewHostDynamicRange
+import dev.nucleusframework.window.tao.TextureViewHostPixelFormat
+import dev.nucleusframework.window.tao.TextureViewHostPresentationState
+import dev.nucleusframework.window.tao.TextureViewStreamController
+import dev.nucleusframework.window.tao.nucleusDmaBufTextureSource
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
@@ -37,6 +48,7 @@ import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.TexturePresentationOutputRequirement
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
 import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineController
@@ -56,12 +68,14 @@ import io.github.kdroidfilter.composemediaplayer.allowsExternalSourceAdapter
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.externalHlsTrackStreamIndex
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
+import io.github.kdroidfilter.composemediaplayer.hasPresentedTextureFrameAfter
 import io.github.kdroidfilter.composemediaplayer.isExternalHlsAudioTrackId
 import io.github.kdroidfilter.composemediaplayer.isExternalHlsSubtitleTrackId
 import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
 import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.normalizeUnixLocalFileUriForPlayback
+import io.github.kdroidfilter.composemediaplayer.prefersColorManagedTexture
 import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.requestHeadersLineString
 import io.github.kdroidfilter.composemediaplayer.requiresProjectionRenderer
@@ -73,6 +87,7 @@ import io.github.kdroidfilter.composemediaplayer.subtitle.isAssLikeDesktopTrack
 import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
 import io.github.kdroidfilter.composemediaplayer.subtitleTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.toConfirmedDecoderCapabilities
+import io.github.kdroidfilter.composemediaplayer.unsupportedDesktopNativeVideoSurfaceException
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
@@ -101,6 +116,29 @@ private const val WAYLAND_NEGOTIATION_TIMEOUT_MS = 8_000L
 internal const val WAYLAND_OVERLAY_UPLOAD_FAILED = 0
 internal const val WAYLAND_OVERLAY_UPLOAD_COMMITTED = 1
 internal const val WAYLAND_OVERLAY_UPLOAD_DROPPED = 2
+
+private fun TextureViewHostCapabilities.toLinuxTextureDisplayCapabilities(): DisplayColorCapabilities {
+    if (
+        presentationState == TextureViewHostPresentationState.UNAVAILABLE ||
+        producerInfo !is LinuxTextureViewProducerInfo
+    ) {
+        return DisplayColorCapabilities()
+    }
+    return DisplayColorCapabilities(
+        isKnown = true,
+        supportedDynamicRanges =
+            buildSet {
+                add(VideoDynamicRange.SDR)
+                if (actualDynamicRange == TextureViewHostDynamicRange.HDR) {
+                    add(VideoDynamicRange.HDR10)
+                    add(VideoDynamicRange.HDR10_PLUS)
+                    add(VideoDynamicRange.HLG)
+                }
+            },
+        maxLuminanceNits = maximumLuminanceNits,
+        referenceWhiteNits = sdrWhiteLevelNits,
+    )
+}
 
 private enum class LinuxLibVlcRenderMode {
     MEMORY,
@@ -180,6 +218,19 @@ class LinuxVideoPlayerState(
     private val frameDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
     internal val currentFrameState: State<ImageBitmap?> = mutableStateOf(null)
+    internal val textureStreamController = TextureViewStreamController()
+    private var textureHostCapabilities = TextureViewHostCapabilities.UNAVAILABLE
+    private var textureOutputConfigured = false
+    private var textureSurfaceWidth = 0
+    private var textureSurfaceHeight = 0
+    private var textureConfiguredInputP010 = false
+    private var textureConfiguredHdr = false
+    private var textureConfiguredHostGeneration = 0L
+    private var textureSubmittedHostGeneration = 0L
+    private var textureSubmittedHostPresentCount = 0L
+    private var textureLastSubmittedFrameSerial = 0L
+    private val textureProducerEpoch = AtomicLong(0L)
+    private var textureConfigureJob: Job? = null
 
     // Double-buffered Skia bitmaps
     private var skiaBitmapWidth: Int = 0
@@ -292,6 +343,18 @@ class LinuxVideoPlayerState(
 
     private fun updateProjectionRenderingInfo() {
         renderingInfo.videoProjection = projection.renderingInfoLabel()
+        if (shouldUseColorManagedTexture() && textureOutputConfigured) {
+            renderingInfo.videoRenderer =
+                when {
+                    textureConfiguredHdr && projection.requiresProjectionRenderer ->
+                        "GStreamer/Vulkan P010 -> FP16 projection DMA-BUF -> Tao TextureView"
+                    textureConfiguredHdr ->
+                        "GStreamer/Vulkan P010 -> FP16 DMA-BUF -> Tao TextureView"
+                    else ->
+                        "GStreamer/Vulkan -> controlled SDR RGBA8 DMA-BUF -> Tao TextureView"
+                }
+            return
+        }
         if (!shouldUseLibVlcNativeSurface()) {
             renderingInfo.videoRenderer =
                 if (libVlcBackendActive && nativeBackendLibVlcRenderMode == LinuxLibVlcRenderMode.MEMORY) {
@@ -501,8 +564,14 @@ class LinuxVideoPlayerState(
                 activeDecoderName = "GStreamer (decoder element not reported)"
                 nativeDecoderNameResolved = false
                 colorOutputVerified = false
-                activeDisplayColorCapabilities = defaultWaylandDisplayCapabilities()
-                val requestWaylandSurface = shouldRequestWaylandColorSurface()
+                activeDisplayColorCapabilities =
+                    if (shouldUseColorManagedTexture()) {
+                        textureHostCapabilities.toLinuxTextureDisplayCapabilities()
+                    } else {
+                        defaultWaylandDisplayCapabilities()
+                    }
+                val requestWaylandSurface =
+                    !shouldUseColorManagedTexture() && shouldRequestWaylandColorSurface()
                 withContext(Dispatchers.Main) {
                     waylandColorSurfaceRequested = requestWaylandSurface
                 }
@@ -527,13 +596,25 @@ class LinuxVideoPlayerState(
                                 playbackOptions.dolbyVisionPolicy == DolbyVisionPolicy.REQUIRE_NATIVE
                         )
                 val needsManagedSdrFallback =
-                    !strictHdrRequest &&
+                    !shouldUseColorManagedTexture() &&
+                        !strictHdrRequest &&
                         !activeSourceColorInfo.isSafeForUnmanagedSdrFallback() &&
                         (
                             !activeSourceColorInfo.isHdr ||
                                 colorPipelineController.pipelineErrorOrNull() != null
                         )
-                if (strictHdrRequest && colorPipelineController.pipelineErrorOrNull() != null) {
+                if (
+                    activeSourceColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
+                    playbackOptions.dolbyVisionPolicy == DolbyVisionPolicy.REQUIRE_NATIVE
+                ) {
+                    publishLinuxColorPipelineError("Native Dolby Vision presentation is unsupported on desktop.")
+                    return@launchSourceOperation
+                }
+                if (
+                    strictHdrRequest &&
+                    !shouldUseColorManagedTexture() &&
+                    colorPipelineController.pipelineErrorOrNull() != null
+                ) {
                     publishLinuxColorPipelineError()
                     return@launchSourceOperation
                 }
@@ -598,7 +679,12 @@ class LinuxVideoPlayerState(
                     lifecycle.ensureCurrentSource(generation)
 
                     startFrameUpdates()
-                    updateFrameAsync()
+                    if (shouldUseColorManagedTexture()) {
+                        scheduleTextureOutputConfiguration()
+                        updateTextureFrameAsync()
+                    } else {
+                        updateFrameAsync()
+                    }
                     startBufferingCheck()
 
                     if (libVlcBackend != null) {
@@ -839,13 +925,9 @@ class LinuxVideoPlayerState(
                 ExternalVlcLocator.findLibVlc()?.let {
                     LinuxResolvedLibVlcBackend(it, LinuxLibVlcRenderMode.MEMORY)
                 }
-            "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-xwindow", "libvlc-x11" -> {
-                ensureLinuxNativeViewX11DisplayAvailable()
-                ExternalVlcLocator.findLibVlc()?.let {
-                    LinuxResolvedLibVlcBackend(it, LinuxLibVlcRenderMode.NATIVE_VIEW)
-                } ?: throw missingLibVlcBackendException()
-            }
-            "libvlc-wayland", "wayland" -> unsupportedLibVlcWaylandBackend()
+            "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-xwindow", "libvlc-x11",
+            "libvlc-wayland", "wayland", "unsupported-native-view",
+            -> throw unsupportedDesktopNativeVideoSurfaceException()
             "ffmpeg", "kmediabridge", "bridge", "vlc" -> null
             else -> null
         }
@@ -1063,6 +1145,175 @@ class LinuxVideoPlayerState(
         }
     }
 
+    internal fun shouldUseColorManagedTexture(): Boolean =
+        !lifecycle.isDisposed &&
+            playbackOptions.desktopVideoSurfaceMode.prefersColorManagedTexture &&
+            !nativeBackendUsesLibVlc
+
+    internal fun onTextureSurfaceResized(
+        width: Int,
+        height: Int,
+    ) {
+        textureSurfaceWidth = width.coerceAtLeast(0)
+        textureSurfaceHeight = height.coerceAtLeast(0)
+        onResized(width, height)
+        scheduleTextureOutputConfiguration()
+    }
+
+    internal fun onTextureViewHostCapabilities(capabilities: TextureViewHostCapabilities) {
+        textureHostCapabilities = capabilities
+        activeDisplayColorCapabilities = capabilities.toLinuxTextureDisplayCapabilities()
+        val presentedSubmittedFrame =
+            textureLastSubmittedFrameSerial > 0L &&
+                capabilities.hasPresentedTextureFrameAfter(
+                    submittedGeneration = textureSubmittedHostGeneration,
+                    submittedPresentCount = textureSubmittedHostPresentCount,
+                    outputRequirement =
+                        if (textureConfiguredHdr) {
+                            TexturePresentationOutputRequirement.HDR_TEN_BIT_OUTPUT
+                        } else {
+                            TexturePresentationOutputRequirement.KNOWN_OUTPUT
+                        },
+                )
+        if (!presentedSubmittedFrame) {
+            colorOutputVerified = false
+        }
+        if (presentedSubmittedFrame && !colorOutputVerified) {
+            colorOutputVerified = true
+            activeDecoderName =
+                if (textureConfiguredInputP010) {
+                    "GStreamer/Vulkan P010 texture producer"
+                } else {
+                    "GStreamer/Vulkan BGRA texture producer"
+                }
+            colorPipelineController.updateSource(
+                source = activeSourceColorInfo,
+                decoderName = activeDecoderName,
+                decoderCapabilities = activeSourceColorInfo.toConfirmedDecoderCapabilities(),
+                isLive = lastUri?.substringBefore('?')?.endsWith(".m3u8", ignoreCase = true) == true,
+            )
+            isLoading = false
+        }
+        refreshLinuxColorPipeline()
+        scheduleTextureOutputConfiguration()
+    }
+
+    internal fun onColorManagedTextureHostAttached() {
+        scheduleTextureOutputConfiguration()
+    }
+
+    private fun scheduleTextureOutputConfiguration() {
+        if (!shouldUseColorManagedTexture()) return
+        textureConfigureJob?.cancel()
+        textureConfigureJob =
+            playerScope.launch(frameDispatcher) {
+                configureTextureOutputIfPossible()
+            }
+    }
+
+    private suspend fun configureTextureOutputIfPossible() {
+        if (!shouldUseColorManagedTexture()) return
+        val ptr = playerPtr
+        val host = textureHostCapabilities
+        val producerInfo = host.producerInfo as? LinuxTextureViewProducerInfo
+        if (
+            ptr == 0L ||
+            textureSurfaceWidth <= 0 ||
+            textureSurfaceHeight <= 0 ||
+            host.presentationState == TextureViewHostPresentationState.UNAVAILABLE ||
+            producerInfo == null ||
+            host.outputPixelFormat == TextureViewHostPixelFormat.UNKNOWN
+        ) {
+            return
+        }
+
+        val sourceNeedsHdrProcessing = activeSourceColorInfo.isHdr
+        var outputHdr =
+            sourceNeedsHdrProcessing &&
+                playbackOptions.dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR &&
+                host.actualDynamicRange == TextureViewHostDynamicRange.HDR
+        if (
+            sourceNeedsHdrProcessing &&
+            playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR &&
+            !outputHdr
+        ) {
+            publishLinuxColorPipelineError("The active Nucleus TextureView host exposes only SDR output.")
+            return
+        }
+        var outputFourcc =
+            if (outputHdr) NucleusDrmFormat.ABGR16161616F else NucleusDrmFormat.ARGB8888
+        if (producerInfo.formats.none { it.format == outputFourcc }) {
+            if (playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR || !outputHdr) {
+                publishLinuxColorPipelineError("The active EGL device cannot import the required video texture format.")
+                return
+            }
+            outputHdr = false
+            outputFourcc = NucleusDrmFormat.ARGB8888
+            if (producerInfo.formats.none { it.format == outputFourcc }) {
+                publishLinuxColorPipelineError("The active EGL device cannot import an SDR video texture.")
+                return
+            }
+        }
+
+        val inputP010 = sourceNeedsHdrProcessing || projection.requiresProjectionRenderer
+        val outputWidth =
+            if (projection.requiresProjectionRenderer || inputP010) {
+                textureSurfaceWidth
+            } else {
+                metadata.width?.takeIf { it > 0 } ?: textureSurfaceWidth
+            }
+        val outputHeight =
+            if (projection.requiresProjectionRenderer || inputP010) {
+                textureSurfaceHeight
+            } else {
+                metadata.height?.takeIf { it > 0 } ?: textureSurfaceHeight
+            }
+        val configuration =
+            buildLinuxTextureNativeConfiguration(
+                source = activeSourceColorInfo,
+                display = activeDisplayColorCapabilities,
+                dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+                projection = projection,
+                projectionView = projectionView,
+                textureCrop = projectionTextureCrop,
+                metadataHandling = colorPipelineStatus.value.plannedMetadataHandling,
+            )
+        val configured =
+            synchronized(nativeInstanceLock) {
+                if (playerPtr != ptr || nativeBackendUsesLibVlc) return@synchronized false
+                LinuxNativeBridge.nConfigureTextureOutput(
+                    ptr,
+                    outputWidth,
+                    outputHeight,
+                    inputP010,
+                    outputHdr,
+                    configuration.integers,
+                    configuration.floats,
+                )
+            }
+        if (!configured) {
+            textureOutputConfigured = false
+            if (playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR) {
+                publishLinuxColorPipelineError("Vulkan could not create an exportable HDR DMA-BUF texture pool.")
+            }
+            return
+        }
+        if (
+            !textureOutputConfigured ||
+            textureConfiguredHostGeneration != host.generation ||
+            textureConfiguredInputP010 != inputP010 ||
+            textureConfiguredHdr != outputHdr
+        ) {
+            colorOutputVerified = false
+        }
+        textureOutputConfigured = true
+        textureConfiguredInputP010 = inputP010
+        textureConfiguredHdr = outputHdr
+        textureConfiguredHostGeneration = host.generation
+        updateProjectionRenderingInfo()
+        refreshLinuxColorPipeline()
+    }
+
     internal fun shouldUseLibVlcNativeSurface(): Boolean =
         !lifecycle.isDisposed &&
             libVlcNativeSurfaceRequested &&
@@ -1160,6 +1411,10 @@ class LinuxVideoPlayerState(
         )
 
     private fun updateWaylandProjectionConfiguration() {
+        if (shouldUseColorManagedTexture()) {
+            scheduleTextureOutputConfiguration()
+            return
+        }
         if (!waylandColorSurfaceAttached || !waylandProjectionRendererAttached) return
         val configuration = currentLinuxHdrProjectionConfiguration() ?: return
         synchronized(nativeInstanceLock) {
@@ -1446,7 +1701,10 @@ class LinuxVideoPlayerState(
                     if (ptr != 0L && !nativeBackendUsesLibVlc) {
                         refreshNativeDecodedColorInfo(ptr)
                     }
-                    if (shouldUseWaylandColorSurface()) {
+                    if (shouldUseColorManagedTexture()) {
+                        if (!textureOutputConfigured) configureTextureOutputIfPossible()
+                        updateTextureFrameAsync()
+                    } else if (shouldUseWaylandColorSurface()) {
                         updateWaylandColorOutputState()
                     } else if (shouldUseLibVlcNativeSurface()) {
                         lastFrameUpdateTime = System.currentTimeMillis()
@@ -1573,6 +1831,12 @@ class LinuxVideoPlayerState(
             isLive = lastUri?.substringBefore('?')?.endsWith(".m3u8", ignoreCase = true) == true,
         )
 
+        if (shouldUseColorManagedTexture()) {
+            scheduleTextureOutputConfiguration()
+            refreshLinuxColorPipeline()
+            return
+        }
+
         val canUseWaylandColorSurface = shouldRequestWaylandColorSurface()
         when {
             canUseWaylandColorSurface && !waylandColorSurfaceRequested ->
@@ -1661,7 +1925,7 @@ class LinuxVideoPlayerState(
     }
 
     private suspend fun updateFrameAsync() {
-        if (shouldUseLibVlcNativeSurface() || shouldUseWaylandColorSurface()) return
+        if (shouldUseColorManagedTexture() || shouldUseLibVlcNativeSurface() || shouldUseWaylandColorSurface()) return
         withContext(frameDispatcher) {
             try {
                 val ptr = playerPtr
@@ -1758,6 +2022,100 @@ class LinuxVideoPlayerState(
                 if (e is CancellationException) throw e
                 linuxLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
             }
+        }
+    }
+
+    private suspend fun updateTextureFrameAsync() {
+        if (!shouldUseColorManagedTexture() || !textureOutputConfigured) return
+        withContext(frameDispatcher) {
+            val ptr = playerPtr
+            if (ptr == 0L) return@withContext
+            val values =
+                synchronized(nativeInstanceLock) {
+                    if (playerPtr != ptr) null else LinuxNativeBridge.nAcquireTextureFrame(ptr)
+                }?.takeIf { it.size >= 10 }
+                    ?: return@withContext
+            val serial = values[0]
+            val generation = values[1]
+            val width = values[2].toInt()
+            val height = values[3].toInt()
+            val fourcc = values[4].toInt()
+            val dmaBufFd = values[5].toInt()
+            val stride = values[6].toInt()
+            val offset = values[7].toInt()
+            val modifier = values[8]
+            val acquireFenceFd = values[9].toInt()
+            if (serial <= 0L || width <= 0 || height <= 0 || dmaBufFd < 0 || stride <= 0) {
+                LinuxNativeBridge.nReleaseTextureFrame(
+                    ptr,
+                    generation,
+                    serial,
+                    dmaBufFd,
+                    acquireFenceFd,
+                )
+                return@withContext
+            }
+            val producerEpoch = textureProducerEpoch.get()
+            val referenceWhite =
+                textureHostCapabilities.sdrWhiteLevelNits
+                    ?: activeDisplayColorCapabilities.referenceWhiteNits
+                    ?: 203f
+            val colorInfo =
+                if (fourcc == NucleusDrmFormat.ABGR16161616F) {
+                    TextureColorInfo(
+                        encoding = TextureColorEncoding.EXTENDED_LINEAR_SRGB,
+                        premultipliedAlpha = true,
+                        sdrWhiteLevelNits = referenceWhite,
+                    )
+                } else {
+                    TextureColorInfo.SRGB_PREMULTIPLIED
+                }
+            val frame =
+                TextureViewFrame(
+                    source =
+                        nucleusDmaBufTextureSource(
+                            fd = dmaBufFd,
+                            widthPx = width,
+                            heightPx = height,
+                            stride = stride,
+                            fourcc = fourcc,
+                            offset = offset,
+                            modifier = modifier,
+                            colorInfo = colorInfo,
+                        ),
+                    acquireFenceFd = acquireFenceFd,
+                    onReleased = { releaseFenceFd ->
+                        synchronized(nativeInstanceLock) {
+                            val activeHandle =
+                                ptr.takeIf {
+                                    textureProducerEpoch.get() == producerEpoch && playerPtr == ptr
+                                } ?: 0L
+                            LinuxNativeBridge.nReleaseTextureFrame(
+                                activeHandle,
+                                generation,
+                                serial,
+                                dmaBufFd,
+                                releaseFenceFd,
+                            )
+                        }
+                    },
+                )
+            runCatching { textureStreamController.submitFrame(frame) }
+                .onFailure {
+                    LinuxNativeBridge.nReleaseTextureFrame(
+                        ptr,
+                        generation,
+                        serial,
+                        dmaBufFd,
+                        acquireFenceFd,
+                    )
+                    return@withContext
+                }
+            val capabilities = textureHostCapabilities
+            textureLastSubmittedFrameSerial = serial
+            textureSubmittedHostGeneration = capabilities.generation
+            textureSubmittedHostPresentCount = capabilities.presentedFrameCount
+            lastFrameUpdateTime = System.currentTimeMillis()
         }
     }
 
@@ -2121,6 +2479,7 @@ class LinuxVideoPlayerState(
                 waylandAttachedWidget = 0L
                 clearDesktopAssSubtitleRenderer()
                 resetState()
+                textureStreamController.close()
                 onPlaybackEnded = null
                 onRestart = null
             }
@@ -2887,6 +3246,51 @@ class LinuxVideoPlayerState(
     }
 
     private fun refreshLinuxColorPipeline() {
+        val usesTexture = shouldUseColorManagedTexture()
+        if (usesTexture) {
+            val host = textureHostCapabilities
+            val hostAvailable =
+                host.presentationState != TextureViewHostPresentationState.UNAVAILABLE &&
+                    host.producerInfo is LinuxTextureViewProducerInfo
+            val controlledRanges =
+                if (textureConfiguredHdr) {
+                    WAYLAND_NATIVE_DYNAMIC_RANGES + VideoDynamicRange.HDR10_PLUS
+                } else {
+                    emptySet()
+                }
+            colorPipelineController.updateOutput(
+                displayCapabilities = activeDisplayColorCapabilities,
+                rendererCapabilities =
+                    RendererColorCapabilities(
+                        controlledHdrDynamicRanges = controlledRanges,
+                        supportsHdrProjection = textureConfiguredHdr && projection.requiresProjectionRenderer,
+                        supportsHdr10PlusApplication = textureConfiguredHdr,
+                        supportsToneMappingToSdr = true,
+                    ),
+                surfaceKind = VideoSurfaceKind.TEXTURE_VIEW,
+                nativeSurfaceAvailable = false,
+                isProjection = projection.requiresProjectionRenderer,
+                verification =
+                    if (colorOutputVerified) {
+                        ColorPipelineVerification.RENDERER_CONFIGURED
+                    } else {
+                        ColorPipelineVerification.NONE
+                    },
+                platformRuntimeFallbackReason =
+                    ColorPipelineFallbackReason.PLATFORM_RUNTIME_UNAVAILABLE.takeUnless {
+                        hostAvailable && textureOutputConfigured
+                    },
+                platformRuntimeDetail =
+                    when {
+                        !hostAvailable -> "Linux color-managed output is waiting for a Nucleus TextureView host."
+                        !textureOutputConfigured -> "Vulkan DMA-BUF texture output is not configured yet."
+                        !colorOutputVerified ->
+                            "Linux texture output is waiting for a producer frame and a same-generation system Present."
+                        else -> null
+                    },
+            )
+            return
+        }
         val runtimeStatus = linuxHdrRuntimeStatus.takeIf { activeSourceColorInfo.isHdr }
         val runtimeRouteReady =
             runtimeStatus?.let { status ->
@@ -2993,6 +3397,17 @@ class LinuxVideoPlayerState(
     }
 
     private fun resetLinuxColorPipeline() {
+        textureConfigureJob?.cancel()
+        textureConfigureJob = null
+        textureProducerEpoch.incrementAndGet()
+        textureStreamController.clear()
+        textureOutputConfigured = false
+        textureConfiguredInputP010 = false
+        textureConfiguredHdr = false
+        textureConfiguredHostGeneration = 0L
+        textureSubmittedHostGeneration = 0L
+        textureSubmittedHostPresentCount = 0L
+        textureLastSubmittedFrameSerial = 0L
         activeSourceColorInfo = VideoColorInfo()
         nativeDecodedColorGeneration = 0
         activeDecoderName = null

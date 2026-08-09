@@ -1,5 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer.mpv
 
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
+import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
+import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.MpvLoadFailure
 import io.github.shusek.kmediampv.runtime.desktop.MpvDesktopRuntime
@@ -49,6 +52,10 @@ internal data class MpvRuntimeConfig(
     /** Application-private parent directory for the verified bundled runtime. */
     val desktopRuntimeDirectory: Path? = null,
     val maxRenderPixels: Int = 16_777_216,
+    val dynamicRangePolicy: DynamicRangePolicy = DynamicRangePolicy.AUTO,
+    val dolbyVisionPolicy: DolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+    val desktopVideoSurfaceMode: DesktopVideoSurfaceMode =
+        DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
 ) {
     init {
         subtitleFontsDirectory?.let { directory ->
@@ -252,10 +259,12 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
 
 private fun configuredDesktopRuntimeDirectory(): Path? {
     val configuredPath =
-        System.getProperty(MPV_RUNTIME_DIRECTORY_PROPERTY)
+        System
+            .getProperty(MPV_RUNTIME_DIRECTORY_PROPERTY)
             ?.trim()
             ?.takeIf(String::isNotEmpty)
-            ?: System.getenv(MPV_RUNTIME_DIRECTORY_ENVIRONMENT)
+            ?: System
+                .getenv(MPV_RUNTIME_DIRECTORY_ENVIRONMENT)
                 ?.trim()
                 ?.takeIf(String::isNotEmpty)
             ?: return null

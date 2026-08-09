@@ -499,7 +499,10 @@ static HRESULT ExtractHdr10PlusPayloadForTimestamp(
 // MediaType change handler — extracted to kill duplication.
 // ---------------------------------------------------------------------------
 static const GUID& RequestedVideoSubtype(const VideoPlayerInstance* inst) {
-    return inst && inst->bHdrOutputRequested ? MFVideoFormat_P010 : MFVideoFormat_RGB32;
+    if (!inst || !inst->bHdrOutputRequested) return MFVideoFormat_RGB32;
+    return inst->hdrPresenter && !inst->hdrPresenter->RequiresP010Input()
+        ? MFVideoFormat_NV12
+        : MFVideoFormat_P010;
 }
 
 static int32_t DecodedBitDepth(IMFMediaType* mediaType) {
@@ -1209,10 +1212,10 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
     if (SUCCEEDED(hr)) hr = attrs->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, dxgiManager);
     if (SUCCEEDED(hr) && !pInstance->bHdrOutputRequested) {
         // The Compose/BGRA route needs Media Foundation's video processor.
-        // The controlled color renderer instead requests P010 directly from
-        // the HEVC decoder and owns all transfer, gamut and tone-mapping work.
-        // Inserting XVP into that route can consume HLG input without ever
-        // producing a sample for the custom presenter.
+        // The controlled color renderer instead requests P010 for HDR or NV12
+        // for SDR directly from the decoder and owns all transfer, gamut and
+        // tone-mapping work. Inserting XVP into that route can consume HLG input
+        // without ever producing a sample for the custom presenter.
         hr = attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
     }
     if (SUCCEEDED(hr) && isNetwork) hr = attrs->SetUINT32(MF_LOW_LATENCY, TRUE);
@@ -1229,7 +1232,7 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
         return hr;
     }
 
-    // ---- Video stream: P010 on the controlled HDR route, RGB32 otherwise ----
+    // ---- Video stream: P010 HDR/NV12 SDR on the controlled texture route, RGB32 otherwise ----
     hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
     if (SUCCEEDED(hr))
         hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
@@ -1441,7 +1444,7 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMediaWithHeaders(
 NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYTE** pData, DWORD* pDataSize) {
     if (!pInstance || !pData || !pDataSize) return OP_E_NOT_INITIALIZED;
 
-    // P010 HDR frames must never fall through to the JVM BGRA canvas.
+    // Controlled P010/NV12 texture frames must never fall through to the JVM BGRA canvas.
     if (pInstance->bHdrOutputRequested) return MF_E_INVALIDREQUEST;
 
     if (pInstance->pHLSPlayer) {
@@ -2156,9 +2159,9 @@ NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT
         return hr;
     }
     if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
-    // The HDR presenter resizes its swapchain to the HWND. Reconfiguring the
-    // decoder here would risk inserting an RGB video processor into the P010
-    // path, so decoded HDR resolution remains native.
+    // The color-managed texture presenter keeps decoded resolution native.
+    // Reconfiguring here would risk inserting an RGB video processor into the
+    // P010/NV12 GPU path.
     if (pInstance->bHdrOutputRequested) return S_OK;
 
     if (targetWidth == 0 || targetHeight == 0) {
@@ -2217,7 +2220,7 @@ NATIVEVIDEOPLAYER_API HRESULT ConfigureHdrOutput(
     // A single negative transfer value explicitly restores the SDR/BGRA path.
     if (integerConfiguration && integerCount == 1 && integerConfiguration[0] < 0) {
         pInstance->bHdrOutputRequested = false;
-        if (pInstance->hdrPresenter) pInstance->hdrPresenter->Detach();
+        if (pInstance->hdrPresenter) pInstance->hdrPresenter->ResetOutput();
         pInstance->hdrPresenter.reset();
         return S_OK;
     }
@@ -2228,17 +2231,6 @@ NATIVEVIDEOPLAYER_API HRESULT ConfigureHdrOutput(
         integerConfiguration, integerCount, floatingConfiguration, floatingCount);
     if (SUCCEEDED(hr)) pInstance->bHdrOutputRequested = true;
     return hr;
-}
-
-NATIVEVIDEOPLAYER_API HRESULT AttachHdrOutput(VideoPlayerInstance* pInstance, HWND hwnd) {
-    if (!pInstance || !pInstance->bHdrOutputRequested || !pInstance->hdrPresenter) {
-        return MF_E_NOT_INITIALIZED;
-    }
-    return pInstance->hdrPresenter->Attach(hwnd);
-}
-
-NATIVEVIDEOPLAYER_API void DetachHdrOutput(VideoPlayerInstance* pInstance) {
-    if (pInstance && pInstance->hdrPresenter) pInstance->hdrPresenter->Detach();
 }
 
 NATIVEVIDEOPLAYER_API HRESULT RenderHdrFrame(VideoPlayerInstance* pInstance) {
@@ -2285,6 +2277,13 @@ NATIVEVIDEOPLAYER_API HRESULT GetHdrOutputStatus(
     if (!pInstance || !status || !pInstance->hdrPresenter) return E_INVALIDARG;
     *status = pInstance->hdrPresenter->GetStatus();
     return S_OK;
+}
+
+NATIVEVIDEOPLAYER_API HRESULT GetHdrTextureOutputInfo(
+    VideoPlayerInstance* pInstance,
+    HdrTextureOutputInfo* output) {
+    if (!pInstance || !output || !pInstance->hdrPresenter) return E_INVALIDARG;
+    return pInstance->hdrPresenter->GetTextureOutputInfo(output) ? S_OK : S_FALSE;
 }
 
 NATIVEVIDEOPLAYER_API void GetDecodedVideoColorInfo(

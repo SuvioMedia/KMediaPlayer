@@ -27,15 +27,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
+import dev.nucleusframework.window.tao.TextureColorEncoding
+import dev.nucleusframework.window.tao.TextureColorInfo
+import dev.nucleusframework.window.tao.TextureViewController
+import dev.nucleusframework.window.tao.nucleusD3D11SharedTextureSource
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-/** Uses a Tao-hosted native macOS OpenGL/EDR view, with Skia as the portable fallback. */
+/** Uses color-managed GPU textures on supported desktop hosts, with explicit CPU/SDR fallback. */
 @Composable
 internal fun MpvVideoPlayerSurface(
     playerState: MpvVideoPlayerState,
@@ -62,10 +64,6 @@ private fun MpvVideoSurfaceContent(
     onSurfaceAttached: () -> Unit = {},
 ) {
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
-    var nativeAttachFailed by remember(playerState) { mutableStateOf(false) }
-    val useNativeMacSurface =
-        playerState.canUseNativeMacSurface &&
-            !nativeAttachFailed
     val videoModifier =
         contentScale.toMpvSurfaceModifier(
             aspectRatio = playerState.aspectRatio,
@@ -84,37 +82,30 @@ private fun MpvVideoSurfaceContent(
     ) {
         playerState.updateNativeMacProjection()
     }
-    LaunchedEffect(playerState.hasMedia) {
-        if (playerState.hasMedia) nativeAttachFailed = false
-    }
     Box(
         modifier = modifier.background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
-        if (useNativeMacSurface) {
-            val surface =
-                remember(playerState, useNativeMacSurface) {
-                    TaoNativeVideoSurface(
-                        kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
-                        createHandle = playerState::createNativeMacView,
-                        disposeHandle = playerState::disposeNativeMacView,
-                    )
-                }
-            TaoNativeVideoView(
-                surface = surface,
-                // Keep the Nucleus native-view host and its sibling Compose scene on the complete
-                // player viewport. An NSView mounted only at the media's aspect-ratio rectangle
-                // would sit above the root Skia scene and hide every control intersecting video.
-                // Ordinary video lets libmpv apply keep-aspect/panscan in this framebuffer. A
-                // projected source fills the intermediate texture instead, so the native GPU
-                // projection pass owns the only aspect-ratio transform.
-                modifier = Modifier.fillMaxSize().background(Color.Black),
-                overlay = { Box(modifier = Modifier.fillMaxSize()) { overlay() } },
-                onAttached = {
-                    playerState.onNativeMacSurfaceAttached()
-                    latestOnSurfaceAttached()
-                },
-                onUnavailable = { nativeAttachFailed = true },
+        if (playerState.usesWindowsColorManagedTexture) {
+            MpvWindowsTextureVideoSurface(
+                playerState = playerState,
+                contentScale = contentScale,
+                overlay = overlay,
+                onSurfaceAttached = { latestOnSurfaceAttached() },
+            )
+        } else if (playerState.usesMacColorManagedTexture) {
+            MpvMacTextureVideoSurface(
+                playerState = playerState,
+                contentScale = contentScale,
+                overlay = overlay,
+                onSurfaceAttached = { latestOnSurfaceAttached() },
+            )
+        } else if (playerState.usesLinuxColorManagedTexture) {
+            MpvLinuxTextureVideoSurface(
+                playerState = playerState,
+                contentScale = contentScale,
+                overlay = overlay,
+                onSurfaceAttached = { latestOnSurfaceAttached() },
             )
         } else {
             MpvSoftwareVideoPlayerSurface(playerState, videoModifier, overlay)
@@ -124,6 +115,149 @@ private fun MpvVideoSurfaceContent(
             }
         }
     }
+}
+
+/** Linux libmpv render API -> rotating fenced GBM DMA-BUF pool -> Nucleus EGL/Skia scene. */
+@Composable
+private fun MpvLinuxTextureVideoSurface(
+    playerState: MpvVideoPlayerState,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit,
+    onSurfaceAttached: () -> Unit,
+) {
+    var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
+
+    LaunchedEffect(playerState, surfaceSize) {
+        if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return@LaunchedEffect
+        while (isActive) {
+            withFrameNanos { }
+            if (playerState.hasMedia) {
+                val produced =
+                    withContext(Dispatchers.Default) {
+                        playerState.renderLinuxTextureFrame(surfaceSize.width, surfaceSize.height)
+                    }
+                if (!produced && !playerState.isPlaying && !playerState.isLoading && !playerState.isSeeking) {
+                    delay(PAUSED_REFRESH_INTERVAL_MS)
+                }
+            } else {
+                delay(IDLE_REFRESH_INTERVAL_MS)
+            }
+        }
+    }
+
+    DesktopColorManagedTextureVideoView(
+        streamController = playerState.linuxTextureStreamController,
+        modifier = Modifier.fillMaxSize().onSizeChanged { surfaceSize = it },
+        contentScale = contentScale,
+        onHostCapabilitiesChanged = playerState::onLinuxTextureHostCapabilitiesChanged,
+        onSurfaceAttached = onSurfaceAttached,
+        overlay = overlay,
+    )
+}
+
+/** macOS libmpv render API -> rotating IOSurface pool -> Nucleus Metal/Skia scene. */
+@Composable
+private fun MpvMacTextureVideoSurface(
+    playerState: MpvVideoPlayerState,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit,
+    onSurfaceAttached: () -> Unit,
+) {
+    var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
+
+    LaunchedEffect(playerState, surfaceSize) {
+        if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return@LaunchedEffect
+        while (isActive) {
+            withFrameNanos { }
+            if (playerState.hasMedia) {
+                val produced =
+                    withContext(Dispatchers.Default) {
+                        playerState.renderMacTextureFrame(surfaceSize.width, surfaceSize.height)
+                    }
+                if (!produced && !playerState.isPlaying && !playerState.isLoading && !playerState.isSeeking) {
+                    delay(PAUSED_REFRESH_INTERVAL_MS)
+                }
+            } else {
+                delay(IDLE_REFRESH_INTERVAL_MS)
+            }
+        }
+    }
+    DisposableEffect(playerState) {
+        onDispose(playerState::onMacTextureSurfaceDetached)
+    }
+
+    DesktopColorManagedTextureVideoView(
+        streamController = playerState.macTextureStreamController,
+        modifier = Modifier.fillMaxSize().onSizeChanged { surfaceSize = it },
+        contentScale = contentScale,
+        onHostCapabilitiesChanged = playerState::onMacTextureHostCapabilitiesChanged,
+        onSurfaceAttached = onSurfaceAttached,
+        overlay = overlay,
+    )
+}
+
+/** Windows libmpv render API -> shared keyed D3D11 RGBA8/FP16 texture -> Nucleus scene. */
+@Composable
+private fun MpvWindowsTextureVideoSurface(
+    playerState: MpvVideoPlayerState,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit,
+    onSurfaceAttached: () -> Unit,
+) {
+    var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
+    val output by playerState.currentWindowsTextureOutput
+    val controller = remember(playerState) { TextureViewController() }
+    val source =
+        remember(output) {
+            output?.let { texture ->
+                nucleusD3D11SharedTextureSource(
+                    sharedHandle = texture.sharedHandle,
+                    widthPx = texture.width,
+                    heightPx = texture.height,
+                    colorInfo =
+                        if (texture.extendedLinear) {
+                            TextureColorInfo(
+                                encoding = TextureColorEncoding.EXTENDED_LINEAR_SRGB,
+                                premultipliedAlpha = true,
+                                sdrWhiteLevelNits = MPV_SCRGB_REFERENCE_WHITE_NITS,
+                            )
+                        } else {
+                            TextureColorInfo.SRGB_PREMULTIPLIED
+                        },
+                )
+            }
+        }
+
+    LaunchedEffect(playerState, surfaceSize) {
+        if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return@LaunchedEffect
+        while (isActive) {
+            withFrameNanos { }
+            if (playerState.hasMedia) {
+                val produced =
+                    withContext(Dispatchers.Default) {
+                        playerState.renderWindowsTextureFrame(surfaceSize.width, surfaceSize.height)
+                    }
+                if (produced) {
+                    controller.markFrameAvailable()
+                    playerState.onWindowsTextureFrameSubmitted()
+                } else if (!playerState.isPlaying && !playerState.isLoading && !playerState.isSeeking) {
+                    delay(PAUSED_REFRESH_INTERVAL_MS)
+                }
+            } else {
+                delay(IDLE_REFRESH_INTERVAL_MS)
+            }
+        }
+    }
+
+    DesktopColorManagedTextureVideoView(
+        source = source,
+        controller = controller,
+        modifier = Modifier.fillMaxSize().onSizeChanged { surfaceSize = it },
+        contentScale = contentScale,
+        onHostCapabilitiesChanged = playerState::onWindowsTextureHostCapabilitiesChanged,
+        onSurfaceAttached = onSurfaceAttached,
+        overlay = overlay,
+    )
 }
 
 /** Renders libmpv's software BGR0 target into Skia when native GPU output is unavailable. */
@@ -173,6 +307,7 @@ private fun MpvSoftwareVideoPlayerSurface(
 
 private const val PAUSED_REFRESH_INTERVAL_MS = 250L
 private const val IDLE_REFRESH_INTERVAL_MS = 100L
+private const val MPV_SCRGB_REFERENCE_WHITE_NITS = 203f
 
 @Composable
 private fun ContentScale.toMpvSurfaceModifier(

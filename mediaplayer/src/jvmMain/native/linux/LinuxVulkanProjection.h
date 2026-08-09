@@ -6,6 +6,19 @@
 
 typedef struct LinuxVulkanProjection LinuxVulkanProjection;
 
+typedef struct LinuxVulkanTextureFrame {
+    uint64_t serial;
+    uint64_t generation;
+    int32_t width;
+    int32_t height;
+    int32_t fourcc;
+    int32_t dma_buf_fd;
+    int32_t stride;
+    int32_t offset;
+    uint64_t modifier;
+    int32_t acquire_fence_fd;
+} LinuxVulkanTextureFrame;
+
 typedef struct LinuxVulkanProjectionConfiguration {
     int32_t transfer;
     int32_t projection;
@@ -44,6 +57,44 @@ typedef struct LinuxVulkanProjectionConfiguration {
 } LinuxVulkanProjectionConfiguration;
 
 int linux_vulkan_projection_library_available(void);
+
+/** Creates a headless, exportable DMA-BUF texture producer. */
+LinuxVulkanProjection* linux_vulkan_texture_create(
+    int32_t width,
+    int32_t height,
+    int32_t input_p010,
+    int32_t output_hdr,
+    const LinuxVulkanProjectionConfiguration* configuration
+);
+
+int linux_vulkan_texture_update(
+    LinuxVulkanProjection* renderer,
+    int32_t width,
+    int32_t height,
+    int32_t input_p010,
+    int32_t output_hdr,
+    const LinuxVulkanProjectionConfiguration* configuration
+);
+
+int linux_vulkan_texture_acquire_frame(
+    LinuxVulkanProjection* renderer,
+    LinuxVulkanTextureFrame* frame
+);
+
+void linux_vulkan_texture_release_frame(
+    LinuxVulkanProjection* renderer,
+    uint64_t serial,
+    int32_t dma_buf_fd,
+    int32_t release_fence_fd
+);
+
+int linux_vulkan_texture_render_bgra(
+    LinuxVulkanProjection* renderer,
+    const uint8_t* pixels,
+    int32_t stride,
+    int32_t width,
+    int32_t height
+);
 
 LinuxVulkanProjection* linux_vulkan_projection_create(
     uintptr_t display,

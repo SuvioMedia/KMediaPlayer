@@ -20,12 +20,12 @@ namespace {
 
 constexpr size_t kRequiredIntegerConfiguration = 10;
 constexpr size_t kRequiredFloatingConfiguration = 22;
-constexpr UINT kOutputRefreshIntervalFrames = 60;
 constexpr float kScRgbReferenceWhiteNits = 80.0f;
 constexpr float kSdrTargetPeakNits = 100.0f;
 
 constexpr int kTransferPq = 0;
 constexpr int kTransferHlg = 1;
+constexpr int kTransferSdr = 2;
 constexpr int kOutputPq = 0;
 constexpr int kOutputScRgb = 1;
 constexpr int kOutputSdr = 2;
@@ -42,7 +42,7 @@ const char* kHdrShader = R"hlsl(
 cbuffer HdrConfiguration : register(b0) {
     int4 uModes;       // transfer, projection, stereo, rotation
     int4 uFlags;       // eye order, output mode, HDR10+ enabled, SDR requested
-    int4 uColor;       // range, matrix, primaries, reserved
+    int4 uColor;       // range, matrix, primaries, decoded input bit depth
     float4 uProjection; // fov, yaw, pitch, roll
     float4 uView;       // zoom, source peak nits, target peak nits, scRGB white
     float4 uCrop;       // left, top, right, bottom
@@ -182,21 +182,27 @@ bool projectionUv(float2 outputUv, out float2 sourceUv) {
     return valid;
 }
 
-float3 sampleP010(float2 uv) {
+float3 sampleYuv(float2 uv) {
     float y = uLuma.Sample(uSampler, uv);
     float2 cbcr = uChroma.Sample(uSampler, uv);
-    // P010 stores each 10-bit code in the most-significant bits of an R16/R16G16
-    // texel. Undo the UNORM16 normalization before applying video-range offsets;
-    // treating the sample as code/1023 introduces a measurable black/white error.
-    const float p010CodeScale = 65535.0 / 64.0;
-    y *= p010CodeScale;
-    cbcr *= p010CodeScale;
+    // P010 stores 10-bit codes in the most-significant bits of UNORM16 texels;
+    // NV12 stores ordinary UNORM8 codes. Convert both formats back to integer
+    // code values before applying their respective nominal-range offsets.
+    bool nv12Input = uColor.w == 8;
+    float codeScale = nv12Input ? 255.0 : 65535.0 / 64.0;
+    float lumaBlack = nv12Input ? 16.0 : 64.0;
+    float lumaRange = nv12Input ? 219.0 : 876.0;
+    float chromaCenter = nv12Input ? 128.0 : 512.0;
+    float chromaRange = nv12Input ? 224.0 : 896.0;
+    float fullRangeMaximum = nv12Input ? 255.0 : 1023.0;
+    y *= codeScale;
+    cbcr *= codeScale;
     if (uColor.x == 0) {
-        y = saturate((y - 64.0) / 876.0);
-        cbcr = (cbcr - 512.0) / 896.0;
+        y = saturate((y - lumaBlack) / lumaRange);
+        cbcr = (cbcr - chromaCenter) / chromaRange;
     } else {
-        y = saturate(y / 1023.0);
-        cbcr = (cbcr - 512.0) / 1023.0;
+        y = saturate(y / fullRangeMaximum);
+        cbcr = (cbcr - chromaCenter) / fullRangeMaximum;
     }
     if (uColor.y == 1) {
         return max(float3(
@@ -338,6 +344,20 @@ float3 bt2020ToBt709(float3 rgb) {
        -0.018151 * rgb.r - 0.100579 * rgb.g + 1.118730 * rgb.b);
 }
 
+float3 bt709Eotf(float3 signal) {
+    signal = saturate(signal);
+    float3 linearSegment = signal / 4.5;
+    float3 powerSegment = pow(max((signal + 0.099) / 1.099, 0.0), 1.0 / 0.45);
+    return lerp(linearSegment, powerSegment, step(0.081, signal));
+}
+
+float3 linearToSrgb(float3 linearRgb) {
+    linearRgb = saturate(linearRgb);
+    float3 linearSegment = linearRgb * 12.92;
+    float3 powerSegment = 1.055 * pow(linearRgb, 1.0 / 2.4) - 0.055;
+    return lerp(linearSegment, powerSegment, step(0.0031308, linearRgb));
+}
+
 float hashNoise(float2 position) {
     return frac(sin(dot(position, float2(12.9898, 78.233))) * 43758.5453);
 }
@@ -357,7 +377,13 @@ float triangularDither8(float2 position) {
 float4 pixelMain(VertexOutput input) : SV_TARGET {
     float2 sourceUv;
     if (!projectionUv(input.uv, sourceUv)) return float4(0.0, 0.0, 0.0, 1.0);
-    float3 encoded2020 = sampleP010(sourceUv);
+    float3 encoded2020 = sampleYuv(sourceUv);
+    if (uModes.x == 2) {
+        float3 linear2020 = sourcePrimariesToBt2020(bt709Eotf(encoded2020));
+        float3 linear709 = bt2020ToBt709(linear2020);
+        float3 outputSignal = linearToSrgb(linear709) + triangularDither8(input.position.xy);
+        return float4(saturate(outputSignal), 1.0);
+    }
     float3 nits = uModes.x == 1 ? hlgToNits(encoded2020) : pqEotf(encoded2020);
     nits = sourcePrimariesToBt2020(nits);
     nits = applyHdr10Plus(nits);
@@ -389,7 +415,7 @@ bool IsFinitePositive(float value) {
 struct alignas(16) ReferenceShaderConfiguration {
     int32_t modes[4] = {0, 0, 0, 0};
     int32_t flags[4] = {0, 0, 0, 0};
-    int32_t color[4] = {0, 0, 0, 0};
+    int32_t color[4] = {0, 0, 0, 10};
     float projection[4] = {360.0f, 0.0f, 0.0f, 0.0f};
     float view[4] = {1.0f, 1000.0f, 1000.0f, 80.0f};
     float crop[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -529,19 +555,36 @@ HRESULT RenderReferenceCase(
     if (!gpu.device || !gpu.context || !gpu.vertexShader || !gpu.pixelShader || !gpu.sampler || !output) {
         return E_INVALIDARG;
     }
-    const UINT16 lumaValue = static_cast<UINT16>(yCode << 6);
-    const UINT16 chromaValues[2] = {
-        static_cast<UINT16>(cbCode << 6),
-        static_cast<UINT16>(crCode << 6),
-    };
     ComPtr<ID3D11ShaderResourceView> lumaView;
     ComPtr<ID3D11ShaderResourceView> chromaView;
-    HRESULT hr = CreateReferenceTexture(
-        gpu.device.Get(), DXGI_FORMAT_R16_UNORM, &lumaValue, sizeof(lumaValue), lumaView.GetAddressOf());
-    if (FAILED(hr)) return hr;
-    hr = CreateReferenceTexture(
-        gpu.device.Get(), DXGI_FORMAT_R16G16_UNORM, chromaValues, sizeof(chromaValues),
-        chromaView.GetAddressOf());
+    HRESULT hr = S_OK;
+    if (configuration.color[3] == 8) {
+        const uint8_t lumaValue = static_cast<uint8_t>(yCode);
+        const uint8_t chromaValues[2] = {
+            static_cast<uint8_t>(cbCode),
+            static_cast<uint8_t>(crCode),
+        };
+        hr = CreateReferenceTexture(
+            gpu.device.Get(), DXGI_FORMAT_R8_UNORM, &lumaValue, sizeof(lumaValue),
+            lumaView.GetAddressOf());
+        if (FAILED(hr)) return hr;
+        hr = CreateReferenceTexture(
+            gpu.device.Get(), DXGI_FORMAT_R8G8_UNORM, chromaValues, sizeof(chromaValues),
+            chromaView.GetAddressOf());
+    } else {
+        const UINT16 lumaValue = static_cast<UINT16>(yCode << 6);
+        const UINT16 chromaValues[2] = {
+            static_cast<UINT16>(cbCode << 6),
+            static_cast<UINT16>(crCode << 6),
+        };
+        hr = CreateReferenceTexture(
+            gpu.device.Get(), DXGI_FORMAT_R16_UNORM, &lumaValue, sizeof(lumaValue),
+            lumaView.GetAddressOf());
+        if (FAILED(hr)) return hr;
+        hr = CreateReferenceTexture(
+            gpu.device.Get(), DXGI_FORMAT_R16G16_UNORM, chromaValues, sizeof(chromaValues),
+            chromaView.GetAddressOf());
+    }
     if (FAILED(hr)) return hr;
 
     D3D11_TEXTURE2D_DESC renderDescription{};
@@ -623,10 +666,53 @@ double ReferenceP010Signal(UINT16 code, bool fullRange) {
                      : (static_cast<double>(code) - 64.0) / 876.0;
 }
 
+uint8_t ReferenceNv12Code(double signal, bool fullRange) {
+    const double scaled = fullRange ? signal * 255.0 : 16.0 + signal * 219.0;
+    return static_cast<uint8_t>(std::lround((std::max)(0.0, (std::min)(scaled, 255.0))));
+}
+
+double ReferenceNv12Signal(uint8_t code, bool fullRange) {
+    return fullRange ? static_cast<double>(code) / 255.0
+                     : (static_cast<double>(code) - 16.0) / 219.0;
+}
+
+double ReferenceBt709Eotf(double signal) {
+    signal = (std::max)(0.0, (std::min)(signal, 1.0));
+    return signal < 0.081 ? signal / 4.5
+                         : std::pow((signal + 0.099) / 1.099, 1.0 / 0.45);
+}
+
+double ReferenceLinearToSrgb(double linear) {
+    linear = (std::max)(0.0, (std::min)(linear, 1.0));
+    return linear < 0.0031308 ? linear * 12.92
+                             : 1.055 * std::pow(linear, 1.0 / 2.4) - 0.055;
+}
+
 HRESULT ValidateReferenceGpuOutput(ID3DBlob* vertexBytecode, ID3DBlob* pixelBytecode) {
     ReferenceGpu gpu;
     HRESULT hr = CreateReferenceGpu(vertexBytecode, pixelBytecode, &gpu);
     if (FAILED(hr)) return hr;
+
+    for (const bool fullRange : {false, true}) {
+        ReferenceShaderConfiguration configuration;
+        configuration.modes[0] = kTransferSdr;
+        configuration.flags[1] = kOutputSdr;
+        configuration.flags[3] = 1;
+        configuration.color[0] = fullRange ? kRangeFull : kRangeLimited;
+        configuration.color[1] = kMatrixBt709;
+        configuration.color[2] = kPrimariesBt709;
+        configuration.color[3] = 8;
+        const uint8_t code = ReferenceNv12Code(0.5, fullRange);
+        const double signal = ReferenceNv12Signal(code, fullRange);
+        const double expected = ReferenceLinearToSrgb(ReferenceBt709Eotf(signal));
+        float output[4]{};
+        hr = RenderReferenceCase(gpu, configuration, code, 128, 128, output);
+        if (FAILED(hr)) return hr;
+        for (size_t channel = 0; channel < 3; ++channel) {
+            hr = RequireReferenceNear(output[channel], expected, 0.008, 0.002);
+            if (FAILED(hr)) return hr;
+        }
+    }
 
     for (const double sourcePeak : {1000.0, 4000.0}) {
         for (const bool fullRange : {false, true}) {
@@ -816,7 +902,7 @@ HRESULT WindowsHdrPresenter::ValidateShaders() {
 }
 
 WindowsHdrPresenter::~WindowsHdrPresenter() {
-    Detach();
+    ResetOutput();
 }
 
 HRESULT WindowsHdrPresenter::Configure(
@@ -828,7 +914,8 @@ HRESULT WindowsHdrPresenter::Configure(
         valueCount < kRequiredFloatingConfiguration) {
         return E_INVALIDARG;
     }
-    if ((integers[0] != kTransferPq && integers[0] != kTransferHlg) ||
+    if ((integers[0] != kTransferPq && integers[0] != kTransferHlg &&
+         integers[0] != kTransferSdr) ||
         integers[1] < 0 || integers[1] > 7 ||
         integers[2] < 0 || integers[2] > 2 ||
         integers[3] < 0 || integers[3] > 1 ||
@@ -890,36 +977,25 @@ HRESULT WindowsHdrPresenter::Configure(
     masteringConfiguration_.maxLuminanceNits = metadata[9];
     masteringConfiguration_.maxContentLightLevelNits = metadata[10];
     masteringConfiguration_.maxFrameAverageLightLevelNits = metadata[11];
+    shaderConfiguration_.view[2] =
+        IsFinitePositive(masteringConfiguration_.maxLuminanceNits)
+            ? masteringConfiguration_.maxLuminanceNits
+            : shaderConfiguration_.view[1];
+    shaderConfiguration_.view[3] = kScRgbReferenceWhiteNits;
 
     status_.firstFramePresented = FALSE;
     status_.p010InputConfirmed = FALSE;
 
-    if (swapChain_) {
-        HRESULT hr = RefreshOutputAndSwapChain(outputConfigurationChanged);
-        if (SUCCEEDED(hr)) hr = UploadConfiguration();
-        if (SUCCEEDED(hr)) hr = ApplySwapChainMetadata();
-        RecordError(hr);
-        return hr;
-    }
-    return S_OK;
-}
-
-HRESULT WindowsHdrPresenter::Attach(HWND hwnd) {
-    if (!hwnd || !IsWindow(hwnd)) return E_INVALIDARG;
-    std::lock_guard<std::mutex> lock(mutex_);
-    const bool changedWindow = hwnd_ != hwnd;
-    hwnd_ = hwnd;
+    if (outputConfigurationChanged) ReleaseOutputTexture();
     HRESULT hr = CreateDeviceResources();
-    if (SUCCEEDED(hr)) hr = RefreshOutputAndSwapChain(changedWindow);
+    if (SUCCEEDED(hr)) hr = UploadConfiguration();
     RecordError(hr);
     return hr;
 }
 
-void WindowsHdrPresenter::Detach() {
+void WindowsHdrPresenter::ResetOutput() {
     std::lock_guard<std::mutex> lock(mutex_);
-    ReleaseSwapChainResources();
-    hwnd_ = nullptr;
-    monitor_ = nullptr;
+    ReleaseOutputTexture();
     status_.displayQueried = FALSE;
     status_.advancedColorEnabled = FALSE;
     status_.swapChainConfigured = FALSE;
@@ -941,7 +1017,9 @@ HRESULT WindowsHdrPresenter::CreateDeviceResources() {
     ComPtr<IDXGIAdapter> adapter;
     HRESULT hr = device_.As(&dxgiDevice);
     if (SUCCEEDED(hr)) hr = dxgiDevice->GetAdapter(adapter.GetAddressOf());
-    if (SUCCEEDED(hr)) hr = adapter->GetParent(IID_PPV_ARGS(factory_.ReleaseAndGetAddressOf()));
+    DXGI_ADAPTER_DESC adapterDescription{};
+    if (SUCCEEDED(hr)) hr = adapter->GetDesc(&adapterDescription);
+    if (SUCCEEDED(hr)) adapterLuid_ = adapterDescription.AdapterLuid;
     if (FAILED(hr)) return hr;
 
     ComPtr<ID3DBlob> vertexBlob;
@@ -989,163 +1067,85 @@ HRESULT WindowsHdrPresenter::CreateDeviceResources() {
     return device_->CreateBuffer(&buffer, nullptr, configurationBuffer_.ReleaseAndGetAddressOf());
 }
 
-HRESULT WindowsHdrPresenter::QueryActiveOutput() {
-    if (!hwnd_ || !factory_) return E_HANDLE;
-    const HMONITOR requestedMonitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
-    if (!requestedMonitor) return DXGI_ERROR_NOT_FOUND;
-
-    ComPtr<IDXGIOutput6> matchingOutput;
-    for (UINT adapterIndex = 0; !matchingOutput; ++adapterIndex) {
-        ComPtr<IDXGIAdapter1> adapter;
-        if (factory_->EnumAdapters1(adapterIndex, adapter.GetAddressOf()) == DXGI_ERROR_NOT_FOUND) break;
-        for (UINT outputIndex = 0; ; ++outputIndex) {
-            ComPtr<IDXGIOutput> output;
-            if (adapter->EnumOutputs(outputIndex, output.GetAddressOf()) == DXGI_ERROR_NOT_FOUND) break;
-            DXGI_OUTPUT_DESC basic{};
-            if (SUCCEEDED(output->GetDesc(&basic)) && basic.Monitor == requestedMonitor) {
-                output.As(&matchingOutput);
-                break;
-            }
-        }
-    }
-    if (!matchingOutput) return DXGI_ERROR_NOT_FOUND;
-
-    DXGI_OUTPUT_DESC1 description{};
-    HRESULT hr = matchingOutput->GetDesc1(&description);
-    if (FAILED(hr)) return hr;
-    const bool monitorChanged = monitor_ != requestedMonitor;
-    monitor_ = requestedMonitor;
-    outputDescription_ = description;
-    status_.displayQueried = TRUE;
-    status_.bitsPerColor = description.BitsPerColor;
-    status_.displayColorSpace = static_cast<UINT32>(description.ColorSpace);
-    status_.minLuminanceNits = description.MinLuminance;
-    status_.maxLuminanceNits = description.MaxLuminance;
-    status_.maxFullFrameLuminanceNits = description.MaxFullFrameLuminance;
-    // DXGI defines the active output color space as the authoritative signal
-    // for HDR/Advanced Color. BitsPerColor describes the active wire format
-    // and may be reported as 8 when the driver uses dithering, even while the
-    // desktop is actively composed in BT.2020/PQ.
-    status_.advancedColorEnabled =
-        description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-    if (monitorChanged) ++status_.monitorGeneration;
-    shaderConfiguration_.view[2] =
-        shaderConfiguration_.flags[3] != 0
-            ? kSdrTargetPeakNits
-            : (IsFinitePositive(description.MaxLuminance)
-                ? description.MaxLuminance
-                : masteringConfiguration_.maxLuminanceNits);
-    shaderConfiguration_.view[3] = kScRgbReferenceWhiteNits;
-    return S_OK;
-}
-
-HRESULT WindowsHdrPresenter::RefreshOutputAndSwapChain(bool forceRecreate) {
-    const HMONITOR previousMonitor = monitor_;
-    HRESULT hr = QueryActiveOutput();
-    if (FAILED(hr)) return hr;
-    const bool sdrOutput = shaderConfiguration_.flags[3] != 0;
-    if (!sdrOutput && !status_.advancedColorEnabled) return DXGI_ERROR_UNSUPPORTED;
-
-    RECT client{};
-    if (!GetClientRect(hwnd_, &client)) return HRESULT_FROM_WIN32(GetLastError());
-    const UINT width = static_cast<UINT>((std::max)(1L, client.right - client.left));
-    const UINT height = static_cast<UINT>((std::max)(1L, client.bottom - client.top));
-    const bool monitorChanged = previousMonitor != monitor_;
-    const DXGI_FORMAT desiredFormat =
-        sdrOutput
-            ? DXGI_FORMAT_R8G8B8A8_UNORM
-            : (shaderConfiguration_.modes[0] == kTransferPq
-                ? DXGI_FORMAT_R10G10B10A2_UNORM
-                : DXGI_FORMAT_R16G16B16A16_FLOAT);
-    if (forceRecreate || monitorChanged || !swapChain_ || desiredFormat != swapChainFormat_) {
-        return CreateSwapChain(width, height);
-    }
-    return ResizeSwapChainIfNeeded();
-}
-
-HRESULT WindowsHdrPresenter::CreateSwapChain(UINT width, UINT height) {
-    ReleaseSwapChainResources();
-    const bool sdrOutput = shaderConfiguration_.flags[3] != 0;
-    if (sdrOutput) {
-        swapChainFormat_ = DXGI_FORMAT_R8G8B8A8_UNORM;
-        swapChainColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-        shaderConfiguration_.flags[1] = kOutputSdr;
-    } else if (shaderConfiguration_.modes[0] == kTransferPq) {
-        swapChainFormat_ = DXGI_FORMAT_R10G10B10A2_UNORM;
-        swapChainColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-        shaderConfiguration_.flags[1] = kOutputPq;
-    } else {
-        swapChainFormat_ = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        swapChainColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-        shaderConfiguration_.flags[1] = kOutputScRgb;
+HRESULT WindowsHdrPresenter::EnsureOutputTexture(UINT width, UINT height) {
+    if (!device_ || !context_ || width == 0 || height == 0) return E_INVALIDARG;
+    const bool extendedLinear = shaderConfiguration_.flags[3] == 0;
+    const DXGI_FORMAT desiredFormat = extendedLinear
+        ? DXGI_FORMAT_R16G16B16A16_FLOAT
+        : DXGI_FORMAT_R8G8B8A8_UNORM;
+    if (outputTexture_ && outputWidth_ == width && outputHeight_ == height &&
+        outputFormat_ == desiredFormat) {
+        return S_OK;
     }
 
-    DXGI_SWAP_CHAIN_DESC1 description{};
+    ReleaseOutputTexture();
+    D3D11_TEXTURE2D_DESC description{};
     description.Width = width;
     description.Height = height;
-    description.Format = swapChainFormat_;
+    description.MipLevels = 1;
+    description.ArraySize = 1;
+    description.Format = desiredFormat;
     description.SampleDesc.Count = 1;
-    description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    description.BufferCount = 3;
-    description.Scaling = DXGI_SCALING_STRETCH;
-    description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    description.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    description.Usage = D3D11_USAGE_DEFAULT;
+    description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    description.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
 
-    ComPtr<IDXGISwapChain1> swapChain1;
-    HRESULT hr = factory_->CreateSwapChainForHwnd(
-        device_.Get(), hwnd_, &description, nullptr, nullptr, swapChain1.GetAddressOf());
-    if (FAILED(hr)) return hr;
-    factory_->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER);
-    hr = swapChain1.As(&swapChain_);
-    if (FAILED(hr)) return hr;
-
-    UINT colorSpaceSupport = 0;
-    hr = swapChain_->CheckColorSpaceSupport(swapChainColorSpace_, &colorSpaceSupport);
-    if (FAILED(hr) || (colorSpaceSupport & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == 0) {
-        return FAILED(hr) ? hr : DXGI_ERROR_UNSUPPORTED;
+    HRESULT hr = device_->CreateTexture2D(&description, nullptr, outputTexture_.GetAddressOf());
+    if (SUCCEEDED(hr)) hr = outputTexture_.As(&outputMutex_);
+    ComPtr<IDXGIResource> sharedResource;
+    if (SUCCEEDED(hr)) hr = outputTexture_.As(&sharedResource);
+    if (SUCCEEDED(hr)) hr = sharedResource->GetSharedHandle(&sharedHandle_);
+    if (SUCCEEDED(hr)) {
+        hr = device_->CreateRenderTargetView(
+            outputTexture_.Get(), nullptr, renderTargetView_.GetAddressOf());
     }
-    hr = swapChain_->SetColorSpace1(swapChainColorSpace_);
-    if (FAILED(hr)) return hr;
-    swapChainWidth_ = width;
-    swapChainHeight_ = height;
-    status_.swapChainColorSpace = static_cast<UINT32>(swapChainColorSpace_);
-    hr = CreateBackBufferView();
-    if (SUCCEEDED(hr)) hr = UploadConfiguration();
-    if (SUCCEEDED(hr)) hr = ApplySwapChainMetadata();
-    if (SUCCEEDED(hr)) status_.swapChainConfigured = TRUE;
-    return hr;
-}
+    if (FAILED(hr)) {
+        ReleaseOutputTexture();
+        return hr;
+    }
 
-HRESULT WindowsHdrPresenter::CreateBackBufferView() {
-    ComPtr<ID3D11Texture2D> backBuffer;
-    HRESULT hr = swapChain_->GetBuffer(0, IID_PPV_ARGS(backBuffer.GetAddressOf()));
-    if (FAILED(hr)) return hr;
-    return device_->CreateRenderTargetView(backBuffer.Get(), nullptr, renderTargetView_.ReleaseAndGetAddressOf());
-}
+    outputWidth_ = width;
+    outputHeight_ = height;
+    outputFormat_ = desiredFormat;
+    frameSerial_ = 0;
+    ++outputGeneration_;
+    shaderConfiguration_.flags[1] = extendedLinear ? kOutputScRgb : kOutputSdr;
+    shaderConfiguration_.view[2] = extendedLinear
+        ? (IsFinitePositive(masteringConfiguration_.maxLuminanceNits)
+            ? masteringConfiguration_.maxLuminanceNits
+            : 1000.0f)
+        : kSdrTargetPeakNits;
+    shaderConfiguration_.view[3] = kScRgbReferenceWhiteNits;
 
-HRESULT WindowsHdrPresenter::ResizeSwapChainIfNeeded() {
-    if (!swapChain_ || !hwnd_) return E_HANDLE;
-    RECT client{};
-    if (!GetClientRect(hwnd_, &client)) return HRESULT_FROM_WIN32(GetLastError());
-    const UINT width = static_cast<UINT>((std::max)(1L, client.right - client.left));
-    const UINT height = static_cast<UINT>((std::max)(1L, client.bottom - client.top));
-    if (width == swapChainWidth_ && height == swapChainHeight_) return S_OK;
-    context_->OMSetRenderTargets(0, nullptr, nullptr);
-    renderTargetView_.Reset();
-    HRESULT hr = swapChain_->ResizeBuffers(0, width, height, swapChainFormat_, 0);
-    if (FAILED(hr)) return hr;
-    swapChainWidth_ = width;
-    swapChainHeight_ = height;
-    return CreateBackBufferView();
+    // The legacy status structure remains binary-compatible for one release.
+    // These fields now describe the producer texture; a system Present is
+    // confirmed exclusively through Nucleus TextureViewHostCapabilities.
+    status_.displayQueried = FALSE;
+    status_.advancedColorEnabled = extendedLinear ? TRUE : FALSE;
+    status_.swapChainConfigured = TRUE;
+    status_.firstFramePresented = FALSE;
+    status_.bitsPerColor = extendedLinear ? 16 : 8;
+    status_.displayColorSpace = static_cast<UINT32>(DXGI_COLOR_SPACE_CUSTOM);
+    status_.swapChainColorSpace = static_cast<UINT32>(
+        extendedLinear
+            ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
+            : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+    status_.monitorGeneration = static_cast<UINT32>(outputGeneration_ & 0xffffffffu);
+    return UploadConfiguration();
 }
 
 HRESULT WindowsHdrPresenter::CreateInputViews(ID3D11Texture2D* source, UINT sourceSubresource) {
     if (!source) return E_INVALIDARG;
     D3D11_TEXTURE2D_DESC sourceDescription{};
     source->GetDesc(&sourceDescription);
-    if (sourceDescription.Format != DXGI_FORMAT_P010) return MF_E_INVALIDMEDIATYPE;
+    if (sourceDescription.Format != DXGI_FORMAT_P010 &&
+        sourceDescription.Format != DXGI_FORMAT_NV12) {
+        return MF_E_INVALIDMEDIATYPE;
+    }
+    const bool nv12Input = sourceDescription.Format == DXGI_FORMAT_NV12;
 
-    if (!shaderInputTexture_ || inputWidth_ != sourceDescription.Width || inputHeight_ != sourceDescription.Height) {
+    if (!shaderInputTexture_ || inputWidth_ != sourceDescription.Width ||
+        inputHeight_ != sourceDescription.Height || inputFormat_ != sourceDescription.Format) {
         shaderInputTexture_.Reset();
         lumaView_.Reset();
         chromaView_.Reset();
@@ -1154,7 +1154,7 @@ HRESULT WindowsHdrPresenter::CreateInputViews(ID3D11Texture2D* source, UINT sour
         inputDescription.Height = sourceDescription.Height;
         inputDescription.MipLevels = 1;
         inputDescription.ArraySize = 1;
-        inputDescription.Format = DXGI_FORMAT_P010;
+        inputDescription.Format = sourceDescription.Format;
         inputDescription.SampleDesc.Count = 1;
         inputDescription.Usage = D3D11_USAGE_DEFAULT;
         inputDescription.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -1162,23 +1162,25 @@ HRESULT WindowsHdrPresenter::CreateInputViews(ID3D11Texture2D* source, UINT sour
         if (FAILED(hr)) return hr;
 
         D3D11_SHADER_RESOURCE_VIEW_DESC lumaDescription{};
-        lumaDescription.Format = DXGI_FORMAT_R16_UNORM;
+        lumaDescription.Format = nv12Input ? DXGI_FORMAT_R8_UNORM : DXGI_FORMAT_R16_UNORM;
         lumaDescription.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
         lumaDescription.Texture2D.MipLevels = 1;
         hr = device_->CreateShaderResourceView(
             shaderInputTexture_.Get(), &lumaDescription, lumaView_.GetAddressOf());
         if (FAILED(hr)) return hr;
         D3D11_SHADER_RESOURCE_VIEW_DESC chromaDescription = lumaDescription;
-        chromaDescription.Format = DXGI_FORMAT_R16G16_UNORM;
+        chromaDescription.Format = nv12Input ? DXGI_FORMAT_R8G8_UNORM : DXGI_FORMAT_R16G16_UNORM;
         hr = device_->CreateShaderResourceView(
             shaderInputTexture_.Get(), &chromaDescription, chromaView_.GetAddressOf());
         if (FAILED(hr)) return hr;
         inputWidth_ = sourceDescription.Width;
         inputHeight_ = sourceDescription.Height;
+        inputFormat_ = sourceDescription.Format;
     }
     context_->CopySubresourceRegion(shaderInputTexture_.Get(), 0, 0, 0, 0,
                                     source, sourceSubresource, nullptr);
-    status_.p010InputConfirmed = TRUE;
+    shaderConfiguration_.color[3] = nv12Input ? 8 : 10;
+    status_.p010InputConfirmed = nv12Input ? FALSE : TRUE;
     return S_OK;
 }
 
@@ -1190,28 +1192,6 @@ HRESULT WindowsHdrPresenter::UploadConfiguration() {
     std::memcpy(mapped.pData, &shaderConfiguration_, sizeof(shaderConfiguration_));
     context_->Unmap(configurationBuffer_.Get(), 0);
     return S_OK;
-}
-
-HRESULT WindowsHdrPresenter::ApplySwapChainMetadata() {
-    if (!swapChain_) return MF_E_NOT_INITIALIZED;
-    if (swapChainColorSpace_ != DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
-        return swapChain_->SetHDRMetaData(DXGI_HDR_METADATA_TYPE_NONE, 0, nullptr);
-    }
-    DXGI_HDR_METADATA_HDR10 metadata{};
-    metadata.RedPrimary[0] = ClampTo<UINT16>(masteringConfiguration_.redX, 50000.0f);
-    metadata.RedPrimary[1] = ClampTo<UINT16>(masteringConfiguration_.redY, 50000.0f);
-    metadata.GreenPrimary[0] = ClampTo<UINT16>(masteringConfiguration_.greenX, 50000.0f);
-    metadata.GreenPrimary[1] = ClampTo<UINT16>(masteringConfiguration_.greenY, 50000.0f);
-    metadata.BluePrimary[0] = ClampTo<UINT16>(masteringConfiguration_.blueX, 50000.0f);
-    metadata.BluePrimary[1] = ClampTo<UINT16>(masteringConfiguration_.blueY, 50000.0f);
-    metadata.WhitePoint[0] = ClampTo<UINT16>(masteringConfiguration_.whiteX, 50000.0f);
-    metadata.WhitePoint[1] = ClampTo<UINT16>(masteringConfiguration_.whiteY, 50000.0f);
-    metadata.MaxMasteringLuminance = ClampTo<UINT32>(masteringConfiguration_.maxLuminanceNits, 10000.0f);
-    metadata.MinMasteringLuminance = ClampTo<UINT32>(masteringConfiguration_.minLuminanceNits, 10000.0f);
-    metadata.MaxContentLightLevel = ClampTo<UINT16>(masteringConfiguration_.maxContentLightLevelNits, 1.0f);
-    metadata.MaxFrameAverageLightLevel =
-        ClampTo<UINT16>(masteringConfiguration_.maxFrameAverageLightLevelNits, 1.0f);
-    return swapChain_->SetHDRMetaData(DXGI_HDR_METADATA_TYPE_HDR10, sizeof(metadata), &metadata);
 }
 
 bool WindowsHdrPresenter::RequiresHdr10PlusMetadata() const {
@@ -1227,20 +1207,11 @@ HRESULT WindowsHdrPresenter::Render(
     size_t hdr10PlusPayloadSize) {
     if (!sample || width == 0 || height == 0) return E_INVALIDARG;
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!hwnd_) return MF_E_NOT_INITIALIZED;
-    if (++frameCounter_ >= kOutputRefreshIntervalFrames) {
-        frameCounter_ = 0;
-        HRESULT refresh = RefreshOutputAndSwapChain(false);
-        if (FAILED(refresh)) {
-            RecordError(refresh);
-            return refresh;
-        }
-    } else {
-        HRESULT resize = ResizeSwapChainIfNeeded();
-        if (FAILED(resize)) {
-            RecordError(resize);
-            return resize;
-        }
+    HRESULT hr = CreateDeviceResources();
+    if (SUCCEEDED(hr)) hr = EnsureOutputTexture(width, height);
+    if (FAILED(hr)) {
+        RecordError(hr);
+        return hr;
     }
 
     if (shaderConfiguration_.flags[2] != 0) {
@@ -1270,7 +1241,7 @@ HRESULT WindowsHdrPresenter::Render(
     }
 
     ComPtr<IMFMediaBuffer> mediaBuffer;
-    HRESULT hr = sample->GetBufferByIndex(0, mediaBuffer.GetAddressOf());
+    hr = sample->GetBufferByIndex(0, mediaBuffer.GetAddressOf());
     if (FAILED(hr)) return hr;
     ComPtr<IMFDXGIBuffer> dxgiBuffer;
     hr = mediaBuffer.As(&dxgiBuffer);
@@ -1289,13 +1260,19 @@ HRESULT WindowsHdrPresenter::Render(
         return hr;
     }
 
+    hr = outputMutex_->AcquireSync(0, 8);
+    if (FAILED(hr)) {
+        RecordError(hr);
+        return hr;
+    }
+
     const float clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     context_->ClearRenderTargetView(renderTargetView_.Get(), clear);
     ID3D11RenderTargetView* target = renderTargetView_.Get();
     context_->OMSetRenderTargets(1, &target, nullptr);
     D3D11_VIEWPORT viewport{};
-    viewport.Width = static_cast<float>(swapChainWidth_);
-    viewport.Height = static_cast<float>(swapChainHeight_);
+    viewport.Width = static_cast<float>(outputWidth_);
+    viewport.Height = static_cast<float>(outputHeight_);
     viewport.MaxDepth = 1.0f;
     context_->RSSetViewports(1, &viewport);
     context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -1310,9 +1287,16 @@ HRESULT WindowsHdrPresenter::Render(
     context_->Draw(3, 0);
     ID3D11ShaderResourceView* emptyViews[2] = {nullptr, nullptr};
     context_->PSSetShaderResources(0, 2, emptyViews);
+    context_->OMSetRenderTargets(0, nullptr, nullptr);
+    context_->Flush();
 
-    hr = swapChain_->Present(1, 0);
-    if (SUCCEEDED(hr)) status_.firstFramePresented = TRUE;
+    hr = outputMutex_->ReleaseSync(0);
+    if (SUCCEEDED(hr)) {
+        ++frameSerial_;
+        // Binary-compatible producer-ready marker. It is deliberately not a
+        // system Present; consumers must use Nucleus capabilities for that.
+        status_.firstFramePresented = TRUE;
+    }
     RecordError(hr);
     return hr;
 }
@@ -1322,17 +1306,39 @@ HdrOutputStatus WindowsHdrPresenter::GetStatus() const {
     return status_;
 }
 
-void WindowsHdrPresenter::ReleaseSwapChainResources() {
+bool WindowsHdrPresenter::RequiresP010Input() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return shaderConfiguration_.modes[0] != kTransferSdr;
+}
+
+bool WindowsHdrPresenter::GetTextureOutputInfo(HdrTextureOutputInfo* output) const {
+    if (!output) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!outputTexture_ || !sharedHandle_ || frameSerial_ == 0) return false;
+    output->sharedHandle = sharedHandle_;
+    output->width = outputWidth_;
+    output->height = outputHeight_;
+    output->format = static_cast<UINT32>(outputFormat_);
+    output->generation = outputGeneration_;
+    output->frameSerial = frameSerial_;
+    output->adapterLuid = adapterLuid_;
+    output->extendedLinear = outputFormat_ == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    return true;
+}
+
+void WindowsHdrPresenter::ReleaseOutputTexture() {
     if (context_) {
         context_->OMSetRenderTargets(0, nullptr, nullptr);
         context_->Flush();
     }
     renderTargetView_.Reset();
-    swapChain_.Reset();
-    swapChainWidth_ = 0;
-    swapChainHeight_ = 0;
-    swapChainFormat_ = DXGI_FORMAT_UNKNOWN;
-    swapChainColorSpace_ = DXGI_COLOR_SPACE_CUSTOM;
+    outputMutex_.Reset();
+    outputTexture_.Reset();
+    sharedHandle_ = nullptr;
+    outputWidth_ = 0;
+    outputHeight_ = 0;
+    outputFormat_ = DXGI_FORMAT_UNKNOWN;
+    frameSerial_ = 0;
     status_.swapChainConfigured = FALSE;
     status_.firstFramePresented = FALSE;
     status_.swapChainColorSpace = static_cast<UINT32>(DXGI_COLOR_SPACE_CUSTOM);

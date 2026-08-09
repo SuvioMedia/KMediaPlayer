@@ -298,6 +298,15 @@ public final class io/github/kdroidfilter/composemediaplayer/DecoderColorCapabil
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode : java/lang/Enum {
+	public static final field COMPOSE Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public static final field PREFER_COLOR_MANAGED_TEXTURE Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public static final field PREFER_NATIVE Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities {
 	public static final field $stable I
 	public fun <init> ()V

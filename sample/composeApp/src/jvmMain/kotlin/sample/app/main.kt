@@ -60,7 +60,7 @@ fun main(args: Array<String>) {
                     ?.uppercase()
                     ?.let { runCatching { DesktopVideoBackend.valueOf(it) }.getOrNull() }
                     ?: DesktopVideoBackend.AUTO,
-            desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+            desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
             extensions = desktopPipelineExtensions,
         )
     val colorSelfTestSeconds =

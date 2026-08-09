@@ -12,6 +12,30 @@ typedef LinuxVulkanProjection* (*CreateFunction)(
     int32_t,
     const LinuxVulkanProjectionConfiguration*
 );
+typedef LinuxVulkanProjection* (*TextureCreateFunction)(
+    int32_t,
+    int32_t,
+    int32_t,
+    int32_t,
+    const LinuxVulkanProjectionConfiguration*
+);
+typedef int (*TextureUpdateFunction)(
+    LinuxVulkanProjection*,
+    int32_t,
+    int32_t,
+    int32_t,
+    int32_t,
+    const LinuxVulkanProjectionConfiguration*
+);
+typedef int (*TextureAcquireFunction)(LinuxVulkanProjection*, LinuxVulkanTextureFrame*);
+typedef void (*TextureReleaseFunction)(LinuxVulkanProjection*, uint64_t, int32_t, int32_t);
+typedef int (*TextureRenderBgraFunction)(
+    LinuxVulkanProjection*,
+    const uint8_t*,
+    int32_t,
+    int32_t,
+    int32_t
+);
 typedef int (*UpdateGeometryFunction)(LinuxVulkanProjection*, int32_t, int32_t, int32_t, int32_t);
 typedef void (*UpdateConfigurationFunction)(
     LinuxVulkanProjection*,
@@ -39,6 +63,11 @@ typedef void (*DestroyFunction)(LinuxVulkanProjection*);
 typedef struct ProjectionApi {
     void* library;
     CreateFunction create;
+    TextureCreateFunction texture_create;
+    TextureUpdateFunction texture_update;
+    TextureAcquireFunction texture_acquire;
+    TextureReleaseFunction texture_release;
+    TextureRenderBgraFunction texture_render_bgra;
     UpdateGeometryFunction update_geometry;
     UpdateConfigurationFunction update_configuration;
     UpdateHdr10PlusMetadataFunction update_hdr10_plus_metadata;
@@ -62,6 +91,16 @@ static int load_projection_api(void) {
         if (projection_api.library) {
             projection_api.create =
                 (CreateFunction)dlsym(projection_api.library, "kmp_vulkan_projection_create");
+            projection_api.texture_create =
+                (TextureCreateFunction)dlsym(projection_api.library, "kmp_vulkan_texture_create");
+            projection_api.texture_update =
+                (TextureUpdateFunction)dlsym(projection_api.library, "kmp_vulkan_texture_update");
+            projection_api.texture_acquire =
+                (TextureAcquireFunction)dlsym(projection_api.library, "kmp_vulkan_texture_acquire_frame");
+            projection_api.texture_release =
+                (TextureReleaseFunction)dlsym(projection_api.library, "kmp_vulkan_texture_release_frame");
+            projection_api.texture_render_bgra =
+                (TextureRenderBgraFunction)dlsym(projection_api.library, "kmp_vulkan_texture_render_bgra");
             projection_api.update_geometry =
                 (UpdateGeometryFunction)dlsym(
                     projection_api.library,
@@ -84,6 +123,11 @@ static int load_projection_api(void) {
             projection_api.destroy =
                 (DestroyFunction)dlsym(projection_api.library, "kmp_vulkan_projection_destroy");
             if (!projection_api.create ||
+                !projection_api.texture_create ||
+                !projection_api.texture_update ||
+                !projection_api.texture_acquire ||
+                !projection_api.texture_release ||
+                !projection_api.texture_render_bgra ||
                 !projection_api.update_geometry ||
                 !projection_api.update_configuration ||
                 !projection_api.update_hdr10_plus_metadata ||
@@ -102,6 +146,68 @@ static int load_projection_api(void) {
 
 int linux_vulkan_projection_library_available(void) {
     return load_projection_api();
+}
+
+LinuxVulkanProjection* linux_vulkan_texture_create(
+    int32_t width,
+    int32_t height,
+    int32_t input_p010,
+    int32_t output_hdr,
+    const LinuxVulkanProjectionConfiguration* configuration
+) {
+    return load_projection_api()
+        ? projection_api.texture_create(width, height, input_p010, output_hdr, configuration)
+        : NULL;
+}
+
+int linux_vulkan_texture_update(
+    LinuxVulkanProjection* renderer,
+    int32_t width,
+    int32_t height,
+    int32_t input_p010,
+    int32_t output_hdr,
+    const LinuxVulkanProjectionConfiguration* configuration
+) {
+    return load_projection_api()
+        ? projection_api.texture_update(
+            renderer,
+            width,
+            height,
+            input_p010,
+            output_hdr,
+            configuration
+        )
+        : 0;
+}
+
+int linux_vulkan_texture_acquire_frame(
+    LinuxVulkanProjection* renderer,
+    LinuxVulkanTextureFrame* frame
+) {
+    return load_projection_api() ? projection_api.texture_acquire(renderer, frame) : 0;
+}
+
+void linux_vulkan_texture_release_frame(
+    LinuxVulkanProjection* renderer,
+    uint64_t serial,
+    int32_t dma_buf_fd,
+    int32_t release_fence_fd
+) {
+    if (load_projection_api()) {
+        projection_api.texture_release(renderer, serial, dma_buf_fd, release_fence_fd);
+    }
+}
+
+int linux_vulkan_texture_render_bgra(
+    LinuxVulkanProjection* renderer,
+    const uint8_t* pixels,
+    int32_t stride,
+    int32_t width,
+    int32_t height
+) {
+    return load_projection_api()
+        ? projection_api.texture_render_bgra(renderer, pixels, stride, width, height)
+        : 0;
 }
 
 LinuxVulkanProjection* linux_vulkan_projection_create(

@@ -13,7 +13,7 @@
 #include <cstdint>
 
 // Native API version — bump when the exported API changes.
-#define NATIVE_VIDEO_PLAYER_VERSION 13
+#define NATIVE_VIDEO_PLAYER_VERSION 14
 
 // Playback speed bounds — kept in sync with
 // io.github.kdroidfilter.composemediaplayer.VideoPlayerState.{MIN,MAX}_PLAYBACK_SPEED.
@@ -56,6 +56,18 @@ typedef struct HdrOutputStatus {
     float maxLuminanceNits;
     float maxFullFrameLuminanceNits;
 } HdrOutputStatus;
+
+/** Producer-owned texture consumed by the Nucleus Windows TextureView host. */
+typedef struct HdrTextureOutputInfo {
+    HANDLE sharedHandle;
+    UINT32 width;
+    UINT32 height;
+    UINT32 format;
+    UINT64 generation;
+    UINT64 frameSerial;
+    LUID adapterLuid;
+    BOOL extendedLinear;
+} HdrTextureOutputInfo;
 
 #ifdef _WIN32
   #ifdef NATIVEVIDEOPLAYER_EXPORTS
@@ -106,10 +118,11 @@ NATIVEVIDEOPLAYER_API HRESULT ConfigureHdrOutput(
     size_t integerCount,
     const float* floatingConfiguration,
     size_t floatingCount);
-NATIVEVIDEOPLAYER_API HRESULT AttachHdrOutput(VideoPlayerInstance* pInstance, HWND hwnd);
-NATIVEVIDEOPLAYER_API void    DetachHdrOutput(VideoPlayerInstance* pInstance);
 NATIVEVIDEOPLAYER_API HRESULT RenderHdrFrame(VideoPlayerInstance* pInstance);
 NATIVEVIDEOPLAYER_API HRESULT GetHdrOutputStatus(VideoPlayerInstance* pInstance, HdrOutputStatus* status);
+NATIVEVIDEOPLAYER_API HRESULT GetHdrTextureOutputInfo(
+    VideoPlayerInstance* pInstance,
+    HdrTextureOutputInfo* output);
 // Active decoded color snapshot: generation, bit depth, primaries, transfer,
 // matrix, range and flags (authoritative unknowns / validated HDR10+).
 // Values follow JvmDecodedVideoColorSignalCodec.

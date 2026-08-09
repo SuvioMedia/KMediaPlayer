@@ -4,7 +4,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 
-/** JNI bridge for the embedded macOS libmpv OpenGL/EDR surface. */
+/** JNI bridge from libmpv's OpenGL render API to a rotating IOSurface pool. */
 internal object MpvMacNativeBridge {
     private const val LIBRARY_NAME = "ComposeMediaPlayerMpvMac"
     private const val RESOURCE_PATH =
@@ -22,8 +22,26 @@ internal object MpvMacNativeBridge {
         colorMode: Int,
     ): Long
 
-    /** Returns the renderer-owned `NSView*` mounted by Nucleus Tao. */
-    @JvmStatic external fun nGetViewHandle(nativeRenderer: Long): Long
+    @JvmStatic external fun nRenderFrame(
+        nativeRenderer: Long,
+        width: Int,
+        height: Int,
+    ): Long
+
+    /** IOSurface, size, pixel format, producer generation/serial, extended-linear flag. */
+    @JvmStatic external fun nGetTextureOutputInfo(nativeRenderer: Long): LongArray?
+
+    @JvmStatic external fun nReleaseTextureFrame(
+        nativeRenderer: Long,
+        generation: Long,
+        serial: Long,
+    )
+
+    /** Acknowledges libmpv only after Nucleus confirms a later system Present. */
+    @JvmStatic external fun nReportPresented(
+        nativeRenderer: Long,
+        serial: Long,
+    )
 
     @JvmStatic external fun nDetach(nativeRenderer: Long)
 
@@ -105,6 +123,5 @@ internal enum class MpvMacOutputColorMode(
     val nativeValue: Int,
 ) {
     SDR(0),
-    BT2100_PQ(1),
-    BT2100_HLG(2),
+    EXTENDED_LINEAR(1),
 }

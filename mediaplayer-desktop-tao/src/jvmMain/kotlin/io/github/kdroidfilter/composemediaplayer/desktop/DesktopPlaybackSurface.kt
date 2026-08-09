@@ -12,13 +12,12 @@ import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.BackendVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.consumeTaoVideoOverlayPointerEvents
 
 /**
  * Renders a desktop playback session inside the caller's current Tao window.
  *
- * The application owns window creation and fullscreen. Native renderers are mounted as child views
- * at this composable's bounds, with [overlay] kept in Nucleus' Compose overlay scene.
+ * The application owns window creation and fullscreen. GPU video textures and [overlay] are
+ * composited in the same Nucleus scene.
  */
 @Composable
 public fun DesktopPlaybackSurface(
@@ -125,10 +124,7 @@ private fun DesktopBackendPlaybackSurface(
             contentScale = contentScale,
             overlay = {
                 Box(
-                    modifier =
-                        Modifier
-                            .fillMaxSize()
-                            .consumeTaoVideoOverlayPointerEvents(),
+                    modifier = Modifier.fillMaxSize(),
                 ) {
                     overlay(playerState)
                 }
@@ -149,7 +145,7 @@ private fun DesktopBackendPlaybackSurface(
     }
 }
 
-/** Backend SPI used by [DesktopPlaybackSurface] to observe native child attachment. */
+/** Backend SPI used by [DesktopPlaybackSurface] to observe TextureView host attachment. */
 @Stable
 @ExperimentalComposeMediaPlayerBackendApi
 public interface TaoPlaybackSurfaceProvider {

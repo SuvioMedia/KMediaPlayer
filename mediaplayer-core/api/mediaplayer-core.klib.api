@@ -93,6 +93,18 @@ final enum class io.github.kdroidfilter.composemediaplayer/ColorPipelineVerifica
     final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/ColorPipelineVerification> // io.github.kdroidfilter.composemediaplayer/ColorPipelineVerification.values|values#static(){}[0]
 }
 
+final enum class io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode> { // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode|null[0]
+    enum entry COMPOSE // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.COMPOSE|null[0]
+    enum entry PREFER_COLOR_MANAGED_TEXTURE // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE|null[0]
+    enum entry PREFER_NATIVE // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.PREFER_NATIVE|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode> // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode> // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.values|values#static(){}[0]
+}
+
 final enum class io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer> { // io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer|null[0]
     enum entry FEL // io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer.FEL|null[0]
     enum entry MEL // io.github.kdroidfilter.composemediaplayer/DolbyVisionEnhancementLayer.MEL|null[0]

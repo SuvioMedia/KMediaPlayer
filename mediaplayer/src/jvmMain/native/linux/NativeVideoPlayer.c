@@ -79,6 +79,12 @@ struct VideoPlayer {
     GstElement* memory_video_bin;
     GstElement* wayland_sink;
     LinuxVulkanProjection* projection_renderer;
+    int texture_output;
+    int texture_input_p010;
+    int texture_output_hdr;
+    int32_t texture_width;
+    int32_t texture_height;
+    uint64_t texture_generation;
     GstElement* audio_bin;  // custom audio bin with scaletempo + level
     GstElement* level;      // level element reference
 
@@ -791,6 +797,146 @@ static void restore_pipeline_state(VideoPlayer* p, GstState target_state, gint64
     }
 }
 
+int32_t nvp_configure_texture_output(
+    VideoPlayer* p,
+    int32_t width,
+    int32_t height,
+    int32_t input_p010,
+    int32_t output_hdr,
+    const LinuxVulkanProjectionConfiguration* configuration
+) {
+    if (!p || width <= 0 || height <= 0 || !configuration) return 0;
+    input_p010 = input_p010 != 0;
+    output_hdr = output_hdr != 0;
+
+    pthread_mutex_lock(&p->output_lock);
+    LinuxVulkanProjection* existing = p->texture_output ? p->projection_renderer : NULL;
+    const int input_changed = existing && p->texture_input_p010 != input_p010;
+    const int output_changed = existing && p->texture_output_hdr != output_hdr;
+    const int size_changed = existing &&
+        (p->texture_width != width || p->texture_height != height);
+    pthread_mutex_unlock(&p->output_lock);
+
+    if (existing && !input_changed) {
+        const int updated = linux_vulkan_texture_update(
+            existing,
+            width,
+            height,
+            input_p010,
+            output_hdr,
+            configuration
+        );
+        if (updated) {
+            pthread_mutex_lock(&p->output_lock);
+            p->texture_output_hdr = output_hdr;
+            p->texture_width = width;
+            p->texture_height = height;
+            if (output_changed || size_changed) p->texture_generation++;
+            pthread_mutex_unlock(&p->output_lock);
+        }
+        return updated;
+    }
+
+    if (existing || p->wayland_sink || p->projection_renderer) {
+        if (p->texture_output) nvp_detach_texture_output(p);
+        else nvp_detach_wayland_output(p);
+    }
+    GstState target_state;
+    gint64 position;
+    snapshot_pipeline_state(p, &target_state, &position);
+    gst_element_set_state(p->pipeline, GST_STATE_NULL);
+    LinuxVulkanProjection* renderer = linux_vulkan_texture_create(
+        width,
+        height,
+        input_p010,
+        output_hdr,
+        configuration
+    );
+    if (!renderer) {
+        restore_pipeline_state(p, target_state, position);
+        return 0;
+    }
+    GstCaps* caps = input_p010
+        ? gst_caps_from_string(
+            "video/x-raw(memory:DMABuf),format=(string)DMA_DRM,drm-format=(string)P010;"
+            "video/x-raw,format=(string)P010_10LE"
+        )
+        : gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, "BGRA", NULL);
+    gst_app_sink_set_caps(GST_APP_SINK(p->video_sink), caps);
+    gst_caps_unref(caps);
+    g_object_set(p->pipeline, "video-sink", p->memory_video_bin, NULL);
+
+    pthread_mutex_lock(&p->output_lock);
+    p->projection_renderer = renderer;
+    p->texture_output = 1;
+    p->texture_input_p010 = input_p010;
+    p->texture_output_hdr = output_hdr;
+    p->texture_width = width;
+    p->texture_height = height;
+    p->texture_generation++;
+    if (p->texture_generation == 0) p->texture_generation = 1;
+    p->wayland_output_state = NVP_WAYLAND_OUTPUT_ATTACHED;
+    pthread_mutex_unlock(&p->output_lock);
+    restore_pipeline_state(p, target_state, position);
+    return 1;
+}
+
+void nvp_detach_texture_output(VideoPlayer* p) {
+    if (!p) return;
+    pthread_mutex_lock(&p->output_lock);
+    LinuxVulkanProjection* renderer = p->texture_output ? p->projection_renderer : NULL;
+    pthread_mutex_unlock(&p->output_lock);
+    if (!renderer) return;
+    GstState target_state;
+    gint64 position;
+    snapshot_pipeline_state(p, &target_state, &position);
+    gst_element_set_state(p->pipeline, GST_STATE_NULL);
+    GstCaps* caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, "BGRA", NULL);
+    gst_app_sink_set_caps(GST_APP_SINK(p->video_sink), caps);
+    gst_caps_unref(caps);
+
+    pthread_mutex_lock(&p->output_lock);
+    p->projection_renderer = NULL;
+    p->texture_output = 0;
+    p->texture_input_p010 = 0;
+    p->texture_output_hdr = 0;
+    p->texture_width = 0;
+    p->texture_height = 0;
+    p->wayland_output_state = 0;
+    pthread_mutex_unlock(&p->output_lock);
+    linux_vulkan_projection_destroy(renderer);
+    restore_pipeline_state(p, target_state, position);
+}
+
+int32_t nvp_acquire_texture_frame(VideoPlayer* p, LinuxVulkanTextureFrame* frame) {
+    if (!p || !frame) return 0;
+    pthread_mutex_lock(&p->output_lock);
+    LinuxVulkanProjection* renderer = p->texture_output ? p->projection_renderer : NULL;
+    const int result = renderer ? linux_vulkan_texture_acquire_frame(renderer, frame) : 0;
+    if (result) frame->generation = p->texture_generation;
+    pthread_mutex_unlock(&p->output_lock);
+    return result;
+}
+
+void nvp_release_texture_frame(
+    VideoPlayer* p,
+    uint64_t generation,
+    uint64_t serial,
+    int32_t dma_buf_fd,
+    int32_t release_fence_fd
+) {
+    if (!p) {
+        linux_vulkan_texture_release_frame(NULL, serial, dma_buf_fd, release_fence_fd);
+        return;
+    }
+    pthread_mutex_lock(&p->output_lock);
+    LinuxVulkanProjection* renderer = p->texture_output && p->texture_generation == generation
+        ? p->projection_renderer
+        : NULL;
+    linux_vulkan_texture_release_frame(renderer, serial, dma_buf_fd, release_fence_fd);
+    pthread_mutex_unlock(&p->output_lock);
+}
+
 int32_t nvp_attach_wayland_output(
     VideoPlayer* p,
     uintptr_t display,
@@ -1349,7 +1495,48 @@ static GstFlowReturn on_new_sample(GstAppSink* sink, gpointer data) {
 
     pthread_mutex_lock(&p->output_lock);
     LinuxVulkanProjection* projection_renderer = p->projection_renderer;
+    const int texture_output = p->texture_output;
+    const int texture_input_p010 = p->texture_input_p010;
     pthread_mutex_unlock(&p->output_lock);
+    if (projection_renderer && texture_output && !texture_input_p010) {
+        gint fps_n = 0;
+        gint fps_d = 1;
+        if (gst_structure_get_fraction(s, "framerate", &fps_n, &fps_d) && fps_d > 0) {
+            p->frame_rate = (float)fps_n / (float)fps_d;
+        }
+        GstBuffer* buffer = gst_sample_get_buffer(sample);
+        GstMapInfo map;
+        if (!buffer || !gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+            gst_sample_unref(sample);
+            return GST_FLOW_OK;
+        }
+        GstVideoInfo video_info;
+        gst_video_info_init(&video_info);
+        const int valid = gst_video_info_from_caps(&video_info, caps) &&
+            GST_VIDEO_INFO_FORMAT(&video_info) == GST_VIDEO_FORMAT_BGRA &&
+            map.size >= (size_t)GST_VIDEO_INFO_SIZE(&video_info);
+        if (valid) update_decoded_color_info(p, caps);
+        const int rendered = valid && linux_vulkan_texture_render_bgra(
+            projection_renderer,
+            map.data,
+            GST_VIDEO_INFO_PLANE_STRIDE(&video_info, 0),
+            width,
+            height
+        );
+        gst_buffer_unmap(buffer, &map);
+        if (rendered) {
+            pthread_mutex_lock(&p->frame_lock);
+            p->frame_width = width;
+            p->frame_height = height;
+            pthread_mutex_unlock(&p->frame_lock);
+        } else {
+            pthread_mutex_lock(&p->output_lock);
+            p->wayland_output_state |= NVP_WAYLAND_OUTPUT_ERROR;
+            pthread_mutex_unlock(&p->output_lock);
+        }
+        gst_sample_unref(sample);
+        return rendered ? GST_FLOW_OK : GST_FLOW_ERROR;
+    }
     if (projection_renderer) {
         GstVideoInfo video_info;
         gst_video_info_init(&video_info);

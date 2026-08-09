@@ -135,6 +135,14 @@ private fun MpvPlaybackOptions.toDesktopRuntimeConfig(): MpvRuntimeConfig {
         subtitleFontsDirectory = fontsDirectory,
         desktopRuntimeDirectory = runtimeDirectory,
         maxRenderPixels = maxDesktopRenderPixels,
+        dynamicRangePolicy = dynamicRangePolicy,
+        dolbyVisionPolicy = dolbyVisionPolicy,
+        desktopVideoSurfaceMode =
+            if (desktopVideoSurfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE) {
+                DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE
+            } else {
+                desktopVideoSurfaceMode
+            },
     )
 }
 
