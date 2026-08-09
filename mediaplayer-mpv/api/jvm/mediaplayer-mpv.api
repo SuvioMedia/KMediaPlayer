@@ -59,18 +59,20 @@ public final class io/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions 
 	public static final field DEFAULT_MAX_DESKTOP_RENDER_PIXELS I
 	public static final field MAX_DESKTOP_RENDER_PIXELS I
 	public fun <init> ()V
-	public fun <init> (Ljava/lang/String;ZZLio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;ILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;)V
-	public synthetic fun <init> (Ljava/lang/String;ZZLio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;ILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;ZZLio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;ILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;ZZLio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;ILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun component1 ()Ljava/lang/String;
 	public final fun component2 ()Z
 	public final fun component3 ()Z
 	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;
 	public final fun component5 ()I
 	public final fun component6 ()Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;
-	public final fun copy (Ljava/lang/String;ZZLio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;ILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
-	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;Ljava/lang/String;ZZLio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;ILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;ZZLio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;ILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;Ljava/lang/String;ZZLio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;ILio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/MpvPlaybackOptions;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getAndroidDecodeMode ()Lio/github/kdroidfilter/composemediaplayer/MpvAndroidDecodeMode;
+	public final fun getDesktopRuntimeDirectory ()Ljava/lang/String;
 	public final fun getMaxDesktopRenderPixels ()I
 	public final fun getPreserveAssStyles ()Z
 	public final fun getRuntimeSource ()Lio/github/kdroidfilter/composemediaplayer/MpvRuntimeSource;
