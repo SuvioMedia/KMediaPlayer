@@ -252,10 +252,12 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
 
 private fun configuredDesktopRuntimeDirectory(): Path? {
     val configuredPath =
-        System.getProperty(MPV_RUNTIME_DIRECTORY_PROPERTY)
+        System
+            .getProperty(MPV_RUNTIME_DIRECTORY_PROPERTY)
             ?.trim()
             ?.takeIf(String::isNotEmpty)
-            ?: System.getenv(MPV_RUNTIME_DIRECTORY_ENVIRONMENT)
+            ?: System
+                .getenv(MPV_RUNTIME_DIRECTORY_ENVIRONMENT)
                 ?.trim()
                 ?.takeIf(String::isNotEmpty)
             ?: return null
