@@ -80,6 +80,10 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
   with libass-based ASS/SSA subtitle support. The default artifact has no MPV
   dependency; applications add the adapter only to the platform source sets
   where they select it.
+- **Optional advertising contracts**: `composemediaplayer-ads-core` contains the
+  provider-neutral ad plan and playback state machine. The default player does
+  not depend on it, so products without advertising do not resolve or package
+  the module.
 
 ## ✨ Supported Video Formats
 | Format | Windows                                                                                                           | Linux  | macOS & iOS                                                       | Android | WASM |
@@ -174,6 +178,7 @@ dependencies {
 Pipeline integrations are separate modules:
 
 ```text
+composemediaplayer-ads-core ────────────────────────────────────────────────> optional ad orchestration
 composemediaplayer-ass ──────────┐
 composemediaplayer-dolbyvision ──┼──> composemediaplayer-extension-api ──> composemediaplayer-core
 composemediaplayer-kmediabridge ─┘
@@ -181,6 +186,14 @@ composemediaplayer-desktop-tao ────────────────�
 composemediaplayer-mpv ─────────────────────────────────> composemediaplayer-desktop-tao
 composemediaplayer ──────────────┬──> composemediaplayer-extension-api
                                  └──> composemediaplayer-desktop-tao
+```
+
+Add advertising only in products that enable it:
+
+```kotlin
+dependencies {
+    implementation("io.github.shusek:composemediaplayer-ads-core:<version>")
+}
 ```
 
 The MPV and KMediaBridge adapters are optional. When both are present they transitively select their

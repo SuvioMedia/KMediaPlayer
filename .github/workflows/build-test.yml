@@ -81,6 +81,7 @@ jobs:
       - name: Test desktop JVM on ${{ matrix.label }}
         run: >-
           ${{ matrix.gradle }} :mediaplayer-core:jvmTest
+          :mediaplayer-ads-core:jvmTest
           :mediaplayer-extension-api:jvmTest
           :mediaplayer-desktop-tao:jvmTest
           :mediaplayer:compileKotlinJvm :mediaplayer:jvmTest
@@ -101,6 +102,8 @@ jobs:
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
+            mediaplayer-ads-core/build/reports/tests/
+            mediaplayer-ads-core/build/test-results/
             mediaplayer-extension-api/build/reports/tests/
             mediaplayer-extension-api/build/test-results/
             mediaplayer-desktop-tao/build/reports/tests/
@@ -146,6 +149,8 @@ jobs:
         run: >-
           ./gradlew :mediaplayer-core:compileAndroidMain
           :mediaplayer-core:testAndroidHostTest
+          :mediaplayer-ads-core:compileAndroidMain
+          :mediaplayer-ads-core:testAndroidHostTest
           :mediaplayer-extension-api:compileAndroidMain
           :mediaplayer-extension-api:testAndroidHostTest
           :mediaplayer:compileAndroidMain :mediaplayer:testAndroidHostTest
@@ -168,6 +173,8 @@ jobs:
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
+            mediaplayer-ads-core/build/reports/tests/
+            mediaplayer-ads-core/build/test-results/
             mediaplayer-extension-api/build/reports/tests/
             mediaplayer-extension-api/build/test-results/
             mediaplayer-ass/build/reports/tests/
@@ -239,6 +246,8 @@ jobs:
         run: >-
           ./gradlew :mediaplayer-core:compileKotlinIosArm64
           :mediaplayer-core:iosSimulatorArm64Test
+          :mediaplayer-ads-core:compileKotlinIosArm64
+          :mediaplayer-ads-core:iosSimulatorArm64Test
           :mediaplayer-extension-api:compileKotlinIosArm64
           :mediaplayer-extension-api:iosSimulatorArm64Test
           :mediaplayer:compileKotlinIosArm64
@@ -262,6 +271,8 @@ jobs:
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
+            mediaplayer-ads-core/build/reports/tests/
+            mediaplayer-ads-core/build/test-results/
             mediaplayer-extension-api/build/reports/tests/
             mediaplayer-extension-api/build/test-results/
             mediaplayer-mpv/build/reports/tests/
@@ -293,6 +304,7 @@ jobs:
       - name: Test Wasm in headless Chrome
         run: >-
           ./gradlew :mediaplayer-core:wasmJsBrowserTest
+          :mediaplayer-ads-core:wasmJsBrowserTest
           :mediaplayer-extension-api:wasmJsBrowserTest
           :mediaplayer:wasmJsBrowserTest
           :mediaplayer-ass:wasmJsBrowserTest
@@ -309,6 +321,8 @@ jobs:
           path: |
             mediaplayer/build/reports/tests/
             mediaplayer/build/test-results/
+            mediaplayer-ads-core/build/reports/tests/
+            mediaplayer-ads-core/build/test-results/
             mediaplayer-extension-api/build/reports/tests/
             mediaplayer-extension-api/build/test-results/
             mediaplayer-ass/build/reports/tests/
@@ -501,25 +515,28 @@ jobs:
       - name: Check pinned libdovi shim
         run: cargo check --locked --manifest-path mediaplayer-dolbyvision/native/libdovi/Cargo.toml
 
-      - name: Validate KMediaPlayer 4.0 release versions
+      - name: Validate KMediaPlayer 4.1 release versions
         run: >-
           ./gradlew :mediaplayer-core:validateReleaseVersion
+          :mediaplayer-ads-core:validateReleaseVersion
           :mediaplayer-desktop-tao:validateReleaseVersion
           :mediaplayer:validateReleaseVersion
           :mediaplayer-mpv:validateReleaseVersion
           :mediaplayer-ass:validateReleaseVersion
           :mediaplayer-dolbyvision:validateReleaseVersion
-          -PpublicationVersion=4.0.0
+          -PpublicationVersion=4.1.0
           -PcomposeMediaPlayer.skipNativeBuild=true --no-daemon
 
       - name: Run formatting and static analysis
         run: >-
           ./gradlew :mediaplayer-core:ktlintCheck
+          :mediaplayer-ads-core:ktlintCheck
           :mediaplayer-extension-api:ktlintCheck
           :mediaplayer-desktop-tao:ktlintCheck
           :mediaplayer:ktlintCheck :mediaplayer-mpv:ktlintCheck
           :mediaplayer-ass:ktlintCheck :mediaplayer-dolbyvision:ktlintCheck
           :mediaplayer-kmediabridge:ktlintCheck
+          :mediaplayer-ads-core:detekt
           :mediaplayer-extension-api:detekt :mediaplayer-desktop-tao:detekt
           :mediaplayer:detekt :mediaplayer-ass:detekt
           :mediaplayer-dolbyvision:detekt :mediaplayer-kmediabridge:detekt
@@ -576,6 +593,7 @@ jobs:
       - name: Validate JVM and KLIB ABI on a fully supported host
         run: >-
           ./gradlew :mediaplayer-core:checkKotlinAbi
+          :mediaplayer-ads-core:checkKotlinAbi
           :mediaplayer-extension-api:checkKotlinAbi
           :mediaplayer-desktop-tao:checkKotlinAbi
           :mediaplayer:checkKotlinAbi
