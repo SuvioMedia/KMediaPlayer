@@ -193,6 +193,8 @@ tasks.register("publishConsumerSmokeArtifacts") {
         ":mediaplayer-mpv:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-mpv:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-mpv:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishJvmPublicationToConsumerSmokeRepository",
     )
 }
 
@@ -239,6 +241,7 @@ gradle.projectsEvaluated {
                 project(":mediaplayer-ass"),
                 project(":mediaplayer-dolbyvision"),
                 project(":mediaplayer-kmediabridge"),
+                project(":mediaplayer-libvlc"),
             ).flatMap { extensionProject ->
                 extensionProject
                     .productionProjectDependencyPaths()

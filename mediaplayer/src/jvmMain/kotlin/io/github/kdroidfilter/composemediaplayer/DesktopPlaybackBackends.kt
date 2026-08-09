@@ -50,6 +50,10 @@ fun platformDesktopPlaybackBackend(
     )
 
 /** Compatibility entry for the removed desktop libVLC child-view backend. */
+@Deprecated(
+    message = "Add composemediaplayer-libvlc and use its libVlcDesktopPlaybackBackend.",
+    level = DeprecationLevel.HIDDEN,
+)
 fun libVlcDesktopPlaybackBackend(
     audioMode: AudioMode = AudioMode(),
     cacheConfig: CacheConfig = CacheConfig(),
