@@ -11,4 +11,8 @@ data class AudioTrack(
     val sampleRate: Int? = null,
     val bitrate: Int? = null,
     val isDefault: Boolean = false,
-)
+    val isEmbedded: Boolean = true,
+) {
+    val isExternal: Boolean
+        get() = !isEmbedded
+}

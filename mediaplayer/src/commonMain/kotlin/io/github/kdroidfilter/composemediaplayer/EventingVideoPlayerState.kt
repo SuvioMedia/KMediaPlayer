@@ -175,6 +175,9 @@ internal class EventingVideoPlayerState(
             delegate.currentAudioTrack = value
         }
 
+    override val externalAudioTracks: List<ExternalAudioTrack>
+        get() = delegate.externalAudioTracks
+
     override var subtitlesEnabled: Boolean
         get() = delegate.subtitlesEnabled
         set(value) {
@@ -480,6 +483,34 @@ internal class EventingVideoPlayerState(
                     ?: TrackSelectionResult.NotFound(id)
             }
             ?: selectAudioTrack(null as AudioTrack?)
+    }
+
+    override fun addExternalAudioTrack(track: ExternalAudioTrack) {
+        ensureNotDisposed()
+        delegate.addExternalAudioTrack(track)
+        emitCurrentErrorIfChanged()
+    }
+
+    override fun removeExternalAudioTrack(trackId: String) {
+        ensureNotDisposed()
+        delegate.removeExternalAudioTrack(trackId)
+        emitCurrentErrorIfChanged()
+    }
+
+    override fun removeExternalAudioTrack(track: ExternalAudioTrack) {
+        removeExternalAudioTrack(track.id)
+    }
+
+    override fun clearExternalAudioTracks() {
+        ensureNotDisposed()
+        delegate.clearExternalAudioTracks()
+        emitCurrentErrorIfChanged()
+    }
+
+    override fun replaceExternalAudioTracks(tracks: List<ExternalAudioTrack>) {
+        ensureNotDisposed()
+        delegate.replaceExternalAudioTracks(tracks)
+        emitCurrentErrorIfChanged()
     }
 
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {

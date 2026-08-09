@@ -56,6 +56,29 @@ class VideoPlayerStateSubtitleTracksTest {
     }
 
     @Test
+    fun previewableExternalAudioTracksPreserveEmbeddedTracksAndSelection() {
+        val embedded = AudioTrack(id = "embedded", label = "Embedded")
+        val available = mutableListOf(embedded)
+        val state = PreviewableVideoPlayerState(availableAudioTracks = available, currentAudioTrack = embedded)
+        val first = externalAudioTrack("narration", "Narration")
+
+        state.addExternalAudioTrack(first)
+        assertEquals(listOf(embedded, first.asAudioTrack()), available)
+        assertEquals(listOf(first), state.externalAudioTracks)
+        assertEquals(TrackSelectionResult.Selected(first.id), state.selectAudioTrack(first.id))
+
+        val replacement = first.copy(label = "Narration replacement")
+        state.replaceExternalAudioTracks(listOf(replacement))
+
+        assertEquals(listOf(embedded, replacement.asAudioTrack()), available)
+        assertEquals(replacement.asAudioTrack(), state.currentAudioTrack)
+
+        state.clearExternalAudioTracks()
+        assertEquals(listOf(embedded), available)
+        assertEquals(null, state.currentAudioTrack)
+    }
+
+    @Test
     fun replaceExternalSubtitleTracksPreservesEmbeddedTracks() {
         val embeddedTrack =
             SubtitleTrack(
@@ -112,5 +135,15 @@ class VideoPlayerStateSubtitleTracksTest {
             language = "en",
             src = "$id.vtt",
             isEmbedded = isEmbedded,
+        )
+
+    private fun externalAudioTrack(
+        id: String,
+        label: String,
+    ): ExternalAudioTrack =
+        ExternalAudioTrack(
+            id = id,
+            label = label,
+            source = MediaSourceSpec("https://media.invalid/$id.m4a", "audio/mp4"),
         )
 }

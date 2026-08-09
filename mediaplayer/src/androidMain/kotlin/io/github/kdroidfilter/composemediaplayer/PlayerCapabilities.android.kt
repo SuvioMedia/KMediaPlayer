@@ -13,6 +13,7 @@ internal actual fun platformPlayerCapabilities(playbackOptions: VideoPlaybackOpt
             supportsMkv = true,
             supportsHls = true,
             supportsPiP = isAndroidPictureInPictureSupported(),
+            supportsExternalAudioTracks = true,
             displayColorCapabilities = queryAndroidDisplayColorCapabilities(),
             rendererColorCapabilities = queryAndroidRendererColorCapabilities(),
             supportedUriSchemes = ANDROID_SUPPORTED_URI_SCHEMES,

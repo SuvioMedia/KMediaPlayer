@@ -1202,6 +1202,34 @@ if (subtitleTrack != null) {
 
 `availableSubtitleTracks` can contain both external tracks added by your app through `addSubtitleTrack(...)` and embedded tracks discovered from the current media. Use `replaceExternalSubtitleTracks(...)` to replace app-managed tracks while preserving embedded tracks, or `removeSubtitleTrack(...)` / `clearExternalSubtitleTracks()` to remove app-managed tracks.
 
+Android applications can also attach a timeline-aligned audio source as an alternative to the audio
+embedded in the primary media. Check `capabilities.supportsExternalAudioTracks`, open the primary
+source, and then register the external track:
+
+```kotlin
+if (playerState.capabilities.supportsExternalAudioTracks) {
+    val narration = ExternalAudioTrack(
+        id = "narration-pl",
+        label = "Polish narration",
+        language = "pl",
+        source = MediaSourceSpec(
+            uri = "https://example.com/narration.m4a",
+            mimeType = "audio/mp4",
+        ),
+    )
+    playerState.addExternalAudioTrack(narration)
+    playerState.selectAudioTrack(narration.id)
+}
+```
+
+External audio is an alternative full mix, not a second signal mixed on the device. Its timestamps
+and period layout must match the primary content. The registry is bound to the current source and is
+cleared when another primary source is opened or the source is released. Use
+`replaceExternalAudioTracks(...)` to update app-managed tracks while preserving embedded tracks.
+Android request headers are sanitized through the same policy as primary media headers; avoid
+putting long-lived credentials in URLs or diagnostic output. External audio bypasses the primary
+media disk cache so session-bound URLs are not retained in its cache index.
+
 `selectAudioTrack(...)`, `selectSubtitleTrack(...)` and `disableSubtitles()` return `TrackSelectionResult`. `Selected`, `Auto` and `Disabled` mean the request was applied; `NotFound`, `NotSupported` and `Failed` mean the player state was not changed.
 
 #### 🎨 Customizing Subtitle Appearance

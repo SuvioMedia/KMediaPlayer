@@ -12,6 +12,7 @@ data class MediaSourceSpec(
 data class PlayerCapabilities(
     val supportsMkv: Boolean = false,
     val supportsPiP: Boolean = false,
+    val supportsExternalAudioTracks: Boolean = false,
     val decoderColorCapabilities: DecoderColorCapabilities = DecoderColorCapabilities(),
     val displayColorCapabilities: DisplayColorCapabilities = DisplayColorCapabilities(),
     val rendererColorCapabilities: RendererColorCapabilities = RendererColorCapabilities(),

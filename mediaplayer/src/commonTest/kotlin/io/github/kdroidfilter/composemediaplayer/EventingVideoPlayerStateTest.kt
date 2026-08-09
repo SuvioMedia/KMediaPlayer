@@ -302,6 +302,29 @@ class EventingVideoPlayerStateTest {
         }
 
     @Test
+    fun externalAudioTrackOperationsAreForwardedToDelegate() =
+        runTest {
+            val delegate = FakeVideoPlayerState()
+            val state = EventingVideoPlayerState(delegate)
+            val first = externalAudioTrack("narration-pl")
+            val second = externalAudioTrack("narration-en")
+
+            state.addExternalAudioTrack(first)
+            assertEquals(listOf(first), state.externalAudioTracks)
+
+            state.replaceExternalAudioTracks(listOf(first, second))
+            assertEquals(listOf(first, second), delegate.externalAudioTracks)
+
+            state.removeExternalAudioTrack(first.id)
+            assertEquals(listOf(second), delegate.externalAudioTracks)
+
+            state.clearExternalAudioTracks()
+            assertEquals(emptyList(), delegate.externalAudioTracks)
+
+            state.dispose()
+        }
+
+    @Test
     fun unsupportedHlsQualitySelectionDoesNotEmitTrackChangedEvent() =
         runTest {
             val delegate = FakeVideoPlayerState()
@@ -649,6 +672,9 @@ private class FakeVideoPlayerState : VideoPlayerState {
     override val metadata: VideoMetadata = VideoMetadata()
     override var currentAudioTrack: AudioTrack? = null
     override var availableAudioTracks: List<AudioTrack> = emptyList()
+    private val mutableExternalAudioTracks = mutableListOf<ExternalAudioTrack>()
+    override val externalAudioTracks: List<ExternalAudioTrack>
+        get() = mutableExternalAudioTracks
 
     @Suppress("OVERRIDE_DEPRECATION")
     override var availableHlsQualities: List<HlsQualityVariant> = emptyList()
@@ -749,6 +775,24 @@ private class FakeVideoPlayerState : VideoPlayerState {
         return track.audioTrackSelectionResult()
     }
 
+    override fun addExternalAudioTrack(track: ExternalAudioTrack) {
+        mutableExternalAudioTracks.removeAll { existing -> existing.id == track.id }
+        mutableExternalAudioTracks += track
+    }
+
+    override fun removeExternalAudioTrack(trackId: String) {
+        mutableExternalAudioTracks.removeAll { track -> track.id == trackId }
+    }
+
+    override fun clearExternalAudioTracks() {
+        mutableExternalAudioTracks.clear()
+    }
+
+    override fun replaceExternalAudioTracks(tracks: List<ExternalAudioTrack>) {
+        mutableExternalAudioTracks.clear()
+        mutableExternalAudioTracks.addAll(tracks)
+    }
+
     override fun selectHlsQuality(variantId: String?): HlsQualitySelectionResult {
         hlsQualitySelectionCalls += 1
         return hlsQualitySelectionResult.also { result ->
@@ -801,3 +845,10 @@ private class FakeVideoPlayerState : VideoPlayerState {
         onRestart?.invoke()
     }
 }
+
+private fun externalAudioTrack(id: String): ExternalAudioTrack =
+    ExternalAudioTrack(
+        id = id,
+        label = id,
+        source = MediaSourceSpec("https://media.invalid/$id.m4a", "audio/mp4"),
+    )

@@ -49,7 +49,9 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.video.VideoFrameMetadataListener
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
@@ -750,6 +752,12 @@ open class DefaultVideoPlayerState(
     private val _availableAudioTracks = mutableStateListOf<AudioTrack>()
     override val availableAudioTracks: List<AudioTrack>
         get() = _availableAudioTracks
+    private val _externalAudioTracks = mutableStateListOf<ExternalAudioTrack>()
+    override val externalAudioTracks: List<ExternalAudioTrack>
+        get() = _externalAudioTracks
+    private val audioTrackSelectionCoordinates = mutableMapOf<String, Pair<Int, Int>>()
+    private var pendingAudioTrackSelectionId: String? = null
+    private var pendingEmbeddedSubtitleTrackSelectionId: String? = null
 
     private var playerView: PlayerView? = null
     private var projectionVideoSurfaceView: SurfaceView? = null
@@ -816,6 +824,86 @@ open class DefaultVideoPlayerState(
                     ?: TrackSelectionResult.NotFound(id)
             }
             ?: selectAudioTrack(null as AudioTrack?)
+    }
+
+    override fun addExternalAudioTrack(track: ExternalAudioTrack) {
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                val existingIndex = _externalAudioTracks.indexOfFirst { existing -> existing.id == track.id }
+                if (existingIndex >= 0 && _externalAudioTracks[existingIndex] == track) return@synchronized
+                val selectionToRestore = pendingAudioTrackSelectionId ?: currentAudioTrack?.id
+                if (existingIndex >= 0) {
+                    _externalAudioTracks[existingIndex] = track
+                } else {
+                    _externalAudioTracks += track
+                }
+                rebuildCurrentSourceForExternalAudio(selectionToRestore)
+            }
+        }
+    }
+
+    override fun removeExternalAudioTrack(trackId: String) {
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                val removed = _externalAudioTracks.removeAll { track -> track.id == trackId }
+                if (!removed) return@synchronized
+                val selectedTrack = currentAudioTrack
+                val selectionToRestore =
+                    (pendingAudioTrackSelectionId ?: selectedTrack?.id)
+                        ?.takeUnless { selectedId -> selectedId == trackId && selectedTrack?.isExternal != false }
+                _availableAudioTracks.removeAll { track -> track.id == trackId && track.isExternal }
+                if (selectedTrack?.id == trackId && selectedTrack.isExternal) currentAudioTrack = null
+                rebuildCurrentSourceForExternalAudio(selectionToRestore)
+            }
+        }
+    }
+
+    override fun clearExternalAudioTracks() {
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                if (_externalAudioTracks.isEmpty()) return@synchronized
+                val selectedTrack = currentAudioTrack
+                val selectionToRestore =
+                    (pendingAudioTrackSelectionId ?: selectedTrack?.id)
+                        ?.takeUnless { selectedId ->
+                            selectedTrack?.isExternal == true ||
+                                _externalAudioTracks.any { track -> track.id == selectedId }
+                        }
+                _externalAudioTracks.clear()
+                _availableAudioTracks.removeAll(AudioTrack::isExternal)
+                if (selectedTrack?.isExternal == true) currentAudioTrack = null
+                rebuildCurrentSourceForExternalAudio(selectionToRestore)
+            }
+        }
+    }
+
+    override fun replaceExternalAudioTracks(tracks: List<ExternalAudioTrack>) {
+        require(tracks.distinctBy(ExternalAudioTrack::id).size == tracks.size) {
+            "External audio track ids must be unique."
+        }
+        runOnPlayerThreadBlocking {
+            synchronized(playerInitializationLock) {
+                checkNotDisposed()
+                if (_externalAudioTracks == tracks) return@synchronized
+                val selectedTrack = currentAudioTrack
+                val previousSelectionId = pendingAudioTrackSelectionId ?: selectedTrack?.id
+                val previousSelectionWasExternal =
+                    selectedTrack?.isExternal == true ||
+                        _externalAudioTracks.any { track -> track.id == previousSelectionId }
+                val selectionToRestore =
+                    previousSelectionId?.takeIf { selectedId ->
+                        !previousSelectionWasExternal || tracks.any { track -> track.id == selectedId }
+                    }
+                _externalAudioTracks.clear()
+                _externalAudioTracks.addAll(tracks)
+                _availableAudioTracks.removeAll(AudioTrack::isExternal)
+                if (selectedTrack?.isExternal == true && selectionToRestore == null) currentAudioTrack = null
+                rebuildCurrentSourceForExternalAudio(selectionToRestore)
+            }
+        }
     }
 
     // Select an external subtitle track
@@ -3066,6 +3154,10 @@ open class DefaultVideoPlayerState(
             externalAssLoadJob?.cancel()
             externalAssLoadJob = null
             androidSubtitleBackend?.deactivate()
+            _externalAudioTracks.clear()
+            pendingAudioTrackSelectionId = null
+            pendingEmbeddedSubtitleTrackSelectionId = null
+            audioTrackSelectionCoordinates.clear()
             stopPositionUpdates()
             abandonDuckAudioFocus()
             player.stop()
@@ -3112,14 +3204,79 @@ open class DefaultVideoPlayerState(
     }
 
     private fun ExoPlayer.setSource(sourceSpec: AndroidSourceSpec) {
-        val mediaSource =
+        val primaryMediaSource =
             (sourceSpec.preparedPipelineSource as? AndroidPreparedVideoPipelineSource)?.createMediaSource()
                 ?: createMediaSource(sourceSpec.mediaItem, sourceSpec.requestHeaders)
-        if (mediaSource == null) {
+        if (_externalAudioTracks.isEmpty() && primaryMediaSource == null) {
             setMediaItem(sourceSpec.mediaItem)
-        } else {
-            setMediaSource(mediaSource)
+            return
         }
+
+        val resolvedPrimaryMediaSource =
+            primaryMediaSource ?: buildAndroidMediaSourceFactory(
+                buildAndroidDataSourceFactory(
+                    context = context,
+                    cache = cacheLease?.cache,
+                    requestHeaders = sourceSpec.requestHeaders,
+                ),
+            ).createMediaSource(sourceSpec.mediaItem)
+        if (_externalAudioTracks.isEmpty()) {
+            setMediaSource(resolvedPrimaryMediaSource)
+            return
+        }
+
+        val mediaSources =
+            buildList {
+                add(resolvedPrimaryMediaSource)
+                _externalAudioTracks.forEach { track -> add(track.createAndroidAudioMediaSource()) }
+            }
+        setMediaSource(
+            MergingMediaSource(
+                // adjustPeriodTimeOffsets =
+                true,
+                // clipDurations =
+                false,
+                *mediaSources.toTypedArray(),
+            ),
+        )
+    }
+
+    private fun ExternalAudioTrack.createAndroidAudioMediaSource(): MediaSource {
+        val mediaItemBuilder =
+            MediaItem
+                .Builder()
+                .setMediaId(id)
+                .setUri(source.uri)
+                .setMediaMetadata(MediaMetadata.Builder().setTitle(label).build())
+        source.mimeType
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?.let(mediaItemBuilder::setMimeType)
+        val dataSourceFactory =
+            buildAndroidDataSourceFactory(
+                context = context,
+                cache = null,
+                requestHeaders = requestHeaders.sanitizedRequestHeaders(),
+            )
+        val mediaSource = DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItemBuilder.build())
+        return FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
+    }
+
+    private fun rebuildCurrentSourceForExternalAudio(selectionToRestore: String?) {
+        val player = exoPlayer ?: return
+        val sourceSpec = currentSourceSpec ?: return
+        val playbackPositionMs = player.currentPosition.coerceAtLeast(0L)
+        val shouldResume = player.playWhenReady
+        pendingAudioTrackSelectionId = selectionToRestore
+        pendingEmbeddedSubtitleTrackSelectionId =
+            pendingEmbeddedSubtitleTrackSelectionId ?: currentSubtitleTrack?.takeIf(SubtitleTrack::isEmbedded)?.id
+        player.setSource(sourceSpec)
+        player.prepare()
+        player.seekTo(playbackPositionMs)
+        player.playWhenReady = shouldResume
+        currentSubtitleTrack
+            ?.takeIf { track -> track.isExternal && usesAndroidSubtitleBackend(track) }
+            ?.let(::loadExternalAssTrack)
     }
 
     /**
@@ -3699,25 +3856,14 @@ open class DefaultVideoPlayerState(
         var selectedSubtitleTrackId: String? = null
         var audioGroupIndex = 0
         var subtitleGroupIndex = 0
+        audioTrackSelectionCoordinates.clear()
 
         player.currentTracks.groups.forEach { group ->
             when (group.type) {
                 C.TRACK_TYPE_AUDIO -> {
-                    for (trackIndex in 0 until group.length) {
-                        val format = group.getTrackFormat(trackIndex)
-                        val id = androidTrackId(C.TRACK_TYPE_AUDIO, audioGroupIndex, trackIndex)
-                        if (group.isTrackSelected(trackIndex)) selectedAudioTrackId = id
-                        audioTracks.add(
-                            AudioTrack(
-                                id = id,
-                                label = format.label ?: format.language ?: "Audio ${audioTracks.size + 1}",
-                                language = format.language.orEmpty(),
-                                channels = format.channelCount.takeIf { it > 0 },
-                                sampleRate = format.sampleRate.takeIf { it > 0 },
-                                bitrate = format.bitrate.takeIf { it > 0 },
-                            ),
-                        )
-                    }
+                    group
+                        .appendAndroidAudioTracks(audioGroupIndex, audioTracks)
+                        ?.let { selectedId -> selectedAudioTrackId = selectedId }
                     audioGroupIndex += 1
                 }
 
@@ -3751,18 +3897,52 @@ open class DefaultVideoPlayerState(
 
         _availableAudioTracks.clear()
         _availableAudioTracks.addAll(audioTracks)
-        currentAudioTrack =
-            selectedAudioTrackId
+        val pendingTrack =
+            pendingAudioTrackSelectionId
                 ?.let { id -> audioTracks.firstOrNull { it.id == id } }
+        currentAudioTrack =
+            pendingTrack
+                ?: selectedAudioTrackId?.let { id -> audioTracks.firstOrNull { it.id == id } }
                 ?: currentAudioTrack?.let { current -> audioTracks.firstOrNull { it.id == current.id } }
                 ?: audioTracks.firstOrNull()
+        if (pendingTrack != null) {
+            pendingAudioTrackSelectionId = null
+            pendingTrack.toAndroidTrackSelectionOverride(player, C.TRACK_TYPE_AUDIO)?.let { override ->
+                player.trackSelectionParameters =
+                    player.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                        .setOverrideForType(override)
+                        .build()
+            }
+        }
 
         val externalSubtitleTracks = _availableSubtitleTracks.filterNot { it.isEmbedded }
         _availableSubtitleTracks.clear()
         _availableSubtitleTracks.addAll(externalSubtitleTracks)
         _availableSubtitleTracks.addAll(embeddedSubtitleTracks)
 
-        if (currentSubtitleTrack?.isEmbedded == true) {
+        val pendingEmbeddedSubtitleTrack =
+            pendingEmbeddedSubtitleTrackSelectionId
+                ?.let { id -> embeddedSubtitleTracks.firstOrNull { track -> track.id == id } }
+        if (pendingEmbeddedSubtitleTrack != null) {
+            currentSubtitleTrack = pendingEmbeddedSubtitleTrack
+            subtitlesEnabled = true
+            pendingEmbeddedSubtitleTrackSelectionId = null
+            pendingEmbeddedSubtitleTrack.toAndroidTrackSelectionOverride(player, C.TRACK_TYPE_TEXT)?.let { override ->
+                player.trackSelectionParameters =
+                    player.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setOverrideForType(override)
+                        .build()
+            }
+        } else if (pendingEmbeddedSubtitleTrackSelectionId != null && embeddedSubtitleTracks.isEmpty()) {
+            // Media3 may report an empty intermediate track set while the merged source is being prepared.
+        } else if (currentSubtitleTrack?.isEmbedded == true) {
+            pendingEmbeddedSubtitleTrackSelectionId = null
             val refreshedTrack =
                 currentSubtitleTrack
                     ?.let { current -> embeddedSubtitleTracks.firstOrNull { it.id == current.id } }
@@ -3800,6 +3980,44 @@ open class DefaultVideoPlayerState(
         }
     }
 
+    private fun Tracks.Group.externalAudioTrackOrNull(): ExternalAudioTrack? {
+        if (_externalAudioTracks.isEmpty()) return null
+        val mergedSourceIndex = mediaTrackGroup.id.substringBefore(':').toIntOrNull() ?: return null
+        if (mergedSourceIndex <= 0) return null
+        return _externalAudioTracks.getOrNull(mergedSourceIndex - 1)
+    }
+
+    private fun Tracks.Group.appendAndroidAudioTracks(
+        audioGroupIndex: Int,
+        destination: MutableList<AudioTrack>,
+    ): String? {
+        val externalTrack = externalAudioTrackOrNull()
+        var selectedTrackId: String? = null
+        for (trackIndex in 0 until length) {
+            val format = getTrackFormat(trackIndex)
+            val id =
+                externalTrack?.idForTrackIndex(trackIndex)
+                    ?: androidTrackId(C.TRACK_TYPE_AUDIO, audioGroupIndex, trackIndex)
+            audioTrackSelectionCoordinates[id] = audioGroupIndex to trackIndex
+            if (isTrackSelected(trackIndex)) selectedTrackId = id
+            destination +=
+                AudioTrack(
+                    id = id,
+                    label = externalTrack?.label ?: format.label ?: format.language ?: "Audio ${destination.size + 1}",
+                    language = externalTrack?.language?.takeIf(String::isNotBlank) ?: format.language.orEmpty(),
+                    channels = format.channelCount.takeIf { it > 0 } ?: externalTrack?.channels,
+                    sampleRate = format.sampleRate.takeIf { it > 0 } ?: externalTrack?.sampleRate,
+                    bitrate = format.bitrate.takeIf { it > 0 } ?: externalTrack?.bitrate,
+                    isDefault = externalTrack?.isDefault == true,
+                    isEmbedded = externalTrack == null,
+                )
+        }
+        return selectedTrackId
+    }
+
+    private fun ExternalAudioTrack.idForTrackIndex(trackIndex: Int): String =
+        if (trackIndex == 0) id else "$id:$trackIndex"
+
     private fun AudioTrack.toAndroidTrackSelectionOverride(
         player: Player,
         trackType: Int,
@@ -3815,7 +4033,12 @@ open class DefaultVideoPlayerState(
         player: Player,
         trackType: Int,
     ): TrackSelectionOverride? {
-        val (targetGroupIndex, targetTrackIndex) = id.toAndroidTrackIndices(trackType) ?: return null
+        val (targetGroupIndex, targetTrackIndex) =
+            if (trackType == C.TRACK_TYPE_AUDIO) {
+                audioTrackSelectionCoordinates[id] ?: id.toAndroidTrackIndices(trackType)
+            } else {
+                id.toAndroidTrackIndices(trackType)
+            } ?: return null
         var groupIndex = 0
         player.currentTracks.groups.forEach { group ->
             if (group.type == trackType) {
@@ -3917,6 +4140,9 @@ open class DefaultVideoPlayerState(
         exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
         _currentAudioTrack = null
         _availableAudioTracks.clear()
+        audioTrackSelectionCoordinates.clear()
+        pendingAudioTrackSelectionId = null
+        pendingEmbeddedSubtitleTrackSelectionId = null
         if (_currentSubtitleTrack?.isEmbedded == true) {
             _currentSubtitleTrack = null
             _subtitlesEnabled = false
@@ -3924,6 +4150,7 @@ open class DefaultVideoPlayerState(
         _availableSubtitleTracks.removeAll { it.isEmbedded }
         updateNativeSubtitleVisibility()
         if (!keepMedia) {
+            _externalAudioTracks.clear()
             clearMediaChapters()
             _hasMedia = false
             sourceLoadedSessionId = 0L
