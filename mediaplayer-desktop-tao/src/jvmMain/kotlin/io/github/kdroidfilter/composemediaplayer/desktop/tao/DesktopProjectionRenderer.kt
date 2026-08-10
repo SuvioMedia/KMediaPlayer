@@ -1,16 +1,28 @@
-package io.github.kdroidfilter.composemediaplayer
+@file:OptIn(io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi::class)
+
+package io.github.kdroidfilter.composemediaplayer.desktop.tao
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.skiaCanvas
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionRenderOptions
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
+import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
+import io.github.kdroidfilter.composemediaplayer.VideoTextureWindow
+import io.github.kdroidfilter.composemediaplayer.isDefaultTextureCrop
+import io.github.kdroidfilter.composemediaplayer.projectionShaderCode
+import io.github.kdroidfilter.composemediaplayer.requiresProjectionRenderer
+import io.github.kdroidfilter.composemediaplayer.toVideoProjectionRenderPlan
 import org.jetbrains.skia.FilterTileMode
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
@@ -20,24 +32,24 @@ import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Shader
 import kotlin.math.floor
 
-internal fun VideoProjectionSettings.usesJvmCanvasProjectionRenderer(textureCrop: VideoTextureCrop): Boolean =
+public fun VideoProjectionSettings.usesDesktopCanvasProjectionRenderer(textureCrop: VideoTextureCrop): Boolean =
     requiresProjectionRenderer || !textureCrop.isDefaultTextureCrop
 
 private const val JVM_CANVAS_RENDERER_LABEL = "Compose Canvas (Skia)"
 private const val JVM_CANVAS_PROJECTION_RENDERER_LABEL = "Compose Canvas -> Skia projection shader"
 
-internal fun VideoProjectionSettings.jvmCanvasRendererLabel(textureCrop: VideoTextureCrop): String =
-    if (usesJvmCanvasProjectionRenderer(textureCrop)) {
+public fun VideoProjectionSettings.desktopCanvasRendererLabel(textureCrop: VideoTextureCrop): String =
+    if (usesDesktopCanvasProjectionRenderer(textureCrop)) {
         JVM_CANVAS_PROJECTION_RENDERER_LABEL
     } else {
         JVM_CANVAS_RENDERER_LABEL
     }
 
-internal fun VideoProjectionSettings.jvmCanvasRendererLabel(
+public fun VideoProjectionSettings.desktopCanvasRendererLabel(
     baseRenderer: String,
     textureCrop: VideoTextureCrop,
 ): String =
-    if (!usesJvmCanvasProjectionRenderer(textureCrop)) {
+    if (!usesDesktopCanvasProjectionRenderer(textureCrop)) {
         baseRenderer
     } else {
         when {
@@ -51,7 +63,7 @@ internal fun VideoProjectionSettings.jvmCanvasRendererLabel(
     }
 
 @Composable
-internal fun JvmProjectedVideoCanvas(
+public fun DesktopProjectedVideoCanvas(
     frame: ImageBitmap,
     projection: VideoProjectionSettings,
     projectionView: VideoProjectionViewSettings,
@@ -60,7 +72,7 @@ internal fun JvmProjectedVideoCanvas(
     modifier: Modifier,
 ) {
     Canvas(modifier = modifier) {
-        if (projection.usesJvmCanvasProjectionRenderer(textureCrop)) {
+        if (projection.usesDesktopCanvasProjectionRenderer(textureCrop)) {
             runCatching {
                 drawProjectedVideoFrame(
                     frame = frame,
@@ -81,11 +93,30 @@ private fun DrawScope.drawScaledVideoFrame(
     frame: ImageBitmap,
     contentScale: ContentScale,
 ) {
-    drawScaledImage(
-        image = frame,
-        dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-        contentScale = contentScale,
-    )
+    val destination = IntSize(size.width.toInt(), size.height.toInt())
+    if (destination.width <= 0 || destination.height <= 0 || frame.width <= 0 || frame.height <= 0) return
+    if (contentScale == ContentScale.Crop) {
+        val scale =
+            maxOf(
+                destination.width / frame.width.toFloat(),
+                destination.height / frame.height.toFloat(),
+            )
+        val sourceWidth = (destination.width / scale).toInt().coerceIn(1, frame.width)
+        val sourceHeight = (destination.height / scale).toInt().coerceIn(1, frame.height)
+        drawImage(
+            image = frame,
+            srcOffset = IntOffset((frame.width - sourceWidth) / 2, (frame.height - sourceHeight) / 2),
+            srcSize = IntSize(sourceWidth, sourceHeight),
+            dstSize = destination,
+            blendMode = BlendMode.Src,
+        )
+    } else {
+        drawImage(
+            image = frame,
+            dstSize = destination,
+            blendMode = BlendMode.Src,
+        )
+    }
 }
 
 private fun DrawScope.drawProjectedVideoFrame(
@@ -143,12 +174,12 @@ private fun DrawScope.drawProjectedVideoFrame(
         }
 }
 
-internal inline fun <T> withJvmProjectionPaint(
+internal inline fun <T> withDesktopProjectionPaint(
     textureShader: Shader,
     configure: (RuntimeShaderBuilder) -> Unit,
     draw: (Paint, Shader) -> T,
 ): T =
-    RuntimeShaderBuilder(jvmProjectionRuntimeEffect).use { builder ->
+    RuntimeShaderBuilder(desktopProjectionRuntimeEffect).use { builder ->
         builder.child("uTexture", textureShader)
         configure(builder)
         builder.makeShader().use { projectionShader ->
@@ -169,7 +200,7 @@ private fun DrawScope.drawProjectedEye(
 ) {
     if (viewport.width <= 0f || viewport.height <= 0f) return
 
-    withJvmProjectionPaint(
+    withDesktopProjectionPaint(
         textureShader = textureShader,
         configure = { builder ->
             builder.uniform("uProjectionType", projection.projectionType.projectionShaderCode)
@@ -202,7 +233,7 @@ private data class ProjectionViewport(
     val height: Float,
 )
 
-internal val jvmProjectionRuntimeEffect: RuntimeEffect by lazy {
+internal val desktopProjectionRuntimeEffect: RuntimeEffect by lazy {
     RuntimeEffect.makeForShader(JVM_PROJECTION_SHADER)
 }
 

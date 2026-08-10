@@ -23,9 +23,9 @@ import dev.nucleusframework.window.tao.TextureView
 import dev.nucleusframework.window.tao.currentMacMetalTextureHost
 import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
 import dev.nucleusframework.window.tao.rememberTextureViewController
-import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import kotlinx.coroutines.Dispatchers
@@ -98,7 +98,7 @@ private fun MacVideoSurfaceContent(
         } else {
             val currentFrame by remember(playerState) { playerState.currentFrameState }
             currentFrame?.let { frame ->
-                JvmProjectedVideoCanvas(
+                DesktopProjectedVideoCanvas(
                     frame = frame,
                     projection = playerState.projection,
                     projectionView = playerState.projectionView,

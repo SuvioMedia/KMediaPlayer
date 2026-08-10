@@ -13,9 +13,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
@@ -65,7 +65,7 @@ internal fun LinuxVideoPlayerSurface(
         } else {
             val currentFrame by remember(playerState) { playerState.currentFrameState }
             currentFrame?.let { frame ->
-                JvmProjectedVideoCanvas(
+                DesktopProjectedVideoCanvas(
                     frame = frame,
                     projection = playerState.projection,
                     projectionView = playerState.projectionView,

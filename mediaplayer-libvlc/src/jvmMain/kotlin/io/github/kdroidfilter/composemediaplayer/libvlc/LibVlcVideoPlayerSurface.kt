@@ -2,7 +2,6 @@
 
 package io.github.kdroidfilter.composemediaplayer.libvlc
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +17,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import dev.nucleusframework.window.tao.currentTextureViewHostCapabilities
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopProjectedVideoCanvas
 
 @Composable
 internal fun LibVlcVideoPlayerSurface(
@@ -30,6 +30,12 @@ internal fun LibVlcVideoPlayerSurface(
     LaunchedEffect(playerState, host) {
         playerState.updateHostCapabilities(host)
     }
+    val projection = playerState.projection
+    val textureCrop = playerState.projectionTextureCrop
+    val projectionRequiresCpuCanvas = playerState.projectionRequiresCpuCanvas
+    LaunchedEffect(playerState, projection, textureCrop) {
+        playerState.updateProjectionRenderingRoute()
+    }
     DisposableEffect(playerState) {
         onDispose(playerState::detachSurface)
     }
@@ -41,7 +47,7 @@ internal fun LibVlcVideoPlayerSurface(
                 .onSizeChanged { size -> playerState.updateSurfaceSize(size.width, size.height) },
         contentAlignment = Alignment.Center,
     ) {
-        if (playerState.usesGpuTexture) {
+        if (playerState.usesGpuTexture && !projectionRequiresCpuCanvas) {
             DesktopColorManagedTextureVideoView(
                 streamController = playerState.streamController,
                 modifier = Modifier.fillMaxSize(),
@@ -49,16 +55,20 @@ internal fun LibVlcVideoPlayerSurface(
                 onHostCapabilitiesChanged = playerState::updateHostCapabilities,
                 overlay = overlay,
             )
-        } else {
+        } else if (!playerState.usesGpuTexture) {
             val frame by remember(playerState) { playerState.currentCpuFrame }
             frame?.let { image ->
-                Image(
-                    bitmap = image,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                DesktopProjectedVideoCanvas(
+                    frame = image,
+                    projection = projection,
+                    projectionView = playerState.projectionView,
+                    textureCrop = textureCrop,
                     contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
+            Box(Modifier.fillMaxSize()) { overlay() }
+        } else {
             Box(Modifier.fillMaxSize()) { overlay() }
         }
     }

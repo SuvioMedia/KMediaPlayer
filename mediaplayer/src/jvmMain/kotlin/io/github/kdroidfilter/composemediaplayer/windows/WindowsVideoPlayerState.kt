@@ -70,13 +70,13 @@ import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import io.github.kdroidfilter.composemediaplayer.allowsExternalSourceAdapter
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.desktopCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.externalHlsTrackStreamIndex
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
 import io.github.kdroidfilter.composemediaplayer.hasPresentedTextureFrameAfter
 import io.github.kdroidfilter.composemediaplayer.isExternalHlsAudioTrackId
 import io.github.kdroidfilter.composemediaplayer.isExternalHlsSubtitleTrackId
 import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
-import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.prefersColorManagedTexture
 import io.github.kdroidfilter.composemediaplayer.prepareSourceWithExtensions
@@ -606,7 +606,7 @@ class WindowsVideoPlayerState(
                 if (libVlcBackendActive && nativeBackendLibVlcRenderMode == WindowsLibVlcRenderMode.MEMORY) {
                     libVlcVideoRenderer(WindowsLibVlcRenderMode.MEMORY)
                 } else {
-                    projection.jvmCanvasRendererLabel(projectionTextureCrop)
+                    projection.desktopCanvasRendererLabel(projectionTextureCrop)
                 }
         }
     }
@@ -1724,7 +1724,7 @@ class WindowsVideoPlayerState(
     private fun libVlcVideoRenderer(renderMode: WindowsLibVlcRenderMode): String =
         when (renderMode) {
             WindowsLibVlcRenderMode.MEMORY ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "libVLC vmem -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )

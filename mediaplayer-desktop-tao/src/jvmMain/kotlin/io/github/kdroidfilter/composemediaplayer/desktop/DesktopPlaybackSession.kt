@@ -225,7 +225,8 @@ public class DesktopPlaybackSession(
                     traceDesktopSession(
                         "SWITCH_COMMIT backend=${backend.info.id} " +
                             "resume=${isSameMedia && bookmark?.wasPlaying == true} " +
-                            "playing=${candidate.isPlaying} positionMs=${candidate.preciseCurrentTime.inWholeMilliseconds}",
+                            "playing=${candidate.isPlaying} " +
+                            "positionMs=${candidate.preciseCurrentTime.inWholeMilliseconds}",
                     )
                     mutableSessionState.value = DesktopPlaybackSessionState.Ready(backend.info)
                     return@withLock candidate

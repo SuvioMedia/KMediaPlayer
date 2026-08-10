@@ -441,6 +441,33 @@ backend-neutral player modules are not relicensed as LGPL.
 See [Player backend architecture](docs/backend-architecture.md) for the module
 rules and the checklist for implementing another backend.
 
+### Optional bundled libVLC 4 backend
+
+The JVM-only `composemediaplayer-libvlc` adapter consumes an audited KMediaVlc runtime and never
+downloads VLC at playback time. `inspectLibVlcBackend()` checks the payload manifest before native
+code is loaded. Flat playback uses the platform GPU transport selected by KMediaVlc: D3D11 on
+Windows, IOSurface/OpenGL on Apple Silicon macOS, and DMA-BUF/GLES2 on Linux.
+
+Projected, stereo, rotated, or cropped video currently uses the bounded RGBA8 CPU-pull route and
+the shared Skia projection shader. Configure the initial projection in `LibVlcPlaybackOptions` so
+`AUTO` can choose that route:
+
+```kotlin
+val playerState = rememberLibVlcVideoPlayerState(
+    LibVlcPlaybackOptions(
+        projection = VideoProjectionSettings(
+            projectionType = VideoProjectionType.Equirect360,
+        ),
+        projectionViewControlMode = VideoProjectionViewControlMode.MANUAL,
+    ),
+)
+```
+
+This fallback is intentionally SDR and therefore rejects `REQUIRE_HDR`. `GPU_PUSH` with a
+projection also fails closed until KMediaVlc exposes a native GPU projection pass. If projection
+will be changed after creating the state, select `CPU_PULL` explicitly; a GPU player is not silently
+recreated or allowed to display the wrong flat image.
+
 The repository commits Kotlin/Wasm Yarn lockfiles. CI fails instead of silently replacing them when an npm dependency changes; run `./gradlew kotlinWasmUpgradeYarnLock` after an intentional npm update and review the resulting lockfile diff.
 
 Gradle dependency verification pins external build artifacts by SHA-256. The only checksum exception is restricted to the locally generated `dev` and `0.0.0-consumer.*` smoke-test publications under this project's own coordinates, whose binaries change with the source under test.

@@ -29,7 +29,6 @@ import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineRenderer
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
-import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
@@ -46,7 +45,10 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
 import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.desktopCanvasRendererLabel
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.usesDesktopCanvasProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.effectiveDeliveryMode
+import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
 import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.shusek.kmediavlc.runtime.desktop.VlcDesktopFrame
 import io.github.shusek.kmediavlc.runtime.desktop.VlcDesktopPlayer
@@ -58,8 +60,8 @@ import io.github.shusek.kmediavlc.runtime.desktop.VlcMacOutputTarget
 import io.github.shusek.kmediavlc.runtime.desktop.VlcNativeHandleType
 import io.github.shusek.kmediavlc.runtime.desktop.VlcOutputTarget
 import io.github.shusek.kmediavlc.runtime.desktop.VlcPlaybackState
-import io.github.shusek.kmediavlc.runtime.desktop.VlcPlayerSnapshot
 import io.github.shusek.kmediavlc.runtime.desktop.VlcPlayerListener
+import io.github.shusek.kmediavlc.runtime.desktop.VlcPlayerSnapshot
 import io.github.shusek.kmediavlc.runtime.desktop.VlcSourceDynamicRange
 import io.github.shusek.kmediavlc.runtime.desktop.VlcUnavailableOutputTarget
 import io.github.shusek.kmediavlc.runtime.desktop.VlcWindowsOutputTarget
@@ -79,9 +81,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
-import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ImageInfo
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -91,7 +93,8 @@ import kotlin.time.Duration.Companion.microseconds
 internal class LibVlcVideoPlayerState(
     runtime: VlcDesktopRuntimeResolution,
     private val options: LibVlcPlaybackOptions,
-) : AbstractBackendVideoPlayerState(), VideoPlayerSurfaceProvider {
+) : AbstractBackendVideoPlayerState(),
+    VideoPlayerSurfaceProvider {
     private val disposed = AtomicBoolean(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val outputMutex = Mutex()
@@ -104,6 +107,7 @@ internal class LibVlcVideoPlayerState(
     private val pendingOpenLock = Any()
     private var currentCpuImage: Bitmap? = null
     private val pipelineState = MutableStateFlow(initialPipelineStatus())
+
     @Volatile
     private var hostCapabilities = TextureViewHostCapabilities.UNAVAILABLE
 
@@ -120,14 +124,21 @@ internal class LibVlcVideoPlayerState(
     private var pendingTransport: PendingTransport? = null
     private var sourceLoadedPublished = false
     private var lastPlaybackState = VlcPlaybackState.IDLE
+    private var gpuProjectionRejected = false
 
     private val nativeListener =
         object : VlcPlayerListener {
-            override fun onFrameAvailable(serial: Long, outputGeneration: Long) {
+            override fun onFrameAvailable(
+                serial: Long,
+                outputGeneration: Long,
+            ) {
                 frameSignals.trySend(Unit)
             }
 
-            override fun onPlaybackStateChanged(state: VlcPlaybackState, mediaGeneration: Long) {
+            override fun onPlaybackStateChanged(
+                state: VlcPlaybackState,
+                mediaGeneration: Long,
+            ) {
                 // State is copied by the bounded polling loop. Avoid re-entering a player while it is created.
             }
         }
@@ -149,10 +160,14 @@ internal class LibVlcVideoPlayerState(
             backend = "KMediaVlc ${runtime.capabilities().libVlcVersion()}",
             videoRenderer =
                 if (options.effectiveDeliveryMode() == VlcFrameDeliveryMode.GPU_PUSH) {
-                    "libVLC 4 GPU TextureView"
+                    GPU_RENDERER_LABEL
                 } else {
-                    "libVLC 4 CPU pull (SDR)"
+                    options.projection.desktopCanvasRendererLabel(
+                        baseRenderer = CPU_RENDERER_LABEL,
+                        textureCrop = options.projectionTextureCrop,
+                    )
                 },
+            videoProjection = options.projection.renderingInfoLabel(),
         )
 
     override val diagnostics: PlaybackDiagnostics
@@ -185,6 +200,10 @@ internal class LibVlcVideoPlayerState(
         get() = disposed.get()
 
     init {
+        projection = options.projection.normalized()
+        projectionView = options.projectionView.normalized()
+        projectionViewControlMode = options.projectionViewControlMode
+        projectionTextureCrop = options.projectionTextureCrop.normalized()
         scope.launch {
             while (isActive) {
                 frameSignals.receiveCatching().getOrNull() ?: break
@@ -217,7 +236,41 @@ internal class LibVlcVideoPlayerState(
     internal val currentCpuFrame: State<ImageBitmap?>
         get() = cpuFrameState
 
-    internal fun updateSurfaceSize(width: Int, height: Int) {
+    internal val projectionRequiresCpuCanvas: Boolean
+        get() = projection.usesDesktopCanvasProjectionRenderer(projectionTextureCrop)
+
+    internal fun updateProjectionRenderingRoute() {
+        val projectionRequired = projectionRequiresCpuCanvas
+        renderingInfo.videoProjection = projection.renderingInfoLabel()
+        if (!usesGpuTexture) {
+            renderingInfo.videoRenderer =
+                projection.desktopCanvasRendererLabel(
+                    baseRenderer = CPU_RENDERER_LABEL,
+                    textureCrop = projectionTextureCrop,
+                )
+            gpuProjectionRejected = false
+            return
+        }
+        if (!projectionRequired) {
+            renderingInfo.videoRenderer = GPU_RENDERER_LABEL
+            val restoreGpuOutput = gpuProjectionRejected
+            gpuProjectionRejected = false
+            if (restoreGpuOutput) configureLatestOutput()
+            return
+        }
+        renderingInfo.videoRenderer = "$GPU_RENDERER_LABEL (projection unavailable)"
+        if (gpuProjectionRejected) return
+        gpuProjectionRejected = true
+        textureStreamController.clear()
+        configureLatestOutput()
+        runCatching { player.pause() }
+        publishError(VideoPlayerError.UnknownError(GPU_PROJECTION_ERROR))
+    }
+
+    internal fun updateSurfaceSize(
+        width: Int,
+        height: Int,
+    ) {
         val nextWidth = width.coerceAtLeast(0)
         val nextHeight = height.coerceAtLeast(0)
         if (surfaceWidth == nextWidth && surfaceHeight == nextHeight) return
@@ -279,9 +332,8 @@ internal class LibVlcVideoPlayerState(
 
     override fun disableBackendSubtitles(): TrackSelectionResult = TrackSelectionResult.NotSupported
 
-    override fun validateExternalSubtitle(track: SubtitleTrack) {
+    override fun validateExternalSubtitle(track: SubtitleTrack): Unit =
         throw UnsupportedOperationException("External subtitles are not exposed by the libVLC 4 bridge yet.")
-    }
 
     override fun removeBackendExternalSubtitle(track: SubtitleTrack) = Unit
 
@@ -330,7 +382,10 @@ internal class LibVlcVideoPlayerState(
         }
     }
 
-    override fun openFile(file: PlatformFile, initializePlayerState: InitialPlayerState) {
+    override fun openFile(
+        file: PlatformFile,
+        initializePlayerState: InitialPlayerState,
+    ) {
         openUri(file.path, initializePlayerState, emptyMap())
     }
 
@@ -364,29 +419,33 @@ internal class LibVlcVideoPlayerState(
     private fun configureLatestOutput(delayMillis: Long = 0L) {
         if (disposed.get()) return
         outputConfigurationJob?.cancel()
-        outputConfigurationJob = scope.launch {
-            if (delayMillis > 0L) delay(delayMillis)
-            outputMutex.withLock {
-                val target = buildOutputTarget()
-                if (target.hasSameConfigurationAs(configuredOutputTarget)) return@withLock
-                val configured =
-                    runCatching {
-                        player.updateOutput(target) &&
-                            (target is VlcUnavailableOutputTarget || player.resize(target.width(), target.height()))
-                    }.getOrDefault(false)
-                if (configured) {
-                    configuredOutputTarget = target
-                    if (target.isAvailable()) openPendingSourceIfReady()
-                } else if (target !is VlcUnavailableOutputTarget) {
-                    publishColorFailure("libVLC 4 could not configure the active TextureView producer target.")
+        outputConfigurationJob =
+            scope.launch {
+                if (delayMillis > 0L) delay(delayMillis)
+                outputMutex.withLock {
+                    val target = buildOutputTarget()
+                    if (target.hasSameConfigurationAs(configuredOutputTarget)) return@withLock
+                    val configured =
+                        runCatching {
+                            player.updateOutput(target) &&
+                                (target is VlcUnavailableOutputTarget || player.resize(target.width(), target.height()))
+                        }.getOrDefault(false)
+                    if (configured) {
+                        configuredOutputTarget = target
+                        if (target.isAvailable()) openPendingSourceIfReady()
+                    } else if (target !is VlcUnavailableOutputTarget) {
+                        publishColorFailure("libVLC 4 could not configure the active TextureView producer target.")
+                    }
                 }
             }
-        }
     }
 
     private fun buildOutputTarget(): VlcOutputTarget {
         val host = hostCapabilities
-        if (!usesGpuTexture || surfaceWidth <= 0 || surfaceHeight <= 0 ||
+        if (!usesGpuTexture ||
+            projectionRequiresCpuCanvas ||
+            surfaceWidth <= 0 ||
+            surfaceHeight <= 0 ||
             host.presentationState == TextureViewHostPresentationState.UNAVAILABLE
         ) {
             return VlcUnavailableOutputTarget(host.generation)
@@ -463,7 +522,7 @@ internal class LibVlcVideoPlayerState(
 
     private fun publishGpuFrame(frame: VlcDesktopFrame) {
         val host = hostCapabilities
-        if (!usesGpuTexture || frame.generation() != host.generation) {
+        if (!usesGpuTexture || projectionRequiresCpuCanvas || frame.generation() != host.generation) {
             frame.close()
             return
         }
@@ -553,17 +612,9 @@ internal class LibVlcVideoPlayerState(
                 while (retiredCpuImages.size > CPU_IMAGE_GRACE_COUNT) retiredCpuImages.removeFirst().close()
             }
             val source = frame.sourceDynamicRange().toVideoColorInfo()
-            lastSubmittedFrame =
-                SubmittedFrame(
-                    frame.serial(),
-                    frame.generation(),
-                    hostCapabilities.generation,
-                    hostCapabilities.presentedFrameCount,
-                    source,
-                    VideoDynamicRange.SDR,
-                )
+            lastSubmittedFrame = null
             renderedFrames.incrementAndGet()
-            updatePendingPipeline(source, VideoDynamicRange.SDR)
+            updateCpuPipeline(source)
         } catch (_: RuntimeException) {
             publishError(VideoPlayerError.UnknownError("libVLC 4 CPU frame conversion failed."))
         } finally {
@@ -588,7 +639,8 @@ internal class LibVlcVideoPlayerState(
             updateAspectRatio(metadata.width, metadata.height)
         }
         applyPendingTransport(snapshot, state)
-        if (!sourceLoadedPublished && _hasMedia &&
+        if (!sourceLoadedPublished &&
+            _hasMedia &&
             state in setOf(VlcPlaybackState.PLAYING, VlcPlaybackState.PAUSED, VlcPlaybackState.BUFFERING)
         ) {
             sourceLoadedPublished = true
@@ -638,10 +690,12 @@ internal class LibVlcVideoPlayerState(
     }
 
     private fun confirmSystemPresent(host: TextureViewHostCapabilities) {
-        val submitted = lastSubmittedFrame ?: run {
-            updatePendingPipeline(VideoColorInfo(), VideoDynamicRange.SDR)
-            return
-        }
+        if (!usesGpuTexture) return
+        val submitted =
+            lastSubmittedFrame ?: run {
+                updatePendingPipeline(VideoColorInfo(), VideoDynamicRange.SDR)
+                return
+            }
         if (host.generation != submitted.hostGeneration ||
             host.presentationState != TextureViewHostPresentationState.PRESENTED ||
             host.presentedFrameCount <= submitted.presentCountAtSubmission
@@ -650,7 +704,9 @@ internal class LibVlcVideoPlayerState(
             return
         }
         val outputRange = submitted.outputDynamicRange
-        val hdrOutput = outputRange != VideoDynamicRange.SDR && outputRange != VideoDynamicRange.UNKNOWN
+        val hdrOutput =
+            outputRange != VideoDynamicRange.SDR &&
+                outputRange != VideoDynamicRange.UNKNOWN
         val honored =
             when (options.dynamicRangePolicy) {
                 DynamicRangePolicy.REQUIRE_HDR -> outputRange != VideoDynamicRange.SDR
@@ -661,14 +717,20 @@ internal class LibVlcVideoPlayerState(
             initialPipelineStatus().copy(
                 display = host.toDisplayCapabilities(),
                 source = submitted.source,
-                surface = if (usesGpuTexture) VideoSurfaceKind.TEXTURE_VIEW else VideoSurfaceKind.COMPOSE_CANVAS,
-                renderer = if (hdrOutput) ColorPipelineRenderer.CONTROLLED_HDR else ColorPipelineRenderer.CONTROLLED_SDR,
+                surface =
+                    if (usesGpuTexture) VideoSurfaceKind.TEXTURE_VIEW else VideoSurfaceKind.COMPOSE_CANVAS,
+                renderer =
+                    if (hdrOutput) ColorPipelineRenderer.CONTROLLED_HDR else ColorPipelineRenderer.CONTROLLED_SDR,
                 plannedOutputDynamicRange = outputRange,
                 outputDynamicRange = outputRange,
                 verification = ColorPipelineVerification.RENDERER_CONFIGURED,
                 requestHonored = honored,
                 fallbackReason =
-                    if (honored) ColorPipelineFallbackReason.NONE else ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
+                    if (honored) {
+                        ColorPipelineFallbackReason.NONE
+                    } else {
+                        ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE
+                    },
                 detail =
                     "libVLC4 frame=${submitted.serial}, producerGeneration=${submitted.outputGeneration}, " +
                         "hostGeneration=${host.generation}, present=${host.presentedFrameCount}, " +
@@ -676,16 +738,22 @@ internal class LibVlcVideoPlayerState(
             )
     }
 
-    private fun updatePendingPipeline(source: VideoColorInfo, outputDynamicRange: VideoDynamicRange) {
+    private fun updatePendingPipeline(
+        source: VideoColorInfo,
+        outputDynamicRange: VideoDynamicRange,
+    ) {
         val host = hostCapabilities
         val hdrOutput =
-            outputDynamicRange != VideoDynamicRange.SDR && outputDynamicRange != VideoDynamicRange.UNKNOWN
+            outputDynamicRange != VideoDynamicRange.SDR &&
+                outputDynamicRange != VideoDynamicRange.UNKNOWN
         pipelineState.value =
             initialPipelineStatus().copy(
                 display = host.toDisplayCapabilities(),
                 source = source,
-                surface = if (usesGpuTexture) VideoSurfaceKind.TEXTURE_VIEW else VideoSurfaceKind.COMPOSE_CANVAS,
-                renderer = if (hdrOutput) ColorPipelineRenderer.CONTROLLED_HDR else ColorPipelineRenderer.CONTROLLED_SDR,
+                surface =
+                    if (usesGpuTexture) VideoSurfaceKind.TEXTURE_VIEW else VideoSurfaceKind.COMPOSE_CANVAS,
+                renderer =
+                    if (hdrOutput) ColorPipelineRenderer.CONTROLLED_HDR else ColorPipelineRenderer.CONTROLLED_SDR,
                 plannedOutputDynamicRange = outputDynamicRange,
                 outputDynamicRange = VideoDynamicRange.UNKNOWN,
                 verification = ColorPipelineVerification.NONE,
@@ -694,12 +762,33 @@ internal class LibVlcVideoPlayerState(
             )
     }
 
+    private fun updateCpuPipeline(source: VideoColorInfo) {
+        pipelineState.value =
+            initialPipelineStatus().copy(
+                display = hostCapabilities.toDisplayCapabilities(),
+                source = source,
+                surface = VideoSurfaceKind.COMPOSE_CANVAS,
+                renderer = ColorPipelineRenderer.CONTROLLED_SDR,
+                plannedOutputDynamicRange = VideoDynamicRange.SDR,
+                outputDynamicRange = VideoDynamicRange.SDR,
+                verification = ColorPipelineVerification.RENDERER_CONFIGURED,
+                requestHonored = options.dynamicRangePolicy != DynamicRangePolicy.REQUIRE_HDR,
+                fallbackReason =
+                    cpuPipelineFallbackReason(
+                        policy = options.dynamicRangePolicy,
+                        source = source,
+                        projectionRequired = projectionRequiresCpuCanvas,
+                    ),
+                detail = "libVLC 4 copied a bounded RGBA8 frame into the Compose/Skia SDR renderer.",
+            )
+    }
+
     private fun initialPipelineStatus(): VideoColorPipelineStatus =
         VideoColorPipelineStatus(
             requestedDynamicRangePolicy = options.dynamicRangePolicy,
             requestedDolbyVisionPolicy = options.dolbyVisionPolicy,
             surface =
-                if (options.desktopVideoSurfaceMode == DesktopVideoSurfaceMode.COMPOSE) {
+                if (options.effectiveDeliveryMode() == VlcFrameDeliveryMode.CPU_PULL) {
                     VideoSurfaceKind.COMPOSE_CANVAS
                 } else {
                     VideoSurfaceKind.TEXTURE_VIEW
@@ -714,7 +803,9 @@ internal class LibVlcVideoPlayerState(
                 detail = message,
             )
         if (options.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR) {
-            publishError(VideoPlayerError.ColorPipelineError(ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE, message))
+            publishError(
+                VideoPlayerError.ColorPipelineError(ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE, message),
+            )
         }
     }
 
@@ -750,6 +841,11 @@ internal class LibVlcVideoPlayerState(
         const val CPU_IMAGE_GRACE_COUNT = 3
         const val DEFAULT_SDR_WHITE_NITS = 203f
         const val DEFAULT_HDR_PEAK_NITS = 1_000f
+        const val GPU_RENDERER_LABEL = "libVLC 4 GPU TextureView"
+        const val CPU_RENDERER_LABEL = "libVLC 4 CPU pull (SDR) -> Compose Canvas (Skia)"
+        const val GPU_PROJECTION_ERROR =
+            "The active libVLC 4 player was created with GPU_PUSH before projection was requested. " +
+                "Recreate it with AUTO or CPU_PULL to render projected, stereo, rotated, or cropped video."
         val PLAYABLE_VLC_STATES =
             setOf(VlcPlaybackState.PLAYING, VlcPlaybackState.PAUSED, VlcPlaybackState.BUFFERING)
     }
@@ -757,9 +853,7 @@ internal class LibVlcVideoPlayerState(
 
 private fun VlcOutputTarget.isAvailable(): Boolean = this !is VlcUnavailableOutputTarget
 
-private fun TextureViewHostCapabilities.hasSameOutputConfigurationAs(
-    other: TextureViewHostCapabilities,
-): Boolean =
+private fun TextureViewHostCapabilities.hasSameOutputConfigurationAs(other: TextureViewHostCapabilities): Boolean =
     generation == other.generation &&
         actualDynamicRange == other.actualDynamicRange &&
         (presentationState == TextureViewHostPresentationState.UNAVAILABLE) ==
@@ -797,18 +891,31 @@ private fun VlcDesktopFrame.outputDynamicRange(source: VideoColorInfo): VideoDyn
         source.dynamicRange.takeUnless { it == VideoDynamicRange.UNKNOWN } ?: VideoDynamicRange.HDR10
     }
 
-internal fun VlcPlaybackState.playingSnapshot(): Boolean? = when (this) {
-    VlcPlaybackState.PLAYING -> true
-    VlcPlaybackState.IDLE,
-    VlcPlaybackState.PAUSED,
-    VlcPlaybackState.STOPPED,
-    VlcPlaybackState.ENDED,
-    VlcPlaybackState.ERROR,
-    -> false
-    VlcPlaybackState.OPENING,
-    VlcPlaybackState.BUFFERING,
-    -> null
-}
+internal fun VlcPlaybackState.playingSnapshot(): Boolean? =
+    when (this) {
+        VlcPlaybackState.PLAYING -> true
+        VlcPlaybackState.IDLE,
+        VlcPlaybackState.PAUSED,
+        VlcPlaybackState.STOPPED,
+        VlcPlaybackState.ENDED,
+        VlcPlaybackState.ERROR,
+        -> false
+        VlcPlaybackState.OPENING,
+        VlcPlaybackState.BUFFERING,
+        -> null
+    }
+
+internal fun cpuPipelineFallbackReason(
+    policy: DynamicRangePolicy,
+    source: VideoColorInfo,
+    projectionRequired: Boolean,
+): ColorPipelineFallbackReason =
+    when {
+        policy == DynamicRangePolicy.FORCE_SDR -> ColorPipelineFallbackReason.EXPLICIT_SDR_REQUEST
+        source.isHdr && projectionRequired -> ColorPipelineFallbackReason.HDR_PROJECTION_UNAVAILABLE
+        source.isHdr -> ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE
+        else -> ColorPipelineFallbackReason.NONE
+    }
 
 private fun TextureViewHostCapabilities.toDisplayCapabilities(): DisplayColorCapabilities =
     DisplayColorCapabilities(

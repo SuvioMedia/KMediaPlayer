@@ -17,9 +17,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import dev.nucleusframework.window.tao.TextureColorInfo
 import dev.nucleusframework.window.tao.nucleusD3D11SharedTextureSource
 import dev.nucleusframework.window.tao.rememberTextureViewController
-import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
@@ -95,7 +95,7 @@ internal fun WindowsVideoPlayerSurface(
         } else {
             val currentFrame by remember(playerState) { playerState.currentFrameState }
             currentFrame?.let { frame ->
-                JvmProjectedVideoCanvas(
+                DesktopProjectedVideoCanvas(
                     frame = frame,
                     projection = playerState.projection,
                     projectionView = playerState.projectionView,

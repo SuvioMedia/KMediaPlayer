@@ -1,0 +1,150 @@
+public abstract interface class io/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Available : io/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability {
+	public static final field $stable I
+	public fun <init> (Ljava/lang/String;Lio/github/shusek/kmediavlc/runtime/desktop/VlcFrameDeliveryMode;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lio/github/shusek/kmediavlc/runtime/desktop/VlcFrameDeliveryMode;
+	public final fun copy (Ljava/lang/String;Lio/github/shusek/kmediavlc/runtime/desktop/VlcFrameDeliveryMode;)Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Available;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Available;Ljava/lang/String;Lio/github/shusek/kmediavlc/runtime/desktop/VlcFrameDeliveryMode;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Available;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBackend ()Ljava/lang/String;
+	public final fun getDeliveryMode ()Lio/github/shusek/kmediavlc/runtime/desktop/VlcFrameDeliveryMode;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Unavailable : io/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;Ljava/lang/String;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Unavailable;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Unavailable;Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGuidance ()Ljava/lang/String;
+	public final fun getReason ()Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableException : java/lang/IllegalStateException {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Unavailable;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Unavailable;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAvailability ()Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability$Unavailable;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason : java/lang/Enum {
+	public static final field GPU_OUTPUT_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public static final field GPU_PROJECTION_UNAVAILABLE Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public static final field INITIALIZATION_FAILED Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public static final field INVALID_RUNTIME Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public static final field NATIVE_DOLBY_VISION_UNSUPPORTED Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public static final field RUNTIME_DEPENDENCY_MISSING Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public static final field UNSUPPORTED_PLATFORM Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendUnavailableReason;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcDesktopPlaybackBackendProvider : io/github/kdroidfilter/composemediaplayer/desktop/OptionalDesktopPlaybackBackendProvider {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun create (Lio/github/kdroidfilter/composemediaplayer/desktop/OptionalDesktopPlaybackBackendOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
+	public fun getProviderId ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy : java/lang/Enum {
+	public static final field AUTO Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;
+	public static final field CPU_PULL Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;
+	public static final field GPU_PUSH Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource;
+	public final fun component10 ()Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;
+	public final fun component4 ()Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public final fun component5 ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public final fun component6 ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;
+	public final fun component7 ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;
+	public final fun component8 ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;
+	public final fun component9 ()Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;)Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDesktopRuntimeDirectory ()Ljava/lang/String;
+	public final fun getDesktopVideoSurfaceMode ()Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public final fun getDolbyVisionPolicy ()Lio/github/kdroidfilter/composemediaplayer/DolbyVisionPolicy;
+	public final fun getDynamicRangePolicy ()Lio/github/kdroidfilter/composemediaplayer/DynamicRangePolicy;
+	public final fun getFrameDeliveryPolicy ()Lio/github/kdroidfilter/composemediaplayer/LibVlcFrameDeliveryPolicy;
+	public final fun getProjection ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;
+	public final fun getProjectionTextureCrop ()Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;
+	public final fun getProjectionView ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;
+	public final fun getProjectionViewControlMode ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;
+	public final fun getRuntimeSource ()Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptionsKt {
+	public static final fun createLibVlcVideoPlayerState (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public static synthetic fun createLibVlcVideoPlayerState$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public static final fun inspectLibVlcBackend (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability;
+	public static synthetic fun inspectLibVlcBackend$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/LibVlcBackendAvailability;
+	public static final fun libVlcDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
+	public static synthetic fun libVlcDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
+	public static final fun libVlcVideoPlayerBackend (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerBackend;
+	public static synthetic fun libVlcVideoPlayerBackend$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerBackend;
+	public static final fun rememberLibVlcVideoPlayerState (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;Landroidx/compose/runtime/Composer;II)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+}
+
+public abstract interface class io/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource {
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource$Bundled : io/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource {
+	public static final field $stable I
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource$Bundled;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource$Resolved : io/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource {
+	public static final field $stable I
+	public fun <init> (Lio/github/shusek/kmediavlc/runtime/desktop/VlcDesktopRuntimeResolution;)V
+	public final fun component1 ()Lio/github/shusek/kmediavlc/runtime/desktop/VlcDesktopRuntimeResolution;
+	public final fun copy (Lio/github/shusek/kmediavlc/runtime/desktop/VlcDesktopRuntimeResolution;)Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource$Resolved;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource$Resolved;Lio/github/shusek/kmediavlc/runtime/desktop/VlcDesktopRuntimeResolution;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/LibVlcRuntimeSource$Resolved;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRuntime ()Lio/github/shusek/kmediavlc/runtime/desktop/VlcDesktopRuntimeResolution;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/LibVlcVideoPlayerBackend : io/github/kdroidfilter/composemediaplayer/VideoPlayerBackend {
+	public static final field $stable I
+	public fun <init> ()V
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;
+	public final fun copy (Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/LibVlcVideoPlayerBackend;
+	public static synthetic fun copy$default (Lio/github/kdroidfilter/composemediaplayer/LibVlcVideoPlayerBackend;Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/LibVlcVideoPlayerBackend;
+	public fun createPlayerState ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getInfo ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerBackendInfo;
+	public final fun getOptions ()Lio/github/kdroidfilter/composemediaplayer/LibVlcPlaybackOptions;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+

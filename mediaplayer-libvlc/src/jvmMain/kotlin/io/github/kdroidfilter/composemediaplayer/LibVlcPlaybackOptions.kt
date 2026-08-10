@@ -7,6 +7,7 @@ import io.github.kdroidfilter.composemediaplayer.desktop.DesktopBackendAvailabil
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopBackendRoutingTier
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.desktop.asDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.usesDesktopCanvasProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.libvlc.LibVlcVideoPlayerState
 import io.github.shusek.kmediavlc.runtime.desktop.VlcDesktopRuntime
 import io.github.shusek.kmediavlc.runtime.desktop.VlcDesktopRuntimeResolution
@@ -15,7 +16,16 @@ import io.github.shusek.kmediavlc.runtime.desktop.VlcRenderEngine
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
 
-/** Options for the completely optional desktop libVLC 4 backend. */
+/**
+ * Options for the completely optional desktop libVLC 4 backend.
+ *
+ * [projection], [projectionView], [projectionViewControlMode], and [projectionTextureCrop]
+ * initialize the corresponding mutable [VideoPlayerState] properties.
+ * [LibVlcFrameDeliveryPolicy.AUTO] selects the SDR CPU-pull route when the initial settings require
+ * a projection shader. Applications that change projection at runtime must select
+ * [LibVlcFrameDeliveryPolicy.CPU_PULL] up front; an already-created GPU player fails closed instead
+ * of presenting an unprojected frame.
+ */
 @Stable
 data class LibVlcPlaybackOptions(
     val runtimeSource: LibVlcRuntimeSource = LibVlcRuntimeSource.Bundled,
@@ -23,6 +33,10 @@ data class LibVlcPlaybackOptions(
     val frameDeliveryPolicy: LibVlcFrameDeliveryPolicy = LibVlcFrameDeliveryPolicy.AUTO,
     val dynamicRangePolicy: DynamicRangePolicy = DynamicRangePolicy.AUTO,
     val dolbyVisionPolicy: DolbyVisionPolicy = DolbyVisionPolicy.AUTO,
+    val projection: VideoProjectionSettings = VideoProjectionSettings(),
+    val projectionView: VideoProjectionViewSettings = VideoProjectionViewSettings(),
+    val projectionViewControlMode: VideoProjectionViewControlMode = VideoProjectionViewControlMode.AUTO,
+    val projectionTextureCrop: VideoTextureCrop = VideoTextureCrop(),
     val desktopVideoSurfaceMode: DesktopVideoSurfaceMode =
         DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
 ) {
@@ -44,7 +58,7 @@ data class LibVlcPlaybackOptions(
 
 /** Selects the bounded producer/consumer transport. */
 enum class LibVlcFrameDeliveryPolicy {
-    /** GPU push for TextureView, CPU pull only for an explicit COMPOSE surface. */
+    /** GPU push for flat TextureView playback; CPU pull for COMPOSE or projected/cropped video. */
     AUTO,
 
     /** libVLC 4 renders GPU textures and only pushes non-owning notifications. */
@@ -71,6 +85,7 @@ enum class LibVlcBackendUnavailableReason {
     UNSUPPORTED_PLATFORM,
     INVALID_RUNTIME,
     GPU_OUTPUT_UNAVAILABLE,
+    GPU_PROJECTION_UNAVAILABLE,
     NATIVE_DOLBY_VISION_UNSUPPORTED,
     INITIALIZATION_FAILED,
 }
@@ -93,9 +108,7 @@ class LibVlcBackendUnavailableException(
 ) : IllegalStateException(availability.guidance, cause)
 
 /** Probes manifests and platform capabilities without extracting or loading native code. */
-fun inspectLibVlcBackend(
-    options: LibVlcPlaybackOptions = LibVlcPlaybackOptions(),
-): LibVlcBackendAvailability {
+fun inspectLibVlcBackend(options: LibVlcPlaybackOptions = LibVlcPlaybackOptions()): LibVlcBackendAvailability {
     if (options.dolbyVisionPolicy == DolbyVisionPolicy.REQUIRE_NATIVE) {
         return unavailable(
             LibVlcBackendUnavailableReason.NATIVE_DOLBY_VISION_UNSUPPORTED,
@@ -103,6 +116,13 @@ fun inspectLibVlcBackend(
         )
     }
     val delivery = options.effectiveDeliveryMode()
+    if (delivery == VlcFrameDeliveryMode.GPU_PUSH && options.requiresDesktopProjectionRenderer()) {
+        return unavailable(
+            LibVlcBackendUnavailableReason.GPU_PROJECTION_UNAVAILABLE,
+            "The libVLC 4 GPU transport does not expose a projection pass yet. " +
+                "Use AUTO or CPU_PULL for projected, stereo, rotated, or cropped video.",
+        )
+    }
     if (delivery == VlcFrameDeliveryMode.CPU_PULL && options.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR) {
         return unavailable(
             LibVlcBackendUnavailableReason.GPU_OUTPUT_UNAVAILABLE,
@@ -132,11 +152,12 @@ fun inspectLibVlcBackend(
         )
     }
     if (delivery == VlcFrameDeliveryMode.GPU_PUSH) {
-        val requiredEngine = currentPlatformRenderEngine()
-            ?: return unavailable(
-                LibVlcBackendUnavailableReason.UNSUPPORTED_PLATFORM,
-                "The initial libVLC 4 GPU TextureView backend is available on Windows only.",
-            )
+        val requiredEngine =
+            currentPlatformRenderEngine()
+                ?: return unavailable(
+                    LibVlcBackendUnavailableReason.UNSUPPORTED_PLATFORM,
+                    "The libVLC 4 GPU TextureView backend supports Windows, macOS, and Linux only.",
+                )
         if (requiredEngine !in capabilities.renderEngines()) {
             return unavailable(
                 LibVlcBackendUnavailableReason.GPU_OUTPUT_UNAVAILABLE,
@@ -151,9 +172,7 @@ fun inspectLibVlcBackend(
 }
 
 /** Creates a libVLC 4 state and loads native code only after the availability probe succeeds. */
-fun createLibVlcVideoPlayerState(
-    options: LibVlcPlaybackOptions = LibVlcPlaybackOptions(),
-): VideoPlayerState {
+fun createLibVlcVideoPlayerState(options: LibVlcPlaybackOptions = LibVlcPlaybackOptions()): VideoPlayerState {
     val availability = inspectLibVlcBackend(options)
     if (availability is LibVlcBackendAvailability.Unavailable) {
         throw LibVlcBackendUnavailableException(availability)
@@ -188,17 +207,15 @@ data class LibVlcVideoPlayerBackend(
     val options: LibVlcPlaybackOptions = LibVlcPlaybackOptions(),
 ) : VideoPlayerBackend {
     override val info: VideoPlayerBackendInfo = libVlcBackendInfo()
+
     override fun createPlayerState(): VideoPlayerState = createLibVlcVideoPlayerState(options)
 }
 
-fun libVlcVideoPlayerBackend(
-    options: LibVlcPlaybackOptions = LibVlcPlaybackOptions(),
-): VideoPlayerBackend = LibVlcVideoPlayerBackend(options)
+fun libVlcVideoPlayerBackend(options: LibVlcPlaybackOptions = LibVlcPlaybackOptions()): VideoPlayerBackend =
+    LibVlcVideoPlayerBackend(options)
 
 /** Explicit desktop-session backend using GPU TextureView rather than a child window. */
-fun libVlcDesktopPlaybackBackend(
-    options: LibVlcPlaybackOptions = LibVlcPlaybackOptions(),
-): DesktopPlaybackBackend =
+fun libVlcDesktopPlaybackBackend(options: LibVlcPlaybackOptions = LibVlcPlaybackOptions()): DesktopPlaybackBackend =
     LibVlcVideoPlayerBackend(options).asDesktopPlaybackBackend(
         routingTier = DesktopBackendRoutingTier.LIBVLC_TEXTURE,
         id = "libvlc4-texture",
@@ -219,9 +236,7 @@ fun libVlcDesktopPlaybackBackend(
     )
 
 @Composable
-fun rememberLibVlcVideoPlayerState(
-    options: LibVlcPlaybackOptions = LibVlcPlaybackOptions(),
-): VideoPlayerState {
+fun rememberLibVlcVideoPlayerState(options: LibVlcPlaybackOptions = LibVlcPlaybackOptions()): VideoPlayerState {
     val backend = remember(options) { LibVlcVideoPlayerBackend(options) }
     return rememberVideoPlayerState(backend)
 }
@@ -243,12 +258,15 @@ internal fun LibVlcPlaybackOptions.effectiveDeliveryMode(): VlcFrameDeliveryMode
         LibVlcFrameDeliveryPolicy.GPU_PUSH -> VlcFrameDeliveryMode.GPU_PUSH
         LibVlcFrameDeliveryPolicy.CPU_PULL -> VlcFrameDeliveryMode.CPU_PULL
         LibVlcFrameDeliveryPolicy.AUTO ->
-            if (desktopVideoSurfaceMode == DesktopVideoSurfaceMode.COMPOSE) {
+            if (desktopVideoSurfaceMode == DesktopVideoSurfaceMode.COMPOSE || requiresDesktopProjectionRenderer()) {
                 VlcFrameDeliveryMode.CPU_PULL
             } else {
                 VlcFrameDeliveryMode.GPU_PUSH
             }
     }
+
+internal fun LibVlcPlaybackOptions.requiresDesktopProjectionRenderer(): Boolean =
+    projection.usesDesktopCanvasProjectionRenderer(projectionTextureCrop)
 
 private fun LibVlcPlaybackOptions.resolveRuntime(): VlcDesktopRuntimeResolution =
     when (val source = runtimeSource) {
@@ -280,10 +298,14 @@ private fun LibVlcPlaybackOptions.runtimeExtractionRoot(): Path {
     }.toAbsolutePath().normalize()
 }
 
-private fun currentPlatformRenderEngine(): VlcRenderEngine? {
-    val os = System.getProperty("os.name", "").lowercase()
+private fun currentPlatformRenderEngine(): VlcRenderEngine? = renderEngineForOsName(System.getProperty("os.name", ""))
+
+internal fun renderEngineForOsName(osName: String): VlcRenderEngine? {
+    val os = osName.lowercase()
     return when {
         os.contains("windows") -> VlcRenderEngine.D3D11
+        os.contains("mac") || os.contains("darwin") -> VlcRenderEngine.OPENGL
+        os.contains("linux") -> VlcRenderEngine.GLES2
         else -> null
     }
 }

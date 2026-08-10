@@ -77,10 +77,11 @@ import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import io.github.kdroidfilter.composemediaplayer.allowsExternalSourceAdapter
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.desktopCanvasRendererLabel
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.usesDesktopCanvasProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.explicitFallbackBackend
 import io.github.kdroidfilter.composemediaplayer.hasPresentedTextureFrameAfter
 import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
-import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.normalizeUnixLocalFileUriForPlayback
 import io.github.kdroidfilter.composemediaplayer.prefersColorManagedTexture
@@ -93,7 +94,6 @@ import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
 import io.github.kdroidfilter.composemediaplayer.subtitleTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.toConfirmedDecoderCapabilities
-import io.github.kdroidfilter.composemediaplayer.usesJvmCanvasProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
@@ -219,7 +219,7 @@ private fun TextureViewHostCapabilities.toDisplayColorCapabilities(): DisplayCol
 internal fun shouldUseMacLibVlcNativeVideoOutput(
     projection: VideoProjectionSettings,
     textureCrop: VideoTextureCrop,
-): Boolean = !projection.usesJvmCanvasProjectionRenderer(textureCrop)
+): Boolean = !projection.usesDesktopCanvasProjectionRenderer(textureCrop)
 
 internal data class MacProjectionTextureViewport(
     val width: Int,
@@ -1163,7 +1163,7 @@ class MacVideoPlayerState(
     }
 
     private fun usesMacMetalProjectionRenderer(): Boolean =
-        projection.usesJvmCanvasProjectionRenderer(projectionTextureCrop)
+        projection.usesDesktopCanvasProjectionRenderer(projectionTextureCrop)
 
     private fun activeMacRendererColorCapabilities(): RendererColorCapabilities =
         macControlledMetalRendererCapabilities(
@@ -1877,12 +1877,12 @@ class MacVideoPlayerState(
         when {
             shouldUseNativeVideoSurface() -> null
             ffmpegHlsFallback != null ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )
             nativeBackendUsesLibVlc ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "libVLC viewport BGRA -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )
@@ -1897,12 +1897,12 @@ class MacVideoPlayerState(
             shouldUseHdrMetalSurface() ->
                 "AVPlayerItemVideoOutput P010/NV12 -> FP16 Metal -> Tao TextureView"
             hdrToneMappingRequested ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "AVPlayerItemVideoOutput tone-mapped BT.709 -> Compose Canvas",
                     textureCrop = projectionTextureCrop,
                 )
             else ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )
@@ -2179,7 +2179,7 @@ class MacVideoPlayerState(
                     if (usesNativeVideoOutput) {
                         "libVLC native NSView"
                     } else {
-                        projection.jvmCanvasRendererLabel(projectionTextureCrop)
+                        projection.desktopCanvasRendererLabel(projectionTextureCrop)
                     },
                 audioRenderer = "libVLC / AUHAL",
                 subtitleRenderer = null,
