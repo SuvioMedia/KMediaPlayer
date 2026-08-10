@@ -23,6 +23,7 @@ import io.github.kdroidfilter.composemediaplayer.isDefaultTextureCrop
 import io.github.kdroidfilter.composemediaplayer.projectionShaderCode
 import io.github.kdroidfilter.composemediaplayer.requiresProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.toVideoProjectionRenderPlan
+import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.FilterTileMode
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
@@ -31,6 +32,7 @@ import org.jetbrains.skia.RuntimeShaderBuilder
 import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Shader
 import kotlin.math.floor
+import org.jetbrains.skia.Canvas as SkiaCanvas
 
 public fun VideoProjectionSettings.usesDesktopCanvasProjectionRenderer(textureCrop: VideoTextureCrop): Boolean =
     requiresProjectionRenderer || !textureCrop.isDefaultTextureCrop
@@ -129,6 +131,26 @@ private fun DrawScope.drawProjectedVideoFrame(
     val height = size.height
     if (width <= 0f || height <= 0f || frame.width <= 0 || frame.height <= 0) return
 
+    drawContext.canvas.skiaCanvas.drawDesktopProjectedFrame(
+        frame = frame.asSkiaBitmap(),
+        projection = projection,
+        projectionView = projectionView,
+        textureCrop = textureCrop,
+        outputWidth = width,
+        outputHeight = height,
+    )
+}
+
+internal fun SkiaCanvas.drawDesktopProjectedFrame(
+    frame: Bitmap,
+    projection: VideoProjectionSettings,
+    projectionView: VideoProjectionViewSettings,
+    textureCrop: VideoTextureCrop,
+    outputWidth: Float,
+    outputHeight: Float,
+) {
+    if (outputWidth <= 0f || outputHeight <= 0f || frame.width <= 0 || frame.height <= 0) return
+
     val normalized = projection.normalized()
     val normalizedView = projectionView.normalized()
     val plan =
@@ -136,7 +158,6 @@ private fun DrawScope.drawProjectedVideoFrame(
             VideoProjectionRenderOptions(textureCrop = textureCrop),
         )
     frame
-        .asSkiaBitmap()
         .makeShader(
             tmx = FilterTileMode.CLAMP,
             tmy = FilterTileMode.CLAMP,
@@ -144,22 +165,22 @@ private fun DrawScope.drawProjectedVideoFrame(
             localMatrix = null,
         ).use { textureShader ->
             if (plan.stereo) {
-                val leftWidth = floor(width / 2f)
+                val leftWidth = floor(outputWidth / 2f)
                 drawProjectedEye(
                     textureShader = textureShader,
                     projection = normalized,
                     projectionView = normalizedView,
                     eyeWindow = plan.leftEyeTexture,
-                    frameSize = frame.size,
-                    viewport = ProjectionViewport(0f, 0f, leftWidth, height),
+                    frameSize = Size(frame.width.toFloat(), frame.height.toFloat()),
+                    viewport = ProjectionViewport(0f, 0f, leftWidth, outputHeight),
                 )
                 drawProjectedEye(
                     textureShader = textureShader,
                     projection = normalized,
                     projectionView = normalizedView,
                     eyeWindow = plan.rightEyeTexture,
-                    frameSize = frame.size,
-                    viewport = ProjectionViewport(leftWidth, 0f, width - leftWidth, height),
+                    frameSize = Size(frame.width.toFloat(), frame.height.toFloat()),
+                    viewport = ProjectionViewport(leftWidth, 0f, outputWidth - leftWidth, outputHeight),
                 )
             } else {
                 drawProjectedEye(
@@ -167,8 +188,8 @@ private fun DrawScope.drawProjectedVideoFrame(
                     projection = normalized,
                     projectionView = normalizedView,
                     eyeWindow = plan.leftEyeTexture,
-                    frameSize = frame.size,
-                    viewport = ProjectionViewport(0f, 0f, width, height),
+                    frameSize = Size(frame.width.toFloat(), frame.height.toFloat()),
+                    viewport = ProjectionViewport(0f, 0f, outputWidth, outputHeight),
                 )
             }
         }
@@ -190,7 +211,7 @@ internal inline fun <T> withDesktopProjectionPaint(
         }
     }
 
-private fun DrawScope.drawProjectedEye(
+private fun SkiaCanvas.drawProjectedEye(
     textureShader: Shader,
     projection: VideoProjectionSettings,
     projectionView: VideoProjectionViewSettings,
@@ -215,16 +236,13 @@ private fun DrawScope.drawProjectedEye(
             builder.uniform("uViewZoom", projectionView.zoom)
         },
         draw = { paint, _ ->
-            drawContext.canvas.skiaCanvas.drawRect(
+            drawRect(
                 Rect.makeXYWH(viewport.left, viewport.top, viewport.width, viewport.height),
                 paint,
             )
         },
     )
 }
-
-private val ImageBitmap.size: Size
-    get() = Size(width.toFloat(), height.toFloat())
 
 private data class ProjectionViewport(
     val left: Float,

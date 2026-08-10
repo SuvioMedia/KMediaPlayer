@@ -490,6 +490,25 @@ The Android runtime and Apple XCFramework graph remain release candidates until 
 physical-device gates are complete; successful source and host tests do not make those payloads
 publication-eligible.
 
+The desktop host acceptance gate decodes a real fixture through a relocated bundled libVLC 4
+runtime, waits for multiple CPU frames, and sends one of those frames through the production Skia
+stereo/360 projection shader. It verifies visible output for both eyes and a changed output after a
+90-degree yaw. Run it only against clean, exact KMediaPlayer and KMediaVlc commits:
+
+```shell
+./.github/scripts/run_libvlc_vr_acceptance.sh \
+  /absolute/path/to/KMediaVlc \
+  /absolute/path/to/relocated-kmediavlc-runtime \
+  /absolute/path/to/fixture.mkv \
+  <full-kmediaplayer-commit> \
+  <full-kmediavlc-commit>
+```
+
+The runner derives the platform bridge from the relocated runtime and rejects partial inputs,
+symlinks, dirty trees, commit mismatches, and unsupported hosts. This is deterministic offscreen
+consumer evidence; it is not a physical headset, display, GPU-import, or render-node acceptance
+result.
+
 Before KMediaVlc reaches a public version, its published-adapter consumer check uses the local
 composite explicitly and runs in two Gradle invocations:
 

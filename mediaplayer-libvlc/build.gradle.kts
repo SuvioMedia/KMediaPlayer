@@ -1,6 +1,7 @@
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 
@@ -37,6 +38,19 @@ val skipAppleInteropDuringIdeaSync =
         .map(String::toBoolean)
         .getOrElse(false)
 val canBuildAppleVlcBridge = Os.isFamily(Os.FAMILY_MAC)
+val vrAcceptanceRuntimeDirectory = providers.gradleProperty("kmediaVlcVrRuntimeDirectory")
+val vrAcceptanceBridge = providers.gradleProperty("kmediaVlcVrBridgePath")
+val vrAcceptanceFixture = providers.gradleProperty("kmediaVlcVrFixture")
+val vrAcceptanceInputs =
+    listOf(
+        vrAcceptanceRuntimeDirectory.isPresent,
+        vrAcceptanceBridge.isPresent,
+        vrAcceptanceFixture.isPresent,
+    )
+val vrAcceptanceConfigured = vrAcceptanceInputs.all { it }
+require(vrAcceptanceInputs.none { it } || vrAcceptanceConfigured) {
+    "The libVLC VR acceptance test requires its runtime directory, bridge, and fixture together."
+}
 
 fun registerAppleVlcBridgeBuild(
     taskName: String,
@@ -157,6 +171,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
         }
         jvmTest.dependencies {
+            implementation(compose.desktop.currentOs)
             implementation(kotlin("test-junit"))
         }
         iosMain.dependencies {
@@ -181,6 +196,20 @@ tasks.matching { it.name == "cinteropAppleVlcIosArm64" }.configureEach {
 }
 tasks.matching { it.name == "cinteropAppleVlcIosSimulatorArm64" }.configureEach {
     dependsOn(buildIosSimulatorArm64VlcBridge)
+}
+
+tasks.named<Test>("jvmTest") {
+    if (vrAcceptanceConfigured) {
+        val runtimeDirectory = rootProject.file(vrAcceptanceRuntimeDirectory.get())
+        val bridge = rootProject.file(vrAcceptanceBridge.get())
+        val fixture = rootProject.file(vrAcceptanceFixture.get())
+        inputs.dir(runtimeDirectory)
+        inputs.file(bridge)
+        inputs.file(fixture)
+        systemProperty("kmediavlc.vr.runtimeDirectory", runtimeDirectory.absolutePath)
+        systemProperty("kmediavlc.vr.bridgePath", bridge.absolutePath)
+        systemProperty("kmediavlc.vr.fixture", fixture.absolutePath)
+    }
 }
 
 if (skipAppleInteropDuringIdeaSync) {
