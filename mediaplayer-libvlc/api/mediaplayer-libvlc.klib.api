@@ -1,0 +1,190 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <io.github.shusek:mediaplayer-libvlc>
+final enum class io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode> { // io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode|null[0]
+    enum entry AUTOMATIC // io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode.AUTOMATIC|null[0]
+    enum entry SOFTWARE_ONLY // io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode.SOFTWARE_ONLY|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode> // io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode // io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode> // io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode.values|values#static(){}[0]
+}
+
+final enum class io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason> { // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason|null[0]
+    enum entry COLOR_POLICY_UNAVAILABLE // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.COLOR_POLICY_UNAVAILABLE|null[0]
+    enum entry GPU_OUTPUT_UNAVAILABLE // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.GPU_OUTPUT_UNAVAILABLE|null[0]
+    enum entry GPU_PROJECTION_UNAVAILABLE // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.GPU_PROJECTION_UNAVAILABLE|null[0]
+    enum entry INITIALIZATION_FAILED // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.INITIALIZATION_FAILED|null[0]
+    enum entry INVALID_RUNTIME // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.INVALID_RUNTIME|null[0]
+    enum entry NATIVE_DOLBY_VISION_UNSUPPORTED // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.NATIVE_DOLBY_VISION_UNSUPPORTED|null[0]
+    enum entry RUNTIME_DEPENDENCY_MISSING // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING|null[0]
+    enum entry UNSUPPORTED_DEVICE // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.UNSUPPORTED_DEVICE|null[0]
+    enum entry UNSUPPORTED_PLATFORM // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.UNSUPPORTED_PLATFORM|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason> // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason> // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason.values|values#static(){}[0]
+}
+
+final enum class io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode> { // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode|null[0]
+    enum entry ANDROID_SURFACE // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode.ANDROID_SURFACE|null[0]
+    enum entry CPU_PULL // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode.CPU_PULL|null[0]
+    enum entry GPU_PUSH // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode.GPU_PUSH|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode> // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode> // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode.values|values#static(){}[0]
+}
+
+final enum class io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy> { // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy|null[0]
+    enum entry AUTO // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy.AUTO|null[0]
+    enum entry CPU_PULL // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy.CPU_PULL|null[0]
+    enum entry GPU_PUSH // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy.GPU_PUSH|null[0]
+
+    final val entries // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy> // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy> // io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy.values|values#static(){}[0]
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability { // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability|null[0]
+    final class Available : io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability { // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available|null[0]
+        constructor <init>(kotlin/String, io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode) // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.<init>|<init>(kotlin.String;io.github.kdroidfilter.composemediaplayer.LibVlcFrameDeliveryMode){}[0]
+
+        final val backend // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.backend|{}backend[0]
+            final fun <get-backend>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.backend.<get-backend>|<get-backend>(){}[0]
+        final val deliveryMode // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.deliveryMode|{}deliveryMode[0]
+            final fun <get-deliveryMode>(): io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.deliveryMode.<get-deliveryMode>|<get-deliveryMode>(){}[0]
+
+        final fun component1(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.component1|component1(){}[0]
+        final fun component2(): io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.component2|component2(){}[0]
+        final fun copy(kotlin/String = ..., io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryMode = ...): io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.copy|copy(kotlin.String;io.github.kdroidfilter.composemediaplayer.LibVlcFrameDeliveryMode){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Available.toString|toString(){}[0]
+    }
+
+    final class Unavailable : io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability { // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable|null[0]
+        constructor <init>(io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason, kotlin/String) // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.<init>|<init>(io.github.kdroidfilter.composemediaplayer.LibVlcBackendUnavailableReason;kotlin.String){}[0]
+
+        final val guidance // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.guidance|{}guidance[0]
+            final fun <get-guidance>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.guidance.<get-guidance>|<get-guidance>(){}[0]
+        final val reason // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.reason|{}reason[0]
+            final fun <get-reason>(): io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.reason.<get-reason>|<get-reason>(){}[0]
+
+        final fun component1(): io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.component1|component1(){}[0]
+        final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.component2|component2(){}[0]
+        final fun copy(io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableReason = ..., kotlin/String = ...): io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.copy|copy(io.github.kdroidfilter.composemediaplayer.LibVlcBackendUnavailableReason;kotlin.String){}[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable.toString|toString(){}[0]
+    }
+}
+
+sealed interface io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource { // io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource|null[0]
+    final object Bundled : io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource { // io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource.Bundled|null[0]
+        final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource.Bundled.equals|equals(kotlin.Any?){}[0]
+        final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource.Bundled.hashCode|hashCode(){}[0]
+        final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource.Bundled.toString|toString(){}[0]
+    }
+}
+
+final class io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableException : kotlin/IllegalStateException { // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableException|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable, kotlin/Throwable? = ...) // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableException.<init>|<init>(io.github.kdroidfilter.composemediaplayer.LibVlcBackendAvailability.Unavailable;kotlin.Throwable?){}[0]
+
+    final val availability // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableException.availability|{}availability[0]
+        final fun <get-availability>(): io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability.Unavailable // io.github.kdroidfilter.composemediaplayer/LibVlcBackendUnavailableException.availability.<get-availability>|<get-availability>(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions { // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource = ..., kotlin/String? = ..., io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy = ..., io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode = ..., io.github.kdroidfilter.composemediaplayer/VideoTextureCrop = ..., io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode = ..., io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode = ...) // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.<init>|<init>(io.github.kdroidfilter.composemediaplayer.LibVlcRuntimeSource;kotlin.String?;io.github.kdroidfilter.composemediaplayer.LibVlcFrameDeliveryPolicy;io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy;io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy;io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode;io.github.kdroidfilter.composemediaplayer.VideoTextureCrop;io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode;io.github.kdroidfilter.composemediaplayer.LibVlcAndroidDecodeMode){}[0]
+
+    final val androidDecodeMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.androidDecodeMode|{}androidDecodeMode[0]
+        final fun <get-androidDecodeMode>(): io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.androidDecodeMode.<get-androidDecodeMode>|<get-androidDecodeMode>(){}[0]
+    final val desktopRuntimeDirectory // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.desktopRuntimeDirectory|{}desktopRuntimeDirectory[0]
+        final fun <get-desktopRuntimeDirectory>(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.desktopRuntimeDirectory.<get-desktopRuntimeDirectory>|<get-desktopRuntimeDirectory>(){}[0]
+    final val desktopVideoSurfaceMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.desktopVideoSurfaceMode|{}desktopVideoSurfaceMode[0]
+        final fun <get-desktopVideoSurfaceMode>(): io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.desktopVideoSurfaceMode.<get-desktopVideoSurfaceMode>|<get-desktopVideoSurfaceMode>(){}[0]
+    final val dolbyVisionPolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.dolbyVisionPolicy|{}dolbyVisionPolicy[0]
+        final fun <get-dolbyVisionPolicy>(): io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.dolbyVisionPolicy.<get-dolbyVisionPolicy>|<get-dolbyVisionPolicy>(){}[0]
+    final val dynamicRangePolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.dynamicRangePolicy|{}dynamicRangePolicy[0]
+        final fun <get-dynamicRangePolicy>(): io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.dynamicRangePolicy.<get-dynamicRangePolicy>|<get-dynamicRangePolicy>(){}[0]
+    final val frameDeliveryPolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.frameDeliveryPolicy|{}frameDeliveryPolicy[0]
+        final fun <get-frameDeliveryPolicy>(): io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.frameDeliveryPolicy.<get-frameDeliveryPolicy>|<get-frameDeliveryPolicy>(){}[0]
+    final val projection // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.projection|{}projection[0]
+        final fun <get-projection>(): io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.projection.<get-projection>|<get-projection>(){}[0]
+    final val projectionTextureCrop // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.projectionTextureCrop|{}projectionTextureCrop[0]
+        final fun <get-projectionTextureCrop>(): io.github.kdroidfilter.composemediaplayer/VideoTextureCrop // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.projectionTextureCrop.<get-projectionTextureCrop>|<get-projectionTextureCrop>(){}[0]
+    final val projectionView // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.projectionView|{}projectionView[0]
+        final fun <get-projectionView>(): io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.projectionView.<get-projectionView>|<get-projectionView>(){}[0]
+    final val projectionViewControlMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.projectionViewControlMode|{}projectionViewControlMode[0]
+        final fun <get-projectionViewControlMode>(): io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.projectionViewControlMode.<get-projectionViewControlMode>|<get-projectionViewControlMode>(){}[0]
+    final val runtimeSource // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.runtimeSource|{}runtimeSource[0]
+        final fun <get-runtimeSource>(): io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.runtimeSource.<get-runtimeSource>|<get-runtimeSource>(){}[0]
+
+    final fun component1(): io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component1|component1(){}[0]
+    final fun component10(): io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component10|component10(){}[0]
+    final fun component11(): io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component11|component11(){}[0]
+    final fun component2(): kotlin/String? // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component2|component2(){}[0]
+    final fun component3(): io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component3|component3(){}[0]
+    final fun component4(): io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component4|component4(){}[0]
+    final fun component5(): io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component5|component5(){}[0]
+    final fun component6(): io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component6|component6(){}[0]
+    final fun component7(): io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component7|component7(){}[0]
+    final fun component8(): io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component8|component8(){}[0]
+    final fun component9(): io.github.kdroidfilter.composemediaplayer/VideoTextureCrop // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.component9|component9(){}[0]
+    final fun copy(io.github.kdroidfilter.composemediaplayer/LibVlcRuntimeSource = ..., kotlin/String? = ..., io.github.kdroidfilter.composemediaplayer/LibVlcFrameDeliveryPolicy = ..., io.github.kdroidfilter.composemediaplayer/DynamicRangePolicy = ..., io.github.kdroidfilter.composemediaplayer/DolbyVisionPolicy = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewSettings = ..., io.github.kdroidfilter.composemediaplayer/VideoProjectionViewControlMode = ..., io.github.kdroidfilter.composemediaplayer/VideoTextureCrop = ..., io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode = ..., io.github.kdroidfilter.composemediaplayer/LibVlcAndroidDecodeMode = ...): io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.copy|copy(io.github.kdroidfilter.composemediaplayer.LibVlcRuntimeSource;kotlin.String?;io.github.kdroidfilter.composemediaplayer.LibVlcFrameDeliveryPolicy;io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy;io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy;io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings;io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode;io.github.kdroidfilter.composemediaplayer.VideoTextureCrop;io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode;io.github.kdroidfilter.composemediaplayer.LibVlcAndroidDecodeMode){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions.toString|toString(){}[0]
+}
+
+final class io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend : io.github.kdroidfilter.composemediaplayer/VideoPlayerBackend { // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend|null[0]
+    constructor <init>(io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions = ...) // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.<init>|<init>(io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions){}[0]
+
+    final val info // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.info|{}info[0]
+        final fun <get-info>(): io.github.kdroidfilter.composemediaplayer/VideoPlayerBackendInfo // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.info.<get-info>|<get-info>(){}[0]
+    final val options // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.options|{}options[0]
+        final fun <get-options>(): io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.options.<get-options>|<get-options>(){}[0]
+
+    final fun component1(): io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.component1|component1(){}[0]
+    final fun copy(io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions = ...): io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.copy|copy(io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions){}[0]
+    final fun createPlayerState(): io.github.kdroidfilter.composemediaplayer/VideoPlayerState // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.createPlayerState|createPlayerState(){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/LibVlcVideoPlayerBackend.toString|toString(){}[0]
+}
+
+final val io.github.kdroidfilter.composemediaplayer.libvlc/io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Available$stableprop // io.github.kdroidfilter.composemediaplayer.libvlc/io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Available$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Available$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer.libvlc/io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Unavailable$stableprop // io.github.kdroidfilter.composemediaplayer.libvlc/io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Unavailable$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Unavailable$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Available$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Available$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Available$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Unavailable$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Unavailable$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Unavailable$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendUnavailableException$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendUnavailableException$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_LibVlcBackendUnavailableException$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcPlaybackOptions$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcPlaybackOptions$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_LibVlcPlaybackOptions$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcRuntimeSource_Bundled$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcRuntimeSource_Bundled$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_LibVlcRuntimeSource_Bundled$stableprop[0]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcVideoPlayerBackend$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcVideoPlayerBackend$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_LibVlcVideoPlayerBackend$stableprop[0]
+
+final fun io.github.kdroidfilter.composemediaplayer.libvlc/io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Available$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.libvlc/io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Available$stableprop_getter|io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Available$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer.libvlc/io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Unavailable$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer.libvlc/io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Unavailable$stableprop_getter|io_github_kdroidfilter_composemediaplayer_libvlc_IosLibVlcRuntimeResult_Unavailable$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/createLibVlcVideoPlayerState(io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions = ...): io.github.kdroidfilter.composemediaplayer/VideoPlayerState // io.github.kdroidfilter.composemediaplayer/createLibVlcVideoPlayerState|createLibVlcVideoPlayerState(io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/inspectLibVlcBackend(io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions = ...): io.github.kdroidfilter.composemediaplayer/LibVlcBackendAvailability // io.github.kdroidfilter.composemediaplayer/inspectLibVlcBackend|inspectLibVlcBackend(io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Available$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Available$stableprop_getter|io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Available$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Unavailable$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Unavailable$stableprop_getter|io_github_kdroidfilter_composemediaplayer_LibVlcBackendAvailability_Unavailable$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendUnavailableException$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcBackendUnavailableException$stableprop_getter|io_github_kdroidfilter_composemediaplayer_LibVlcBackendUnavailableException$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcPlaybackOptions$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcPlaybackOptions$stableprop_getter|io_github_kdroidfilter_composemediaplayer_LibVlcPlaybackOptions$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcRuntimeSource_Bundled$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcRuntimeSource_Bundled$stableprop_getter|io_github_kdroidfilter_composemediaplayer_LibVlcRuntimeSource_Bundled$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcVideoPlayerBackend$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_LibVlcVideoPlayerBackend$stableprop_getter|io_github_kdroidfilter_composemediaplayer_LibVlcVideoPlayerBackend$stableprop_getter(){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/libVlcVideoPlayerBackend(io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions = ...): io.github.kdroidfilter.composemediaplayer/VideoPlayerBackend // io.github.kdroidfilter.composemediaplayer/libVlcVideoPlayerBackend|libVlcVideoPlayerBackend(io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions){}[0]
+final fun io.github.kdroidfilter.composemediaplayer/rememberLibVlcVideoPlayerState(io.github.kdroidfilter.composemediaplayer/LibVlcPlaybackOptions?, androidx.compose.runtime/Composer?, kotlin/Int, kotlin/Int): io.github.kdroidfilter.composemediaplayer/VideoPlayerState // io.github.kdroidfilter.composemediaplayer/rememberLibVlcVideoPlayerState|rememberLibVlcVideoPlayerState(io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions?;androidx.compose.runtime.Composer?;kotlin.Int;kotlin.Int){}[0]

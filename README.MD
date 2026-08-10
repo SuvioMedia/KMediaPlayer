@@ -478,6 +478,14 @@ the final color pipeline. Its first bounded layout contract accepts `ContentScal
 scales fail closed instead of silently displaying different geometry. A delayed callback from an
 old Surface cannot detach a newer fullscreen Surface.
 
+iOS ARM64 device and simulator variants consume the exact KMediaVlc CocoaPod and resolve its signed
+XCFramework graph only from the application's private `Frameworks` directory; there is no system
+VLC or user-installed fallback. The first iOS transport is bounded CPU pull: KMediaVlc supplies
+premultiplied RGBA8/sRGB frames, the adapter copies them into owned CoreGraphics images, and Compose
+renders those images through UIKit. Local paths, `file:`, and HTTP(S) sources are accepted.
+Projection/crop, `GPU_PUSH`, non-`AUTO` dynamic-range policies, and non-default Dolby Vision
+policies fail closed until the native output and color pipeline can be verified.
+
 The Android runtime and Apple XCFramework graph remain release candidates until their legal and
 physical-device gates are complete; successful source and host tests do not make those payloads
 publication-eligible.

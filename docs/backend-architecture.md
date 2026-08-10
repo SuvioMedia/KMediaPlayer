@@ -232,6 +232,15 @@ and supports automatic or software-only decoding. Its first layout contract is
 desktop frame transports, non-default dynamic-range policies, and non-default Dolby
 Vision fail closed rather than silently selecting different geometry or color.
 
+The iOS actual publishes ARM64 device and simulator variants through CocoaPods.
+It loads the stable KMediaVlc ABI only from the signed application's private
+framework directory and never searches for a system or user-installed VLC.
+The first transport is CPU pull: bounded premultiplied RGBA8/sRGB frames are
+copied into adapter-owned CoreGraphics images before the native frame is
+released. Media generations fence stale snapshots and frames, while looping
+reopens the exact source request. GPU push, projection/crop, unverified HDR or
+Dolby Vision policies, and desktop runtime paths fail closed.
+
 The isolated consumer publishes core, desktop Tao, and all current libVLC
 adapter variants to a runner-local Maven repository in one Gradle invocation,
 then compiles Android and runs JVM tests in a second invocation. KMediaVlc is

@@ -16,7 +16,8 @@ import androidx.compose.runtime.remember
  *
  * Desktop [LibVlcFrameDeliveryPolicy.AUTO] selects CPU pull when the initial projection needs the
  * shared Skia shader. Android currently exposes libVLC's direct Surface transport and rejects
- * projection, explicit frame-delivery modes, and color policies it cannot verify.
+ * projection, explicit frame-delivery modes, and color policies it cannot verify. iOS uses bounded
+ * CPU-pull RGBA8/sRGB frames and rejects GPU output, projection, and unverified color policies.
  */
 @Stable
 data class LibVlcPlaybackOptions(

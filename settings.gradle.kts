@@ -254,6 +254,8 @@ dependencyResolutionManagement {
                 includeModule("io.github.shusek", "composemediaplayer-mpv-jvm")
                 includeModule("io.github.shusek", "composemediaplayer-libvlc")
                 includeModule("io.github.shusek", "composemediaplayer-libvlc-android")
+                includeModule("io.github.shusek", "composemediaplayer-libvlc-iosarm64")
+                includeModule("io.github.shusek", "composemediaplayer-libvlc-iossimulatorarm64")
                 includeModule("io.github.shusek", "composemediaplayer-libvlc-jvm")
             }
         }
