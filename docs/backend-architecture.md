@@ -75,10 +75,10 @@ DesktopPlaybackSurface(
 )
 ```
 
-On macOS ARM64 the HLS proxy accepts a normal internet `http`/`https` URL from
-the application. It keeps the remote URL, TLS, request headers, cookies, and
-playlist references in the JVM and exposes only opaque numeric-loopback routes
-to the verified bundled MPV runtime.
+The HLS proxy remains an optional source adapter for platform backends that need
+it. The verified MPV backend receives normal `http`/`https` URLs directly,
+passes sanitized request headers as a structured libmpv string array, clears
+them between sources, and keeps TLS peer verification enabled.
 
 The automatic order is platform direct, KMediaBridge bounded remux, native MPV,
 native libVLC, then KMediaBridge compatibility transcode. Unavailable or
@@ -100,11 +100,12 @@ Resize and fullscreen stay inside that one native hierarchy on every platform.
 No AWT/Swing/JAWT/JBR window peer is initialized. A software Skia route remains
 a valid SDR fallback and is never promoted to an HDR claim.
 
-Remote authenticated progressive input for MPV is read through the application's
-seekable data-source callback and materialized into a bounded private cache;
-headers are never passed to MPV. Adaptive HLS/DASH stays with an app-owned
-transport/backend instead of being materialized. Requests and failures redact
-the URI and all header values.
+MPV direct input is restricted to local files and reviewed HTTP(S) protocols.
+Apple uses the system SecureTransport trust path, Windows uses SChannel, and
+Android/Linux receive an explicit CA PEM from the platform/JVM trust store.
+Header names and values are bounded and reject injection before crossing the
+native boundary. Diagnostics and failures must continue to redact the URI and
+all header values.
 
 ## Pipeline extensions
 

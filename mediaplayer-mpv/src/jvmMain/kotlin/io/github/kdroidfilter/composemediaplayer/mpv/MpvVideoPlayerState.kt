@@ -160,7 +160,7 @@ internal class MpvVideoPlayerState(
             subtitleRenderer = "mpv/libass",
             notes =
                 if (usesVerifiedBundledRuntime) {
-                    "Verified KMediaMpv runtime with credential-safe loopback HLS input."
+                    "Verified KMediaMpv runtime with direct HTTP/HTTPS input and verified TLS."
                 } else {
                     "User-provided libmpv; native runtime license is unverified."
                 },
@@ -233,12 +233,8 @@ internal class MpvVideoPlayerState(
     override val capabilities =
         PlayerCapabilities(
             supportsMkv = true,
-            supportedUriSchemes =
-                if (usesVerifiedBundledRuntime) {
-                    setOf("file")
-                } else {
-                    setOf("file", "http", "https", "rtmp", "rtsp")
-                },
+            supportedUriSchemes = setOf("file", "http", "https"),
+            supportsHls = true,
         )
 
     override val preciseCurrentTime: Duration
@@ -324,12 +320,24 @@ internal class MpvVideoPlayerState(
         ensureOpen()
         require(uri.isNotBlank()) { "The media URI must not be blank." }
         val normalizedUri = uri.normalizedMpvMediaUri()
-        require(requestHeaders.isEmpty()) {
-            "The mpv artifact does not accept request headers. Use a credential-safe transport outside this backend."
+        require(normalizedUri.isVerifiedBundledMpvSource()) {
+            "The MPV desktop backend accepts only local files and direct HTTP/HTTPS sources."
         }
-        require(!usesVerifiedBundledRuntime || normalizedUri.isVerifiedBundledMpvSource()) {
-            "The verified KMediaMpv runtime accepts local files and credential-free loopback HTTP only."
-        }
+        val httpHeaderFields =
+            if (normalizedUri.isMpvHttpSource()) {
+                requestHeaders.toMpvHttpHeaderFields()
+            } else {
+                require(requestHeaders.isEmpty()) {
+                    "HTTP request headers can only be used with HTTP/HTTPS media sources."
+                }
+                emptyList()
+            }
+        val tlsCertificateAuthorityFile =
+            if (normalizedUri.isMpvHttpsSource()) {
+                resolveDesktopMpvTlsCertificateAuthorityFile(runtimeConfig)
+            } else {
+                null
+            }
 
         droppedVideoFrames = null
         maximumAvSyncOffsetMs = null
@@ -346,6 +354,9 @@ internal class MpvVideoPlayerState(
                 awaitingNativeMacDecodeRestart = false
                 resumePlaybackAfterNativeSurfaceAttach = wantsPlayback && waitForNativePipeline
                 resetNativeMacDecodeRouteBeforeSourceLoad()
+                engine.setStringListProperty("http-header-fields", httpHeaderFields)
+                engine.setProperty("tls-verify", "yes")
+                engine.setProperty("tls-ca-file", tlsCertificateAuthorityFile?.toString().orEmpty())
                 engine.command("loadfile", normalizedUri, "replace")
                 engine.setProperty(
                     "pause",
@@ -1306,7 +1317,7 @@ internal class MpvVideoPlayerState(
     private fun softwareRenderingNotes(): String =
         buildString {
             if (usesVerifiedBundledRuntime) {
-                append("Verified KMediaMpv runtime with credential-safe loopback HLS input.")
+                append("Verified KMediaMpv runtime with direct HTTP/HTTPS input and verified TLS.")
             } else {
                 append("User-provided libmpv; native runtime license is unverified.")
             }
@@ -1454,6 +1465,8 @@ internal fun mpvInitializationOptions(
         )
         put("framedrop", "vo")
         put("keep-open", "yes")
+        put("terminal", "no")
+        put("tls-verify", "yes")
         put("sub-ass-override", if (config.preserveAssStyles) "no" else "strip")
         put("embeddedfonts", if (config.useEmbeddedFonts) "yes" else "no")
         subtitleFontsDirectory?.let { put("sub-fonts-dir", it) }
@@ -1712,7 +1725,7 @@ internal fun String.isLocalMpvSource(): Boolean {
     return candidate.equals("file", ignoreCase = true)
 }
 
-internal fun String.isVerifiedBundledMpvSource(): Boolean = isLocalMpvSource() || isNumericLoopbackHttpMpvSource()
+internal fun String.isVerifiedBundledMpvSource(): Boolean = isLocalMpvSource() || isDirectHttpMpvSource()
 
 /**
  * Java's legacy `File.toURI()` emits valid local URIs such as `file:/movie.mp4`, while libmpv's
@@ -1732,10 +1745,10 @@ internal fun String.normalizedMpvMediaUri(): String {
     }.getOrDefault(this)
 }
 
-private fun String.isNumericLoopbackHttpMpvSource(): Boolean {
+private fun String.isDirectHttpMpvSource(): Boolean {
+    if (!isSafeDirectMpvHttpSource()) return false
     val uri = runCatching { URI.create(this) }.getOrNull() ?: return false
-    if (!uri.scheme.equals("http", ignoreCase = true) || uri.userInfo != null) return false
-    if (uri.port !in 1..65535) return false
-    val host = uri.host?.removeSurrounding("[", "]")
-    return host == "127.0.0.1" || host == "::1"
+    if (uri.scheme?.lowercase() !in setOf("http", "https") || uri.userInfo != null) return false
+    if (uri.host.isNullOrBlank() || uri.port < -1 || uri.port == 0 || uri.port > 65535) return false
+    return true
 }

@@ -17,6 +17,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class MpvRuntimeTest {
@@ -33,6 +34,19 @@ class MpvRuntimeTest {
             val unavailable = assertIs<MpvBackendAvailability.Unavailable>(availability)
             assertEquals(MpvBackendUnavailableReason.UNSUPPORTED_PLATFORM, unavailable.reason)
         }
+    }
+
+    @Test
+    fun identicalBundledRuntimeConfigurationReusesOneNativePayload() {
+        if (!isBundledMpvDesktopSupported()) return
+
+        val first = resolveMpvRuntime(MpvRuntimeConfig())
+        val second =
+            resolveMpvRuntime(
+                MpvRuntimeConfig(maxRenderPixels = MpvRuntimeConfig().maxRenderPixels / 2),
+            )
+
+        assertEquals(first.librarySource, second.librarySource)
     }
 
     @Test
@@ -173,6 +187,30 @@ class MpvRuntimeTest {
     }
 
     @Test
+    fun usesSystemTlsTrustOnAppleAndValidatesAnExplicitPemFile() {
+        assertNull(
+            resolveDesktopMpvTlsCertificateAuthorityFile(
+                config = MpvRuntimeConfig(),
+                osName = "Mac OS X",
+            ),
+        )
+
+        val certificateAuthority = Files.createTempFile("kmediampv-ca-", ".pem")
+        val config = MpvRuntimeConfig(tlsCertificateAuthorityFile = certificateAuthority)
+        try {
+            assertEquals(
+                certificateAuthority.toAbsolutePath().normalize(),
+                resolveDesktopMpvTlsCertificateAuthorityFile(config, osName = "Linux"),
+            )
+        } finally {
+            Files.delete(certificateAuthority)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            resolveDesktopMpvTlsCertificateAuthorityFile(config, osName = "Linux")
+        }
+    }
+
+    @Test
     fun usesMoltenVkAsTheDefaultMacRenderer() {
         val config = MpvRuntimeConfig()
         val backend =
@@ -194,6 +232,8 @@ class MpvRuntimeTest {
         assertEquals("vulkan", options["gpu-api"])
         assertEquals("macvk", options["gpu-context"])
         assertEquals("4242", options["wid"])
+        assertEquals("no", options["terminal"])
+        assertEquals("yes", options["tls-verify"])
     }
 
     @Test
@@ -304,15 +344,17 @@ class MpvRuntimeTest {
     }
 
     @Test
-    fun boundsVerifiedRuntimeSourcesToLocalFilesAndNumericLoopbackHttp() {
+    fun boundsVerifiedRuntimeSourcesToLocalFilesAndDirectHttp() {
         assertTrue("/private/video.mkv".isVerifiedBundledMpvSource())
         assertTrue("relative/video.mkv".isVerifiedBundledMpvSource())
         assertTrue("file:///private/video.mkv".isVerifiedBundledMpvSource())
         assertTrue("http://127.0.0.1:49152/hls/1".isVerifiedBundledMpvSource())
         assertTrue("http://[::1]:49152/hls/1".isVerifiedBundledMpvSource())
-        assertFalse("http://localhost:49152/hls/1".isVerifiedBundledMpvSource())
-        assertFalse("https://127.0.0.1:49152/hls/1".isVerifiedBundledMpvSource())
-        assertFalse("https://example.invalid/video.mkv".isVerifiedBundledMpvSource())
+        assertTrue("http://localhost:49152/hls/1".isVerifiedBundledMpvSource())
+        assertTrue("https://127.0.0.1:49152/hls/1".isVerifiedBundledMpvSource())
+        assertTrue("https://example.invalid/video.mkv".isVerifiedBundledMpvSource())
+        assertFalse("https://user@example.invalid/video.mkv".isVerifiedBundledMpvSource())
+        assertFalse("https:///video.mkv".isVerifiedBundledMpvSource())
         assertFalse("rtsp://example.invalid/live".isVerifiedBundledMpvSource())
     }
 

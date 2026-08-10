@@ -50,6 +50,8 @@ internal data class MpvRuntimeConfig(
     val subtitleFontsDirectory: Path? = null,
     /** Application-private parent directory for the verified bundled runtime. */
     val desktopRuntimeDirectory: Path? = null,
+    /** Optional application-private PEM trust bundle used for HTTPS sources. */
+    val tlsCertificateAuthorityFile: Path? = null,
     val maxRenderPixels: Int = 16_777_216,
 ) {
     init {
@@ -61,6 +63,11 @@ internal data class MpvRuntimeConfig(
         desktopRuntimeDirectory?.let { directory ->
             require(directory.isAbsolute) {
                 "desktopRuntimeDirectory must be an absolute path."
+            }
+        }
+        tlsCertificateAuthorityFile?.let { file ->
+            require(file.isAbsolute) {
+                "tlsCertificateAuthorityFile must be an absolute path."
             }
         }
         require(maxRenderPixels in 1..67_108_864) {
@@ -199,23 +206,16 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
     try {
         val fontsDirectory = config.subtitleFontsDirectory
         val runtimeDirectory = config.desktopRuntimeDirectory ?: configuredDesktopRuntimeDirectory()
-        val resolution =
-            if (fontsDirectory == null) {
-                null
-            } else if (runtimeDirectory == null) {
-                MpvDesktopRuntime.resolveRuntimeForLoading(fontsDirectory)
-            } else {
-                MpvDesktopRuntime.resolveRuntimeForLoading(fontsDirectory, runtimeDirectory)
+        val cacheKey =
+            BundledMpvRuntimeCacheKey(
+                subtitleFontsDirectory = fontsDirectory?.normalize(),
+                desktopRuntimeDirectory = runtimeDirectory?.normalize(),
+            )
+        return synchronized(bundledMpvRuntimeCacheLock) {
+            bundledMpvRuntimeCache.getOrPut(cacheKey) {
+                extractBundledMpvRuntime(fontsDirectory, runtimeDirectory)
             }
-        val path =
-            resolution?.libMpvPath()
-                ?: runtimeDirectory?.let(MpvDesktopRuntime::resolveLibMpvForLoading)
-                ?: MpvDesktopRuntime.resolveLibMpvForLoading()
-        return ResolvedMpvRuntime(
-            librarySource = MpvLibrarySource.ExplicitPath(path),
-            requiredOptions = resolution?.requiredOptions().orEmpty(),
-            licenseStatus = MpvRuntimeLicenseStatus.VERIFIED_KMEDIAMPV_BUNDLED,
-        )
+        }
     } catch (failure: NoClassDefFoundError) {
         throw MpvRuntimeResolutionFailure(
             reason = MpvUnavailableReason.RUNTIME_DEPENDENCY_MISSING,
@@ -251,6 +251,37 @@ private fun resolveBundledMpvRuntime(config: MpvRuntimeConfig): ResolvedMpvRunti
         )
     }
 }
+
+private fun extractBundledMpvRuntime(
+    fontsDirectory: Path?,
+    runtimeDirectory: Path?,
+): ResolvedMpvRuntime {
+    val resolution =
+        if (fontsDirectory == null) {
+            null
+        } else if (runtimeDirectory == null) {
+            MpvDesktopRuntime.resolveRuntimeForLoading(fontsDirectory)
+        } else {
+            MpvDesktopRuntime.resolveRuntimeForLoading(fontsDirectory, runtimeDirectory)
+        }
+    val path =
+        resolution?.libMpvPath()
+            ?: runtimeDirectory?.let(MpvDesktopRuntime::resolveLibMpvForLoading)
+            ?: MpvDesktopRuntime.resolveLibMpvForLoading()
+    return ResolvedMpvRuntime(
+        librarySource = MpvLibrarySource.ExplicitPath(path),
+        requiredOptions = resolution?.requiredOptions().orEmpty(),
+        licenseStatus = MpvRuntimeLicenseStatus.VERIFIED_KMEDIAMPV_BUNDLED,
+    )
+}
+
+private data class BundledMpvRuntimeCacheKey(
+    val subtitleFontsDirectory: Path?,
+    val desktopRuntimeDirectory: Path?,
+)
+
+private val bundledMpvRuntimeCacheLock = Any()
+private val bundledMpvRuntimeCache = mutableMapOf<BundledMpvRuntimeCacheKey, ResolvedMpvRuntime>()
 
 private fun configuredDesktopRuntimeDirectory(): Path? {
     val configuredPath =

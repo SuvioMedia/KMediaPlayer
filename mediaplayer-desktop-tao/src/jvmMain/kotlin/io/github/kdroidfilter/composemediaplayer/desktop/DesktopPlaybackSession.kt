@@ -508,6 +508,7 @@ public class DesktopPlaybackSession(
         request: DesktopPlaybackRequest,
     ): Boolean =
         backend.routingTier == DesktopBackendRoutingTier.MPV_NATIVE &&
+            !backend.info.capabilities.canPlaySource(request.source) &&
             seekableMediaDataSourceFactory != null &&
             hlsMediaProxyFactory == null &&
             request.source.isProgressiveRemoteSource()
@@ -517,6 +518,7 @@ public class DesktopPlaybackSession(
         request: DesktopPlaybackRequest,
     ): Boolean =
         backend.routingTier == DesktopBackendRoutingTier.MPV_NATIVE &&
+            !backend.info.capabilities.canPlaySource(request.source) &&
             hlsMediaProxyFactory != null &&
             request.source.isRemoteHttpSource()
 

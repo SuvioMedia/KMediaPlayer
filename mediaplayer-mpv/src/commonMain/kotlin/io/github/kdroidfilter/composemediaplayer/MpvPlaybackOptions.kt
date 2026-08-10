@@ -30,6 +30,9 @@ import androidx.compose.runtime.remember
  * to extract the verified bundled desktop runtime. Desktop applications whose default temporary
  * directory is shared or otherwise rejected can provision a secure directory and pass it here.
  * Other targets ignore this option.
+ * @param tlsCertificateAuthorityFile optional absolute PEM CA file for private/self-signed HTTPS
+ * sources. Android and Linux otherwise derive a CA bundle from their platform/JVM trust store;
+ * Apple and Windows use the system trust store. TLS peer verification cannot be disabled.
  */
 @Stable
 data class MpvPlaybackOptions(
@@ -40,6 +43,7 @@ data class MpvPlaybackOptions(
     val maxDesktopRenderPixels: Int = DEFAULT_MAX_DESKTOP_RENDER_PIXELS,
     val runtimeSource: MpvRuntimeSource = MpvRuntimeSource.Bundled,
     val desktopRuntimeDirectory: String? = null,
+    val tlsCertificateAuthorityFile: String? = null,
     val macRenderer: MpvMacRenderer = MpvMacRenderer.MOLTENVK,
     val iosRenderer: MpvIosRenderer = MpvIosRenderer.MOLTENVK,
 ) {
@@ -58,6 +62,12 @@ data class MpvPlaybackOptions(
         }
         require(desktopRuntimeDirectory?.contains('\u0000') != true) {
             "desktopRuntimeDirectory must not contain NUL."
+        }
+        require(tlsCertificateAuthorityFile == null || tlsCertificateAuthorityFile.isNotBlank()) {
+            "tlsCertificateAuthorityFile must be null or a non-blank absolute path."
+        }
+        require(tlsCertificateAuthorityFile?.contains('\u0000') != true) {
+            "tlsCertificateAuthorityFile must not contain NUL."
         }
     }
 

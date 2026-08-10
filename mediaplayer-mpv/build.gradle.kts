@@ -370,6 +370,9 @@ tasks.withType<Test>().configureEach {
     providers.gradleProperty("composeMediaPlayerLoopbackHttpTestSource").orNull?.let { source ->
         systemProperty("composemediaplayer.test.loopbackHttpSource", source)
     }
+    providers.gradleProperty("composeMediaPlayerDirectHttpTestSource").orNull?.let { source ->
+        systemProperty("composemediaplayer.test.directHttpSource", source)
+    }
 }
 tasks.named<Test>("jvmTest") {
     // Keep process-global native loader and libmpv lifecycle state from leaking

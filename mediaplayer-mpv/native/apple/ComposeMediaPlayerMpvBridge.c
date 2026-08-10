@@ -4,6 +4,7 @@
 
 #include <dlfcn.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,27 @@
  */
 typedef struct mpv_handle mpv_handle;
 typedef struct mpv_render_context mpv_render_context;
+typedef struct mpv_node_list mpv_node_list;
+
+typedef union mpv_node_union {
+    char *string;
+    int flag;
+    int64_t int64;
+    double double_value;
+    mpv_node_list *list;
+    void *byte_array;
+} mpv_node_union;
+
+typedef struct mpv_node {
+    mpv_node_union u;
+    int format;
+} mpv_node;
+
+struct mpv_node_list {
+    int num;
+    mpv_node *values;
+    char **keys;
+};
 
 typedef struct mpv_render_param {
     int type;
@@ -54,6 +76,12 @@ static const char cmp_mpv_client_header_isc_notice[] =
     "PERFORMANCE OF THIS SOFTWARE.\n";
 
 enum {
+    MPV_FORMAT_STRING = 1,
+    MPV_FORMAT_NODE = 6,
+    MPV_FORMAT_NODE_ARRAY = 7,
+};
+
+enum {
     MPV_RENDER_PARAM_INVALID = 0,
     MPV_RENDER_PARAM_API_TYPE = 1,
     MPV_RENDER_PARAM_SW_SIZE = 17,
@@ -69,6 +97,7 @@ typedef int (*mpv_initialize_fn)(mpv_handle *);
 typedef void (*mpv_terminate_destroy_fn)(mpv_handle *);
 typedef int (*mpv_set_option_string_fn)(mpv_handle *, const char *, const char *);
 typedef int (*mpv_set_property_string_fn)(mpv_handle *, const char *, const char *);
+typedef int (*mpv_set_property_fn)(mpv_handle *, const char *, int, void *);
 typedef char *(*mpv_get_property_string_fn)(mpv_handle *, const char *);
 typedef void (*mpv_free_fn)(void *);
 typedef int (*mpv_command_fn)(mpv_handle *, const char *const *);
@@ -94,6 +123,7 @@ typedef struct cmp_mpv_api {
     mpv_terminate_destroy_fn terminate_destroy;
     mpv_set_option_string_fn set_option_string;
     mpv_set_property_string_fn set_property_string;
+    mpv_set_property_fn set_property;
     mpv_get_property_string_fn get_property_string;
     mpv_free_fn free_value;
     mpv_command_fn command;
@@ -198,6 +228,7 @@ static int cmp_mpv_open_api(const char *library_path, cmp_mpv_api *api) {
     CMP_MPV_LOAD(api, terminate_destroy, "mpv_terminate_destroy");
     CMP_MPV_LOAD(api, set_option_string, "mpv_set_option_string");
     CMP_MPV_LOAD(api, set_property_string, "mpv_set_property_string");
+    CMP_MPV_LOAD(api, set_property, "mpv_set_property");
     CMP_MPV_LOAD(api, get_property_string, "mpv_get_property_string");
     CMP_MPV_LOAD(api, free_value, "mpv_free");
     CMP_MPV_LOAD(api, command, "mpv_command");
@@ -296,6 +327,8 @@ cmp_mpv_player *cmp_mpv_player_create(
         {"input-vo-keyboard", "no"},
         {"osc", "no"},
         {"keep-open", "yes"},
+        {"terminal", "no"},
+        {"tls-verify", "yes"},
         {"sub-ass-override", preserve_ass_styles ? "no" : "strip"},
         {"embeddedfonts", use_embedded_fonts ? "yes" : "no"},
     };
@@ -439,6 +472,52 @@ int cmp_mpv_player_set_property(
     return player->api.set_property_string(player->handle, name, value) < 0
         ? CMP_MPV_COMMAND_FAILED
         : CMP_MPV_OK;
+}
+
+int cmp_mpv_player_set_string_list_property(
+    cmp_mpv_player *player,
+    const char *name,
+    const char *const *values,
+    size_t count
+) {
+    if (player == NULL || player->handle == NULL || name == NULL ||
+        count > (size_t)INT_MAX || (count > 0 && values == NULL)) {
+        return CMP_MPV_INVALID_ARGUMENT;
+    }
+
+    mpv_node *nodes = NULL;
+    if (count > 0) {
+        nodes = calloc(count, sizeof(*nodes));
+        if (nodes == NULL) {
+            return CMP_MPV_COMMAND_FAILED;
+        }
+        for (size_t index = 0; index < count; ++index) {
+            if (values[index] == NULL) {
+                free(nodes);
+                return CMP_MPV_INVALID_ARGUMENT;
+            }
+            nodes[index].u.string = (char *)values[index];
+            nodes[index].format = MPV_FORMAT_STRING;
+        }
+    }
+
+    mpv_node_list list = {
+        .num = (int)count,
+        .values = nodes,
+        .keys = NULL,
+    };
+    mpv_node root = {
+        .u.list = &list,
+        .format = MPV_FORMAT_NODE_ARRAY,
+    };
+    const int result = player->api.set_property(
+        player->handle,
+        name,
+        MPV_FORMAT_NODE,
+        &root
+    );
+    free(nodes);
+    return result < 0 ? CMP_MPV_COMMAND_FAILED : CMP_MPV_OK;
 }
 
 char *cmp_mpv_player_get_property(

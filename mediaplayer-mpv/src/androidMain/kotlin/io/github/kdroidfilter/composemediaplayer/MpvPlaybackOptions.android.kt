@@ -13,7 +13,8 @@ internal actual fun mpvBackendInfo(): VideoPlayerBackendInfo =
         capabilities =
             PlayerCapabilities(
                 supportsMkv = true,
-                supportedUriSchemes = setOf("file", "content"),
+                supportedUriSchemes = setOf("file", "content", "http", "https"),
+                supportsHls = true,
             ),
     )
 
@@ -43,6 +44,15 @@ actual fun inspectMpvBackend(options: MpvPlaybackOptions): MpvBackendAvailabilit
                 guidance = "The MPV subtitle-font directory must be an absolute app-private Android path.",
             )
         }
+    val certificateAuthorityFile =
+        try {
+            options.androidCertificateAuthorityFile()
+        } catch (_: IllegalArgumentException) {
+            return MpvBackendAvailability.Unavailable(
+                reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
+                guidance = "The MPV CA file must be an absolute regular Android file.",
+            )
+        }
 
     return try {
         if (!MpvAndroidRuntime.isSupportedDevice()) {
@@ -57,6 +67,11 @@ actual fun inspectMpvBackend(options: MpvPlaybackOptions): MpvBackendAvailabilit
                 MpvBackendAvailability.Unavailable(
                     reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
                     guidance = "The configured MPV subtitle-font directory does not exist.",
+                )
+            } else if (certificateAuthorityFile != null && !certificateAuthorityFile.isFile) {
+                MpvBackendAvailability.Unavailable(
+                    reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
+                    guidance = "The configured MPV CA file does not exist.",
                 )
             } else {
                 MpvBackendAvailability.Available(backend = "KMediaMpv Android")
@@ -105,6 +120,7 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
             context = context,
             subtitleFontsDirectory = options.androidSubtitleFontsDirectory(),
             decodeMode = options.androidDecodeMode.toRuntimeDecodeMode(),
+            certificateAuthorityFile = options.androidCertificateAuthorityFile(),
         )
     } catch (failure: RuntimeException) {
         throw MpvBackendUnavailableException(
@@ -139,5 +155,12 @@ private fun MpvPlaybackOptions.androidSubtitleFontsDirectory(): File? =
     subtitleFontsDirectory?.let { configuredPath ->
         File(configuredPath).also { directory ->
             require(directory.isAbsolute) { "The subtitle-font directory must be absolute." }
+        }
+    }
+
+private fun MpvPlaybackOptions.androidCertificateAuthorityFile(): File? =
+    tlsCertificateAuthorityFile?.let { configuredPath ->
+        File(configuredPath).also { file ->
+            require(file.isAbsolute) { "The TLS certificate-authority file must be absolute." }
         }
     }

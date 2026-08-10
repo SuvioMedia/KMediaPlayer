@@ -105,7 +105,8 @@ internal class IosMpvVideoPlayerState(
     override val capabilities =
         PlayerCapabilities(
             supportsMkv = true,
-            supportedUriSchemes = setOf("file", "http", "https", "rtmp", "rtsp"),
+            supportedUriSchemes = setOf("file", "http", "https"),
+            supportsHls = true,
         )
 
     override val preciseCurrentTime: Duration
@@ -164,12 +165,31 @@ internal class IosMpvVideoPlayerState(
     ) {
         ensureOpen()
         require(uri.isNotBlank()) { "The media URI must not be blank." }
-        require(requestHeaders.isEmpty()) {
-            "The mpv artifact does not accept request headers. Use a credential-safe transport outside this backend."
+        val scheme = uri.mpvSourceScheme()
+        require(scheme == null || scheme in IOS_MPV_SOURCE_SCHEMES) {
+            "The verified iOS MPV runtime accepts only local files and direct HTTP/HTTPS sources."
         }
+        require(!uri.isMpvHttpSource() || uri.isSafeDirectMpvHttpSource()) {
+            "HTTP(S) sources require a host and must not contain user information."
+        }
+        val httpHeaderFields =
+            if (uri.isMpvHttpSource()) {
+                requestHeaders.toMpvHttpHeaderFields()
+            } else {
+                require(requestHeaders.isEmpty()) {
+                    "HTTP request headers can only be used with HTTP/HTTPS media sources."
+                }
+                emptyList()
+            }
         beginSourcePreparation(uri, initializePlayerState)
         activeSource = ActiveIosMpvSource(uri, initializePlayerState)
         try {
+            engine.setStringListProperty("http-header-fields", httpHeaderFields)
+            engine.setProperty("tls-verify", "yes")
+            engine.setProperty(
+                "tls-ca-file",
+                options.tlsCertificateAuthorityFile.takeIf { uri.isMpvHttpsSource() }.orEmpty(),
+            )
             engine.command("loadfile", uri, "replace")
             engine.setProperty(
                 "pause",
@@ -693,6 +713,7 @@ internal class IosMpvVideoPlayerState(
         }
 
     companion object {
+        private val IOS_MPV_SOURCE_SCHEMES = setOf("file", "http", "https")
         private const val MPV_VOLUME_SCALE = 100f
         private const val EVENT_WAIT_SECONDS = 0.05
         private const val TRACK_REFRESH_INTERVAL_MS = 1_000L

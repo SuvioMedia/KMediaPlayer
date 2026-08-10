@@ -31,6 +31,7 @@ import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_free_
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_get_property
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_render_bgr0
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_set_property
+import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_set_string_list_property
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_switch_to_software
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_wait_event
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_wakeup
@@ -240,6 +241,35 @@ internal class IosLibMpvEngine private constructor(
             ) == CMP_MPV_OK.toInt(),
         ) {
             "libmpv rejected property $name."
+        }
+    }
+
+    fun setStringListProperty(
+        name: String,
+        values: List<String>,
+    ) {
+        val current = checkNotNull(player) { "The libmpv player is closed." }
+        memScoped {
+            val nativeValues =
+                if (values.isEmpty()) {
+                    null
+                } else {
+                    allocArray<CPointerVar<ByteVar>>(values.size).also { pointers ->
+                        values.forEachIndexed { index, value ->
+                            pointers[index] = value.cstr.getPointer(this)
+                        }
+                    }
+                }
+            check(
+                cmp_mpv_player_set_string_list_property(
+                    current,
+                    name,
+                    nativeValues,
+                    values.size.toULong(),
+                ) == CMP_MPV_OK.toInt(),
+            ) {
+                "libmpv rejected string-list property $name."
+            }
         }
     }
 

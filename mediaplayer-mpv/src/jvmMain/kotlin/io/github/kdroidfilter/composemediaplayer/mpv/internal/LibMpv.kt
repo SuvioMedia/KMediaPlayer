@@ -85,6 +85,17 @@ internal class LibMpvLibrary private constructor(
                 ValueLayout.ADDRESS,
             ),
         )
+    private val setPropertyHandle =
+        downcall(
+            "mpv_set_property",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+            ),
+        )
     private val getPropertyStringHandle =
         downcall(
             "mpv_get_property_string",
@@ -253,6 +264,47 @@ internal class LibMpvLibrary private constructor(
         checkResult(handle, setPropertyStringHandle, name, value)
     }
 
+    internal fun setStringListProperty(
+        handle: MemorySegment,
+        name: String,
+        values: List<String>,
+    ) {
+        Arena.ofConfined().use { callArena ->
+            val nativeValues =
+                if (values.isEmpty()) {
+                    MemorySegment.NULL
+                } else {
+                    callArena.allocate(MPV_NODE_LAYOUT, values.size.toLong()).also { nodes ->
+                        values.forEachIndexed { index, value ->
+                            val offset = MPV_NODE_LAYOUT.byteSize() * index
+                            nodes.set(
+                                ValueLayout.ADDRESS,
+                                offset + MPV_NODE_DATA_OFFSET,
+                                callArena.allocateFrom(value),
+                            )
+                            nodes.set(ValueLayout.JAVA_INT, offset + MPV_NODE_FORMAT_OFFSET, MPV_FORMAT_STRING)
+                        }
+                    }
+                }
+            val nativeList = callArena.allocate(MPV_NODE_LIST_LAYOUT)
+            nativeList.set(ValueLayout.JAVA_INT, MPV_NODE_LIST_COUNT_OFFSET, values.size)
+            nativeList.set(ValueLayout.ADDRESS, MPV_NODE_LIST_VALUES_OFFSET, nativeValues)
+            nativeList.set(ValueLayout.ADDRESS, MPV_NODE_LIST_KEYS_OFFSET, MemorySegment.NULL)
+
+            val root = callArena.allocate(MPV_NODE_LAYOUT)
+            root.set(ValueLayout.ADDRESS, MPV_NODE_DATA_OFFSET, nativeList)
+            root.set(ValueLayout.JAVA_INT, MPV_NODE_FORMAT_OFFSET, MPV_FORMAT_NODE_ARRAY)
+            val result =
+                setPropertyHandle.invokeWithArguments(
+                    handle,
+                    callArena.allocateFrom(name),
+                    MPV_FORMAT_NODE,
+                    root,
+                ) as Int
+            checkResult(result)
+        }
+    }
+
     internal fun getProperty(
         handle: MemorySegment,
         name: String,
@@ -390,8 +442,14 @@ internal class LibMpvLibrary private constructor(
     }
 
     override fun close() {
-        arena.close()
+        if (!retainForProcessLifetime()) arena.close()
     }
+
+    private fun retainForProcessLifetime(): Boolean =
+        shouldRetainMpvLibraryForProcessLifetime(
+            osName = System.getProperty("os.name", ""),
+            embeddedMacVkApiVersion = embeddedMacVkApiVersion,
+        )
 
     companion object {
         private const val EMBEDDED_MACVK_API_VERSION_SYMBOL =
@@ -415,6 +473,10 @@ internal class LibMpvLibrary private constructor(
         private const val MPV_EVENT_PLAYBACK_RESTART = 21
         private const val MPV_ERROR_OPTION_NOT_FOUND = -5
 
+        private const val MPV_FORMAT_STRING = 1
+        private const val MPV_FORMAT_NODE = 6
+        private const val MPV_FORMAT_NODE_ARRAY = 7
+
         private val RENDER_PARAM_LAYOUT =
             MemoryLayout.structLayout(
                 ValueLayout.JAVA_INT.withName("type"),
@@ -433,8 +495,26 @@ internal class LibMpvLibrary private constructor(
                 ValueLayout.JAVA_INT.withName("reason"),
                 ValueLayout.JAVA_INT.withName("error"),
             )
+        private val MPV_NODE_LAYOUT =
+            MemoryLayout.structLayout(
+                ValueLayout.ADDRESS.withName("data"),
+                ValueLayout.JAVA_INT.withName("format"),
+                MemoryLayout.paddingLayout(4),
+            )
+        private val MPV_NODE_LIST_LAYOUT =
+            MemoryLayout.structLayout(
+                ValueLayout.JAVA_INT.withName("num"),
+                MemoryLayout.paddingLayout(4),
+                ValueLayout.ADDRESS.withName("values"),
+                ValueLayout.ADDRESS.withName("keys"),
+            )
         private const val EVENT_ID_OFFSET = 0L
         private const val EVENT_DATA_OFFSET = 16L
+        private const val MPV_NODE_DATA_OFFSET = 0L
+        private const val MPV_NODE_FORMAT_OFFSET = 8L
+        private const val MPV_NODE_LIST_COUNT_OFFSET = 0L
+        private const val MPV_NODE_LIST_VALUES_OFFSET = 8L
+        private const val MPV_NODE_LIST_KEYS_OFFSET = 16L
         private val nativeLocaleLock = Any()
 
         fun open(source: MpvLibrarySource): LibMpvLibrary {
@@ -607,6 +687,15 @@ internal class LibMpvLibrary private constructor(
     }
 }
 
+internal fun shouldRetainMpvLibraryForProcessLifetime(
+    osName: String,
+    embeddedMacVkApiVersion: Int,
+): Boolean {
+    val normalizedOsName = osName.lowercase(Locale.ROOT)
+    return embeddedMacVkApiVersion > 0 &&
+        (normalizedOsName.contains("mac") || normalizedOsName.contains("darwin"))
+}
+
 internal fun nativeNumericLocaleCategory(osName: String): Int {
     val normalized = osName.lowercase(Locale.ROOT)
     return when {
@@ -644,6 +733,14 @@ internal class LibMpvEngine(
     ) {
         checkOpen()
         library.setProperty(handle, name, value)
+    }
+
+    fun setStringListProperty(
+        name: String,
+        values: List<String>,
+    ) {
+        checkOpen()
+        library.setStringListProperty(handle, name, values)
     }
 
     fun getProperty(name: String): String? {
