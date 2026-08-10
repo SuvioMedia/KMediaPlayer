@@ -83,6 +83,10 @@ providers.gradleProperty("kmediaMpvProjectDir").orNull?.let { projectDirectory -
 providers.gradleProperty("kmediaVlcProjectDir").orNull?.let { projectDirectory ->
     includeBuild(projectDirectory) {
         dependencySubstitution {
+            if (providers.gradleProperty("kmediaVlcDesktopOnly").orNull != "true") {
+                substitute(module("io.github.shusek:kmedia-vlc-runtime-android"))
+                    .using(project(":runtime-android"))
+            }
             substitute(module("io.github.shusek:kmedia-vlc-runtime-desktop"))
                 .using(project(":runtime-desktop"))
         }
@@ -249,6 +253,7 @@ dependencyResolutionManagement {
                 includeModule("io.github.shusek", "composemediaplayer-mpv-iossimulatorarm64")
                 includeModule("io.github.shusek", "composemediaplayer-mpv-jvm")
                 includeModule("io.github.shusek", "composemediaplayer-libvlc")
+                includeModule("io.github.shusek", "composemediaplayer-libvlc-android")
                 includeModule("io.github.shusek", "composemediaplayer-libvlc-jvm")
             }
         }
@@ -266,5 +271,6 @@ include(":mediaplayer-libvlc")
 include(":consumer-smoke")
 include(":consumer-smoke-extensions")
 include(":consumer-smoke-mpv")
+include(":consumer-smoke-libvlc")
 include(":sample:composeApp")
 include(":androidApp")

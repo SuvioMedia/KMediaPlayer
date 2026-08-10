@@ -46,6 +46,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 kmedia-mpv-runtime-android = { module = "io.github.shusek:kmedia-mpv-runtime-android", version.ref = "kmediaMpv" }
 kmedia-mpv-runtime-desktop = { module = "io.github.shusek:kmedia-mpv-runtime-desktop", version.ref = "kmediaMpv" }
+kmedia-vlc-runtime-android = { module = "io.github.shusek:kmedia-vlc-runtime-android", version.ref = "kmediaVlc" }
 kmedia-vlc-runtime-desktop = { module = "io.github.shusek:kmedia-vlc-runtime-desktop", version.ref = "kmediaVlc" }
 kmedia-bridge-api = { module = "io.github.shusek:kmedia-bridge-api", version.ref = "kmediaBridge" }
 kmedia-bridge-ffmpeg = { module = "io.github.shusek:kmedia-bridge-ffmpeg", version.ref = "kmediaBridge" }

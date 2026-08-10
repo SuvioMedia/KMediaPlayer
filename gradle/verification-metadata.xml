@@ -5,7 +5,7 @@
       <verify-signatures>false</verify-signatures>
       <trusted-artifacts>
          <trust group="dev[.]nucleusframework" name="(?:dev[.]nucleusframework[.]gradle[.]plugin|plugin|nucleus[.].*)" version="[0-9]+[.][0-9]+[.][0-9]+-kmp-hdr[.][1-9][0-9]*" regex="true" reason="Suvio Nucleus fork releases and local integration builds share these versioned coordinates."/>
-         <trust group="io[.]github[.]shusek" name="composemediaplayer(?:-(?:ass|core|desktop-tao|dolbyvision|extension-api|kmediabridge|mpv))?(?:-(?:android|jvm))?" version="(?:dev|0[.]0[.]0-consumer[.][0-9A-Za-z._-]+)" regex="true" reason="Locally generated consumer-smoke fixtures cannot have stable checksums."/>
+         <trust group="io[.]github[.]shusek" name="composemediaplayer(?:-(?:ass|core|desktop-tao|dolbyvision|extension-api|kmediabridge|libvlc|mpv))?(?:-(?:android|jvm))?" version="(?:dev|0[.]0[.]0-consumer[.][0-9A-Za-z._-]+)" regex="true" reason="Locally generated consumer-smoke fixtures cannot have stable checksums."/>
       </trusted-artifacts>
    </configuration>
    <components>

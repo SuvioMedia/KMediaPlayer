@@ -32,6 +32,14 @@ EXPECTED_BACKEND_DEPENDENCIES = {
         "kmedia-mpv-runtime-desktop",
         _catalog_version("kmediaMpv"),
     ),
+    "composemediaplayer-libvlc-android": (
+        "kmedia-vlc-runtime-android",
+        _catalog_version("kmediaVlc"),
+    ),
+    "composemediaplayer-libvlc-jvm": (
+        "kmedia-vlc-runtime-desktop",
+        _catalog_version("kmediaVlc"),
+    ),
     "composemediaplayer-kmediabridge-android": (
         "kmedia-bridge-ffmpeg-android",
         _catalog_version("kmediaBridge"),
@@ -44,6 +52,7 @@ EXPECTED_BACKEND_DEPENDENCIES = {
 EXPECTED_DESKTOP_TAO_DEPENDENCIES = {
     "composemediaplayer-jvm": "composemediaplayer-desktop-tao-jvm",
     "composemediaplayer-mpv-jvm": "composemediaplayer-desktop-tao-jvm",
+    "composemediaplayer-libvlc-jvm": "composemediaplayer-desktop-tao-jvm",
 }
 
 

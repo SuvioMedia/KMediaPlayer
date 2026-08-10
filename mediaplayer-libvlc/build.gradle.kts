@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 
 plugins {
     alias(libs.plugins.multiplatform)
+    alias(libs.plugins.android.multiplatform.library)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose)
     alias(libs.plugins.vannitktech.maven.publish)
@@ -24,16 +25,39 @@ kotlin {
         keepLocallyUnsupportedTargets.set(false)
     }
 
+    android {
+        namespace = "io.github.kdroidfilter.composemediaplayer.libvlc"
+        compileSdk = 37
+        minSdk = 28
+        withHostTest {}
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_25)
+    }
+
     jvm {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_25)
     }
 
     sourceSets {
-        jvmMain.dependencies {
+        commonMain.dependencies {
             api(project(":mediaplayer-core"))
+            implementation(libs.compose.foundation)
+        }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
+        androidMain.dependencies {
+            implementation(libs.androidcontextprovider)
+            implementation(libs.kotlinx.coroutines.android)
+            api(libs.kmedia.vlc.runtime.android)
+        }
+        named("androidHostTest") {
+            dependencies {
+                implementation(kotlin("test-junit"))
+            }
+        }
+        jvmMain.dependencies {
             api(project(":mediaplayer-desktop-tao"))
             api(libs.kmedia.vlc.runtime.desktop)
-            implementation(libs.compose.foundation)
             implementation(libs.compose.ui)
             implementation(libs.kotlinx.coroutines.core)
         }
@@ -60,7 +84,7 @@ mavenPublishing {
     )
     pom {
         name.set("Compose Media Player libVLC 4 Backend")
-        description.set("Optional color-managed libVLC 4 TextureView backend for desktop.")
+        description.set("Optional bundled libVLC 4 backend for desktop and Android.")
         inceptionYear.set("2026")
         url.set("https://github.com/SuvioMedia/KMediaPlayer")
         developers {

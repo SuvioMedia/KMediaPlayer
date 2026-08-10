@@ -77,6 +77,31 @@ class VerifyMavenPomsTest(unittest.TestCase):
             )
             verify_maven_poms.validate_pom(pom, "3.0.0-rc.1")
 
+    def test_requires_platform_specific_kmediavlc_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = Path(temporary_directory)
+            for target in ("android", "jvm"):
+                artifact = f"composemediaplayer-libvlc-{target}"
+                pom = self._write_pom(repository, artifact, "4.0.0-rc.1")
+                expected_artifact, expected_version = verify_maven_poms.EXPECTED_BACKEND_DEPENDENCIES[artifact]
+                with self.assertRaisesRegex(ValueError, expected_artifact):
+                    verify_maven_poms.validate_pom(pom, "4.0.0-rc.1")
+                dependencies = (
+                    "<dependencies><dependency><groupId>io.github.shusek</groupId>"
+                    f"<artifactId>{expected_artifact}</artifactId>"
+                    f"<version>{expected_version}</version></dependency>"
+                )
+                if target == "jvm":
+                    dependencies += (
+                        "<dependency><groupId>io.github.shusek</groupId>"
+                        "<artifactId>composemediaplayer-desktop-tao-jvm</artifactId>"
+                        "<version>4.0.0-rc.1</version></dependency>"
+                    )
+                pom.write_text(
+                    pom.read_text().replace("</project>", f"{dependencies}</dependencies></project>"),
+                )
+                verify_maven_poms.validate_pom(pom, "4.0.0-rc.1")
+
     def test_requires_same_version_desktop_tao_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = Path(temporary_directory)

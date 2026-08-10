@@ -193,8 +193,30 @@ tasks.register("publishConsumerSmokeArtifacts") {
         ":mediaplayer-mpv:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-mpv:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-mpv:publishAndroidPublicationToConsumerSmokeRepository",
+    )
+}
+
+tasks.register("publishLibVlcConsumerSmokeArtifacts") {
+    group = "verification"
+    description = "Publishes the minimal desktop and Android graph for the isolated libVLC consumer smoke test."
+    dependsOn(
+        ":mediaplayer-core:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-core:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-core:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-tao:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-tao:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-libvlc:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-libvlc:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishAndroidPublicationToConsumerSmokeRepository",
+    )
+}
+
+tasks.register("libVlcConsumerSmokeTest") {
+    group = "verification"
+    description = "Compiles Android and runs JVM consumers against locally published libVLC adapter artifacts."
+    dependsOn(
+        ":consumer-smoke-libvlc:compileAndroidMain",
+        ":consumer-smoke-libvlc:jvmTest",
     )
 }
 

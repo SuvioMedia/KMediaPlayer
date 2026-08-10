@@ -443,10 +443,10 @@ rules and the checklist for implementing another backend.
 
 ### Optional bundled libVLC 4 backend
 
-The JVM-only `composemediaplayer-libvlc` adapter consumes an audited KMediaVlc runtime and never
-downloads VLC at playback time. `inspectLibVlcBackend()` checks the payload manifest before native
-code is loaded. Flat playback uses the platform GPU transport selected by KMediaVlc: D3D11 on
-Windows, IOSurface/OpenGL on Apple Silicon macOS, and DMA-BUF/GLES2 on Linux.
+The optional `composemediaplayer-libvlc` adapter consumes an audited KMediaVlc runtime and never
+downloads VLC at playback time. On desktop, `inspectLibVlcBackend()` checks the payload manifest
+before native code is loaded. Flat playback uses the platform GPU transport selected by KMediaVlc:
+D3D11 on Windows, IOSurface/OpenGL on Apple Silicon macOS, and DMA-BUF/GLES2 on Linux.
 
 Projected, stereo, rotated, or cropped video currently uses the bounded RGBA8 CPU-pull route and
 the shared Skia projection shader. Configure the initial projection in `LibVlcPlaybackOptions` so
@@ -468,6 +468,37 @@ projection also fails closed until KMediaVlc exposes a native GPU projection pas
 will be changed after creating the state, select `CPU_PULL` explicitly; a GPU player is not silently
 recreated or allowed to display the wrong flat image.
 
+Android uses the bundled KMediaVlc AAR and libVLC's direct Surface transport on API 28+ ARM64 and
+ARMv7 devices. It accepts local paths, `file:`, `content:`, and HTTP(S) sources and exposes
+automatic or software-only decoding through `LibVlcAndroidDecodeMode`. The Android probe loads the
+native graph and checks its path-free build identity before creating a player. Explicit
+`GPU_PUSH`/`CPU_PULL`, projected or cropped video, non-`AUTO` dynamic-range policies, and non-default
+Dolby Vision policies all fail closed because this first Surface bridge cannot render projection or verify
+the final color pipeline. Its first bounded layout contract accepts `ContentScale.Fit`; other
+scales fail closed instead of silently displaying different geometry. A delayed callback from an
+old Surface cannot detach a newer fullscreen Surface.
+
+The Android runtime and Apple XCFramework graph remain release candidates until their legal and
+physical-device gates are complete; successful source and host tests do not make those payloads
+publication-eligible.
+
+Before KMediaVlc reaches a public version, its published-adapter consumer check uses the local
+composite explicitly and runs in two Gradle invocations:
+
+```shell
+./gradlew publishLibVlcConsumerSmokeArtifacts \
+  -PpublicationVersion=0.0.0-consumer.local \
+  -PkmediaVlcProjectDir=/absolute/path/to/KMediaVlc \
+  --no-configuration-cache
+python3 .github/scripts/verify_maven_poms.py \
+  build/consumer-repository \
+  0.0.0-consumer.local
+./gradlew libVlcConsumerSmokeTest \
+  -PpublicationVersion=0.0.0-consumer.local \
+  -PkmediaVlcProjectDir=/absolute/path/to/KMediaVlc \
+  --no-configuration-cache
+```
+
 The repository commits Kotlin/Wasm Yarn lockfiles. CI fails instead of silently replacing them when an npm dependency changes; run `./gradlew kotlinWasmUpgradeYarnLock` after an intentional npm update and review the resulting lockfile diff.
 
 Gradle dependency verification pins external build artifacts by SHA-256. The only checksum exception is restricted to the locally generated `dev` and `0.0.0-consumer.*` smoke-test publications under this project's own coordinates, whose binaries change with the source under test.
@@ -476,7 +507,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 
 | Library Version | Kotlin Version | Compose Version | Java | Android toolchain |
 |-----------------|----------------|-----------------|------|-------------------|
-| 4.0.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
+| 4.0.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV/libVLC minSdk 28 |
 | 3.0.x           | 2.4.10         | 1.12.0-beta03   | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 2.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 1.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23 |
