@@ -18,7 +18,12 @@ import androidx.compose.runtime.remember
  * copy-back and automatically falls back to software decoding when hardware decoding fails.
  * @param maxDesktopRenderPixels upper bound for a software-rendered desktop or iOS frame.
  * @param runtimeSource native libmpv source. [MpvRuntimeSource.Bundled] keeps the
- * verified KMediaMpv runtime on currently published Android and desktop targets.
+ * verified KMediaMpv runtime on currently published Android, desktop, and iOS targets.
+ * @param macRenderer selects the macOS video renderer. MoltenVK uses a capability-marked
+ * embedded macvk runtime and automatically falls back to OpenGL when that route is unavailable.
+ * @param iosRenderer selects the iOS presentation path. MoltenVK uses a capability-marked
+ * KMediaMpv runtime to render through Vulkan into a UIKit-owned Metal surface and automatically
+ * falls back to the bounded software renderer when unavailable.
  * Windows and iOS applications can opt into an app-supplied runtime with
  * [MpvRuntimeSource.System] or [MpvRuntimeSource.ExplicitPath].
  * @param desktopRuntimeDirectory optional absolute, application-private parent directory used
@@ -35,6 +40,8 @@ data class MpvPlaybackOptions(
     val maxDesktopRenderPixels: Int = DEFAULT_MAX_DESKTOP_RENDER_PIXELS,
     val runtimeSource: MpvRuntimeSource = MpvRuntimeSource.Bundled,
     val desktopRuntimeDirectory: String? = null,
+    val macRenderer: MpvMacRenderer = MpvMacRenderer.MOLTENVK,
+    val iosRenderer: MpvIosRenderer = MpvIosRenderer.MOLTENVK,
 ) {
     init {
         require(subtitleFontsDirectory == null || subtitleFontsDirectory.isNotBlank()) {
@@ -67,6 +74,34 @@ enum class MpvAndroidDecodeMode {
 
     /** Disable hardware video decoding. */
     SOFTWARE_ONLY,
+}
+
+/** macOS video-output policy. Other targets ignore this option. */
+enum class MpvMacRenderer {
+    /**
+     * Uses mpv's `gpu-next` Vulkan output through MoltenVK in the Compose-owned `NSView`.
+     *
+     * The route is activated only when libmpv exports KMediaMpv's versioned embedding
+     * capability. Missing or failed support falls back to [OPENGL].
+     */
+    MOLTENVK,
+
+    /** Uses libmpv's public OpenGL render API in the existing native EDR surface. */
+    OPENGL,
+}
+
+/** iOS video-output policy. Other targets ignore this option. */
+enum class MpvIosRenderer {
+    /**
+     * Uses mpv `gpu-next` through MoltenVK in an application-owned `UIView`/`CAMetalLayer`.
+     *
+     * The route is activated only when libmpv exports KMediaMpv's versioned iOS embedding
+     * capability. Missing or failed support falls back to [SOFTWARE].
+     */
+    MOLTENVK,
+
+    /** Uses libmpv's bounded BGR0 software render API and presents frames through CoreGraphics. */
+    SOFTWARE,
 }
 
 /**

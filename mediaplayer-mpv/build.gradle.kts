@@ -6,6 +6,7 @@ import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import org.gradle.jvm.toolchain.JvmVendorSpec
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
@@ -88,10 +89,11 @@ val javaToolchains = extensions.getByType<JavaToolchainService>()
 val macMpvNativeJdk =
     javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(25))
+        vendor.set(JvmVendorSpec.ADOPTIUM)
     }
 val buildMacMpvNative =
     tasks.register<Exec>("buildMacMpvNative") {
-        description = "Builds the embedded macOS libmpv OpenGL/EDR surface."
+        description = "Builds the embedded macOS libmpv OpenGL/EDR and macvk host surfaces."
         group = "build"
         enabled = Os.isFamily(Os.FAMILY_MAC)
         workingDir(layout.projectDirectory)

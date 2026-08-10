@@ -3,6 +3,8 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import io.github.kdroidfilter.composemediaplayer.mpv.IosLibMpvEngine
+import io.github.kdroidfilter.composemediaplayer.mpv.IosMpvMetalSurface
+import io.github.kdroidfilter.composemediaplayer.mpv.IosMpvRendererBackend
 import io.github.kdroidfilter.composemediaplayer.mpv.IosMpvVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.mpv.inspectIosMpvRuntime
 import io.github.kdroidfilter.composemediaplayer.mpv.requireIosMpvRuntime
@@ -47,14 +49,47 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
         )
     }
     val resolution = requireIosMpvRuntime(options)
-    val engine = IosLibMpvEngine.create(resolution, options)
+    var iosVkFailure: Throwable? = null
+    var rendererFallbackReason: String? = null
+    var metalSurface =
+        if (options.iosRenderer == MpvIosRenderer.MOLTENVK) {
+            IosMpvMetalSurface.create()
+        } else {
+            null
+        }
+    val engine =
+        if (metalSurface != null) {
+            try {
+                IosLibMpvEngine.create(
+                    resolution = resolution,
+                    options = options,
+                    rendererBackend = IosMpvRendererBackend.IOSVK,
+                    surfaceLayer = metalSurface.nativeHandle,
+                )
+            } catch (failure: Throwable) {
+                iosVkFailure = failure
+                rendererFallbackReason = "the runtime could not initialize embedded iosvk"
+                metalSurface = null
+                try {
+                    IosLibMpvEngine.create(resolution, options)
+                } catch (softwareFailure: Throwable) {
+                    softwareFailure.addSuppressed(failure)
+                    throw softwareFailure
+                }
+            }
+        } else {
+            IosLibMpvEngine.create(resolution, options)
+        }
     return try {
         IosMpvVideoPlayerState(
             options = options,
             engine = engine,
+            metalSurface = metalSurface,
+            rendererFallbackReason = rendererFallbackReason,
         )
     } catch (failure: Throwable) {
         engine.close()
+        iosVkFailure?.let(failure::addSuppressed)
         throw failure
     }
 }

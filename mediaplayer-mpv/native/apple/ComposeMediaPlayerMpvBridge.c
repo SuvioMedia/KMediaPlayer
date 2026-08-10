@@ -3,6 +3,8 @@
 #include "ComposeMediaPlayerMpvBridge.h"
 
 #include <dlfcn.h>
+#include <inttypes.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -61,6 +63,7 @@ enum {
 };
 
 typedef uint64_t (*mpv_client_api_version_fn)(void);
+typedef int (*kmediampv_embedded_iosvk_api_version_fn)(void);
 typedef mpv_handle *(*mpv_create_fn)(void);
 typedef int (*mpv_initialize_fn)(mpv_handle *);
 typedef void (*mpv_terminate_destroy_fn)(mpv_handle *);
@@ -105,7 +108,30 @@ struct cmp_mpv_player {
     cmp_mpv_api api;
     mpv_handle *handle;
     mpv_render_context *render_context;
+    int renderer;
 };
+
+static int cmp_mpv_symbol(
+    void *library,
+    const char *name,
+    void *target,
+    size_t target_size
+);
+
+static int cmp_mpv_has_iosvk_capability(const cmp_mpv_api *api) {
+    if (api == NULL || api->library == NULL) {
+        return 0;
+    }
+    kmediampv_embedded_iosvk_api_version_fn version = NULL;
+    if (!cmp_mpv_symbol(
+            api->library,
+            "kmediampv_embedded_iosvk_api_version",
+            &version,
+            sizeof(version))) {
+        return 0;
+    }
+    return version() == 1;
+}
 
 static void cmp_mpv_close_api(cmp_mpv_api *api) {
     if (api == NULL) {
@@ -224,9 +250,17 @@ cmp_mpv_player *cmp_mpv_player_create(
     const char *subtitle_fonts_directory,
     int preserve_ass_styles,
     int use_embedded_fonts,
+    int renderer,
+    uintptr_t surface_layer,
     int *status
 ) {
-    if (status == NULL) {
+    if (status == NULL ||
+        (renderer != CMP_MPV_RENDERER_SOFTWARE &&
+         renderer != CMP_MPV_RENDERER_IOSVK) ||
+        (renderer == CMP_MPV_RENDERER_IOSVK && surface_layer == 0)) {
+        if (status != NULL) {
+            *status = CMP_MPV_INVALID_ARGUMENT;
+        }
         return NULL;
     }
     *status = CMP_MPV_INITIALIZATION_FAILED;
@@ -240,6 +274,13 @@ cmp_mpv_player *cmp_mpv_player_create(
         free(player);
         return NULL;
     }
+    if (renderer == CMP_MPV_RENDERER_IOSVK &&
+        !cmp_mpv_has_iosvk_capability(&player->api)) {
+        *status = CMP_MPV_INITIALIZATION_FAILED;
+        cmp_mpv_close_api(&player->api);
+        free(player);
+        return NULL;
+    }
 
     player->handle = player->api.create();
     if (player->handle == NULL) {
@@ -249,13 +290,11 @@ cmp_mpv_player *cmp_mpv_player_create(
     }
 
     const char *const_options[][2] = {
-        {"vo", "libmpv"},
         {"config", "no"},
         {"load-scripts", "no"},
         {"input-default-bindings", "no"},
         {"input-vo-keyboard", "no"},
         {"osc", "no"},
-        {"hwdec", "auto-copy-safe"},
         {"keep-open", "yes"},
         {"sub-ass-override", preserve_ass_styles ? "no" : "strip"},
         {"embeddedfonts", use_embedded_fonts ? "yes" : "no"},
@@ -267,6 +306,56 @@ cmp_mpv_player *cmp_mpv_player_create(
             const_options[index][0],
             const_options[index][1]
         );
+        if (*status != CMP_MPV_OK) {
+            cmp_mpv_player_destroy(player);
+            return NULL;
+        }
+    }
+    const char *renderer_options[][2] = {
+        {"vo", renderer == CMP_MPV_RENDERER_IOSVK ? "gpu-next" : "libmpv"},
+        {"hwdec", renderer == CMP_MPV_RENDERER_IOSVK
+            ? "auto-safe"
+            : "auto-copy-safe"},
+    };
+    const size_t renderer_option_count =
+        sizeof(renderer_options) / sizeof(renderer_options[0]);
+    for (size_t index = 0; index < renderer_option_count; ++index) {
+        *status = cmp_mpv_set_option(
+            player,
+            renderer_options[index][0],
+            renderer_options[index][1]
+        );
+        if (*status != CMP_MPV_OK) {
+            cmp_mpv_player_destroy(player);
+            return NULL;
+        }
+    }
+    if (renderer == CMP_MPV_RENDERER_IOSVK) {
+        const char *iosvk_options[][2] = {
+            {"gpu-api", "vulkan"},
+            {"gpu-context", "iosvk"},
+        };
+        const size_t iosvk_option_count =
+            sizeof(iosvk_options) / sizeof(iosvk_options[0]);
+        for (size_t index = 0; index < iosvk_option_count; ++index) {
+            *status = cmp_mpv_set_option(
+                player,
+                iosvk_options[index][0],
+                iosvk_options[index][1]
+            );
+            if (*status != CMP_MPV_OK) {
+                cmp_mpv_player_destroy(player);
+                return NULL;
+            }
+        }
+        char wid[3U * sizeof(uintptr_t) + 1U];
+        int length = snprintf(wid, sizeof(wid), "%" PRIuPTR, surface_layer);
+        if (length <= 0 || (size_t)length >= sizeof(wid)) {
+            *status = CMP_MPV_INVALID_ARGUMENT;
+            cmp_mpv_player_destroy(player);
+            return NULL;
+        }
+        *status = cmp_mpv_set_option(player, "wid", wid);
         if (*status != CMP_MPV_OK) {
             cmp_mpv_player_destroy(player);
             return NULL;
@@ -288,20 +377,23 @@ cmp_mpv_player *cmp_mpv_player_create(
         return NULL;
     }
 
-    const char *api_type = "sw";
-    mpv_render_param render_parameters[] = {
-        {MPV_RENDER_PARAM_API_TYPE, (void *)api_type},
-        {MPV_RENDER_PARAM_INVALID, NULL},
-    };
-    if (player->api.render_context_create(
-            &player->render_context,
-            player->handle,
-            render_parameters) < 0 ||
-        player->render_context == NULL) {
-        cmp_mpv_player_destroy(player);
-        return NULL;
+    if (renderer == CMP_MPV_RENDERER_SOFTWARE) {
+        const char *api_type = "sw";
+        mpv_render_param render_parameters[] = {
+            {MPV_RENDER_PARAM_API_TYPE, (void *)api_type},
+            {MPV_RENDER_PARAM_INVALID, NULL},
+        };
+        if (player->api.render_context_create(
+                &player->render_context,
+                player->handle,
+                render_parameters) < 0 ||
+            player->render_context == NULL) {
+            cmp_mpv_player_destroy(player);
+            return NULL;
+        }
     }
 
+    player->renderer = renderer;
     *status = CMP_MPV_OK;
     return player;
 }
@@ -411,6 +503,7 @@ int cmp_mpv_player_render_bgr0(
     void *pixels
 ) {
     if (player == NULL || player->render_context == NULL ||
+        player->renderer != CMP_MPV_RENDERER_SOFTWARE ||
         width <= 0 || height <= 0 || pixels == NULL ||
         row_bytes < (size_t)width * 4U) {
         return CMP_MPV_INVALID_ARGUMENT;
@@ -429,4 +522,38 @@ int cmp_mpv_player_render_bgr0(
                parameters) < 0
         ? CMP_MPV_RENDER_FAILED
         : CMP_MPV_OK;
+}
+
+int cmp_mpv_player_switch_to_software(cmp_mpv_player *player) {
+    if (player == NULL || player->handle == NULL ||
+        player->render_context != NULL ||
+        player->renderer != CMP_MPV_RENDERER_IOSVK) {
+        return CMP_MPV_INVALID_ARGUMENT;
+    }
+    if (player->api.set_property_string(
+            player->handle,
+            "vo",
+            "libmpv") < 0) {
+        return CMP_MPV_COMMAND_FAILED;
+    }
+    if (player->api.set_property_string(
+            player->handle,
+            "hwdec",
+            "auto-copy-safe") < 0) {
+        return CMP_MPV_COMMAND_FAILED;
+    }
+    const char *api_type = "sw";
+    mpv_render_param parameters[] = {
+        {MPV_RENDER_PARAM_API_TYPE, (void *)api_type},
+        {MPV_RENDER_PARAM_INVALID, NULL},
+    };
+    if (player->api.render_context_create(
+            &player->render_context,
+            player->handle,
+            parameters) < 0 ||
+        player->render_context == NULL) {
+        return CMP_MPV_RENDER_FAILED;
+    }
+    player->renderer = CMP_MPV_RENDERER_SOFTWARE;
+    return CMP_MPV_OK;
 }

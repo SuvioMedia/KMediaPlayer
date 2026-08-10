@@ -4,7 +4,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 
-/** JNI bridge for the embedded macOS libmpv OpenGL/EDR surface. */
+/** JNI bridge for the embedded macOS libmpv OpenGL/EDR and macvk host surfaces. */
 internal object MpvMacNativeBridge {
     private const val LIBRARY_NAME = "ComposeMediaPlayerMpvMac"
     private const val RESOURCE_PATH =
@@ -21,6 +21,29 @@ internal object MpvMacNativeBridge {
         libraryLoadName: String,
         colorMode: Int,
     ): Long
+
+    @JvmStatic
+    external fun nCreateRendererInHost(
+        mpvHandle: Long,
+        libraryLoadName: String,
+        colorMode: Int,
+        nativeView: Long,
+    ): Long
+
+    /** Creates the Compose-owned `NSView*` consumed by the patched windowless macvk VO. */
+    @JvmStatic external fun nCreateMacVkHost(): Long
+
+    @JvmStatic external fun nDestroyMacVkHost(nativeView: Long)
+
+    @JvmStatic external fun nRequestMacVkRedraw(nativeView: Long)
+
+    @JvmStatic external fun nGetMacVkDisplayRefreshRate(nativeView: Long): Double
+
+    @JvmStatic
+    external fun nSetMacVkColorMode(
+        nativeView: Long,
+        colorMode: Int,
+    )
 
     /** Returns the renderer-owned `NSView*` mounted by Nucleus Tao. */
     @JvmStatic external fun nGetViewHandle(nativeRenderer: Long): Long

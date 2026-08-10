@@ -24,6 +24,11 @@ enum {
 };
 
 enum {
+    CMP_MPV_RENDERER_SOFTWARE = 0,
+    CMP_MPV_RENDERER_IOSVK = 1,
+};
+
+enum {
     CMP_MPV_EVENT_NONE = 0,
     CMP_MPV_EVENT_SHUTDOWN = 1,
     CMP_MPV_EVENT_END_FILE = 7,
@@ -49,9 +54,11 @@ int cmp_mpv_probe(
 );
 
 /**
- * Creates a software-rendered libmpv player.
+ * Creates a software- or MoltenVK-rendered libmpv player.
  *
  * library_path follows cmp_mpv_probe. subtitle_fonts_directory may be NULL.
+ * CMP_MPV_RENDERER_IOSVK requires a positive CAMetalLayer pointer in surface_layer
+ * and KMediaMpv's versioned embedded-iosvk capability.
  * status receives a CMP_MPV_* value on both success and failure.
  */
 cmp_mpv_player *cmp_mpv_player_create(
@@ -59,6 +66,8 @@ cmp_mpv_player *cmp_mpv_player_create(
     const char *subtitle_fonts_directory,
     int preserve_ass_styles,
     int use_embedded_fonts,
+    int renderer,
+    uintptr_t surface_layer,
     int *status
 );
 
@@ -104,6 +113,9 @@ int cmp_mpv_player_render_bgr0(
     size_t row_bytes,
     void *pixels
 );
+
+/** Replaces the embedded iosvk VO with the bounded software render context. */
+int cmp_mpv_player_switch_to_software(cmp_mpv_player *player);
 
 #ifdef __cplusplus
 }

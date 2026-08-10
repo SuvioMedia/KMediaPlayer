@@ -696,14 +696,25 @@ static BOOL choose_pixel_format(
 - (void)refreshNativeGeometry;
 @end
 
-static CGColorSpaceRef create_output_color_space(KMPMpvNativeRenderer* renderer) {
-    switch (renderer ? renderer->color_mode : 0) {
+/** Compose-owned host used by the capability-marked, windowless macvk VO. */
+@interface KMPMpvMacVkHostView : KMPMpvVideoView {
+    NSInteger _embeddedColorMode;
+}
+- (void)setEmbeddedMetalColorMode:(NSInteger)colorMode;
+- (void)refreshEmbeddedMetalGeometry;
+@end
+
+static CGColorSpaceRef create_output_color_space_for_view(
+    NSView* view,
+    int color_mode
+) {
+    switch (color_mode) {
         case 1:
             return CGColorSpaceCreateWithName(kCGColorSpaceITUR_2100_PQ);
         case 2:
             return CGColorSpaceCreateWithName(kCGColorSpaceITUR_2100_HLG);
         default: {
-            NSScreen* screen = [[renderer->view window] screen];
+            NSScreen* screen = [[view window] screen];
             CGColorSpaceRef screen_space = [[screen colorSpace] CGColorSpace];
             if (screen_space) return CGColorSpaceRetain(screen_space);
             return CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
@@ -714,7 +725,10 @@ static CGColorSpaceRef create_output_color_space(KMPMpvNativeRenderer* renderer)
 static void apply_output_color_space(KMPMpvNativeRenderer* renderer) {
     if (!renderer || !renderer->layer) return;
     BOOL extended_range = renderer->color_mode != 0;
-    CGColorSpaceRef color_space = create_output_color_space(renderer);
+    CGColorSpaceRef color_space = create_output_color_space_for_view(
+        renderer->view,
+        renderer->color_mode
+    );
     if (color_space) {
         [renderer->layer setColorspace:color_space];
         CGColorSpaceRelease(color_space);
@@ -1252,9 +1266,90 @@ static void renderer_update_callback(void* context) {
 
 @end
 
+@implementation KMPMpvMacVkHostView
+
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        _embeddedColorMode = 0;
+        [self setWantsLayer:YES];
+        [[self layer] setMasksToBounds:YES];
+        [[self layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
+        [self setAutoresizingMask:NSViewNotSizable];
+    }
+    return self;
+}
+
+- (NSView*)hitTest:(NSPoint)point {
+    (void)point;
+    return nil;
+}
+
+- (BOOL)acceptsFirstResponder {
+    return NO;
+}
+
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [self refreshEmbeddedMetalGeometry];
+}
+
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    [self refreshEmbeddedMetalGeometry];
+}
+
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
+    [self refreshEmbeddedMetalGeometry];
+}
+
+- (void)layout {
+    [super layout];
+    [self refreshEmbeddedMetalGeometry];
+}
+
+- (void)setEmbeddedMetalColorMode:(NSInteger)colorMode {
+    _embeddedColorMode = colorMode;
+    [self refreshEmbeddedMetalGeometry];
+}
+
+- (void)refreshEmbeddedMetalGeometry {
+    NSRect bounds = [self bounds];
+    CGFloat scale = [[self window] backingScaleFactor];
+    if (scale <= 0.0) scale = 1.0;
+    BOOL extended_range = _embeddedColorMode != 0;
+    CGColorSpaceRef color_space = create_output_color_space_for_view(
+        self,
+        (int)_embeddedColorMode
+    );
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (CALayer* child in [[self layer] sublayers]) {
+        [child setFrame:bounds];
+        [child setContentsScale:scale];
+        if ([child isKindOfClass:[CAMetalLayer class]]) {
+            CAMetalLayer* metal = (CAMetalLayer*)child;
+            CGSize drawable_size = CGSizeMake(
+                MAX(1.0, bounds.size.width * scale),
+                MAX(1.0, bounds.size.height * scale)
+            );
+            [metal setDrawableSize:drawable_size];
+            if (color_space) [metal setColorspace:color_space];
+            [metal setWantsExtendedDynamicRangeContent:extended_range];
+        }
+    }
+    [CATransaction commit];
+    if (color_space) CGColorSpaceRelease(color_space);
+}
+
+@end
+
 
 typedef struct {
     KMPMpvNativeRenderer* renderer;
+    KMPMpvVideoView* host_view;
     BOOL created;
 } KMPMpvCreateContext;
 
@@ -1303,8 +1398,9 @@ static void create_renderer_on_main(void* raw_context) {
         }
 
         KMPMpvOpenGLLayer* layer = [[KMPMpvOpenGLLayer alloc] initWithRenderer:renderer];
-        KMPMpvVideoView* view =
-            [[KMPMpvVideoView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 1.0, 1.0)];
+        KMPMpvVideoView* view = context->host_view
+            ? [context->host_view retain]
+            : [[KMPMpvVideoView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 1.0, 1.0)];
         renderer->layer = [layer retain];
         renderer->view = [view retain];
         // Nucleus is the only frame writer. AppKit autoresizing would race its deferred
@@ -1380,6 +1476,65 @@ typedef struct {
     double refresh_rate;
 } KMPMpvRefreshRateContext;
 
+typedef struct {
+    KMPMpvMacVkHostView* view;
+} KMPMpvMacVkHostCreateContext;
+
+static void create_macvk_host_on_main(void* raw_context) {
+    KMPMpvMacVkHostCreateContext* context = (KMPMpvMacVkHostCreateContext*)raw_context;
+    if (!context) return;
+    @autoreleasepool {
+        context->view = [[KMPMpvMacVkHostView alloc]
+            initWithFrame:NSMakeRect(0.0, 0.0, 1.0, 1.0)];
+    }
+}
+
+static void destroy_macvk_host_on_main(void* raw_view) {
+    KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)raw_view;
+    if (!view) return;
+    @autoreleasepool {
+        [view removeFromSuperview];
+        [view release];
+    }
+}
+
+typedef struct {
+    KMPMpvMacVkHostView* view;
+    double refresh_rate;
+} KMPMpvMacVkRefreshRateContext;
+
+typedef struct {
+    KMPMpvMacVkHostView* view;
+    NSInteger color_mode;
+} KMPMpvMacVkColorContext;
+
+static void update_macvk_color_mode_on_main(void* raw_context) {
+    KMPMpvMacVkColorContext* context = (KMPMpvMacVkColorContext*)raw_context;
+    if (!context || !context->view) return;
+    [context->view setEmbeddedMetalColorMode:context->color_mode];
+}
+
+static void read_macvk_refresh_rate_on_main(void* raw_context) {
+    KMPMpvMacVkRefreshRateContext* context =
+        (KMPMpvMacVkRefreshRateContext*)raw_context;
+    if (!context || !context->view) return;
+    NSScreen* screen = [[context->view window] screen] ?: [NSScreen mainScreen];
+    if (!screen) return;
+    if (@available(macOS 12.0, *)) {
+        NSInteger frames_per_second = [screen maximumFramesPerSecond];
+        if (frames_per_second > 0) context->refresh_rate = (double)frames_per_second;
+    }
+    if (context->refresh_rate > 0.0) return;
+
+    NSNumber* screen_number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
+    if (!screen_number) return;
+    CGDisplayModeRef mode = CGDisplayCopyDisplayMode([screen_number unsignedIntValue]);
+    if (!mode) return;
+    double refresh_rate = CGDisplayModeGetRefreshRate(mode);
+    CGDisplayModeRelease(mode);
+    if (refresh_rate > 0.0) context->refresh_rate = refresh_rate;
+}
+
 static void update_color_mode_on_main(void* raw_context) {
     KMPMpvColorContext* context = (KMPMpvColorContext*)raw_context;
     if (!context || !context->renderer ||
@@ -1423,14 +1578,94 @@ static void read_refresh_rate_on_main(void* raw_context) {
 }
 
 JNIEXPORT jlong JNICALL
-Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nCreateRenderer(
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nCreateMacVkHost(
+    JNIEnv* environment,
+    jclass bridge_class
+) {
+    (void)environment;
+    (void)bridge_class;
+    KMPMpvMacVkHostCreateContext context = { .view = nil };
+    run_on_appkit_main_sync(create_macvk_host_on_main, &context);
+    return (jlong)(uintptr_t)context.view;
+}
+
+JNIEXPORT void JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nDestroyMacVkHost(
     JNIEnv* environment,
     jclass bridge_class,
-    jlong raw_mpv_handle,
-    jstring library_load_name,
+    jlong native_view
+) {
+    (void)environment;
+    (void)bridge_class;
+    KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
+    if (!view) return;
+    run_on_appkit_main_sync(destroy_macvk_host_on_main, view);
+}
+
+JNIEXPORT void JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nRequestMacVkRedraw(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong native_view
+) {
+    (void)environment;
+    (void)bridge_class;
+    KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
+    if (!view) return;
+    void (^redraw)(void) = ^{
+        [view refreshEmbeddedMetalGeometry];
+        [view setNeedsDisplay:YES];
+    };
+    if (pthread_main_np()) {
+        redraw();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), redraw);
+    }
+}
+
+JNIEXPORT jdouble JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nGetMacVkDisplayRefreshRate(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong native_view
+) {
+    (void)environment;
+    (void)bridge_class;
+    KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
+    if (!view) return 0.0;
+    KMPMpvMacVkRefreshRateContext context = {
+        .view = view,
+        .refresh_rate = 0.0,
+    };
+    run_on_appkit_main_sync(read_macvk_refresh_rate_on_main, &context);
+    return context.refresh_rate;
+}
+
+JNIEXPORT void JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nSetMacVkColorMode(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong native_view,
     jint color_mode
 ) {
+    (void)environment;
     (void)bridge_class;
+    KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
+    if (!view) return;
+    KMPMpvMacVkColorContext context = {
+        .view = view,
+        .color_mode = (NSInteger)color_mode,
+    };
+    run_on_appkit_main_sync(update_macvk_color_mode_on_main, &context);
+}
+
+static jlong create_renderer(
+    JNIEnv* environment,
+    jlong raw_mpv_handle,
+    jstring library_load_name,
+    jint color_mode,
+    KMPMpvVideoView* host_view
+) {
     if (!environment || !library_load_name || raw_mpv_handle == 0) return 0;
 
     const char* library_name = (*environment)->GetStringUTFChars(
@@ -1482,6 +1717,7 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nCreateRen
 
     KMPMpvCreateContext context = {
         .renderer = renderer,
+        .host_view = host_view,
         .created = NO,
     };
     run_on_appkit_main_sync(create_renderer_on_main, &context);
@@ -1491,6 +1727,46 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nCreateRen
         return 0;
     }
     return (jlong)(uintptr_t)renderer;
+}
+
+JNIEXPORT jlong JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nCreateRenderer(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong raw_mpv_handle,
+    jstring library_load_name,
+    jint color_mode
+) {
+    (void)bridge_class;
+    return create_renderer(
+        environment,
+        raw_mpv_handle,
+        library_load_name,
+        color_mode,
+        nil
+    );
+}
+
+JNIEXPORT jlong JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nCreateRendererInHost(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong raw_mpv_handle,
+    jstring library_load_name,
+    jint color_mode,
+    jlong native_view
+) {
+    (void)bridge_class;
+    KMPMpvMacVkHostView* host_view =
+        (KMPMpvMacVkHostView*)(uintptr_t)native_view;
+    if (!host_view) return 0;
+    return create_renderer(
+        environment,
+        raw_mpv_handle,
+        library_load_name,
+        color_mode,
+        host_view
+    );
 }
 
 JNIEXPORT jlong JNICALL
