@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeRequest
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSession
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.MpvMacRenderer
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
@@ -78,6 +79,9 @@ private fun exerciseRuntimeCoexistence(firstClient: FirstClient) =
                     createMpvVideoPlayerState(
                         MpvPlaybackOptions(
                             subtitleFontsDirectory = fontsDirectory.toString(),
+                            // This test validates software-frame/libass coexistence,
+                            // not the native renderer default.
+                            macRenderer = MpvMacRenderer.OPENGL,
                         ),
                     ),
                 )
