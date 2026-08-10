@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.mpv
 
+import io.github.kdroidfilter.composemediaplayer.MpvMacRenderer
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.MpvLoadFailure
 import io.github.shusek.kmediampv.runtime.desktop.MpvDesktopRuntime
@@ -44,6 +45,7 @@ internal data class MpvRuntimeConfig(
     val librarySource: MpvLibrarySource = MpvLibrarySource.Bundled,
     val preserveAssStyles: Boolean = true,
     val useEmbeddedFonts: Boolean = true,
+    val macRenderer: MpvMacRenderer = MpvMacRenderer.MOLTENVK,
     /** One non-recursive directory containing application-supplied subtitle fonts. */
     val subtitleFontsDirectory: Path? = null,
     /** Application-private parent directory for the verified bundled runtime. */

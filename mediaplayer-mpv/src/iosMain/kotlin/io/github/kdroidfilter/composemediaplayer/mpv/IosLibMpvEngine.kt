@@ -20,6 +20,8 @@ import io.github.kdroidfilter.composemediaplayer.mpv.native.CMP_MPV_INVALID_ARGU
 import io.github.kdroidfilter.composemediaplayer.mpv.native.CMP_MPV_LIBRARY_NOT_FOUND
 import io.github.kdroidfilter.composemediaplayer.mpv.native.CMP_MPV_OK
 import io.github.kdroidfilter.composemediaplayer.mpv.native.CMP_MPV_RENDER_FAILED
+import io.github.kdroidfilter.composemediaplayer.mpv.native.CMP_MPV_RENDERER_IOSVK
+import io.github.kdroidfilter.composemediaplayer.mpv.native.CMP_MPV_RENDERER_SOFTWARE
 import io.github.kdroidfilter.composemediaplayer.mpv.native.CMP_MPV_REQUIRED_SYMBOL_MISSING
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_event
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_command
@@ -29,6 +31,7 @@ import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_free_
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_get_property
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_render_bgr0
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_set_property
+import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_switch_to_software
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_wait_event
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_player_wakeup
 import io.github.kdroidfilter.composemediaplayer.mpv.native.cmp_mpv_probe
@@ -71,6 +74,11 @@ internal data class IosMpvRuntimeResolution(
     val versionMajor: Int,
     val versionMinor: Int,
 )
+
+internal enum class IosMpvRendererBackend {
+    SOFTWARE,
+    IOSVK,
+}
 
 internal fun inspectIosMpvRuntime(options: MpvPlaybackOptions): MpvBackendAvailability =
     when (val resolution = resolveIosMpvRuntime(options)) {
@@ -199,7 +207,11 @@ private fun Int.toGuidance(): String =
 
 internal class IosLibMpvEngine private constructor(
     private var player: CPointer<cmp_mpv_player>?,
+    rendererBackend: IosMpvRendererBackend,
 ) {
+    var rendererBackend: IosMpvRendererBackend = rendererBackend
+        private set
+
     fun command(vararg arguments: String) {
         require(arguments.isNotEmpty()) { "An mpv command must not be empty." }
         val current = checkNotNull(player) { "The libmpv player is closed." }
@@ -286,6 +298,14 @@ internal class IosLibMpvEngine private constructor(
         }
     }
 
+    fun switchToSoftwareRendering() {
+        val current = checkNotNull(player) { "The libmpv player is closed." }
+        check(cmp_mpv_player_switch_to_software(current) == CMP_MPV_OK.toInt()) {
+            "libmpv could not replace its iosvk video output."
+        }
+        rendererBackend = IosMpvRendererBackend.SOFTWARE
+    }
+
     fun wakeup() {
         player?.let(::cmp_mpv_player_wakeup)
     }
@@ -300,6 +320,8 @@ internal class IosLibMpvEngine private constructor(
         fun create(
             resolution: IosMpvRuntimeResolution,
             options: MpvPlaybackOptions,
+            rendererBackend: IosMpvRendererBackend = IosMpvRendererBackend.SOFTWARE,
+            surfaceLayer: ULong = 0uL,
         ): IosLibMpvEngine {
             val statusAndPlayer =
                 memScoped {
@@ -310,6 +332,11 @@ internal class IosLibMpvEngine private constructor(
                             options.subtitleFontsDirectory,
                             if (options.preserveAssStyles) 1 else 0,
                             if (options.useEmbeddedFonts) 1 else 0,
+                            when (rendererBackend) {
+                                IosMpvRendererBackend.SOFTWARE -> CMP_MPV_RENDERER_SOFTWARE.toInt()
+                                IosMpvRendererBackend.IOSVK -> CMP_MPV_RENDERER_IOSVK.toInt()
+                            },
+                            surfaceLayer,
                             status.ptr,
                         )
                     status.value to player
@@ -322,7 +349,7 @@ internal class IosLibMpvEngine private constructor(
                             guidance = statusAndPlayer.first.toGuidance(),
                         ),
                     )
-            return IosLibMpvEngine(player)
+            return IosLibMpvEngine(player, rendererBackend)
         }
     }
 }

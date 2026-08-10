@@ -5,12 +5,16 @@ package io.github.kdroidfilter.composemediaplayer.mpv
 import androidx.compose.ui.graphics.toPixelMap
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.MpvMacRenderer
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionType
 import io.github.kdroidfilter.composemediaplayer.createMpvVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.createVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
@@ -22,6 +26,78 @@ import kotlin.time.Duration.Companion.milliseconds
 
 class MpvMacNativeSurfaceIntegrationTest {
     @Test
+    fun playsThroughCapabilityMarkedEmbeddedMacVk() {
+        if (!isMacArm64()) return
+        val library = configuredFile(MPV_LIBRARY_PROPERTY) ?: return
+        val media = configuredFile(NATIVE_SURFACE_MEDIA_PROPERTY) ?: return
+        val loadedLibrary = LibMpvLibrary.open(MpvLibrarySource.ExplicitPath(library))
+        try {
+            assertEquals(1, loadedLibrary.embeddedMacVkApiVersion)
+        } finally {
+            loadedLibrary.close()
+        }
+        assertTrue(MpvMacNativeBridge.isAvailable, "The macOS native bridge is unavailable.")
+        val probeHost = MpvMacNativeBridge.nCreateMacVkHost()
+        assertTrue(probeHost != 0L, "The macOS native bridge did not create a macvk host.")
+        val probeLibrary = LibMpvLibrary.open(MpvLibrarySource.ExplicitPath(library))
+        val probeEngine =
+            try {
+                probeLibrary.createEngine(
+                    options =
+                        mpvInitializationOptions(
+                            config = MpvRuntimeConfig(),
+                            macBackend = MpvMacNativeBackend.MACVK,
+                            macVkHostView = probeHost,
+                        ),
+                    createSoftwareRenderer = false,
+                )
+            } catch (failure: Throwable) {
+                probeLibrary.close()
+                throw failure
+            }
+        probeEngine.close()
+        MpvMacNativeBridge.nDestroyMacVkHost(probeHost)
+        val player = createExplicitMpvPlayer(library)
+
+        try {
+            assertContains(player.renderingInfo.videoRenderer.orEmpty(), "macvk")
+            val nativeView = player.createNativeMacView()
+            assertTrue(nativeView != 0L, "The embedded macvk NSView was not created.")
+            player.onNativeMacSurfaceAttached()
+            player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
+
+            await("Embedded macvk did not reach active playback.") {
+                player.hasMedia &&
+                    player.isPlaying &&
+                    !player.isLoading &&
+                    player.currentTime >= 250.milliseconds
+            }
+            assertContains(player.renderingInfo.videoRenderer.orEmpty(), "macvk")
+            assertEquals(null, player.error)
+            MpvMacOutputColorMode.entries.forEach { mode ->
+                MpvMacNativeBridge.nSetMacVkColorMode(nativeView, mode.nativeValue)
+            }
+            MpvMacNativeBridge.nSetMacVkColorMode(
+                nativeView,
+                MpvMacOutputColorMode.SDR.nativeValue,
+            )
+
+            val timeBeforeProjection = player.currentTime
+            player.projection =
+                VideoProjectionSettings(projectionType = VideoProjectionType.Fisheye190)
+            player.updateNativeMacProjection()
+            assertContains(player.renderingInfo.videoRenderer.orEmpty(), "OpenGL")
+            assertContains(player.renderingInfo.notes.orEmpty(), "projection requires")
+            await("Playback stalled while switching macvk to the OpenGL projection pass.") {
+                player.currentTime >= timeBeforeProjection + 250.milliseconds
+            }
+            assertEquals(null, player.error)
+        } finally {
+            player.dispose()
+        }
+    }
+
+    @Test
     fun createsNativeViewAndReturnsToSoftwareRendering() {
         if (!isMacArm64()) return
         val library = configuredFile(MPV_LIBRARY_PROPERTY) ?: return
@@ -30,20 +106,21 @@ class MpvMacNativeSurfaceIntegrationTest {
                 ?: configuredFile(WMAPRO_MEDIA_PROPERTY)
                 ?: configuredLegacyDirectory()?.findWmv()
                 ?: return
-        val player = createExplicitMpvPlayer(library)
+        val player = createExplicitMpvPlayer(library, MpvMacRenderer.OPENGL)
         var nativeView = 0L
 
         try {
+            nativeView = player.createNativeMacView()
+            assertTrue(nativeView != 0L, "The native macOS MPV NSView was not created.")
+            player.onNativeMacSurfaceAttached()
             player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
-            await("MPV did not start before native-view creation.") {
+            await("MPV did not start with the native view attached.") {
                 player.hasMedia &&
                     player.isPlaying &&
                     !player.isLoading &&
                     player.currentTime >= 250.milliseconds
             }
 
-            nativeView = player.createNativeMacView()
-            assertTrue(nativeView != 0L, "The native macOS MPV NSView was not created.")
             assertContains(player.renderingInfo.videoRenderer.orEmpty(), "OpenGL")
             val timeBeforeObservation = player.currentTime
             await("Playback stalled while the native MPV NSView was active.") {
@@ -52,7 +129,11 @@ class MpvMacNativeSurfaceIntegrationTest {
 
             player.disposeNativeMacView(nativeView)
             nativeView = 0L
-            assertContains(player.renderingInfo.videoRenderer.orEmpty(), "software")
+            await("MPV did not return to software rendering after native-view disposal.") {
+                player.renderingInfo.videoRenderer
+                    .orEmpty()
+                    .contains("software")
+            }
             await("MPV did not resume software rendering after native-view disposal.") {
                 player.renderFrame(RENDER_WIDTH, RENDER_HEIGHT)
                 player.currentFrame.value
@@ -72,17 +153,18 @@ class MpvMacNativeSurfaceIntegrationTest {
         if (!isMacArm64()) return
         val library = configuredFile(MPV_LIBRARY_PROPERTY) ?: return
         val media = configuredFile(NATIVE_SURFACE_MEDIA_PROPERTY) ?: return
-        val mpvPlayer = createExplicitMpvPlayer(library)
+        val mpvPlayer = createExplicitMpvPlayer(library, MpvMacRenderer.OPENGL)
         var platformPlayer: VideoPlayerState? = null
 
         try {
+            assertTrue(mpvPlayer.createNativeMacView() != 0L)
+            mpvPlayer.onNativeMacSurfaceAttached()
             mpvPlayer.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
-            await("MPV did not start before backend handoff.") {
+            await("MPV did not start with the native view attached before backend handoff.") {
                 mpvPlayer.hasMedia &&
                     mpvPlayer.isPlaying &&
                     mpvPlayer.currentTime >= 250.milliseconds
             }
-            assertTrue(mpvPlayer.createNativeMacView() != 0L)
 
             // Disposing the player must synchronously release its renderer-owned NSView.
             mpvPlayer.dispose()
@@ -106,11 +188,15 @@ class MpvMacNativeSurfaceIntegrationTest {
         }
     }
 
-    private fun createExplicitMpvPlayer(library: Path): MpvVideoPlayerState =
+    private fun createExplicitMpvPlayer(
+        library: Path,
+        macRenderer: MpvMacRenderer = MpvMacRenderer.MOLTENVK,
+    ): MpvVideoPlayerState =
         assertIs(
             createMpvVideoPlayerState(
                 MpvPlaybackOptions(
                     runtimeSource = MpvRuntimeSource.ExplicitPath(library.toString()),
+                    macRenderer = macRenderer,
                 ),
             ),
         )

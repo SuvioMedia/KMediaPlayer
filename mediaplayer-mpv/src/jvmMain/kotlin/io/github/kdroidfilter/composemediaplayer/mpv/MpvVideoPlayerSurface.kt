@@ -35,7 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-/** Uses a Tao-hosted native macOS OpenGL/EDR view, with Skia as the portable fallback. */
+/** Uses a Tao-hosted native macOS Metal or OpenGL/EDR view, with Skia as the portable fallback. */
 @Composable
 internal fun MpvVideoPlayerSurface(
     playerState: MpvVideoPlayerState,

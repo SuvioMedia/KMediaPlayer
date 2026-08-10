@@ -15,6 +15,7 @@ import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableException
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableReason
+import io.github.kdroidfilter.composemediaplayer.MpvMacRenderer
 import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
@@ -61,6 +62,8 @@ import kotlin.time.Duration.Companion.seconds
 internal class MpvVideoPlayerState(
     internal val runtimeConfig: MpvRuntimeConfig,
     private val engine: LibMpvEngine,
+    initialMacVkHostView: Long = 0L,
+    initialMacBackendFallbackReason: String? = null,
 ) : AbstractMpvVideoPlayerState(),
     VideoPlayerSurfaceProvider,
     TaoPlaybackSurfaceProvider {
@@ -73,6 +76,19 @@ internal class MpvVideoPlayerState(
 
     @Volatile
     private var nativeMacRenderer = 0L
+
+    @Volatile
+    private var nativeMacVkHostView = initialMacVkHostView
+
+    @Volatile
+    private var nativeMacVkActive = initialMacVkHostView != 0L
+
+    @Volatile
+    private var nativeMacBackendFallbackReason: String? = initialMacBackendFallbackReason
+
+    private var currentSourceUri: String? = null
+    private var currentSourceWantsPlayback = false
+    private var macVkPlaybackFallbackAttempted = false
     private var nativeMacColorMode = MpvMacOutputColorMode.SDR
     private var nativeMacProjectionEnabled = false
     private var nativeMacContentScaleMode = MpvMacContentScaleMode.FIT
@@ -200,10 +216,17 @@ internal class MpvVideoPlayerState(
         }
 
     internal val canUseNativeMacSurface: Boolean
-        get() = !disposed.get() && nativeMacRenderer != 0L
+        get() = !disposed.get() && hasNativeMacGpuSurface
 
     init {
-        initializeNativeMacRendererBeforePlayback()
+        if (nativeMacVkHostView != 0L) {
+            initializeMacVkRendererBeforePlayback()
+        } else {
+            initializeNativeMacRendererBeforePlayback()
+        }
+        if (!hasNativeMacGpuSurface && nativeMacBackendFallbackReason != null) {
+            publishSoftwareRenderingInfo()
+        }
         eventJob = scope.launch { eventLoop() }
     }
 
@@ -253,7 +276,7 @@ internal class MpvVideoPlayerState(
 
     override fun playBackend() {
         renderLock.withLock {
-            if (nativeMacRenderer != 0L && (!nativeMacSurfaceAttached || !nativeMacDecodeReady)) {
+            if (hasNativeMacGpuSurface && (!nativeMacSurfaceAttached || !nativeMacDecodeReady)) {
                 resumePlaybackAfterNativeSurfaceAttach = true
                 engine.setProperty("pause", "yes")
             } else {
@@ -310,12 +333,15 @@ internal class MpvVideoPlayerState(
 
         droppedVideoFrames = null
         maximumAvSyncOffsetMs = null
+        currentSourceUri = normalizedUri
+        currentSourceWantsPlayback = initializePlayerState == InitialPlayerState.PLAY
+        macVkPlaybackFallbackAttempted = false
         beginSourcePreparation(normalizedUri, initializePlayerState)
 
         try {
             renderLock.withLock {
                 val wantsPlayback = initializePlayerState == InitialPlayerState.PLAY
-                val waitForNativePipeline = nativeMacRenderer != 0L
+                val waitForNativePipeline = hasNativeMacGpuSurface
                 nativeMacDecodeReady = !waitForNativePipeline
                 awaitingNativeMacDecodeRestart = false
                 resumePlaybackAfterNativeSurfaceAttach = wantsPlayback && waitForNativePipeline
@@ -412,6 +438,9 @@ internal class MpvVideoPlayerState(
         nativeMacDecodeReady = false
         awaitingNativeMacDecodeRestart = false
         resumePlaybackAfterNativeSurfaceAttach = false
+        currentSourceUri = null
+        currentSourceWantsPlayback = false
+        macVkPlaybackFallbackAttempted = false
         frameState.value = null
         resetSourceState()
     }
@@ -426,7 +455,7 @@ internal class MpvVideoPlayerState(
         try {
             renderLock.withLock {
                 if (disposed.get() || !_hasMedia) return
-                if (nativeMacRenderer != 0L) {
+                if (hasNativeMacGpuSurface) {
                     // A headless consumer or a failed native-view attachment can still request the
                     // software frame API. The eagerly-created macOS renderer owns mpv's only render
                     // context, so hand it back before rendering instead of leaving playback paused
@@ -435,7 +464,7 @@ internal class MpvVideoPlayerState(
                     nativeMacDecodeReady = false
                     awaitingNativeMacDecodeRestart = false
                     resumePlaybackAfterNativeSurfaceAttach = false
-                    detachNativeMacRendererLocked(restoreSoftwareRenderer = true)
+                    detachNativeMacSurfaceLocked(restoreSoftwareRenderer = true)
                 }
                 val target = framePool.next(width, height)
                 engine.render(
@@ -471,27 +500,48 @@ internal class MpvVideoPlayerState(
                 textureCrop = projectionTextureCrop,
             )
         nativeMacProjectionEnabled = configuration.enabled
-        applyNativeMacInputGeometry()
         renderLock.withLock {
-            if (disposed.get() || nativeMacRenderer == 0L) return@withLock
-            MpvMacNativeBridge.nSetProjection(
-                nativeRenderer = nativeMacRenderer,
-                parameters = configuration.toNativeArray(),
-            )
+            if (disposed.get()) return@withLock
+            if (configuration.enabled && nativeMacVkActive) {
+                switchMacVkToOpenGlLocked("projection requires the OpenGL post-process pass")
+            }
+            applyNativeMacInputGeometry()
+            if (nativeMacRenderer != 0L) {
+                MpvMacNativeBridge.nSetProjection(
+                    nativeRenderer = nativeMacRenderer,
+                    parameters = configuration.toNativeArray(),
+                )
+            }
         }
         mutateSnapshotState {
             renderingInfo.videoProjection = projection.renderingInfoLabel()
         }
     }
 
-    /** Creates the renderer-owned `NSView*` that Nucleus Tao mounts in its native hierarchy. */
+    /** Returns the Compose-owned macvk host or renderer-owned OpenGL `NSView*`. */
     internal fun createNativeMacView(): Long {
         if (!canUseNativeMacSurface) return 0L
         return renderLock.withLock {
             if (disposed.get()) return@withLock 0L
-            runCatching {
-                MpvMacNativeBridge.nGetViewHandle(nativeMacRenderer)
-            }.getOrDefault(0L)
+            nativeMacVkHostView.takeIf { it != 0L }
+                ?: runCatching {
+                    MpvMacNativeBridge.nGetViewHandle(nativeMacRenderer)
+                }.getOrDefault(0L)
+        }
+    }
+
+    private fun initializeMacVkRendererBeforePlayback() {
+        renderLock.withLock {
+            if (disposed.get() || !nativeMacVkActive || nativeMacVkHostView == 0L) return
+            frameState.value = null
+            nativeMacProjectionEnabled = false
+            applyNativeMacInputGeometry()
+            configureNativeMacPlaybackProfile()
+            runCatching { engine.setProperty("hwdec", nativeMacDecodeRoute.mpvHwdec) }
+            mutateSnapshotState {
+                renderingInfo.videoRenderer = "libmpv gpu-next/macvk in an embedded Metal surface"
+                renderingInfo.notes = nativeMacRenderingNotes()
+            }
         }
     }
 
@@ -503,58 +553,95 @@ internal class MpvVideoPlayerState(
     private fun initializeNativeMacRendererBeforePlayback() {
         if (!MpvMacNativeBridge.isAvailable || disposed.get()) return
         renderLock.withLock {
-            if (nativeMacRenderer != 0L || disposed.get()) return
-            val target =
-                try {
-                    engine.beginExternalRendering()
-                } catch (_: RuntimeException) {
-                    return
-                }
-            val renderer =
-                try {
+            if (hasNativeMacGpuSurface || disposed.get()) return
+            attachOpenGlRendererLocked()
+        }
+    }
+
+    private fun attachOpenGlRendererLocked(hostView: Long = 0L): Boolean {
+        val target =
+            try {
+                engine.beginExternalRendering()
+            } catch (_: RuntimeException) {
+                return false
+            }
+        val renderer =
+            try {
+                if (hostView != 0L) {
+                    MpvMacNativeBridge.nCreateRendererInHost(
+                        mpvHandle = target.mpvHandle,
+                        libraryLoadName = target.libraryLoadName,
+                        colorMode = nativeMacColorMode.nativeValue,
+                        nativeView = hostView,
+                    )
+                } else {
                     MpvMacNativeBridge.nCreateRenderer(
                         mpvHandle = target.mpvHandle,
                         libraryLoadName = target.libraryLoadName,
                         colorMode = nativeMacColorMode.nativeValue,
                     )
-                } catch (_: Throwable) {
-                    0L
                 }
-            val nativeView =
-                if (renderer != 0L) {
-                    runCatching { MpvMacNativeBridge.nGetViewHandle(renderer) }.getOrDefault(0L)
-                } else {
-                    0L
-                }
-            if (renderer == 0L || nativeView == 0L) {
-                if (renderer != 0L) runCatching { MpvMacNativeBridge.nDetach(renderer) }
-                runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
-                runCatching { engine.setProperty("hwdec", SOFTWARE_RENDER_HWDEC) }
-                return
+            } catch (_: Throwable) {
+                0L
             }
-
-            nativeMacRenderer = renderer
-            frameState.value = null
-            applyNativeMacOutputColorMode(nativeMacColorMode)
-            val projectionConfiguration =
-                mpvMacProjectionConfiguration(
-                    projection = projection,
-                    projectionView = projectionView,
-                    textureCrop = projectionTextureCrop,
-                )
-            nativeMacProjectionEnabled = projectionConfiguration.enabled
-            applyNativeMacInputGeometry()
-            MpvMacNativeBridge.nSetProjection(
-                nativeRenderer = nativeMacRenderer,
-                parameters = projectionConfiguration.toNativeArray(),
-            )
-            configureNativeMacPlaybackProfile()
-            runCatching { engine.setProperty("hwdec", nativeMacDecodeRoute.mpvHwdec) }
-            mutateSnapshotState {
-                renderingInfo.videoRenderer = "libmpv OpenGL in a native macOS EDR surface"
-                renderingInfo.notes = nativeMacRenderingNotes()
+        val nativeView =
+            if (renderer != 0L) {
+                runCatching { MpvMacNativeBridge.nGetViewHandle(renderer) }.getOrDefault(0L)
+            } else {
+                0L
             }
+        if (renderer == 0L || nativeView == 0L) {
+            if (renderer != 0L) runCatching { MpvMacNativeBridge.nDetach(renderer) }
+            runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
+            runCatching { engine.setProperty("hwdec", SOFTWARE_RENDER_HWDEC) }
+            return false
         }
+
+        nativeMacRenderer = renderer
+        frameState.value = null
+        applyNativeMacOutputColorMode(nativeMacColorMode)
+        val projectionConfiguration =
+            mpvMacProjectionConfiguration(
+                projection = projection,
+                projectionView = projectionView,
+                textureCrop = projectionTextureCrop,
+            )
+        nativeMacProjectionEnabled = projectionConfiguration.enabled
+        applyNativeMacInputGeometry()
+        MpvMacNativeBridge.nSetProjection(
+            nativeRenderer = nativeMacRenderer,
+            parameters = projectionConfiguration.toNativeArray(),
+        )
+        configureNativeMacPlaybackProfile()
+        runCatching { engine.setProperty("hwdec", nativeMacDecodeRoute.mpvHwdec) }
+        mutateSnapshotState {
+            renderingInfo.videoRenderer = "libmpv OpenGL in a native macOS EDR surface"
+            renderingInfo.notes = nativeMacRenderingNotes()
+        }
+        return true
+    }
+
+    private fun switchMacVkToOpenGlLocked(reason: String): Boolean {
+        if (!nativeMacVkActive) return nativeMacRenderer != 0L
+        val hostView = nativeMacVkHostView
+        if (hostView == 0L) return false
+
+        val selectedVideo = suspendVideoOutputForContextSwitch()
+        runCatching { engine.setProperty("vo", "libmpv") }
+        nativeMacVkActive = false
+        nativeMacBackendFallbackReason = reason
+        val attached = attachOpenGlRendererLocked(hostView)
+        if (attached) {
+            resumeVideoOutputAfterContextSwitch(selectedVideo, nativeMacDecodeRoute.mpvHwdec)
+            if (nativeMacSurfaceAttached) {
+                runCatching { MpvMacNativeBridge.nRequestRedraw(nativeMacRenderer) }
+            }
+            return true
+        }
+
+        resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
+        publishSoftwareRenderingInfo()
+        return false
     }
 
     internal fun disposeNativeMacView(
@@ -575,16 +662,24 @@ internal class MpvVideoPlayerState(
             if (disposed.get()) return@launch
             renderLock.withLock {
                 if (disposed.get()) return@withLock
-                detachNativeMacRendererLocked(restoreSoftwareRenderer = true)
+                detachNativeMacSurfaceLocked(restoreSoftwareRenderer = true)
             }
         }
     }
 
     internal fun onNativeMacSurfaceAttached() {
         renderLock.withLock {
-            if (disposed.get() || nativeMacRenderer == 0L) return
+            if (disposed.get() || !hasNativeMacGpuSurface) return
             nativeMacSurfaceAttached = true
-            runCatching { MpvMacNativeBridge.nGetDisplayRefreshRate(nativeMacRenderer) }
+            val refreshRate =
+                if (nativeMacVkActive) {
+                    runCatching {
+                        MpvMacNativeBridge.nGetMacVkDisplayRefreshRate(nativeMacVkHostView)
+                    }
+                } else {
+                    runCatching { MpvMacNativeBridge.nGetDisplayRefreshRate(nativeMacRenderer) }
+                }
+            refreshRate
                 .getOrNull()
                 ?.takeIf { it.isFinite() && it > 0.0 }
                 ?.let { refreshRate ->
@@ -592,14 +687,47 @@ internal class MpvVideoPlayerState(
                         engine.setProperty("display-fps-override", refreshRate.toString())
                     }
                 }
-            MpvMacNativeBridge.nRequestRedraw(nativeMacRenderer)
+            if (nativeMacVkActive) {
+                MpvMacNativeBridge.nRequestMacVkRedraw(nativeMacVkHostView)
+            } else {
+                MpvMacNativeBridge.nRequestRedraw(nativeMacRenderer)
+            }
             resumeNativeMacPlaybackIfReady()
         }
     }
 
-    private fun detachNativeMacRendererLocked(restoreSoftwareRenderer: Boolean) {
+    private fun detachNativeMacSurfaceLocked(restoreSoftwareRenderer: Boolean) {
+        val macVkHost = nativeMacVkHostView
+        if (nativeMacVkActive && macVkHost != 0L) {
+            val selectedVideo =
+                if (restoreSoftwareRenderer) {
+                    suspendVideoOutputForContextSwitch()
+                } else {
+                    runCatching { engine.setProperty("vid", "no") }
+                    null
+                }
+            runCatching { engine.setProperty("vo", "libmpv") }
+            nativeMacVkActive = false
+            nativeMacVkHostView = 0L
+            applyNativeMacInputGeometry()
+            runCatching { MpvMacNativeBridge.nDestroyMacVkHost(macVkHost) }
+            if (restoreSoftwareRenderer) {
+                runCatching { engine.restoreSoftwareRendering() }
+                resetNativeMacTargetColorProperties()
+                resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
+                publishSoftwareRenderingInfo()
+            }
+            return
+        }
+
         val renderer = nativeMacRenderer
-        if (renderer == 0L) return
+        if (renderer == 0L) {
+            if (nativeMacVkHostView != 0L) {
+                runCatching { MpvMacNativeBridge.nDestroyMacVkHost(nativeMacVkHostView) }
+                nativeMacVkHostView = 0L
+            }
+            return
+        }
         val selectedVideo =
             if (restoreSoftwareRenderer) {
                 suspendVideoOutputForContextSwitch()
@@ -613,13 +741,21 @@ internal class MpvVideoPlayerState(
         } finally {
             engine.endExternalRendering(restoreSoftwareRenderer)
         }
+        if (nativeMacVkHostView != 0L) {
+            runCatching { MpvMacNativeBridge.nDestroyMacVkHost(nativeMacVkHostView) }
+            nativeMacVkHostView = 0L
+        }
         if (restoreSoftwareRenderer) {
             resetNativeMacTargetColorProperties()
             resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-            mutateSnapshotState {
-                renderingInfo.videoRenderer = "libmpv software render API"
-                renderingInfo.notes = softwareRenderingNotes()
-            }
+            publishSoftwareRenderingInfo()
+        }
+    }
+
+    private fun publishSoftwareRenderingInfo() {
+        mutateSnapshotState {
+            renderingInfo.videoRenderer = "libmpv software render API"
+            renderingInfo.notes = softwareRenderingNotes()
         }
     }
 
@@ -650,6 +786,9 @@ internal class MpvVideoPlayerState(
     }
 
     private fun onFileLoaded() {
+        if (macVkVideoOutputIsConfiguredButUnexpected() && retryCurrentSourceWithOpenGl()) {
+            return
+        }
         refreshSnapshot()
         val decodeRestartRequested = configureNativeMacDecodeRouteForLoadedSource()
         refreshSnapshot()
@@ -664,6 +803,11 @@ internal class MpvVideoPlayerState(
 
     private fun onEndFile(event: NativeMpvEvent.EndFile) {
         if (!_hasMedia || event.reason == MPV_END_FILE_REASON_STOP || event.reason == MPV_END_FILE_REASON_QUIT) return
+        if ((event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) &&
+            retryCurrentSourceWithOpenGl()
+        ) {
+            return
+        }
         if ((event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) &&
             System.nanoTime() < renderContextSwitchDeadlineNanos
         ) {
@@ -681,6 +825,9 @@ internal class MpvVideoPlayerState(
 
     private fun onPlaybackRestarted() {
         renderContextSwitchDeadlineNanos = 0L
+        if (macVkVideoOutputIsConfiguredButUnexpected() && retryCurrentSourceWithOpenGl()) {
+            return
+        }
         if (awaitingNativeMacDecodeRestart) {
             awaitingNativeMacDecodeRestart = false
             mutateSnapshotState { _isSeeking = false }
@@ -696,6 +843,33 @@ internal class MpvVideoPlayerState(
         }
     }
 
+    private fun macVkVideoOutputIsConfiguredButUnexpected(): Boolean {
+        if (!nativeMacVkActive) return false
+        val configured = engine.getProperty("vo-configured").yesNoOrNull() ?: false
+        if (!configured) return false
+        return !engine.getProperty("current-vo").equals("gpu-next", ignoreCase = true)
+    }
+
+    private fun retryCurrentSourceWithOpenGl(): Boolean {
+        if (!nativeMacVkActive || macVkPlaybackFallbackAttempted || disposed.get()) return false
+        val source = currentSourceUri ?: return false
+        macVkPlaybackFallbackAttempted = true
+        return renderLock.withLock {
+            if (!nativeMacVkActive || disposed.get()) return@withLock false
+            nativeMacDecodeReady = false
+            awaitingNativeMacDecodeRestart = false
+            resumePlaybackAfterNativeSurfaceAttach = currentSourceWantsPlayback
+            runCatching { engine.setProperty("pause", "yes") }
+            if (!switchMacVkToOpenGlLocked("macvk video output failed to configure")) {
+                return@withLock false
+            }
+            runCatching {
+                engine.command("loadfile", source, "replace")
+                engine.setProperty("pause", "yes")
+            }.isSuccess
+        }
+    }
+
     private fun refreshSnapshot() {
         if (!_hasMedia || disposed.get()) return
         val position = engine.getProperty("time-pos").secondsOrNull() ?: _currentTime
@@ -704,7 +878,7 @@ internal class MpvVideoPlayerState(
         val buffering =
             (engine.getProperty("paused-for-cache").yesNoOrNull() ?: false) ||
                 awaitingNativeMacDecodeRestart ||
-                (nativeMacRenderer != 0L && !nativeMacDecodeReady)
+                (hasNativeMacGpuSurface && !nativeMacDecodeReady)
         val seeking = engine.getProperty("seeking").yesNoOrNull() ?: _isSeeking
         val width = engine.getProperty("video-params/w").positiveIntOrNull()
         val height = engine.getProperty("video-params/h").positiveIntOrNull()
@@ -923,6 +1097,17 @@ internal class MpvVideoPlayerState(
     private val usesVerifiedBundledRuntime: Boolean
         get() = runtimeConfig.librarySource == MpvLibrarySource.Bundled
 
+    private val hasNativeMacGpuSurface: Boolean
+        get() = nativeMacRenderer != 0L || (nativeMacVkActive && nativeMacVkHostView != 0L)
+
+    private val activeNativeMacBackend: MpvMacNativeBackend?
+        get() =
+            when {
+                nativeMacVkActive && nativeMacVkHostView != 0L -> MpvMacNativeBackend.MACVK
+                nativeMacRenderer != 0L -> MpvMacNativeBackend.OPENGL
+                else -> null
+            }
+
     override fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
         runCatching { engine.command("stop") }
@@ -933,7 +1118,7 @@ internal class MpvVideoPlayerState(
             }
         }
         renderLock.withLock {
-            detachNativeMacRendererLocked(restoreSoftwareRenderer = false)
+            detachNativeMacSurfaceLocked(restoreSoftwareRenderer = false)
             frameState.value = null
             framePool.close()
             engine.close()
@@ -945,7 +1130,7 @@ internal class MpvVideoPlayerState(
         if (nativeMacColorMode == mode) return
         nativeMacColorMode = mode
         renderLock.withLock {
-            if (nativeMacRenderer != 0L) applyNativeMacOutputColorMode(mode)
+            if (hasNativeMacGpuSurface) applyNativeMacOutputColorMode(mode)
         }
     }
 
@@ -961,7 +1146,12 @@ internal class MpvVideoPlayerState(
                 runCatching { engine.setProperty("target-trc", "hlg") }
             }
         }
-        MpvMacNativeBridge.nSetColorMode(nativeMacRenderer, mode.nativeValue)
+        if (nativeMacRenderer != 0L) {
+            MpvMacNativeBridge.nSetColorMode(nativeMacRenderer, mode.nativeValue)
+        }
+        if (nativeMacVkActive && nativeMacVkHostView != 0L) {
+            MpvMacNativeBridge.nSetMacVkColorMode(nativeMacVkHostView, mode.nativeValue)
+        }
     }
 
     private fun resetNativeMacTargetColorProperties() {
@@ -1018,20 +1208,31 @@ internal class MpvVideoPlayerState(
             } else {
                 append("User-provided libmpv; runtime license is unverified; ")
             }
-            append("native macOS OpenGL/EDR output with Compose controls; ")
+            when (activeNativeMacBackend) {
+                MpvMacNativeBackend.MACVK ->
+                    append("experimental embedded gpu-next/macvk output through MoltenVK/Metal; ")
+                MpvMacNativeBackend.OPENGL ->
+                    append("native macOS OpenGL/EDR output with Compose controls; ")
+                null -> append("software video output; ")
+            }
+            nativeMacBackendFallbackReason?.let { reason ->
+                append("OpenGL fallback: ")
+                append(reason)
+                append("; ")
+            }
             append(nativeMacDecodeRoute.description)
             append('.')
         }
 
     private fun resetNativeMacDecodeRouteBeforeSourceLoad() {
-        if (nativeMacRenderer == 0L || nativeMacDecodeRoute == MpvMacDecodeRoute.HARDWARE_AUTO) return
+        if (!hasNativeMacGpuSurface || nativeMacDecodeRoute == MpvMacDecodeRoute.HARDWARE_AUTO) return
         nativeMacDecodeRoute = MpvMacDecodeRoute.HARDWARE_AUTO
         runCatching { engine.setProperty("hwdec", nativeMacDecodeRoute.mpvHwdec) }
         mutateSnapshotState { renderingInfo.notes = nativeMacRenderingNotes() }
     }
 
     private fun configureNativeMacDecodeRouteForLoadedSource(): Boolean {
-        if (nativeMacRenderer == 0L || disposed.get()) return false
+        if (!hasNativeMacGpuSurface || disposed.get()) return false
         val selectedRoute =
             selectMpvMacDecodeRoute(
                 videoFormat = engine.getProperty("video-format"),
@@ -1046,7 +1247,7 @@ internal class MpvVideoPlayerState(
 
         var switched = false
         renderLock.withLock {
-            if (nativeMacRenderer == 0L || disposed.get() || selectedRoute == nativeMacDecodeRoute) {
+            if (!hasNativeMacGpuSurface || disposed.get() || selectedRoute == nativeMacDecodeRoute) {
                 return@withLock
             }
             val restartPosition = engine.getProperty("time-pos").secondsOrNull() ?: Duration.ZERO
@@ -1082,7 +1283,7 @@ internal class MpvVideoPlayerState(
         if (!resumePlaybackAfterNativeSurfaceAttach ||
             !nativeMacDecodeReady ||
             !nativeMacSurfaceAttached ||
-            nativeMacRenderer == 0L
+            !hasNativeMacGpuSurface
         ) {
             return
         }
@@ -1103,10 +1304,17 @@ internal class MpvVideoPlayerState(
     }
 
     private fun softwareRenderingNotes(): String =
-        if (usesVerifiedBundledRuntime) {
-            "Verified KMediaMpv runtime with credential-safe loopback HLS input."
-        } else {
-            "User-provided libmpv; native runtime license is unverified."
+        buildString {
+            if (usesVerifiedBundledRuntime) {
+                append("Verified KMediaMpv runtime with credential-safe loopback HLS input.")
+            } else {
+                append("User-provided libmpv; native runtime license is unverified.")
+            }
+            nativeMacBackendFallbackReason?.let { reason ->
+                append(" Native macOS fallback: ")
+                append(reason)
+                append('.')
+            }
         }
 
     companion object {
@@ -1142,6 +1350,26 @@ internal enum class MpvMacDecodeRoute(
         description = "adaptive software decoding for high-throughput SDR HEVC",
     ),
 }
+
+internal enum class MpvMacNativeBackend {
+    OPENGL,
+    MACVK,
+}
+
+internal fun selectMpvMacNativeBackend(
+    requested: MpvMacRenderer,
+    nativeBridgeAvailable: Boolean,
+    embeddedMacVkApiVersion: Int,
+): MpvMacNativeBackend =
+    if (
+        requested == MpvMacRenderer.MOLTENVK &&
+        nativeBridgeAvailable &&
+        embeddedMacVkApiVersion >= EMBEDDED_MACVK_API_VERSION
+    ) {
+        MpvMacNativeBackend.MACVK
+    } else {
+        MpvMacNativeBackend.OPENGL
+    }
 
 /**
  * FFmpeg's VideoToolbox interop can fall below real time for SDR HEVC streams around two
@@ -1185,7 +1413,11 @@ private fun String?.toMacOutputColorMode(): MpvMacOutputColorMode =
         else -> MpvMacOutputColorMode.SDR
     }
 
-internal fun mpvInitializationOptions(config: MpvRuntimeConfig): Map<String, String> {
+internal fun mpvInitializationOptions(
+    config: MpvRuntimeConfig,
+    macBackend: MpvMacNativeBackend = MpvMacNativeBackend.OPENGL,
+    macVkHostView: Long = 0L,
+): Map<String, String> {
     val subtitleFontsDirectory =
         config.subtitleFontsDirectory?.let { directory ->
             require(
@@ -1198,12 +1430,28 @@ internal fun mpvInitializationOptions(config: MpvRuntimeConfig): Map<String, Str
         }
 
     return buildMap {
-        put("vo", "libmpv")
+        if (macBackend == MpvMacNativeBackend.MACVK) {
+            require(macVkHostView > 0L) { "macvk requires a valid embedded NSView handle." }
+            put("vo", "gpu-next")
+            put("gpu-api", "vulkan")
+            put("gpu-context", "macvk")
+            put("wid", macVkHostView.toString())
+            put("target-colorspace-hint", "yes")
+        } else {
+            put("vo", "libmpv")
+        }
         put("config", "no")
         put("load-scripts", "no")
         put("input-default-bindings", "no")
         put("input-vo-keyboard", "no")
-        put("hwdec", "no")
+        put(
+            "hwdec",
+            if (macBackend == MpvMacNativeBackend.MACVK) {
+                MpvMacDecodeRoute.HARDWARE_AUTO.mpvHwdec
+            } else {
+                "no"
+            },
+        )
         put("framedrop", "vo")
         put("keep-open", "yes")
         put("sub-ass-override", if (config.preserveAssStyles) "no" else "strip")
@@ -1211,6 +1459,8 @@ internal fun mpvInitializationOptions(config: MpvRuntimeConfig): Map<String, Str
         subtitleFontsDirectory?.let { put("sub-fonts-dir", it) }
     }
 }
+
+private const val EMBEDDED_MACVK_API_VERSION = 1
 
 internal fun createDesktopMpvVideoPlayerState(config: MpvRuntimeConfig): MpvVideoPlayerState {
     val resolved =
@@ -1226,7 +1476,6 @@ internal fun createDesktopMpvVideoPlayerState(config: MpvRuntimeConfig): MpvVide
                 cause = failure,
             )
         }
-    val options = mpvInitializationOptions(config) + resolved.requiredOptions
     val library =
         try {
             LibMpvLibrary.open(resolved.librarySource)
@@ -1240,38 +1489,99 @@ internal fun createDesktopMpvVideoPlayerState(config: MpvRuntimeConfig): MpvVide
                 cause = failure,
             )
         }
+    val macVkRequested = config.macRenderer == MpvMacRenderer.MOLTENVK
+    val nativeBridgeAvailable = MpvMacNativeBridge.isAvailable
+    val embeddedMacVkApiVersion = library.embeddedMacVkApiVersion
+    var initialMacBackendFallbackReason =
+        when {
+            !macVkRequested -> null
+            !nativeBridgeAvailable -> "the native macOS bridge is unavailable"
+            embeddedMacVkApiVersion < EMBEDDED_MACVK_API_VERSION ->
+                "the runtime does not expose embedded macvk capability version $EMBEDDED_MACVK_API_VERSION"
+            else -> null
+        }
+    var macBackend =
+        selectMpvMacNativeBackend(
+            requested = config.macRenderer,
+            nativeBridgeAvailable = nativeBridgeAvailable,
+            embeddedMacVkApiVersion = embeddedMacVkApiVersion,
+        )
+    var macVkHostView =
+        if (macBackend == MpvMacNativeBackend.MACVK) {
+            runCatching { MpvMacNativeBridge.nCreateMacVkHost() }.getOrDefault(0L)
+        } else {
+            0L
+        }
+    if (macBackend == MpvMacNativeBackend.MACVK && macVkHostView == 0L) {
+        initialMacBackendFallbackReason = "the native macOS bridge could not create an embedded host view"
+        macBackend = MpvMacNativeBackend.OPENGL
+    }
+
     val engine =
         try {
-            library.createEngine(options)
-        } catch (failure: MpvLoadFailure) {
-            library.close()
-            throw MpvBackendUnavailableException(
-                availability =
-                    MpvBackendAvailability.Unavailable(
-                        reason = failure.reason.toPublicReason(),
-                        guidance = failure.guidance,
-                    ),
-                cause = failure,
+            library.createEngine(
+                options =
+                    mpvInitializationOptions(config, macBackend, macVkHostView) +
+                        resolved.requiredOptions,
+                createSoftwareRenderer = macBackend != MpvMacNativeBackend.MACVK,
             )
         } catch (failure: RuntimeException) {
-            library.close()
-            throw MpvBackendUnavailableException(
-                availability =
-                    MpvBackendAvailability.Unavailable(
-                        reason = MpvBackendUnavailableReason.INITIALIZATION_FAILED,
-                        guidance =
-                            "The verified libmpv runtime could not initialize the software backend.",
-                    ),
-                cause = failure,
-            )
+            if (macBackend != MpvMacNativeBackend.MACVK) {
+                library.close()
+                throw failure.asMpvBackendInitializationFailure()
+            }
+
+            runCatching { MpvMacNativeBridge.nDestroyMacVkHost(macVkHostView) }
+            macVkHostView = 0L
+            macBackend = MpvMacNativeBackend.OPENGL
+            initialMacBackendFallbackReason = "libmpv rejected embedded macvk initialization"
+            try {
+                library.createEngine(
+                    options = mpvInitializationOptions(config) + resolved.requiredOptions,
+                )
+            } catch (fallbackFailure: RuntimeException) {
+                fallbackFailure.addSuppressed(failure)
+                library.close()
+                throw fallbackFailure.asMpvBackendInitializationFailure()
+            }
         }
     return try {
-        MpvVideoPlayerState(config, engine)
+        MpvVideoPlayerState(
+            config,
+            engine,
+            initialMacVkHostView = macVkHostView,
+            initialMacBackendFallbackReason = initialMacBackendFallbackReason,
+        )
     } catch (failure: RuntimeException) {
-        engine.close()
+        runCatching { engine.close() }
+        if (macVkHostView != 0L) {
+            runCatching { MpvMacNativeBridge.nDestroyMacVkHost(macVkHostView) }
+        }
         throw failure
     }
 }
+
+private fun RuntimeException.asMpvBackendInitializationFailure(): MpvBackendUnavailableException =
+    when (this) {
+        is MpvLoadFailure ->
+            MpvBackendUnavailableException(
+                availability =
+                    MpvBackendAvailability.Unavailable(
+                        reason = reason.toPublicReason(),
+                        guidance = guidance,
+                    ),
+                cause = this,
+            )
+        else ->
+            MpvBackendUnavailableException(
+                availability =
+                    MpvBackendAvailability.Unavailable(
+                        reason = MpvBackendUnavailableReason.INITIALIZATION_FAILED,
+                        guidance = "The verified libmpv runtime could not initialize the desktop backend.",
+                    ),
+                cause = this,
+            )
+    }
 
 private fun MpvUnavailableReason.toPublicReason(): MpvBackendUnavailableReason =
     when (this) {

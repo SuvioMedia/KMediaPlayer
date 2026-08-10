@@ -110,7 +110,7 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
 
 > HDR recognition is not treated as proof of HDR output. In particular, a libVLC native child view on Windows or Linux is not a confirmed HDR route. `AUTO` uses a verified SDR tone-map when the native HDR requirements are unavailable, while `REQUIRE_HDR` returns a typed color-pipeline error. See [HDR pipeline and platform status](docs/hdr-pipeline.md).
 
-> iPhone and iPad are supported on a non-blocking [software-only best-effort basis](docs/ios-best-effort-readiness.md): device arm64 builds, Simulator tests and shared Metal references are required, but this project has no physical iOS hardware and makes no physical HDR, Dolby Vision, 4K60 or thermal-performance claim. Runtime color status therefore fails closed whenever Apple does not explicitly confirm the format, display and surface.
+> iPhone and iPad are supported on a non-blocking [software-verified best-effort basis](docs/ios-best-effort-readiness.md): device arm64 builds, Simulator tests and shared Metal references are required, but this project has no physical iOS hardware and makes no physical HDR, Dolby Vision, 4K60 or thermal-performance claim. Runtime color status therefore fails closed whenever Apple does not explicitly confirm the format, display and surface.
 
 > Flat Android video follows the platform-recommended MediaCodec + `SurfaceView` path; KMediaPlayer does not overwrite decoder buffers with a guessed dataspace. On Android 9+, a small read-only JNI bridge compares `ANativeWindow_getBuffersDataSpace()` with the decoded HDR10/HDR10+/HLG signal after the first frame. An exact match is `RENDERER_CONFIGURED`; Android 14+'s active HDR/SDR composition report is independent `SYSTEM_REPORTED` evidence and is retained only for the current decoded output signal, source, surface and display. Dolby Vision remains vendor-managed. If neither public signal confirms the route, `AUTO` uses a verified controlled or source-bridge SDR fallback when available, while `REQUIRE_HDR` fails instead of labeling inferred playback as HDR.
 
@@ -421,11 +421,37 @@ val options = MpvPlaybackOptions(
 )
 ```
 
+The macOS MPV renderer defaults to `MpvMacRenderer.MOLTENVK`. A libmpv carrying
+KMediaMpv's versioned embedded-macvk capability uses the windowless
+`gpu-next`/Vulkan route in the Compose-owned Metal surface:
+
+```kotlin
+val options = MpvPlaybackOptions(
+    runtimeSource = MpvRuntimeSource.ExplicitPath("/Applications/MyApp.app/Contents/Frameworks/libmpv.dylib"),
+    macRenderer = MpvMacRenderer.MOLTENVK,
+)
+```
+
+This is already the default, so the explicit option is needed only when making
+the renderer policy visible in application configuration. An unmarked or
+failing runtime falls back to OpenGL; stock mpv is never allowed to create a
+separate macOS window. Enabling the public projection transform also switches
+that player to OpenGL because the projection pass currently uses the libmpv
+OpenGL render API. The bundled runtime must carry MoltenVK and KMediaMpv's
+versioned macvk capability to keep the default route on Vulkan.
+
 On iOS, use the generated `ComposeMediaPlayerMpv` pod so CocoaPods embeds and
 code-signs the exact `KMediaMpv`, `KMediaFfmpegRuntime`, and `KMediaAssRuntime`
 framework graph. The default `Bundled` source resolves that graph. An
 application-supplied framework can still be selected with `System` or an
 `ExplicitPath` inside the signed application bundle.
+
+The iOS MPV renderer defaults to `MpvIosRenderer.MOLTENVK`: KMediaPlayer owns
+the `UIView`/`CAMetalLayer`, while KMediaMpv's versioned `iosvk` context runs
+mpv `gpu-next` through Vulkan and the packaged MoltenVK framework. This route
+does not use OpenGL ES. A missing capability or failed Vulkan video output
+falls back to the bounded software render API; `MpvIosRenderer.SOFTWARE`
+selects that fallback explicitly.
 
 `inspectMpvBackend()` reports a missing runtime, unsupported target, or rejected
 native payload without falling back silently. `rememberVideoPlayerState()`

@@ -132,6 +132,7 @@ private fun MpvPlaybackOptions.toDesktopRuntimeConfig(): MpvRuntimeConfig {
             },
         preserveAssStyles = preserveAssStyles,
         useEmbeddedFonts = useEmbeddedFonts,
+        macRenderer = macRenderer,
         subtitleFontsDirectory = fontsDirectory,
         desktopRuntimeDirectory = runtimeDirectory,
         maxRenderPixels = maxDesktopRenderPixels,

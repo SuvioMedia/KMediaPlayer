@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer.mpv
 
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableReason
+import io.github.kdroidfilter.composemediaplayer.MpvMacRenderer
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
 import io.github.kdroidfilter.composemediaplayer.inspectMpvBackend
@@ -169,6 +170,78 @@ class MpvRuntimeTest {
         assertFailsWith<IllegalArgumentException> {
             MpvRuntimeConfig(maxRenderPixels = 67_108_865)
         }
+    }
+
+    @Test
+    fun usesMoltenVkAsTheDefaultMacRenderer() {
+        val config = MpvRuntimeConfig()
+        val backend =
+            selectMpvMacNativeBackend(
+                requested = config.macRenderer,
+                nativeBridgeAvailable = true,
+                embeddedMacVkApiVersion = 1,
+            )
+        val options =
+            mpvInitializationOptions(
+                config = config,
+                macBackend = backend,
+                macVkHostView = 4_242L,
+            )
+
+        assertEquals(MpvMacRenderer.MOLTENVK, config.macRenderer)
+        assertEquals(MpvMacNativeBackend.MACVK, backend)
+        assertEquals("gpu-next", options["vo"])
+        assertEquals("vulkan", options["gpu-api"])
+        assertEquals("macvk", options["gpu-context"])
+        assertEquals("4242", options["wid"])
+    }
+
+    @Test
+    fun macVkPlanRequiresTheVersionedCapabilityAndEmbeddedView() {
+        assertEquals(
+            MpvMacNativeBackend.OPENGL,
+            selectMpvMacNativeBackend(
+                requested = MpvMacRenderer.MOLTENVK,
+                nativeBridgeAvailable = true,
+                embeddedMacVkApiVersion = 0,
+            ),
+        )
+        assertEquals(
+            MpvMacNativeBackend.OPENGL,
+            selectMpvMacNativeBackend(
+                requested = MpvMacRenderer.OPENGL,
+                nativeBridgeAvailable = true,
+                embeddedMacVkApiVersion = 1,
+            ),
+        )
+        assertEquals(
+            MpvMacNativeBackend.MACVK,
+            selectMpvMacNativeBackend(
+                requested = MpvMacRenderer.MOLTENVK,
+                nativeBridgeAvailable = true,
+                embeddedMacVkApiVersion = 1,
+            ),
+        )
+
+        assertFailsWith<IllegalArgumentException> {
+            mpvInitializationOptions(
+                config = MpvRuntimeConfig(macRenderer = MpvMacRenderer.MOLTENVK),
+                macBackend = MpvMacNativeBackend.MACVK,
+            )
+        }
+
+        val options =
+            mpvInitializationOptions(
+                config = MpvRuntimeConfig(macRenderer = MpvMacRenderer.MOLTENVK),
+                macBackend = MpvMacNativeBackend.MACVK,
+                macVkHostView = 4_242L,
+            )
+        assertEquals("gpu-next", options["vo"])
+        assertEquals("vulkan", options["gpu-api"])
+        assertEquals("macvk", options["gpu-context"])
+        assertEquals("4242", options["wid"])
+        assertEquals("yes", options["target-colorspace-hint"])
+        assertEquals("auto-safe", options["hwdec"])
     }
 
     @Test
