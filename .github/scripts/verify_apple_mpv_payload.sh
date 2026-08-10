@@ -18,7 +18,7 @@ grep -F "spec.dependency           'KMediaAssRuntime', '= $runtime_version'" \
   "$ffmpeg/KMediaFfmpegRuntime.podspec"
 grep -F "spec.version              = '$runtime_version'" "$ass/KMediaAssRuntime.podspec"
 
-expected_mpv=$'KMediaMpv\nKMediaMpvPlacebo'
+expected_mpv=$'KMediaMpv\nKMediaMpvMoltenVK\nKMediaMpvPlacebo'
 expected_ffmpeg=$'KMediaFfmpegAvcodec\nKMediaFfmpegAvfilter\nKMediaFfmpegAvformat\nKMediaFfmpegAvutil\nKMediaFfmpegRuntime\nKMediaFfmpegSwresample\nKMediaFfmpegSwscale'
 expected_ass=$'KMediaAssRuntime\nKMediaFfmpegAss\nKMediaFfmpegFreetype\nKMediaFfmpegFribidi\nKMediaFfmpegHarfbuzz'
 
