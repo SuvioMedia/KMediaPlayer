@@ -65,7 +65,17 @@ actual fun createVideoPlayerState(
     audioMode: AudioMode,
     cacheConfig: CacheConfig,
     playbackOptions: VideoPlaybackOptions,
-): VideoPlayerState = DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions)
+): VideoPlayerState =
+    EventingVideoPlayerState(
+        SynchronizedExternalAudioVideoPlayerState(
+            primaryState = DefaultVideoPlayerState(audioMode, cacheConfig, playbackOptions),
+            engineFactory = {
+                VideoPlayerStateExternalAudioPlaybackEngine(
+                    DefaultVideoPlayerState(audioMode, CacheConfig(), playbackOptions),
+                )
+            },
+        ),
+    )
 
 private val iosLogger = TaggedLogger("iOSVideoPlayerState")
 private const val DOLBY_VISION_PROFILE_7 = 7
@@ -1536,7 +1546,7 @@ open class DefaultVideoPlayerState(
         requestHeaders: Map<String, String>,
     ) {
         ensureNotDisposed()
-        iosLogger.d { "openUri called with uri: $uri, initializePlayerState: $initializePlayerState" }
+        iosLogger.d { "openUri called with a redacted URI, initializePlayerState: $initializePlayerState" }
         sourcePreparationJob?.cancel()
         sourcePreparationJob = null
         sourceConversionAttemptGeneration = null
@@ -1587,7 +1597,7 @@ open class DefaultVideoPlayerState(
 
         val nsUrl =
             NSURL.URLWithString(uri) ?: run {
-                iosLogger.d { "Failed to create NSURL from uri: $uri" }
+                iosLogger.d { "Failed to create NSURL from a redacted URI" }
                 desiredPlayback = false
                 _isLoading = false
                 setError(VideoPlayerError.SourceError("Invalid media source: $uri"))

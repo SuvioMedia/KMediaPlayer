@@ -107,13 +107,12 @@ private fun SurfaceAttachedEffect(
 
 /** Resolves API and event wrappers to the platform state that owns the native video surface. */
 internal fun VideoPlayerState.resolveJvmSurfaceState(): VideoPlayerState {
-    var current = this
-    while (true) {
-        current =
-            when (current) {
-                is DefaultVideoPlayerState -> current.delegate
-                is EventingVideoPlayerState -> current.wrappedState
-                else -> return current
-            }
+    var current = unwrapDelegatingState()
+    repeat(MAXIMUM_JVM_SURFACE_STATE_DEPTH) {
+        val defaultState = current as? DefaultVideoPlayerState ?: return current
+        current = defaultState.delegate.unwrapDelegatingState()
     }
+    error("The JVM player-state decorator chain is too deep.")
 }
+
+private const val MAXIMUM_JVM_SURFACE_STATE_DEPTH = 32

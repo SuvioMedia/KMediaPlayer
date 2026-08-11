@@ -289,6 +289,12 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/tao/Composa
 	public final fun getLambda$1927371799$io_github_shusek_mediaplayer_desktop_tao ()Lkotlin/jvm/functions/Function2;
 }
 
+public final class io/github/kdroidfilter/composemediaplayer/desktop/tao/ComposableSingletons$TaoNativeVideoSurfaceKt {
+	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/desktop/tao/ComposableSingletons$TaoNativeVideoSurfaceKt;
+	public fun <init> ()V
+	public final fun getLambda$1068559100$io_github_shusek_mediaplayer_desktop_tao ()Lkotlin/jvm/functions/Function2;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/desktop/tao/DesktopColorManagedTextureVideoViewKt {
 	public static final fun DesktopColorManagedTextureVideoView (Ldev/nucleusframework/window/tao/TextureViewSource;Ldev/nucleusframework/window/tao/TextureViewController;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;II)V
 	public static final fun DesktopColorManagedTextureVideoView (Ldev/nucleusframework/window/tao/TextureViewStreamController;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;II)V
@@ -299,5 +305,25 @@ public final class io/github/kdroidfilter/composemediaplayer/desktop/tao/Desktop
 	public static final fun desktopCanvasRendererLabel (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;)Ljava/lang/String;
 	public static final fun desktopCanvasRendererLabel (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;)Ljava/lang/String;
 	public static final fun usesDesktopCanvasProjectionRenderer (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;)Z
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurface {
+	public static final field $stable I
+	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function5;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)V
+	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function3;Lkotlin/jvm/functions/Function5;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getKind ()Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind : java/lang/Enum {
+	public static final field LINUX_GTK_WIDGET Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind;
+	public static final field MACOS_NS_VIEW Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind;
+	public static final field WINDOWS_HWND Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKind;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurfaceKt {
+	public static final fun TaoNativeVideoView (Lio/github/kdroidfilter/composemediaplayer/desktop/tao/TaoNativeVideoSurface;Landroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;II)V
 }
 

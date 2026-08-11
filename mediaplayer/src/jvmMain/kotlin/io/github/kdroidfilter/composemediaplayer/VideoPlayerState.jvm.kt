@@ -22,6 +22,20 @@ actual fun createVideoPlayerState(
     playbackOptions: VideoPlaybackOptions,
 ): VideoPlayerState = DefaultVideoPlayerState(playbackOptions)
 
+private fun createJvmPlatformPlayerState(playbackOptions: VideoPlaybackOptions): VideoPlayerState =
+    when (CurrentPlatform.os) {
+        CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState(playbackOptions)
+        CurrentPlatform.OS.MAC -> {
+            if (!CurrentPlatform.isSupportedMacOsArchitecture) {
+                throw UnsupportedOperationException(
+                    "Compose Media Player for macOS requires Apple Silicon (arm64).",
+                )
+            }
+            MacVideoPlayerState(playbackOptions)
+        }
+        CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState(playbackOptions)
+    }
+
 /**
  * Represents the state and behavior of a video player. This class provides properties
  * and methods to control video playback, manage the playback state, and interact with
@@ -52,18 +66,14 @@ open class DefaultVideoPlayerState(
     TaoPlaybackSurfaceProvider {
     val delegate: VideoPlayerState =
         EventingVideoPlayerState(
-            when (CurrentPlatform.os) {
-                CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState(playbackOptions)
-                CurrentPlatform.OS.MAC -> {
-                    if (!CurrentPlatform.isSupportedMacOsArchitecture) {
-                        throw UnsupportedOperationException(
-                            "Compose Media Player for macOS requires Apple Silicon (arm64).",
-                        )
-                    }
-                    MacVideoPlayerState(playbackOptions)
-                }
-                CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState(playbackOptions)
-            },
+            SynchronizedExternalAudioVideoPlayerState(
+                primaryState = createJvmPlatformPlayerState(playbackOptions),
+                engineFactory = {
+                    VideoPlayerStateExternalAudioPlaybackEngine(
+                        createJvmPlatformPlayerState(playbackOptions),
+                    )
+                },
+            ),
         )
 
     override var projection: VideoProjectionSettings
@@ -141,9 +151,24 @@ open class DefaultVideoPlayerState(
         set(value) {
             delegate.currentAudioTrack = value
         }
-    override val availableAudioTracks = delegate.availableAudioTracks
+    override val availableAudioTracks: List<AudioTrack>
+        get() = delegate.availableAudioTracks
+
+    override val externalAudioTracks: List<ExternalAudioTrack>
+        get() = delegate.externalAudioTracks
+    override val externalAudioPlaybackStatus: ExternalAudioPlaybackStatus
+        get() = delegate.externalAudioPlaybackStatus
 
     override fun selectAudioTrack(track: AudioTrack?): TrackSelectionResult = delegate.selectAudioTrack(track)
+
+    override fun addExternalAudioTrack(track: ExternalAudioTrack) = delegate.addExternalAudioTrack(track)
+
+    override fun removeExternalAudioTrack(trackId: String) = delegate.removeExternalAudioTrack(trackId)
+
+    override fun clearExternalAudioTracks() = delegate.clearExternalAudioTracks()
+
+    override fun replaceExternalAudioTracks(tracks: List<ExternalAudioTrack>) =
+        delegate.replaceExternalAudioTracks(tracks)
 
     override var subtitlesEnabled: Boolean
         get() = delegate.subtitlesEnabled
@@ -200,6 +225,12 @@ open class DefaultVideoPlayerState(
         requestHeaders: Map<String, String>,
     ) = delegate.openUri(uri, initializePlayerState, requestHeaders)
 
+    override fun openSource(
+        source: MediaSourceSpec,
+        initializePlayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
+    ) = delegate.openSource(source, initializePlayerState, requestHeaders)
+
     override fun prepare(
         uri: String,
         initializePlayerState: InitialPlayerState,
@@ -210,6 +241,11 @@ open class DefaultVideoPlayerState(
         file: PlatformFile,
         initializePlayerState: InitialPlayerState,
     ) = delegate.openFile(file, initializePlayerState)
+
+    override fun openAsset(
+        fileName: String,
+        initializePlayerState: InitialPlayerState,
+    ) = delegate.openAsset(fileName, initializePlayerState)
 
     override fun play() = delegate.play()
 

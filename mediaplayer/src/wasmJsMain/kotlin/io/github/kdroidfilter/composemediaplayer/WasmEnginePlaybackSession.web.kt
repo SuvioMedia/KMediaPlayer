@@ -750,6 +750,7 @@ private fun MediaInfo.toKMediaSnapshot(
                             ?.coerceAtMost(Int.MAX_VALUE.toLong())
                             ?.toInt(),
                     isDefault = track.isDefault,
+                    codec = track.codec,
                 )
             },
         activeAudioTrackId = activeAudioTrackId?.let { "$WASM_ENGINE_AUDIO_TRACK_ID_PREFIX$it" },

@@ -73,8 +73,8 @@ jobs:
             echo "Release tags must use immutable SemVer, for example v1.2.3." >&2
             exit 1
           fi
-          if [[ ! "$version" =~ ^4\.0\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
-            echo "This workflow publishes the KMediaPlayer 4.0 line, including immutable RC tags." >&2
+          if [[ ! "$version" =~ ^4\.1\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "This workflow publishes the KMediaPlayer 4.1 line, including immutable RC tags." >&2
             exit 1
           fi
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
@@ -203,6 +203,7 @@ jobs:
         shell: bash
         run: >-
           ./gradlew :mediaplayer-core:publishAllPublicationsToReleaseStagingRepository
+          :mediaplayer-ads-core:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-extension-api:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-desktop-tao:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer:publishAllPublicationsToReleaseStagingRepository
@@ -248,6 +249,12 @@ jobs:
 
           expected_coordinates=(
             composemediaplayer-core
+            composemediaplayer-ads-core
+            composemediaplayer-ads-core-android
+            composemediaplayer-ads-core-iosarm64
+            composemediaplayer-ads-core-iossimulatorarm64
+            composemediaplayer-ads-core-jvm
+            composemediaplayer-ads-core-wasm-js
             composemediaplayer-desktop-tao
             composemediaplayer-desktop-tao-jvm
             composemediaplayer
@@ -326,6 +333,7 @@ jobs:
         shell: bash
         run: >-
           ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
+          :mediaplayer-ads-core:publishAndReleaseToMavenCentral
           :mediaplayer-extension-api:publishAndReleaseToMavenCentral
           :mediaplayer-desktop-tao:publishAndReleaseToMavenCentral
           :mediaplayer:publishAndReleaseToMavenCentral

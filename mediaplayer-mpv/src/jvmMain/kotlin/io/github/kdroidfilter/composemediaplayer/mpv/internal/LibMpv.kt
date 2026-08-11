@@ -135,6 +135,15 @@ internal class LibMpvLibrary private constructor(
             "mpv_render_context_free",
             FunctionDescriptor.ofVoid(ValueLayout.ADDRESS),
         )
+    private val embeddedMacVkApiVersionHandle: MethodHandle? =
+        lookup
+            .find(EMBEDDED_MACVK_API_VERSION_SYMBOL)
+            .map { symbol ->
+                linker.downcallHandle(
+                    symbol,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT),
+                )
+            }.orElse(null)
 
     val clientApiVersion: MpvClientApiVersion
         get() {
@@ -145,7 +154,25 @@ internal class LibMpvLibrary private constructor(
             )
         }
 
-    fun createEngine(options: Map<String, String>): LibMpvEngine {
+    /**
+     * Version of KMediaMpv's private `wid`-backed macvk contract.
+     *
+     * Stock libmpv does not implement macOS `wid` for macvk even though older client API
+     * documentation suggested it did. Requiring an explicit symbol prevents an unpatched
+     * runtime from opening and managing a separate mpv window.
+     */
+    val embeddedMacVkApiVersion: Int
+        get() =
+            embeddedMacVkApiVersionHandle
+                ?.let { handle ->
+                    runCatching { (handle.invokeWithArguments() as Number).toInt() }
+                        .getOrDefault(0)
+                } ?: 0
+
+    fun createEngine(
+        options: Map<String, String>,
+        createSoftwareRenderer: Boolean = true,
+    ): LibMpvEngine {
         val version = clientApiVersion
         if (version.major != MpvRuntime.COMPILED_CLIENT_API_MAJOR) {
             throw MpvLoadFailure(
@@ -172,7 +199,12 @@ internal class LibMpvLibrary private constructor(
                 )
             }
             checkResult(initializeHandle.invokeWithArguments(handle) as Int)
-            val renderContext = createSoftwareRenderContext(handle)
+            val renderContext =
+                if (createSoftwareRenderer) {
+                    createSoftwareRenderContext(handle)
+                } else {
+                    null
+                }
             return LibMpvEngine(this, handle, renderContext)
         } catch (failure: Throwable) {
             terminateDestroyHandle.invokeWithArguments(handle)
@@ -362,6 +394,8 @@ internal class LibMpvLibrary private constructor(
     }
 
     companion object {
+        private const val EMBEDDED_MACVK_API_VERSION_SYMBOL =
+            "kmediampv_embedded_macvk_api_version"
         private const val MAX_PROPERTY_BYTES = 64L * 1024L
         private const val MAX_ERROR_BYTES = 4L * 1024L
         private const val BYTES_PER_PIXEL = 4L
@@ -591,7 +625,7 @@ internal fun nativeNumericLocaleCategory(osName: String): Int {
 internal class LibMpvEngine(
     private val library: LibMpvLibrary,
     private val handle: MemorySegment,
-    renderContext: MemorySegment,
+    renderContext: MemorySegment?,
 ) : AutoCloseable {
     @Volatile
     private var closed = false
@@ -655,6 +689,15 @@ internal class LibMpvEngine(
             mpvHandle = handle.address(),
             libraryLoadName = library.loadedFrom.nativeLoadName(),
         )
+    }
+
+    /** Creates the software render context after a window-owned VO has been stopped. */
+    fun restoreSoftwareRendering() {
+        checkOpen()
+        check(!externalRenderContextActive) { "A native libmpv render context is active." }
+        if (softwareRenderContext == null) {
+            softwareRenderContext = library.createSoftwareRenderContext(handle)
+        }
     }
 
     /** Must be called only after the native render context has been destroyed. */

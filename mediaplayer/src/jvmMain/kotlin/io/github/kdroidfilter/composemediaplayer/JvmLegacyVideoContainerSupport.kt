@@ -406,6 +406,7 @@ internal object JvmLegacyVideoContainerSupport {
                             sampleRate = stream.sampleRate,
                             bitrate = stream.bitrate,
                             isDefault = audioOrdinal == 0,
+                            codec = stream.codecName,
                         ),
                 )
             }

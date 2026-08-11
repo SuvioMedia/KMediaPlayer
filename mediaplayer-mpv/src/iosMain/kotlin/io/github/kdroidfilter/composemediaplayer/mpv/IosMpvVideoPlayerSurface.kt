@@ -33,11 +33,13 @@ internal fun IosMpvVideoPlayerSurface(
 ) {
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
     val frame by playerState.currentFrame
+    val nativeVideoView = playerState.nativeVideoView
 
     LaunchedEffect(playerState, contentScale) {
         playerState.setCropMode(contentScale == ContentScale.Crop)
     }
-    LaunchedEffect(playerState, surfaceSize) {
+    LaunchedEffect(playerState, surfaceSize, nativeVideoView) {
+        if (nativeVideoView != null) return@LaunchedEffect
         if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return@LaunchedEffect
         while (isActive) {
             withFrameNanos { }
@@ -60,23 +62,36 @@ internal fun IosMpvVideoPlayerSurface(
                 .background(Color.Black)
                 .onSizeChanged { surfaceSize = it },
     ) {
-        UIKitView(
-            factory = {
-                UIImageView().apply {
-                    backgroundColor = UIColor.blackColor
-                    clipsToBounds = true
-                    contentMode = contentScale.toUiContentMode()
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-            update = { imageView ->
-                imageView.image = frame
-                imageView.contentMode = contentScale.toUiContentMode()
-            },
-            onRelease = { imageView ->
-                imageView.image = null
-            },
-        )
+        if (nativeVideoView != null) {
+            UIKitView(
+                factory = { nativeVideoView },
+                modifier = Modifier.fillMaxSize(),
+                update = {
+                    playerState.layoutNativeVideoSurface(
+                        pixelWidth = surfaceSize.width,
+                        pixelHeight = surfaceSize.height,
+                    )
+                },
+            )
+        } else {
+            UIKitView(
+                factory = {
+                    UIImageView().apply {
+                        backgroundColor = UIColor.blackColor
+                        clipsToBounds = true
+                        contentMode = contentScale.toUiContentMode()
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                update = { imageView ->
+                    imageView.image = frame
+                    imageView.contentMode = contentScale.toUiContentMode()
+                },
+                onRelease = { imageView ->
+                    imageView.image = null
+                },
+            )
+        }
         overlay()
     }
 }

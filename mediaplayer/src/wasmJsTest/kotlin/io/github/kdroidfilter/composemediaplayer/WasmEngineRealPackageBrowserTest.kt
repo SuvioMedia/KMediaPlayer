@@ -37,7 +37,7 @@ class WasmEngineRealPackageBrowserTest {
     @Test
     fun realWasmEngineLoadsMp4AndWebM() =
         runTest(timeout = 45.seconds) {
-            val state = createVideoPlayerState() as DefaultVideoPlayerState
+            val state = DefaultVideoPlayerState(VideoPlaybackOptions())
             val surfaceHost = WasmEngineTestSurfaceHost()
             var session: WasmEnginePlaybackSession? = null
             try {
@@ -82,7 +82,7 @@ class WasmEngineRealPackageBrowserTest {
     @Test
     fun realWasmEngineLoadsMkvSwitchesAudioAndSeeks() =
         runTest(timeout = 45.seconds) {
-            val state = createVideoPlayerState() as DefaultVideoPlayerState
+            val state = DefaultVideoPlayerState(VideoPlaybackOptions())
             val surfaceHost = WasmEngineTestSurfaceHost()
             val sourceFile =
                 PlatformFile(
@@ -151,7 +151,7 @@ class WasmEngineRealPackageBrowserTest {
     @Test
     fun realWasmEngineLoadsBrowserBlobUrl() =
         runTest(timeout = 45.seconds) {
-            val state = createVideoPlayerState() as DefaultVideoPlayerState
+            val state = DefaultVideoPlayerState(VideoPlaybackOptions())
             val surfaceHost = WasmEngineTestSurfaceHost()
             val blobUrl = createBrowserObjectUrl(createDualOpusBrowserFile(DUAL_OPUS_MKV_DATA_URI))
             val session =
@@ -185,12 +185,11 @@ class WasmEngineRealPackageBrowserTest {
     fun realWasmEngineExposesTypedAdvancedControlsWithoutChangingTheMainPlaybackState() =
         runTest(timeout = 45.seconds) {
             val state =
-                createVideoPlayerState(
-                    playbackOptions =
-                        VideoPlaybackOptions(
-                            webDecoderPreference = WebDecoderPreference.SOFTWARE,
-                        ),
-                ) as DefaultVideoPlayerState
+                DefaultVideoPlayerState(
+                    VideoPlaybackOptions(
+                        webDecoderPreference = WebDecoderPreference.SOFTWARE,
+                    ),
+                )
             val surfaceHost = WasmEngineTestSurfaceHost()
             val session =
                 WasmEnginePlaybackSession(
@@ -233,7 +232,7 @@ class WasmEngineRealPackageBrowserTest {
     fun realWasmEngineLoadsHttpRangeNoRangeAndCustomMediaHeaders() =
         runTest(timeout = 45.seconds) {
             val networkFixture = WASM_ENGINE_NETWORK_FIXTURE
-            val state = createVideoPlayerState() as DefaultVideoPlayerState
+            val state = DefaultVideoPlayerState(VideoPlaybackOptions())
             val surfaceHost = WasmEngineTestSurfaceHost()
             var session: WasmEnginePlaybackSession? = null
             try {
@@ -281,7 +280,7 @@ class WasmEngineRealPackageBrowserTest {
     @Test
     fun realWasmEngineLoadsHlsAndDash() =
         runTest(timeout = 90.seconds) {
-            val state = createVideoPlayerState() as DefaultVideoPlayerState
+            val state = DefaultVideoPlayerState(VideoPlaybackOptions())
             val surfaceHost = WasmEngineTestSurfaceHost()
             var session: WasmEnginePlaybackSession? = null
             try {

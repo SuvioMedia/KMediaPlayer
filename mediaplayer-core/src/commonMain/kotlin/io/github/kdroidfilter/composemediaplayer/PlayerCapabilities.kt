@@ -12,12 +12,16 @@ data class MediaSourceSpec(
 data class PlayerCapabilities(
     val supportsMkv: Boolean = false,
     val supportsPiP: Boolean = false,
+    val supportsExternalAudioTracks: Boolean = false,
     val decoderColorCapabilities: DecoderColorCapabilities = DecoderColorCapabilities(),
     val displayColorCapabilities: DisplayColorCapabilities = DisplayColorCapabilities(),
     val rendererColorCapabilities: RendererColorCapabilities = RendererColorCapabilities(),
     val colorConversionCapabilities: ColorConversionCapabilities = ColorConversionCapabilities(),
     val supportedUriSchemes: Set<String> = DEFAULT_SUPPORTED_URI_SCHEMES,
     val supportsHls: Boolean = false,
+    val supportsExternalAudioOverlay: Boolean = false,
+    val supportsExternalAudioDucking: Boolean = false,
+    val supportsEncodedAudioPassthroughSuppression: Boolean = false,
 ) {
     fun canPlaySource(
         uri: String,

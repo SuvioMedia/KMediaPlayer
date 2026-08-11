@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="${1:-mediaplayer-mpv/build}"
-mpv_version="${KMEDIA_MPV_VERSION:-0.3.0-rc.8}"
+mpv_version="${KMEDIA_MPV_VERSION:-0.3.0-rc.9}"
 runtime_version="${KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.6}"
 mpv="$root/kmediaMpvPod"
 ffmpeg="$root/kmediaFfmpegRuntimePod"
@@ -18,7 +18,7 @@ grep -F "spec.dependency           'KMediaAssRuntime', '= $runtime_version'" \
   "$ffmpeg/KMediaFfmpegRuntime.podspec"
 grep -F "spec.version              = '$runtime_version'" "$ass/KMediaAssRuntime.podspec"
 
-expected_mpv=$'KMediaMpv\nKMediaMpvPlacebo'
+expected_mpv=$'KMediaMpv\nKMediaMpvMoltenVK\nKMediaMpvPlacebo'
 expected_ffmpeg=$'KMediaFfmpegAvcodec\nKMediaFfmpegAvfilter\nKMediaFfmpegAvformat\nKMediaFfmpegAvutil\nKMediaFfmpegRuntime\nKMediaFfmpegSwresample\nKMediaFfmpegSwscale'
 expected_ass=$'KMediaAssRuntime\nKMediaFfmpegAss\nKMediaFfmpegFreetype\nKMediaFfmpegFribidi\nKMediaFfmpegHarfbuzz'
 

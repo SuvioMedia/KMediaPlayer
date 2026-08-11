@@ -879,7 +879,7 @@ class MacVideoPlayerState(
         requestHeaders: Map<String, String>,
     ) {
         lifecycle.ensureUsable()
-        macLogger.d { "openUri() - Opening URI: $uri, initializePlayerState: $initializePlayerState" }
+        macLogger.d { "openUri() - Opening redacted URI, initializePlayerState: $initializePlayerState" }
 
         val sanitizedHeaders = requestHeaders.sanitizedRequestHeaders()
         lifecycle.launchSourceOperation(
@@ -2852,7 +2852,7 @@ class MacVideoPlayerState(
         uri: String,
         requestHeaders: Map<String, String>,
     ): Boolean {
-        macLogger.d { "openMediaUri() - Opening URI: $uri" }
+        macLogger.d { "openMediaUri() - Opening redacted URI" }
         val ptr = playerPtr
         if (ptr == 0L) return false
 

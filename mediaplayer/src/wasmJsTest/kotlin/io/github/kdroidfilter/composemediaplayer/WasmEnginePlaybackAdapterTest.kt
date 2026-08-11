@@ -253,7 +253,7 @@ class WasmEnginePlaybackAdapterTest {
                         container = "matroska",
                     ),
             )
-        val state = createVideoPlayerState() as DefaultVideoPlayerState
+        val state = DefaultVideoPlayerState(VideoPlaybackOptions())
         try {
             state.openUri("https://example.test/movie.mkv")
             state.applyWasmEngineSnapshot(snapshot)
@@ -285,7 +285,7 @@ class WasmEnginePlaybackAdapterTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun audioStateAndEventChangeOnlyAfterAdapterAcceptsSelection() =
         runTest {
-            val state = createVideoPlayerState() as DefaultVideoPlayerState
+            val state = DefaultVideoPlayerState(VideoPlaybackOptions())
             val events = mutableListOf<PlaybackEvent>()
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
                 state.playbackEvents.collect { events += it }
@@ -316,7 +316,7 @@ class WasmEnginePlaybackAdapterTest {
 
     @Test
     fun rapidAcceptedAudioSwitchesKeepTheLastTrack() {
-        val state = createVideoPlayerState() as DefaultVideoPlayerState
+        val state = DefaultVideoPlayerState(VideoPlaybackOptions())
         try {
             state.openUri("https://example.test/movie.mkv")
             state.applyWasmEngineSnapshot(twoAudioTrackSnapshot())

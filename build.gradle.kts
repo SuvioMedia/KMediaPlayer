@@ -85,6 +85,9 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         check(":mediaplayer-mpv" !in defaultPlayer) {
             ":mediaplayer must not depend on the optional :mediaplayer-mpv implementation."
         }
+        check(":mediaplayer-ads-core" !in defaultPlayer) {
+            ":mediaplayer must not depend on the optional :mediaplayer-ads-core contracts."
+        }
         check(defaultPlayerExternal.none { coordinate -> coordinate.startsWith("io.github.shusek:kmedia-bridge-") }) {
             ":mediaplayer must not pull KMediaBridge or FFmpeg; configure :mediaplayer-kmediabridge explicitly."
         }
@@ -177,6 +180,9 @@ tasks.register("publishConsumerSmokeArtifacts") {
         ":mediaplayer-extension-api:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer-extension-api:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-extension-api:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-ads-core:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-ads-core:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-ads-core:publishAndroidPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer:publishAndroidPublicationToConsumerSmokeRepository",
@@ -261,6 +267,7 @@ gradle.projectsEvaluated {
         optionalExtensionDependencies.set(
             setOf(
                 project(":mediaplayer-ass"),
+                project(":mediaplayer-ads-core"),
                 project(":mediaplayer-dolbyvision"),
                 project(":mediaplayer-kmediabridge"),
                 project(":mediaplayer-libvlc"),

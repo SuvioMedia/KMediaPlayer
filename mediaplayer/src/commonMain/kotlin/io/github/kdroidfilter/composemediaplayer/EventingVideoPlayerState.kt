@@ -23,11 +23,11 @@ import kotlin.time.Duration.Companion.milliseconds
 internal class EventingVideoPlayerState(
     private val delegate: VideoPlayerState,
     eventCoroutineContext: CoroutineContext,
-) : VideoPlayerState by delegate {
+) : DelegatingVideoPlayerState,
+    VideoPlayerState by delegate {
     constructor(delegate: VideoPlayerState) : this(delegate, Dispatchers.Default)
 
-    /** Underlying platform state used by platform surface hosts. */
-    internal val wrappedState: VideoPlayerState
+    override val delegateState: VideoPlayerState
         get() = delegate
 
     private val eventDispatcher = PlaybackEventDispatcher()
@@ -174,6 +174,9 @@ internal class EventingVideoPlayerState(
             ensureNotDisposed()
             delegate.currentAudioTrack = value
         }
+
+    override val externalAudioTracks: List<ExternalAudioTrack>
+        get() = delegate.externalAudioTracks
 
     override var subtitlesEnabled: Boolean
         get() = delegate.subtitlesEnabled
@@ -480,6 +483,34 @@ internal class EventingVideoPlayerState(
                     ?: TrackSelectionResult.NotFound(id)
             }
             ?: selectAudioTrack(null as AudioTrack?)
+    }
+
+    override fun addExternalAudioTrack(track: ExternalAudioTrack) {
+        ensureNotDisposed()
+        delegate.addExternalAudioTrack(track)
+        emitCurrentErrorIfChanged()
+    }
+
+    override fun removeExternalAudioTrack(trackId: String) {
+        ensureNotDisposed()
+        delegate.removeExternalAudioTrack(trackId)
+        emitCurrentErrorIfChanged()
+    }
+
+    override fun removeExternalAudioTrack(track: ExternalAudioTrack) {
+        removeExternalAudioTrack(track.id)
+    }
+
+    override fun clearExternalAudioTracks() {
+        ensureNotDisposed()
+        delegate.clearExternalAudioTracks()
+        emitCurrentErrorIfChanged()
+    }
+
+    override fun replaceExternalAudioTracks(tracks: List<ExternalAudioTrack>) {
+        ensureNotDisposed()
+        delegate.replaceExternalAudioTracks(tracks)
+        emitCurrentErrorIfChanged()
     }
 
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {

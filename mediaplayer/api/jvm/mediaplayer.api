@@ -32,10 +32,12 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)V
 	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun RenderTaoPlaybackSurface (Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;I)V
+	public fun addExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
 	public fun addSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun canPlaySource (Ljava/lang/String;Ljava/lang/String;)Z
 	public fun clearCache ()Lio/github/kdroidfilter/composemediaplayer/CacheClearResult;
 	public fun clearError ()V
+	public fun clearExternalAudioTracks ()V
 	public fun clearExternalSubtitleTracks ()V
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
@@ -64,6 +66,8 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
+	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
 	public fun getLoadingState ()Lio/github/kdroidfilter/composemediaplayer/PlaybackLoadingState;
@@ -106,8 +110,11 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun playbackSnapshot ()Lio/github/kdroidfilter/composemediaplayer/PlaybackSnapshot;
 	public fun prepare (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun releaseSource ()V
+	public fun removeExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
+	public fun removeExternalAudioTrack (Ljava/lang/String;)V
 	public fun removeSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun removeSubtitleTrack (Ljava/lang/String;)V
+	public fun replaceExternalAudioTracks (Ljava/util/List;)V
 	public fun replaceExternalSubtitleTracks (Ljava/util/List;)V
 	public fun restart ()V
 	public fun seekBy-LRDsOJo (J)V
@@ -173,7 +180,7 @@ public final class io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBack
 	public static synthetic fun kMediaBridgeRemuxDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static final fun kMediaBridgeTranscodeDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static synthetic fun kMediaBridgeTranscodeDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
-	public static final fun libVlcDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
+	public static final synthetic fun libVlcDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static synthetic fun libVlcDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static final fun platformDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static synthetic fun platformDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
@@ -615,10 +622,12 @@ public final class io/github/kdroidfilter/composemediaplayer/MediaSupportSnapsho
 
 public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlayerState : io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
 	public static final field $stable I
+	public fun addExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
 	public fun addSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun canPlaySource (Ljava/lang/String;Ljava/lang/String;)Z
 	public fun clearCache ()Lio/github/kdroidfilter/composemediaplayer/CacheClearResult;
 	public fun clearError ()V
+	public fun clearExternalAudioTracks ()V
 	public fun clearExternalSubtitleTracks ()V
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
@@ -646,6 +655,8 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
+	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
 	public fun getLoadingState ()Lio/github/kdroidfilter/composemediaplayer/PlaybackLoadingState;
@@ -688,8 +699,11 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 	public fun playbackSnapshot ()Lio/github/kdroidfilter/composemediaplayer/PlaybackSnapshot;
 	public fun prepare (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun releaseSource ()V
+	public fun removeExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
+	public fun removeExternalAudioTrack (Ljava/lang/String;)V
 	public fun removeSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun removeSubtitleTrack (Ljava/lang/String;)V
+	public fun replaceExternalAudioTracks (Ljava/util/List;)V
 	public fun replaceExternalSubtitleTracks (Ljava/util/List;)V
 	public fun restart ()V
 	public fun seekBy-LRDsOJo (J)V
@@ -735,6 +749,11 @@ public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlay
 
 public final class io/github/kdroidfilter/composemediaplayer/RenderableVideoPlayerSurfaceKt {
 	public static final fun VideoPlayerSurface (Lio/github/kdroidfilter/composemediaplayer/RenderableVideoPlayerState;Landroidx/compose/ui/Modifier;Landroidx/compose/ui/layout/ContentScale;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;II)V
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/SynchronizedExternalAudioVideoPlayerStateKt {
+	public static final fun withSynchronizedExternalAudioPlayback (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+	public static final fun withSynchronizedExternalAudioPlayback (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;Lkotlin/jvm/functions/Function0;)Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions {
@@ -920,10 +939,12 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun <init> ()V
 	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)V
 	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun addExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
 	public fun addSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun canPlaySource (Ljava/lang/String;Ljava/lang/String;)Z
 	public fun clearCache ()Lio/github/kdroidfilter/composemediaplayer/CacheClearResult;
 	public fun clearError ()V
+	public fun clearExternalAudioTracks ()V
 	public fun clearExternalSubtitleTracks ()V
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
@@ -951,6 +972,8 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
+	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
 	public fun getLoadingState ()Lio/github/kdroidfilter/composemediaplayer/PlaybackLoadingState;
@@ -994,8 +1017,11 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun playbackSnapshot ()Lio/github/kdroidfilter/composemediaplayer/PlaybackSnapshot;
 	public fun prepare (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun releaseSource ()V
+	public fun removeExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
+	public fun removeExternalAudioTrack (Ljava/lang/String;)V
 	public fun removeSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun removeSubtitleTrack (Ljava/lang/String;)V
+	public fun replaceExternalAudioTracks (Ljava/util/List;)V
 	public fun replaceExternalSubtitleTracks (Ljava/util/List;)V
 	public fun restart ()V
 	public fun seekBy-LRDsOJo (J)V
@@ -1061,10 +1087,12 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun <init> ()V
 	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)V
 	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun addExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
 	public fun addSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun canPlaySource (Ljava/lang/String;Ljava/lang/String;)Z
 	public fun clearCache ()Lio/github/kdroidfilter/composemediaplayer/CacheClearResult;
 	public fun clearError ()V
+	public fun clearExternalAudioTracks ()V
 	public fun clearExternalSubtitleTracks ()V
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
@@ -1092,6 +1120,8 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
+	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
 	public fun getLoadingState ()Lio/github/kdroidfilter/composemediaplayer/PlaybackLoadingState;
@@ -1135,8 +1165,11 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun playbackSnapshot ()Lio/github/kdroidfilter/composemediaplayer/PlaybackSnapshot;
 	public fun prepare (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun releaseSource ()V
+	public fun removeExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
+	public fun removeExternalAudioTrack (Ljava/lang/String;)V
 	public fun removeSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun removeSubtitleTrack (Ljava/lang/String;)V
+	public fun replaceExternalAudioTracks (Ljava/util/List;)V
 	public fun replaceExternalSubtitleTracks (Ljava/util/List;)V
 	public fun restart ()V
 	public fun seekBy-LRDsOJo (J)V
@@ -1286,10 +1319,12 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public fun <init> ()V
 	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)V
 	public synthetic fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun addExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
 	public fun addSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun canPlaySource (Ljava/lang/String;Ljava/lang/String;)Z
 	public fun clearCache ()Lio/github/kdroidfilter/composemediaplayer/CacheClearResult;
 	public fun clearError ()V
+	public fun clearExternalAudioTracks ()V
 	public fun clearExternalSubtitleTracks ()V
 	public fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
 	public fun dispose ()V
@@ -1317,6 +1352,8 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public fun getDurationMs ()J
 	public fun getDurationText ()Ljava/lang/String;
 	public fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
+	public fun getExternalAudioTracks ()Ljava/util/List;
 	public fun getHasMedia ()Z
 	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
 	public fun getLoadingState ()Lio/github/kdroidfilter/composemediaplayer/PlaybackLoadingState;
@@ -1363,8 +1400,11 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public fun playbackSnapshot ()Lio/github/kdroidfilter/composemediaplayer/PlaybackSnapshot;
 	public fun prepare (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
 	public fun releaseSource ()V
+	public fun removeExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
+	public fun removeExternalAudioTrack (Ljava/lang/String;)V
 	public fun removeSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
 	public fun removeSubtitleTrack (Ljava/lang/String;)V
+	public fun replaceExternalAudioTracks (Ljava/util/List;)V
 	public fun replaceExternalSubtitleTracks (Ljava/util/List;)V
 	public fun restart ()V
 	public fun seekBy-LRDsOJo (J)V

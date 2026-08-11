@@ -9,7 +9,7 @@ fi
 JDK_HOME="$1"
 OUTPUT_ROOT="$2"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SOURCE="$SCRIPT_DIR/MpvMacTextureBridge.mm"
+SOURCE="$SCRIPT_DIR/MpvMacVideoBridge.m"
 OUTPUT_DIRECTORY="$OUTPUT_ROOT/composemediaplayer/native/darwin-arm64"
 OUTPUT_LIBRARY="$OUTPUT_DIRECTORY/libComposeMediaPlayerMpvMac.dylib"
 
@@ -20,9 +20,9 @@ fi
 
 mkdir -p "$OUTPUT_DIRECTORY"
 
-clang++ \
-    -x objective-c++ \
-    -std=c++17 \
+clang \
+    -x objective-c \
+    -fblocks \
     -fno-objc-arc \
     -Wall \
     -Wextra \
@@ -35,11 +35,12 @@ clang++ \
     -I"$JDK_HOME/include" \
     -I"$JDK_HOME/include/darwin" \
     "$SOURCE" \
-    -framework Foundation \
+    -framework AppKit \
     -framework CoreFoundation \
+    -framework CoreGraphics \
     -framework CoreVideo \
-    -framework IOSurface \
     -framework OpenGL \
+    -framework QuartzCore \
     -o "$OUTPUT_LIBRARY"
 
 echo "$OUTPUT_LIBRARY"

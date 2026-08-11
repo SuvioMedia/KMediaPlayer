@@ -54,6 +54,8 @@ import kotlin.time.Duration.Companion.seconds
 internal class IosMpvVideoPlayerState(
     internal val options: MpvPlaybackOptions,
     private val engine: IosLibMpvEngine,
+    metalSurface: IosMpvMetalSurface? = null,
+    rendererFallbackReason: String? = null,
 ) : AbstractMpvVideoPlayerState(),
     VideoPlayerSurfaceProvider {
     private val lifecycleLock = NSLock()
@@ -62,6 +64,9 @@ internal class IosMpvVideoPlayerState(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val eventJob: Job
     private val frameState = mutableStateOf<UIImage?>(null)
+    private val metalSurfaceState = mutableStateOf(metalSurface)
+    private var rendererFallbackReason = rendererFallbackReason
+    private var activeSource: ActiveIosMpvSource? = null
 
     private var lastTrackRefreshMs = 0L
 
@@ -86,10 +91,15 @@ internal class IosMpvVideoPlayerState(
     override val renderingInfo =
         VideoRenderingInfo(
             backend = "libmpv",
-            videoRenderer = "libmpv software render API",
+            videoRenderer =
+                if (metalSurface != null) {
+                    "mpv gpu-next Vulkan through MoltenVK/Metal"
+                } else {
+                    "libmpv software render API"
+                },
             audioRenderer = "mpv iOS audio output",
             subtitleRenderer = "mpv/libass",
-            notes = "Application-embedded, code-signed iOS libmpv runtime.",
+            notes = iosRenderingNotes(),
         )
 
     override val capabilities =
@@ -158,6 +168,7 @@ internal class IosMpvVideoPlayerState(
             "The mpv artifact does not accept request headers. Use a credential-safe transport outside this backend."
         }
         beginSourcePreparation(uri, initializePlayerState)
+        activeSource = ActiveIosMpvSource(uri, initializePlayerState)
         try {
             engine.command("loadfile", uri, "replace")
             engine.setProperty(
@@ -165,6 +176,7 @@ internal class IosMpvVideoPlayerState(
                 if (initializePlayerState == InitialPlayerState.PAUSE) "yes" else "no",
             )
         } catch (_: Throwable) {
+            activeSource = null
             _hasMedia = false
             publishError(VideoPlayerError.SourceError("libmpv rejected the media source."))
         }
@@ -240,12 +252,23 @@ internal class IosMpvVideoPlayerState(
     override fun releaseSource() {
         ensureOpen()
         runCatching { engine.command("stop") }
+        activeSource = null
         frameState.value = null
         resetSourceState()
     }
 
     internal val currentFrame: State<UIImage?>
         get() = frameState
+
+    internal val nativeVideoView
+        get() = metalSurfaceState.value?.view
+
+    internal fun layoutNativeVideoSurface(
+        pixelWidth: Int,
+        pixelHeight: Int,
+    ) {
+        metalSurfaceState.value?.layout(pixelWidth, pixelHeight)
+    }
 
     internal fun renderFrame(
         requestedWidth: Int,
@@ -255,54 +278,62 @@ internal class IosMpvVideoPlayerState(
         renderLock.lock()
         try {
             if (isDisposed() || !_hasMedia) return
-            val (width, height) = constrainSize(requestedWidth, requestedHeight)
-            val rowBytes = width * BYTES_PER_PIXEL
-            val colorSpace = checkNotNull(CGColorSpaceCreateDeviceRGB())
-            val bitmapInfo =
-                kCGBitmapByteOrder32Little or
-                    CGImageAlphaInfo.kCGImageAlphaNoneSkipFirst.value
-            val context =
-                CGBitmapContextCreate(
-                    data = null,
-                    width = width.toULong(),
-                    height = height.toULong(),
-                    bitsPerComponent = BITS_PER_COMPONENT.toULong(),
-                    bytesPerRow = rowBytes.toULong(),
-                    space = colorSpace,
-                    bitmapInfo = bitmapInfo,
-                )
-            if (context == null) {
-                CGColorSpaceRelease(colorSpace)
-                error("CoreGraphics could not allocate an MPV frame.")
-            }
-            try {
-                val pixels = checkNotNull(CGBitmapContextGetData(context))
-                engine.render(
-                    width = width,
-                    height = height,
-                    rowBytes = rowBytes.toULong(),
-                    pixels = pixels,
-                )
-                val image = checkNotNull(CGBitmapContextCreateImage(context))
-                try {
-                    val uiImage = UIImage.imageWithCGImage(image)
-                    mutateSnapshotState {
-                        frameState.value = uiImage
-                    }
-                } finally {
-                    CGImageRelease(image)
-                }
-            } finally {
-                CGContextRelease(context)
-                CGColorSpaceRelease(colorSpace)
-            }
+            if (metalSurfaceState.value != null) return
+            renderSoftwareFrameLocked(requestedWidth, requestedHeight)
         } catch (_: Throwable) {
             if (!isDisposed()) {
                 mutateSnapshotState { _hasMedia = false }
-                publishError(VideoPlayerError.UnknownError("libmpv software rendering failed."))
+                publishError(VideoPlayerError.UnknownError("libmpv rendering failed."))
             }
         } finally {
             renderLock.unlock()
+        }
+    }
+
+    private fun renderSoftwareFrameLocked(
+        requestedWidth: Int,
+        requestedHeight: Int,
+    ) {
+        val (width, height) = constrainSize(requestedWidth, requestedHeight)
+        val rowBytes = width * BYTES_PER_PIXEL
+        val colorSpace = checkNotNull(CGColorSpaceCreateDeviceRGB())
+        val bitmapInfo =
+            kCGBitmapByteOrder32Little or
+                CGImageAlphaInfo.kCGImageAlphaNoneSkipFirst.value
+        val context =
+            CGBitmapContextCreate(
+                data = null,
+                width = width.toULong(),
+                height = height.toULong(),
+                bitsPerComponent = BITS_PER_COMPONENT.toULong(),
+                bytesPerRow = rowBytes.toULong(),
+                space = colorSpace,
+                bitmapInfo = bitmapInfo,
+            )
+        if (context == null) {
+            CGColorSpaceRelease(colorSpace)
+            error("CoreGraphics could not allocate an MPV frame.")
+        }
+        try {
+            val pixels = checkNotNull(CGBitmapContextGetData(context))
+            engine.render(
+                width = width,
+                height = height,
+                rowBytes = rowBytes.toULong(),
+                pixels = pixels,
+            )
+            val image = checkNotNull(CGBitmapContextCreateImage(context))
+            try {
+                val uiImage = UIImage.imageWithCGImage(image)
+                mutateSnapshotState {
+                    frameState.value = uiImage
+                }
+            } finally {
+                CGImageRelease(image)
+            }
+        } finally {
+            CGContextRelease(context)
+            CGColorSpaceRelease(colorSpace)
         }
     }
 
@@ -356,11 +387,52 @@ internal class IosMpvVideoPlayerState(
             return
         }
         if (event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) {
+            if (event.errorCode == MPV_ERROR_VO_INIT_FAILED &&
+                trySwitchIosVkToSoftware()
+            ) {
+                return
+            }
             mutateSnapshotState { _hasMedia = false }
             publishError(VideoPlayerError.SourceError("libmpv could not finish the media source."))
             return
         }
         emitPlaybackEnded()
+    }
+
+    private fun trySwitchIosVkToSoftware(): Boolean {
+        val source = activeSource ?: return false
+        if (metalSurfaceState.value == null) return false
+        renderLock.lock()
+        return try {
+            engine.switchToSoftwareRendering()
+            rendererFallbackReason = "the embedded iosvk video output could not initialize"
+            mutateSnapshotState {
+                metalSurfaceState.value = null
+                frameState.value = null
+                renderingInfo.videoRenderer = "libmpv software render API"
+                renderingInfo.notes = iosRenderingNotes()
+                _hasMedia = true
+                _isLoading = true
+            }
+            engine.command("loadfile", source.uri, "replace")
+            engine.setProperty(
+                "pause",
+                if (source.initialState == InitialPlayerState.PAUSE) "yes" else "no",
+            )
+            true
+        } catch (_: Throwable) {
+            if (engine.rendererBackend == IosMpvRendererBackend.SOFTWARE) {
+                rendererFallbackReason = "the embedded iosvk video output could not initialize"
+                mutateSnapshotState {
+                    metalSurfaceState.value = null
+                    renderingInfo.videoRenderer = "libmpv software render API"
+                    renderingInfo.notes = iosRenderingNotes()
+                }
+            }
+            false
+        } finally {
+            renderLock.unlock()
+        }
     }
 
     private fun onPlaybackRestarted() {
@@ -386,6 +458,10 @@ internal class IosMpvVideoPlayerState(
         val frameRate = engine.getProperty("container-fps").positiveFloatOrNull()
         val container = engine.getProperty("file-format")
         val videoDecoder = engine.getProperty("video-codec")
+        val hardwareDecoder =
+            engine
+                .getProperty("hwdec-current")
+                ?.takeUnless { it.equals("no", ignoreCase = true) }
         val audioDecoder = engine.getProperty("audio-codec-name")
 
         updatePlaybackPosition(
@@ -401,8 +477,10 @@ internal class IosMpvVideoPlayerState(
             metadata.height = height
             metadata.frameRate = frameRate
             renderingInfo.container = container
-            renderingInfo.videoDecoder = videoDecoder
+            renderingInfo.videoDecoder =
+                listOfNotNull(videoDecoder, hardwareDecoder).joinToString(" / ").ifBlank { null }
             renderingInfo.audioRenderer = audioDecoder ?: "mpv iOS audio output"
+            renderingInfo.notes = iosRenderingNotes(hardwareDecoder)
         }
         updateAspectRatio(width, height)
     }
@@ -589,11 +667,30 @@ internal class IosMpvVideoPlayerState(
         try {
             frameState.value = null
             engine.close()
+            metalSurfaceState.value = null
         } finally {
             renderLock.unlock()
         }
         scope.cancel()
     }
+
+    private fun iosRenderingNotes(hardwareDecoder: String? = null): String =
+        buildString {
+            append("Application-embedded, code-signed iOS libmpv runtime; ")
+            if (metalSurfaceState.value != null) {
+                append("gpu-next Vulkan presentation through MoltenVK/Metal")
+                if (hardwareDecoder.equals("videotoolbox", ignoreCase = true)) {
+                    append(" with direct VideoToolbox/Metal texture interop")
+                }
+            } else {
+                append("bounded CoreGraphics software presentation")
+            }
+            rendererFallbackReason?.let { reason ->
+                append("; software fallback: ")
+                append(reason)
+            }
+            append('.')
+        }
 
     companion object {
         private const val MPV_VOLUME_SCALE = 100f
@@ -603,12 +700,18 @@ internal class IosMpvVideoPlayerState(
         private const val MPV_END_FILE_REASON_STOP = 2
         private const val MPV_END_FILE_REASON_QUIT = 3
         private const val MPV_END_FILE_REASON_ERROR = 4
+        private const val MPV_ERROR_VO_INIT_FAILED = -15
         private const val AUDIO_TRACK_PREFIX = "mpv:audio:"
         private const val SUBTITLE_TRACK_PREFIX = "mpv:subtitle:"
         private const val BYTES_PER_PIXEL = 4
         private const val BITS_PER_COMPONENT = 8
     }
 }
+
+private data class ActiveIosMpvSource(
+    val uri: String,
+    val initialState: InitialPlayerState,
+)
 
 private fun currentTimeMillis(): Long = (NSDate().timeIntervalSince1970 * 1_000.0).toLong()
 

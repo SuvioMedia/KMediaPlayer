@@ -6,6 +6,7 @@ import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import org.gradle.jvm.toolchain.JvmVendorSpec
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
@@ -65,10 +66,7 @@ val kmediaMpvAssRuntimePodDirectory =
         .orElse(layout.buildDirectory.dir("kmediaAssRuntimePod").map { it.asFile })
 val appleMpvNativeDirectory = layout.projectDirectory.dir("native/apple")
 val macMpvNativeDirectory = layout.projectDirectory.dir("src/jvmMain/native/macos")
-val windowsMpvNativeDirectory = layout.projectDirectory.dir("src/jvmMain/native/windows")
-val linuxMpvNativeDirectory = layout.projectDirectory.dir("src/jvmMain/native/linux")
 val macMpvNativeResources = layout.buildDirectory.dir("generated/mpvMacNative/resources")
-val linuxMpvNativeResources = layout.buildDirectory.dir("generated/mpvLinuxNative/resources")
 val iosArm64MpvBridge = layout.buildDirectory.dir("generated/appleMpvBridge/ios-arm64")
 val iosSimulatorArm64MpvBridge =
     layout.buildDirectory.dir("generated/appleMpvBridge/ios-simulator-arm64")
@@ -80,7 +78,6 @@ val skipAppleMpvBridgeBuild =
         .map { it.equals("true", ignoreCase = true) }
         .getOrElse(false)
 val canBuildAppleMpvBridge = Os.isFamily(Os.FAMILY_MAC) && !skipAppleMpvBridgeBuild
-val isLinuxHost = System.getProperty("os.name", "").contains("linux", ignoreCase = true)
 // Local runtime pods are release inputs and must not be required by a JVM-only IDEA import.
 val skipAppleInteropDuringIdeaSync =
     providers
@@ -92,10 +89,11 @@ val javaToolchains = extensions.getByType<JavaToolchainService>()
 val macMpvNativeJdk =
     javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(25))
+        vendor.set(JvmVendorSpec.ADOPTIUM)
     }
 val buildMacMpvNative =
     tasks.register<Exec>("buildMacMpvNative") {
-        description = "Builds the embedded macOS libmpv OpenGL/EDR surface."
+        description = "Builds the embedded macOS libmpv OpenGL/EDR and macvk host surfaces."
         group = "build"
         enabled = Os.isFamily(Os.FAMILY_MAC)
         workingDir(layout.projectDirectory)
@@ -108,48 +106,12 @@ val buildMacMpvNative =
             macMpvNativeResources.get().asFile.absolutePath,
         )
         inputs.file(macMpvNativeDirectory.file("build.sh"))
-        inputs.file(macMpvNativeDirectory.file("MpvMacTextureBridge.mm"))
+        inputs.file(macMpvNativeDirectory.file("MpvMacVideoBridge.m"))
         outputs.file(
             macMpvNativeResources.map {
                 it.file("composemediaplayer/native/darwin-arm64/libComposeMediaPlayerMpvMac.dylib")
             },
         )
-    }
-val buildWindowsMpvNative =
-    tasks.register<Exec>("buildWindowsMpvNative") {
-        description = "Builds the libmpv shared FP16 TextureView producer for Windows."
-        group = "build"
-        enabled = Os.isFamily(Os.FAMILY_WINDOWS)
-        workingDir(windowsMpvNativeDirectory)
-        commandLine("cmd", "/c", windowsMpvNativeDirectory.file("build.bat").asFile.absolutePath)
-        inputs.dir(windowsMpvNativeDirectory)
-        outputs.files(
-            layout.projectDirectory.file(
-                "src/jvmMain/resources/composemediaplayer/native/win32-x86-64/ComposeMediaPlayerMpvWindows.dll",
-            ),
-            layout.projectDirectory.file(
-                "src/jvmMain/resources/composemediaplayer/native/win32-arm64/ComposeMediaPlayerMpvWindows.dll",
-            ),
-        )
-    }
-val buildLinuxMpvNative =
-    tasks.register<Exec>("buildLinuxMpvNative") {
-        description = "Builds the libmpv GBM/EGL DMA-BUF TextureView producer for Linux."
-        group = "build"
-        enabled = isLinuxHost
-        workingDir(layout.projectDirectory)
-        commandLine(
-            "bash",
-            linuxMpvNativeDirectory.file("build.sh").asFile.absolutePath,
-            macMpvNativeJdk
-                .get()
-                .metadata.installationPath.asFile.absolutePath,
-            linuxMpvNativeResources.get().asFile.absolutePath,
-        )
-        inputs.file(linuxMpvNativeDirectory.file("build.sh"))
-        inputs.file(linuxMpvNativeDirectory.file("CMakeLists.txt"))
-        inputs.file(linuxMpvNativeDirectory.file("MpvLinuxTextureBridge.cpp"))
-        outputs.dir(linuxMpvNativeResources)
     }
 
 fun registerAppleMpvBridgeBuild(
@@ -312,9 +274,8 @@ nativeJvmTestResources.orNull?.let { resourcesDirectory ->
     }
 }
 tasks.named<ProcessResources>("jvmProcessResources") {
-    dependsOn(buildMacMpvNative, buildWindowsMpvNative, buildLinuxMpvNative)
+    dependsOn(buildMacMpvNative)
     from(macMpvNativeResources)
-    from(linuxMpvNativeResources)
 }
 tasks.named<ProcessResources>("jvmTestProcessResources") {
     from(rootProject.file("mediaplayer-kmediabridge/src/jvmTest/resources"))

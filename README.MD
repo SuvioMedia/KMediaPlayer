@@ -80,6 +80,10 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
   with libass-based ASS/SSA subtitle support. The default artifact has no MPV
   dependency; applications add the adapter only to the platform source sets
   where they select it.
+- **Optional advertising contracts**: `composemediaplayer-ads-core` contains the
+  provider-neutral ad plan and playback state machine. The default player does
+  not depend on it, so products without advertising do not resolve or package
+  the module.
 
 ## ✨ Supported Video Formats
 | Format | Windows                                                                                                           | Linux  | macOS & iOS                                                       | Android | WASM |
@@ -106,7 +110,7 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
 
 > HDR recognition is not treated as proof of HDR output. In particular, a libVLC native child view on Windows or Linux is not a confirmed HDR route. `AUTO` uses a verified SDR tone-map when the native HDR requirements are unavailable, while `REQUIRE_HDR` returns a typed color-pipeline error. See [HDR pipeline and platform status](docs/hdr-pipeline.md).
 
-> iPhone and iPad are supported on a non-blocking [software-only best-effort basis](docs/ios-best-effort-readiness.md): device arm64 builds, Simulator tests and shared Metal references are required, but this project has no physical iOS hardware and makes no physical HDR, Dolby Vision, 4K60 or thermal-performance claim. Runtime color status therefore fails closed whenever Apple does not explicitly confirm the format, display and surface.
+> iPhone and iPad are supported on a non-blocking [software-verified best-effort basis](docs/ios-best-effort-readiness.md): device arm64 builds, Simulator tests and shared Metal references are required, but this project has no physical iOS hardware and makes no physical HDR, Dolby Vision, 4K60 or thermal-performance claim. Runtime color status therefore fails closed whenever Apple does not explicitly confirm the format, display and surface.
 
 > Flat Android video follows the platform-recommended MediaCodec + `SurfaceView` path; KMediaPlayer does not overwrite decoder buffers with a guessed dataspace. On Android 9+, a small read-only JNI bridge compares `ANativeWindow_getBuffersDataSpace()` with the decoded HDR10/HDR10+/HLG signal after the first frame. An exact match is `RENDERER_CONFIGURED`; Android 14+'s active HDR/SDR composition report is independent `SYSTEM_REPORTED` evidence and is retained only for the current decoded output signal, source, surface and display. Dolby Vision remains vendor-managed. If neither public signal confirms the route, `AUTO` uses a verified controlled or source-bridge SDR fallback when available, while `REQUIRE_HDR` fails instead of labeling inferred playback as HDR.
 
@@ -174,6 +178,7 @@ dependencies {
 Pipeline integrations are separate modules:
 
 ```text
+composemediaplayer-ads-core ────────────────────────────────────────────────> optional ad orchestration
 composemediaplayer-ass ──────────┐
 composemediaplayer-dolbyvision ──┼──> composemediaplayer-extension-api ──> composemediaplayer-core
 composemediaplayer-kmediabridge ─┘
@@ -181,6 +186,14 @@ composemediaplayer-desktop-tao ────────────────�
 composemediaplayer-mpv ─────────────────────────────────> composemediaplayer-desktop-tao
 composemediaplayer ──────────────┬──> composemediaplayer-extension-api
                                  └──> composemediaplayer-desktop-tao
+```
+
+Add advertising only in products that enable it:
+
+```kotlin
+dependencies {
+    implementation("io.github.shusek:composemediaplayer-ads-core:<version>")
+}
 ```
 
 The MPV and KMediaBridge adapters are optional. When both are present they transitively select their
@@ -408,11 +421,37 @@ val options = MpvPlaybackOptions(
 )
 ```
 
+The macOS MPV renderer defaults to `MpvMacRenderer.MOLTENVK`. A libmpv carrying
+KMediaMpv's versioned embedded-macvk capability uses the windowless
+`gpu-next`/Vulkan route in the Compose-owned Metal surface:
+
+```kotlin
+val options = MpvPlaybackOptions(
+    runtimeSource = MpvRuntimeSource.ExplicitPath("/Applications/MyApp.app/Contents/Frameworks/libmpv.dylib"),
+    macRenderer = MpvMacRenderer.MOLTENVK,
+)
+```
+
+This is already the default, so the explicit option is needed only when making
+the renderer policy visible in application configuration. An unmarked or
+failing runtime falls back to OpenGL; stock mpv is never allowed to create a
+separate macOS window. Enabling the public projection transform also switches
+that player to OpenGL because the projection pass currently uses the libmpv
+OpenGL render API. The bundled runtime must carry MoltenVK and KMediaMpv's
+versioned macvk capability to keep the default route on Vulkan.
+
 On iOS, use the generated `ComposeMediaPlayerMpv` pod so CocoaPods embeds and
 code-signs the exact `KMediaMpv`, `KMediaFfmpegRuntime`, and `KMediaAssRuntime`
 framework graph. The default `Bundled` source resolves that graph. An
 application-supplied framework can still be selected with `System` or an
 `ExplicitPath` inside the signed application bundle.
+
+The iOS MPV renderer defaults to `MpvIosRenderer.MOLTENVK`: KMediaPlayer owns
+the `UIView`/`CAMetalLayer`, while KMediaMpv's versioned `iosvk` context runs
+mpv `gpu-next` through Vulkan and the packaged MoltenVK framework. This route
+does not use OpenGL ES. A missing capability or failed Vulkan video output
+falls back to the bounded software render API; `MpvIosRenderer.SOFTWARE`
+selects that fallback explicitly.
 
 `inspectMpvBackend()` reports a missing runtime, unsupported target, or rejected
 native payload without falling back silently. `rememberVideoPlayerState()`
@@ -1286,6 +1325,51 @@ if (subtitleTrack != null) {
 ```
 
 `availableSubtitleTracks` can contain both external tracks added by your app through `addSubtitleTrack(...)` and embedded tracks discovered from the current media. Use `replaceExternalSubtitleTracks(...)` to replace app-managed tracks while preserving embedded tracks, or `removeSubtitleTrack(...)` / `clearExternalSubtitleTracks()` to remove app-managed tracks.
+
+Applications can also attach a timeline-aligned replacement or overlay audio source to the primary
+media. This is available on Android, iOS, desktop JVM, and browser Wasm. Check
+`capabilities.supportsExternalAudioTracks`, open the primary source, and then register the external
+track:
+
+```kotlin
+if (playerState.capabilities.supportsExternalAudioTracks) {
+    val narration = ExternalAudioTrack(
+        id = "narration-pl",
+        label = "Polish narration",
+        language = "pl",
+        source = MediaSourceSpec(
+            uri = "https://example.com/narration.m4a",
+            mimeType = "audio/mp4",
+        ),
+        playbackMode = ExternalAudioPlaybackMode.OVERLAY,
+        duckingIntervals = listOf(
+            ExternalAudioDuckingInterval(12.seconds, 16.seconds),
+        ),
+        duckingVolumeMultiplier = 0.35f,
+    )
+    playerState.addExternalAudioTrack(narration)
+    playerState.selectAudioTrack(narration.id)
+}
+```
+
+`REPLACE` tracks are alternative full mixes and mute the programme audio after the auxiliary transport
+is ready. `OVERLAY` tracks are mixed locally with programme audio; configured ducking intervals lower
+the programme volume with short attack/release ramps while keeping the overlay at the requested player
+volume. Both modes require timestamps aligned to the primary content. The registry is bound to the
+current source and is cleared when another primary source is opened or the source is released. Use
+`replaceExternalAudioTracks(...)` to update app-managed tracks while preserving embedded tracks.
+Native Android replacement tracks can be merged into the Media3 timeline. Overlay tracks, iOS and
+desktop JVM use a second headless platform transport, while browser Wasm uses a separate
+`HTMLAudioElement`. On synchronized routes the primary player remains the timeline authority: play,
+pause, seek, speed, looping, volume, and drift are synchronized. Optional backends can opt into the same behavior with
+`withSynchronizedExternalAudioPlayback()`.
+
+Request headers are sanitized through the same policy as primary media headers; avoid putting
+long-lived credentials in URLs or diagnostic output. Browser external audio cannot attach custom
+request headers and therefore requires a short-lived, self-authorizing URL. External audio bypasses
+the primary media disk cache so session-bound URLs are not retained in its cache index. Actual codec
+and channel-layout support still depends on the device, OS, browser, and selected backend; stereo AAC
+is the broadest compatibility profile.
 
 `selectAudioTrack(...)`, `selectSubtitleTrack(...)` and `disableSubtitles()` return `TrackSelectionResult`. `Selected`, `Auto` and `Disabled` mean the request was applied; `NotFound`, `NotSupported` and `Failed` mean the player state was not changed.
 

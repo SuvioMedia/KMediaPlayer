@@ -8,53 +8,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import dev.nucleusframework.window.tao.LinuxTextureViewProducerInfo
-import dev.nucleusframework.window.tao.NucleusDrmFormat
-import dev.nucleusframework.window.tao.TextureColorEncoding
-import dev.nucleusframework.window.tao.TextureColorInfo
-import dev.nucleusframework.window.tao.TextureViewFrame
-import dev.nucleusframework.window.tao.TextureViewHostCapabilities
-import dev.nucleusframework.window.tao.TextureViewHostDynamicRange
-import dev.nucleusframework.window.tao.TextureViewHostPixelFormat
-import dev.nucleusframework.window.tao.TextureViewHostPresentationState
-import dev.nucleusframework.window.tao.TextureViewStreamController
-import dev.nucleusframework.window.tao.WindowsTextureViewProducerInfo
-import dev.nucleusframework.window.tao.nucleusD3D11SharedTextureSource
-import dev.nucleusframework.window.tao.nucleusDmaBufTextureSource
-import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
-import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
-import io.github.kdroidfilter.composemediaplayer.ColorPipelineRenderer
-import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
-import io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities
-import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
-import io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities
-import io.github.kdroidfilter.composemediaplayer.DolbyVisionInfo
-import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
-import io.github.kdroidfilter.composemediaplayer.DynamicMetadataHandling
-import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableException
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableReason
+import io.github.kdroidfilter.composemediaplayer.MpvMacRenderer
 import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
-import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
-import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
-import io.github.kdroidfilter.composemediaplayer.VideoColorMatrix
-import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineStatus
-import io.github.kdroidfilter.composemediaplayer.VideoColorPrimaries
-import io.github.kdroidfilter.composemediaplayer.VideoColorRange
-import io.github.kdroidfilter.composemediaplayer.VideoColorTransfer
-import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
-import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.desktop.TaoPlaybackSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvEngine
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
@@ -70,9 +38,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -85,103 +50,46 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.math.sqrt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-internal enum class MpvWindowsTextureRenderResult {
-    PRODUCED,
-    IDLE,
-    RETRY,
-}
-
 @Stable
 @OptIn(ExperimentalComposeMediaPlayerBackendApi::class)
 internal class MpvVideoPlayerState(
     internal val runtimeConfig: MpvRuntimeConfig,
     private val engine: LibMpvEngine,
+    initialMacVkHostView: Long = 0L,
+    initialMacBackendFallbackReason: String? = null,
 ) : AbstractMpvVideoPlayerState(),
     VideoPlayerSurfaceProvider,
     TaoPlaybackSurfaceProvider {
     private val disposed = AtomicBoolean(false)
     private val renderLock = ReentrantLock()
-    private val windowsTextureExecutor: ExecutorService =
-        Executors.newSingleThreadExecutor { task ->
-            Thread(task, "KMediaPlayer-MPV-Windows-Texture").apply { isDaemon = true }
-        }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val eventJob: Job
     private val frameState = mutableStateOf<ImageBitmap?>(null)
     private val framePool = MpvFramePool(runtimeConfig.maxRenderPixels)
-    internal val windowsTextureStreamController = TextureViewStreamController()
-    internal val macTextureStreamController = TextureViewStreamController()
-    internal val linuxTextureStreamController = TextureViewStreamController()
-    private val mutableColorPipelineStatus =
-        MutableStateFlow(
-            VideoColorPipelineStatus(
-                requestedDynamicRangePolicy = runtimeConfig.dynamicRangePolicy,
-                requestedDolbyVisionPolicy = runtimeConfig.dolbyVisionPolicy,
-                surface =
-                    if (runtimeConfig.desktopVideoSurfaceMode == DesktopVideoSurfaceMode.COMPOSE) {
-                        VideoSurfaceKind.COMPOSE_CANVAS
-                    } else {
-                        VideoSurfaceKind.TEXTURE_VIEW
-                    },
-            ),
-        )
-
-    @Volatile
-    private var nativeWindowsRenderer = 0L
-
-    @Volatile
-    private var windowsTextureHostCapabilities = TextureViewHostCapabilities.UNAVAILABLE
-
-    @Volatile
-    private var windowsTextureProducerSerial = 0L
-
-    @Volatile
-    private var windowsTextureSubmittedSerial = 0L
-
-    @Volatile
-    private var windowsTextureSubmittedHostGeneration = 0L
-
-    @Volatile
-    private var windowsTextureSubmittedPresentCount = 0L
-
-    @Volatile
-    private var windowsTextureConfirmedSerial = 0L
-
-    @Volatile
-    private var windowsTextureConfirmedHostGeneration = 0L
-
-    private val windowsTextureRenderCalls = AtomicLong()
-    private val windowsTextureRenderNanos = AtomicLong()
-    private val windowsTextureMaximumRenderNanos = AtomicLong()
-
-    @Volatile
-    private var sourceColorInfo = VideoColorInfo()
-
-    private var windowsTextureAdapterLuid = 0L
-    private var windowsTextureRendererExtendedLinear = false
-    private var windowsTextureConfiguration: MpvWindowsTextureConfiguration? = null
-    private var desktopTextureFailurePublished = false
-
-    private fun <T> onWindowsTextureThread(block: () -> T): T =
-        windowsTextureExecutor.submit<T> { block() }.get()
-
-    @Volatile
-    private var desktopTextureFailureDetail: String? = null
 
     @Volatile
     private var nativeMacRenderer = 0L
+
+    @Volatile
+    private var nativeMacVkHostView = initialMacVkHostView
+
+    @Volatile
+    private var nativeMacVkActive = initialMacVkHostView != 0L
+
+    @Volatile
+    private var nativeMacBackendFallbackReason: String? = initialMacBackendFallbackReason
+
+    private var currentSourceUri: String? = null
+    private var currentSourceWantsPlayback = false
+    private var macVkPlaybackFallbackAttempted = false
     private var nativeMacColorMode = MpvMacOutputColorMode.SDR
-    private var macTextureConfiguration: MpvMacTextureConfiguration? = null
     private var nativeMacProjectionEnabled = false
     private var nativeMacContentScaleMode = MpvMacContentScaleMode.FIT
 
@@ -190,53 +98,6 @@ internal class MpvVideoPlayerState(
 
     @Volatile
     private var nativeMacSurfaceAttached = false
-
-    @Volatile
-    private var macTextureHostCapabilities = TextureViewHostCapabilities.UNAVAILABLE
-
-    @Volatile
-    private var macTextureProducerSerial = 0L
-
-    @Volatile
-    private var macTextureSubmittedSerial = 0L
-
-    @Volatile
-    private var macTextureSubmittedHostGeneration = 0L
-
-    @Volatile
-    private var macTextureSubmittedPresentCount = 0L
-
-    @Volatile
-    private var macTextureConfirmedSerial = 0L
-
-    @Volatile
-    private var macTextureConfirmedHostGeneration = 0L
-
-    @Volatile
-    private var nativeLinuxRenderer = 0L
-
-    @Volatile
-    private var linuxTextureHostCapabilities = TextureViewHostCapabilities.UNAVAILABLE
-
-    private var linuxTextureConfiguration: MpvLinuxTextureConfiguration? = null
-
-    @Volatile
-    private var linuxTextureProducerSerial = 0L
-
-    @Volatile
-    private var linuxTextureSubmittedSerial = 0L
-
-    @Volatile
-    private var linuxTextureSubmittedHostGeneration = 0L
-
-    @Volatile
-    private var linuxTextureSubmittedPresentCount = 0L
-
-    @Volatile
-    private var linuxTextureConfirmedSerial = 0L
-
-    @Volatile
-    private var linuxTextureConfirmedHostGeneration = 0L
 
     @Volatile
     private var resumePlaybackAfterNativeSurfaceAttach = false
@@ -308,28 +169,16 @@ internal class MpvVideoPlayerState(
     override val diagnostics: PlaybackDiagnostics
         get() {
             val nativePresentation =
-                if (isMacHost()) {
-                    renderLock.withLock {
-                        nativeMacRenderer
-                            .takeIf { it != 0L }
-                            ?.let { renderer ->
-                                runCatching {
-                                    MpvMacNativeBridge.nGetPresentationDiagnostics(renderer)
-                                }.getOrNull()
-                            }
-                    }
-                } else {
-                    null
+                renderLock.withLock {
+                    nativeMacRenderer
+                        .takeIf { it != 0L }
+                        ?.let { renderer ->
+                            runCatching {
+                                MpvMacNativeBridge.nGetPresentationDiagnostics(renderer)
+                            }.getOrNull()
+                        }
                 }
-            val producedTextureFrames =
-                when {
-                    isWindowsHost() -> windowsTextureProducerSerial
-                    isMacHost() -> macTextureProducerSerial
-                    else -> linuxTextureProducerSerial
-                }.takeIf { frames -> frames > 0L }
-            val renderedFrames =
-                nativePresentation?.getOrNull(NEW_VIDEO_FRAME_COUNT_INDEX)
-                    ?: producedTextureFrames
+            val renderedFrames = nativePresentation?.getOrNull(NEW_VIDEO_FRAME_COUNT_INDEX)
             val droppedFrames = droppedVideoFrames
             val presentationNotes =
                 nativePresentation
@@ -349,16 +198,6 @@ internal class MpvVideoPlayerState(
                             "renderAvgUs=$averageRenderMicros renderMaxUs=$maximumRenderMicros " +
                             "flushAvgUs=$averageFlushMicros flushMaxUs=$maximumFlushMicros"
                     }.orEmpty()
-            val windowsRenderCount = windowsTextureRenderCalls.get()
-            val windowsPresentationNotes =
-                if (isWindowsHost() && windowsRenderCount > 0L) {
-                    val averageMicros = windowsTextureRenderNanos.get() / windowsRenderCount / 1_000L
-                    val maximumMicros = windowsTextureMaximumRenderNanos.get() / 1_000L
-                    " windowsTextureRenders=$windowsRenderCount " +
-                        "windowsRenderAvgUs=$averageMicros windowsRenderMaxUs=$maximumMicros"
-                } else {
-                    ""
-                }
             return PlaybackDiagnostics(
                 totalVideoFrames =
                     if (renderedFrames != null && droppedFrames != null) {
@@ -372,29 +211,22 @@ internal class MpvVideoPlayerState(
                 videoWidth = metadata.width,
                 videoHeight = metadata.height,
                 bitrate = metadata.bitrate?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt(),
-                notes = renderingInfo.notes + presentationNotes + windowsPresentationNotes + mpvTimingNotes,
+                notes = renderingInfo.notes + presentationNotes + mpvTimingNotes,
             )
         }
 
-    internal val usesMacColorManagedTexture: Boolean
-        get() =
-            isMacHost() &&
-                runtimeConfig.desktopVideoSurfaceMode != DesktopVideoSurfaceMode.COMPOSE &&
-                !disposed.get() &&
-                nativeMacRenderer != 0L
-
-    internal val usesWindowsColorManagedTexture: Boolean
-        get() =
-            isWindowsHost() &&
-                runtimeConfig.desktopVideoSurfaceMode != DesktopVideoSurfaceMode.COMPOSE
-
-    internal val usesLinuxColorManagedTexture: Boolean
-        get() =
-            isLinuxHost() &&
-                runtimeConfig.desktopVideoSurfaceMode != DesktopVideoSurfaceMode.COMPOSE
+    internal val canUseNativeMacSurface: Boolean
+        get() = !disposed.get() && hasNativeMacGpuSurface
 
     init {
-        initializeNativeMacRendererBeforePlayback()
+        if (nativeMacVkHostView != 0L) {
+            initializeMacVkRendererBeforePlayback()
+        } else {
+            initializeNativeMacRendererBeforePlayback()
+        }
+        if (!hasNativeMacGpuSurface && nativeMacBackendFallbackReason != null) {
+            publishSoftwareRenderingInfo()
+        }
         eventJob = scope.launch { eventLoop() }
     }
 
@@ -408,9 +240,6 @@ internal class MpvVideoPlayerState(
                     setOf("file", "http", "https", "rtmp", "rtsp")
                 },
         )
-
-    override val colorPipelineStatus: StateFlow<VideoColorPipelineStatus> =
-        mutableColorPipelineStatus.asStateFlow()
 
     override val preciseCurrentTime: Duration
         get() =
@@ -447,7 +276,7 @@ internal class MpvVideoPlayerState(
 
     override fun playBackend() {
         renderLock.withLock {
-            if (nativeMacRenderer != 0L && (!nativeMacSurfaceAttached || !nativeMacDecodeReady)) {
+            if (hasNativeMacGpuSurface && (!nativeMacSurfaceAttached || !nativeMacDecodeReady)) {
                 resumePlaybackAfterNativeSurfaceAttach = true
                 engine.setProperty("pause", "yes")
             } else {
@@ -504,14 +333,15 @@ internal class MpvVideoPlayerState(
 
         droppedVideoFrames = null
         maximumAvSyncOffsetMs = null
-        sourceColorInfo = VideoColorInfo()
-        updateDesktopColorPipelineStatus()
+        currentSourceUri = normalizedUri
+        currentSourceWantsPlayback = initializePlayerState == InitialPlayerState.PLAY
+        macVkPlaybackFallbackAttempted = false
         beginSourcePreparation(normalizedUri, initializePlayerState)
 
         try {
             renderLock.withLock {
                 val wantsPlayback = initializePlayerState == InitialPlayerState.PLAY
-                val waitForNativePipeline = nativeMacRenderer != 0L
+                val waitForNativePipeline = hasNativeMacGpuSurface
                 nativeMacDecodeReady = !waitForNativePipeline
                 awaitingNativeMacDecodeRestart = false
                 resumePlaybackAfterNativeSurfaceAttach = wantsPlayback && waitForNativePipeline
@@ -608,29 +438,10 @@ internal class MpvVideoPlayerState(
         nativeMacDecodeReady = false
         awaitingNativeMacDecodeRestart = false
         resumePlaybackAfterNativeSurfaceAttach = false
+        currentSourceUri = null
+        currentSourceWantsPlayback = false
+        macVkPlaybackFallbackAttempted = false
         frameState.value = null
-        windowsTextureProducerSerial = 0L
-        windowsTextureSubmittedSerial = 0L
-        windowsTextureConfirmedSerial = 0L
-        desktopTextureFailurePublished = false
-        desktopTextureFailureDetail = null
-        windowsTextureStreamController.clear()
-        macTextureStreamController.clear()
-        macTextureProducerSerial = 0L
-        macTextureSubmittedSerial = 0L
-        macTextureSubmittedHostGeneration = 0L
-        macTextureSubmittedPresentCount = 0L
-        macTextureConfirmedSerial = 0L
-        macTextureConfirmedHostGeneration = 0L
-        linuxTextureStreamController.clear()
-        linuxTextureProducerSerial = 0L
-        linuxTextureSubmittedSerial = 0L
-        linuxTextureSubmittedHostGeneration = 0L
-        linuxTextureSubmittedPresentCount = 0L
-        linuxTextureConfirmedSerial = 0L
-        linuxTextureConfirmedHostGeneration = 0L
-        sourceColorInfo = VideoColorInfo()
-        updateDesktopColorPipelineStatus()
         resetSourceState()
     }
 
@@ -644,10 +455,16 @@ internal class MpvVideoPlayerState(
         try {
             renderLock.withLock {
                 if (disposed.get() || !_hasMedia) return
-                if (nativeMacRenderer != 0L || nativeWindowsRenderer != 0L || nativeLinuxRenderer != 0L) {
-                    // Texture mode owns mpv's sole render context. CPU rendering is available only
-                    // through the explicit COMPOSE option, where this renderer is never created.
-                    return
+                if (hasNativeMacGpuSurface) {
+                    // A headless consumer or a failed native-view attachment can still request the
+                    // software frame API. The eagerly-created macOS renderer owns mpv's only render
+                    // context, so hand it back before rendering instead of leaving playback paused
+                    // forever with neither a mounted NSView nor a software frame.
+                    if (nativeMacSurfaceAttached) return
+                    nativeMacDecodeReady = false
+                    awaitingNativeMacDecodeRestart = false
+                    resumePlaybackAfterNativeSurfaceAttach = false
+                    detachNativeMacSurfaceLocked(restoreSoftwareRenderer = true)
                 }
                 val target = framePool.next(width, height)
                 engine.render(
@@ -668,749 +485,6 @@ internal class MpvVideoPlayerState(
         }
     }
 
-    /** Renders libmpv directly into the shared D3D11 texture consumed by Nucleus. */
-    internal fun renderWindowsTextureFrame(
-        requestedWidth: Int,
-        requestedHeight: Int,
-    ): MpvWindowsTextureRenderResult {
-        if (!usesWindowsColorManagedTexture || disposed.get() || !_hasMedia) {
-            return MpvWindowsTextureRenderResult.IDLE
-        }
-        if (requestedWidth <= 0 || requestedHeight <= 0) return MpvWindowsTextureRenderResult.IDLE
-        val host = windowsTextureHostCapabilities
-        val producer =
-            host.producerInfo as? WindowsTextureViewProducerInfo
-                ?: return MpvWindowsTextureRenderResult.RETRY
-        if (host.presentationState == TextureViewHostPresentationState.UNAVAILABLE) {
-            return MpvWindowsTextureRenderResult.RETRY
-        }
-        if (runtimeConfig.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR &&
-            host.actualDynamicRange != TextureViewHostDynamicRange.HDR
-        ) {
-            publishDesktopTextureFailure(
-                message = "The active Windows output cannot present the required HDR texture pipeline.",
-                reason = ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
-            )
-            return MpvWindowsTextureRenderResult.IDLE
-        }
-
-        val (width, height) = constrainMpvRenderSize(requestedWidth, requestedHeight, runtimeConfig.maxRenderPixels)
-        val configuration = windowsTextureConfiguration(host)
-        // Ordinary libmpv property calls can wait for the core. Never make
-        // them while holding renderLock: diagnostics and host callbacks also
-        // need that lock, and render control may request an update while a
-        // property call is in flight.
-        configureWindowsTextureOutput(configuration)
-        return try {
-            renderLock.withLock {
-                if (disposed.get() || !_hasMedia) return@withLock MpvWindowsTextureRenderResult.IDLE
-                ensureWindowsTextureRendererLocked(
-                    adapterLuid = producer.adapterLuid,
-                    extendedLinear = configuration.extendedLinear,
-                    width = width,
-                    height = height,
-                ) ?: return@withLock MpvWindowsTextureRenderResult.IDLE
-                // Recreating a context clears the negotiation marker while
-                // detaching the old producer. The properties were already
-                // applied above, outside the render critical section.
-                windowsTextureConfiguration = configuration
-                val renderStartedAtNanos = System.nanoTime()
-                val serial =
-                    try {
-                        onWindowsTextureThread {
-                            MpvWindowsTextureBridge.nRenderFrame(
-                                nativeRenderer = nativeWindowsRenderer,
-                                width = width,
-                                height = height,
-                            )
-                        }
-                    } finally {
-                        recordWindowsTextureRenderDuration(System.nanoTime() - renderStartedAtNanos)
-                    }
-                if (serial < 0L) {
-                    onWindowsTextureThread {
-                        MpvWindowsTextureBridge.nGetFailure(nativeWindowsRenderer)
-                    }?.let(::publishDesktopTextureFailure)
-                    return@withLock MpvWindowsTextureRenderResult.IDLE
-                }
-                if (serial == 0L) {
-                    // The keyed mutex was busy. Retry promptly on the dedicated
-                    // producer dispatcher rather than waiting for another UI
-                    // frame; no error occurred and the previous texture remains
-                    // valid for composition.
-                    return@withLock MpvWindowsTextureRenderResult.RETRY
-                }
-                val values =
-                    onWindowsTextureThread {
-                        MpvWindowsTextureBridge.nGetTextureOutputInfo(nativeWindowsRenderer)
-                    }
-                        ?: return@withLock MpvWindowsTextureRenderResult.RETRY
-                val output =
-                    values.toWindowsTextureOutput(configuration.extendedLinear)
-                        ?: return@withLock MpvWindowsTextureRenderResult.RETRY
-                if (output.adapterLuid != producer.adapterLuid) {
-                    publishDesktopTextureFailure(
-                        "The MPV texture and Nucleus composition surface use different Windows adapters.",
-                    )
-                    return@withLock MpvWindowsTextureRenderResult.IDLE
-                }
-                val isNewFrame = serial > windowsTextureProducerSerial
-                windowsTextureProducerSerial = maxOf(windowsTextureProducerSerial, serial)
-                if (isNewFrame) {
-                    val colorInfo =
-                        if (output.extendedLinear) {
-                            mpvExtendedLinearColorInfo(configuration.targetPeakNits)
-                        } else {
-                            TextureColorInfo.SRGB_PREMULTIPLIED
-                        }
-                    windowsTextureStreamController.submitFrame(
-                        TextureViewFrame(
-                            source =
-                                nucleusD3D11SharedTextureSource(
-                                    sharedHandle = output.sharedHandle,
-                                    widthPx = output.width,
-                                    heightPx = output.height,
-                                    colorInfo = colorInfo,
-                            ),
-                        ),
-                    )
-                    onWindowsTextureFrameSubmitted()
-                    MpvWindowsTextureRenderResult.PRODUCED
-                } else {
-                    MpvWindowsTextureRenderResult.IDLE
-                }
-            }
-        } catch (_: Throwable) {
-            publishDesktopTextureFailure("libmpv could not render the shared Windows video texture.")
-            MpvWindowsTextureRenderResult.IDLE
-        }
-    }
-
-    /** Records that Compose invalidated TextureView for the producer frame just rendered. */
-    internal fun onWindowsTextureFrameSubmitted() {
-        val serial = windowsTextureProducerSerial
-        if (serial <= 0L) return
-        val host = windowsTextureHostCapabilities
-        windowsTextureSubmittedSerial = serial
-        windowsTextureSubmittedHostGeneration = host.generation
-        windowsTextureSubmittedPresentCount = host.presentedFrameCount
-    }
-
-    private fun recordWindowsTextureRenderDuration(durationNanos: Long) {
-        val normalized = durationNanos.coerceAtLeast(0L)
-        windowsTextureRenderCalls.incrementAndGet()
-        windowsTextureRenderNanos.addAndGet(normalized)
-        windowsTextureMaximumRenderNanos.updateAndGet { previous -> maxOf(previous, normalized) }
-    }
-
-    /** Applies output changes and confirms a producer frame only after a later system Present. */
-    internal fun onWindowsTextureHostCapabilitiesChanged(capabilities: TextureViewHostCapabilities) {
-        windowsTextureHostCapabilities = capabilities
-        updateDesktopColorPipelineStatus()
-        val producer = capabilities.producerInfo as? WindowsTextureViewProducerInfo
-        if (!renderLock.tryLock()) return
-        try {
-            if (nativeWindowsRenderer != 0L &&
-                producer != null &&
-                producer.adapterLuid != windowsTextureAdapterLuid
-            ) {
-                detachWindowsTextureRendererLocked(restoreSoftwareRenderer = false)
-            }
-            val submitted = windowsTextureSubmittedSerial
-            if (nativeWindowsRenderer != 0L &&
-                submitted > 0L &&
-                submitted > windowsTextureConfirmedSerial &&
-                capabilities.hasPresentedMpvTextureFrameAfter(
-                    submittedGeneration = windowsTextureSubmittedHostGeneration,
-                    submittedPresentCount = windowsTextureSubmittedPresentCount,
-                    outputRequirement =
-                        if (windowsTextureConfiguration?.extendedLinear == true) {
-                            MpvTextureOutputRequirement.FP16_SCRGB_OUTPUT
-                        } else {
-                            MpvTextureOutputRequirement.KNOWN_OUTPUT
-                        },
-                )
-            ) {
-                onWindowsTextureThread {
-                    MpvWindowsTextureBridge.nReportPresented(nativeWindowsRenderer, submitted)
-                }
-                windowsTextureConfirmedSerial = submitted
-                windowsTextureConfirmedHostGeneration = capabilities.generation
-                mutateSnapshotState {
-                    renderingInfo.notes = windowsTextureRenderingNotes(confirmedPresent = true)
-                }
-                updateDesktopColorPipelineStatus()
-            }
-        } finally {
-            renderLock.unlock()
-        }
-    }
-
-    private fun ensureWindowsTextureRendererLocked(
-        adapterLuid: Long,
-        extendedLinear: Boolean,
-        width: Int,
-        height: Int,
-    ): Long? {
-        if (!MpvWindowsTextureBridge.isAvailable || adapterLuid == 0L) {
-            publishDesktopTextureFailure("The Windows MPV TextureView bridge is unavailable.")
-            return null
-        }
-        if (nativeWindowsRenderer != 0L &&
-            windowsTextureAdapterLuid == adapterLuid &&
-            windowsTextureRendererExtendedLinear == extendedLinear
-        ) {
-            return nativeWindowsRenderer
-        }
-
-        val selectedVideo = suspendVideoOutputForContextSwitch()
-        if (nativeWindowsRenderer != 0L) {
-            detachWindowsTextureRendererLocked(restoreSoftwareRenderer = false)
-        }
-        val target =
-            try {
-                engine.beginExternalRendering()
-            } catch (_: RuntimeException) {
-                resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-                publishDesktopTextureFailure("libmpv rejected the Windows GPU render context.")
-                return null
-            }
-        val renderer =
-            runCatching {
-                onWindowsTextureThread {
-                    MpvWindowsTextureBridge.createRenderer(
-                        mpvHandle = target.mpvHandle,
-                        libraryLoadName = target.libraryLoadName,
-                        adapterLuid = adapterLuid,
-                        extendedLinear = extendedLinear,
-                        width = width,
-                        height = height,
-                    )
-                }
-            }.getOrDefault(0L)
-        if (renderer == 0L) {
-            runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
-            resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-            publishDesktopTextureFailure("The Windows MPV GPU texture renderer could not be created.")
-            return null
-        }
-
-        nativeWindowsRenderer = renderer
-        desktopTextureFailurePublished = false
-        desktopTextureFailureDetail = null
-        windowsTextureAdapterLuid = adapterLuid
-        windowsTextureRendererExtendedLinear = extendedLinear
-        windowsTextureConfiguration = null
-        windowsTextureProducerSerial = 0L
-        windowsTextureSubmittedSerial = 0L
-        windowsTextureConfirmedSerial = 0L
-        windowsTextureConfirmedHostGeneration = 0L
-        frameState.value = null
-        // ANGLE is the correct Windows render API, but direct D3D11VA surface
-        // interop in third-party libmpv builds is not uniformly stable for
-        // Main10/HEVC. Keep hardware decode while taking mpv's explicit copy
-        // route into the color-managed RGBA16F target.
-        runCatching { engine.setProperty("hwdec", WINDOWS_TEXTURE_HWDEC) }
-        resumeVideoOutputAfterContextSwitch(selectedVideo, WINDOWS_TEXTURE_HWDEC)
-        mutateSnapshotState {
-            renderingInfo.videoRenderer =
-                if (extendedLinear) {
-                    "libmpv GPU TextureView (D3D11 RGBA16F/linear BT.709)"
-                } else {
-                    "libmpv GPU TextureView (D3D11 RGBA8/sRGB)"
-                }
-            renderingInfo.notes = windowsTextureRenderingNotes(confirmedPresent = false)
-        }
-        return renderer
-    }
-
-    private fun windowsTextureConfiguration(host: TextureViewHostCapabilities): MpvWindowsTextureConfiguration {
-        val wantsExtended =
-            sourceColorInfo.isHdr &&
-                runtimeConfig.dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR &&
-                host.actualDynamicRange == TextureViewHostDynamicRange.HDR
-        val peak =
-            if (wantsExtended) {
-                host.maximumLuminanceNits?.coerceAtLeast(MPV_SDR_REFERENCE_WHITE_NITS)
-                    ?: MPV_DEFAULT_HDR_PEAK_NITS
-            } else {
-                MPV_SDR_REFERENCE_WHITE_NITS
-            }
-        return MpvWindowsTextureConfiguration(wantsExtended, peak)
-    }
-
-    private fun configureWindowsTextureOutput(requested: MpvWindowsTextureConfiguration) {
-        if (windowsTextureConfiguration == requested) return
-
-        runCatching {
-            engine.setProperty("fbo-format", if (requested.extendedLinear) "rgba16f" else "rgba8")
-        }
-        runCatching { engine.setProperty("target-prim", "bt.709") }
-        runCatching { engine.setProperty("hdr-reference-white", MPV_SDR_REFERENCE_WHITE_NITS.toString()) }
-        runCatching { engine.setProperty("target-peak", requested.targetPeakNits.toString()) }
-        if (requested.extendedLinear) {
-            // libmpv's render API still uses the legacy gl_video backend. Its
-            // scRGB target encoding is not the SDR-white-relative linear signal
-            // expected by TextureView. A linear target is normalized to
-            // target-peak; TextureColorInfo above carries that reference.
-            runCatching { engine.setProperty("target-trc", "linear") }
-        } else {
-            runCatching { engine.setProperty("target-trc", "srgb") }
-        }
-        windowsTextureConfiguration = requested
-    }
-
-    private fun detachWindowsTextureRendererLocked(restoreSoftwareRenderer: Boolean) {
-        val renderer = nativeWindowsRenderer
-        if (renderer == 0L) return
-        nativeWindowsRenderer = 0L
-        windowsTextureAdapterLuid = 0L
-        windowsTextureRendererExtendedLinear = false
-        windowsTextureConfiguration = null
-        windowsTextureProducerSerial = 0L
-        windowsTextureSubmittedSerial = 0L
-        windowsTextureConfirmedSerial = 0L
-        windowsTextureConfirmedHostGeneration = 0L
-        windowsTextureStreamController.clear()
-        try {
-            onWindowsTextureThread {
-                MpvWindowsTextureBridge.nDetach(renderer)
-            }
-        } finally {
-            engine.endExternalRendering(restoreSoftwareRenderer)
-        }
-    }
-
-    /** Renders libmpv into one GBM buffer from the rotating DMA-BUF stream. */
-    internal fun renderLinuxTextureFrame(
-        requestedWidth: Int,
-        requestedHeight: Int,
-    ): Boolean {
-        if (!usesLinuxColorManagedTexture || disposed.get() || !_hasMedia) return false
-        if (requestedWidth <= 0 || requestedHeight <= 0) return false
-        val host = linuxTextureHostCapabilities
-        if (host.presentationState == TextureViewHostPresentationState.UNAVAILABLE) return false
-        if (runtimeConfig.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR &&
-            host.actualDynamicRange != TextureViewHostDynamicRange.HDR
-        ) {
-            publishDesktopTextureFailure(
-                message = "The active Linux output cannot present the required HDR texture pipeline.",
-                reason = ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
-            )
-            return false
-        }
-        val configuration = resolveLinuxTextureConfiguration(host) ?: return false
-        val (width, height) =
-            constrainMpvRenderSize(requestedWidth, requestedHeight, runtimeConfig.maxRenderPixels)
-        return try {
-            renderLock.withLock {
-                if (disposed.get() || !_hasMedia) return@withLock false
-                val renderer = ensureLinuxTextureRendererLocked(configuration) ?: return@withLock false
-                applyLinuxTextureOutputProperties(configuration)
-                val serial = MpvLinuxTextureBridge.nRenderFrame(renderer, width, height)
-                if (serial <= 0L) {
-                    MpvLinuxTextureBridge.nGetFailure(renderer)?.let(::publishDesktopTextureFailure)
-                    return@withLock false
-                }
-                if (serial <= linuxTextureProducerSerial) return@withLock false
-                val values = MpvLinuxTextureBridge.nAcquireTextureFrame(renderer, serial)
-                val output = values?.toLinuxTextureOutput()
-                if (output == null) {
-                    MpvLinuxTextureBridge.nDiscardTextureFrame(renderer, serial)
-                    return@withLock false
-                }
-                if (output.fourcc != configuration.fourcc ||
-                    output.extendedLinear != configuration.extendedLinear
-                ) {
-                    MpvLinuxTextureBridge.nReleaseTextureFrame(
-                        renderer,
-                        output.generation,
-                        output.serial,
-                        output.frameFd,
-                        output.acquireFenceFd,
-                    )
-                    publishDesktopTextureFailure("The Linux MPV texture does not match the negotiated host format.")
-                    return@withLock false
-                }
-                val frame =
-                    TextureViewFrame(
-                        source =
-                            nucleusDmaBufTextureSource(
-                                fd = output.frameFd,
-                                widthPx = output.width,
-                                heightPx = output.height,
-                                stride = output.stride,
-                                fourcc = output.fourcc,
-                                offset = output.offset,
-                                modifier = output.modifier,
-                                colorInfo =
-                                    if (output.extendedLinear) {
-                                        mpvExtendedLinearColorInfo(configuration.targetPeakNits)
-                                    } else {
-                                        TextureColorInfo.SRGB_PREMULTIPLIED
-                                    },
-                            ),
-                        acquireFenceFd = output.acquireFenceFd,
-                        onReleased = { releaseFenceFd ->
-                            MpvLinuxTextureBridge.nReleaseTextureFrame(
-                                nativeRenderer = renderer,
-                                generation = output.generation,
-                                serial = output.serial,
-                                frameFd = output.frameFd,
-                                releaseFenceFd = releaseFenceFd,
-                            )
-                        },
-                    )
-                val submitted = runCatching { linuxTextureStreamController.submitFrame(frame) }.isSuccess
-                if (!submitted) {
-                    MpvLinuxTextureBridge.nReleaseTextureFrame(
-                        renderer,
-                        output.generation,
-                        output.serial,
-                        output.frameFd,
-                        output.acquireFenceFd,
-                    )
-                    return@withLock false
-                }
-                linuxTextureProducerSerial = serial
-                linuxTextureSubmittedSerial = serial
-                linuxTextureSubmittedHostGeneration = host.generation
-                linuxTextureSubmittedPresentCount = host.presentedFrameCount
-                true
-            }
-        } catch (_: Throwable) {
-            publishDesktopTextureFailure("libmpv could not render the shared Linux video texture.")
-            false
-        }
-    }
-
-    /** Confirms the exact producer generation only after Nucleus reports a later Present. */
-    internal fun onLinuxTextureHostCapabilitiesChanged(capabilities: TextureViewHostCapabilities) {
-        linuxTextureHostCapabilities = capabilities
-        updateDesktopColorPipelineStatus()
-        val producer = capabilities.producerInfo as? LinuxTextureViewProducerInfo
-        if (!renderLock.tryLock()) return
-        try {
-            if (nativeLinuxRenderer != 0L &&
-                (
-                    producer?.renderNode == null ||
-                        producer.renderNode != linuxTextureConfiguration?.renderNode
-                )
-            ) {
-                detachLinuxTextureRendererLocked(restoreSoftwareRenderer = false)
-            }
-            val submitted = linuxTextureSubmittedSerial
-            if (nativeLinuxRenderer != 0L &&
-                submitted > linuxTextureConfirmedSerial &&
-                capabilities.hasPresentedMpvTextureFrameAfter(
-                    submittedGeneration = linuxTextureSubmittedHostGeneration,
-                    submittedPresentCount = linuxTextureSubmittedPresentCount,
-                    outputRequirement =
-                        if (linuxTextureConfiguration?.extendedLinear == true) {
-                            MpvTextureOutputRequirement.HDR_TEN_BIT_OUTPUT
-                        } else {
-                            MpvTextureOutputRequirement.KNOWN_OUTPUT
-                        },
-                )
-            ) {
-                MpvLinuxTextureBridge.nReportPresented(nativeLinuxRenderer, submitted)
-                linuxTextureConfirmedSerial = submitted
-                linuxTextureConfirmedHostGeneration = capabilities.generation
-                mutateSnapshotState {
-                    renderingInfo.notes = linuxTextureRenderingNotes(confirmedPresent = true)
-                }
-                updateDesktopColorPipelineStatus()
-            }
-        } finally {
-            renderLock.unlock()
-        }
-    }
-
-    private fun resolveLinuxTextureConfiguration(host: TextureViewHostCapabilities): MpvLinuxTextureConfiguration? {
-        val producer = host.producerInfo as? LinuxTextureViewProducerInfo
-        val renderNode = producer?.renderNode
-        if (producer == null || renderNode == null) {
-            publishDesktopTextureFailure("The active Linux TextureView host did not expose its DRM render node.")
-            return null
-        }
-        val hdrFormat = producer.formats.firstOrNull { it.format == NucleusDrmFormat.ABGR16161616F }
-        val sdrFormat = producer.formats.firstOrNull { it.format == NucleusDrmFormat.ARGB8888 }
-        val wantsExtended =
-            sourceColorInfo.isHdr &&
-                runtimeConfig.dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR &&
-                host.actualDynamicRange == TextureViewHostDynamicRange.HDR
-        if (wantsExtended &&
-            hdrFormat == null &&
-            runtimeConfig.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR
-        ) {
-            publishDesktopTextureFailure(
-                message = "The active Linux GPU cannot import the required FP16 video texture.",
-                reason = ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
-            )
-            return null
-        }
-        val selected = if (wantsExtended && hdrFormat != null) hdrFormat else sdrFormat
-        if (selected == null) {
-            publishDesktopTextureFailure("The active Linux GPU exposes no compatible TextureView DMA-BUF format.")
-            return null
-        }
-        val extended = selected.format == NucleusDrmFormat.ABGR16161616F
-        val peak =
-            if (extended) {
-                host.maximumLuminanceNits?.coerceAtLeast(MPV_SDR_REFERENCE_WHITE_NITS)
-                    ?: MPV_DEFAULT_HDR_PEAK_NITS
-            } else {
-                MPV_SDR_REFERENCE_WHITE_NITS
-            }
-        return MpvLinuxTextureConfiguration(
-            renderNode = renderNode,
-            fourcc = selected.format,
-            modifiers = selected.modifiers,
-            extendedLinear = extended,
-            targetPeakNits = peak,
-        )
-    }
-
-    private fun ensureLinuxTextureRendererLocked(configuration: MpvLinuxTextureConfiguration): Long? {
-        if (!MpvLinuxTextureBridge.isAvailable) {
-            publishDesktopTextureFailure("The Linux MPV TextureView bridge is unavailable.")
-            return null
-        }
-        if (nativeLinuxRenderer != 0L && linuxTextureConfiguration == configuration) {
-            return nativeLinuxRenderer
-        }
-        val selectedVideo = suspendVideoOutputForContextSwitch()
-        if (nativeLinuxRenderer != 0L) {
-            detachLinuxTextureRendererLocked(restoreSoftwareRenderer = false)
-        }
-        val target =
-            try {
-                engine.beginExternalRendering()
-            } catch (_: RuntimeException) {
-                resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-                publishDesktopTextureFailure("libmpv rejected the Linux GPU render context.")
-                return null
-            }
-        val renderer =
-            runCatching {
-                MpvLinuxTextureBridge.nCreateRenderer(
-                    mpvHandle = target.mpvHandle,
-                    libraryLoadName = target.libraryLoadName,
-                    renderNode = configuration.renderNode,
-                    fourcc = configuration.fourcc,
-                    modifiers = configuration.modifiers.toLongArray(),
-                    extendedLinear = configuration.extendedLinear,
-                )
-            }.getOrDefault(0L)
-        if (renderer == 0L) {
-            runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
-            resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-            publishDesktopTextureFailure("The Linux MPV DMA-BUF texture renderer could not be created.")
-            return null
-        }
-        nativeLinuxRenderer = renderer
-        linuxTextureConfiguration = configuration
-        desktopTextureFailurePublished = false
-        desktopTextureFailureDetail = null
-        linuxTextureProducerSerial = 0L
-        linuxTextureSubmittedSerial = 0L
-        linuxTextureConfirmedSerial = 0L
-        linuxTextureConfirmedHostGeneration = 0L
-        frameState.value = null
-        applyLinuxTextureOutputProperties(configuration)
-        runCatching { engine.setProperty("hwdec", "auto-safe") }
-        resumeVideoOutputAfterContextSwitch(selectedVideo, "auto-safe")
-        mutateSnapshotState {
-            renderingInfo.videoRenderer =
-                if (configuration.extendedLinear) {
-                    "libmpv GPU TextureView (GBM RGBA16F/linear BT.709)"
-                } else {
-                    "libmpv GPU TextureView (GBM RGBA8/sRGB)"
-                }
-            renderingInfo.notes = linuxTextureRenderingNotes(confirmedPresent = false)
-        }
-        return renderer
-    }
-
-    private fun applyLinuxTextureOutputProperties(configuration: MpvLinuxTextureConfiguration) {
-        runCatching { engine.setProperty("fbo-format", if (configuration.extendedLinear) "rgba16f" else "rgba8") }
-        runCatching { engine.setProperty("target-prim", "bt.709") }
-        runCatching { engine.setProperty("hdr-reference-white", MPV_SDR_REFERENCE_WHITE_NITS.toString()) }
-        runCatching { engine.setProperty("target-peak", configuration.targetPeakNits.toString()) }
-        runCatching { engine.setProperty("target-trc", if (configuration.extendedLinear) "linear" else "srgb") }
-    }
-
-    private fun detachLinuxTextureRendererLocked(restoreSoftwareRenderer: Boolean) {
-        val renderer = nativeLinuxRenderer
-        if (renderer == 0L) return
-        nativeLinuxRenderer = 0L
-        linuxTextureConfiguration = null
-        linuxTextureStreamController.clear()
-        linuxTextureProducerSerial = 0L
-        linuxTextureSubmittedSerial = 0L
-        linuxTextureConfirmedSerial = 0L
-        linuxTextureConfirmedHostGeneration = 0L
-        try {
-            MpvLinuxTextureBridge.nDetach(renderer)
-        } finally {
-            engine.endExternalRendering(restoreSoftwareRenderer)
-        }
-    }
-
-    private fun linuxTextureRenderingNotes(confirmedPresent: Boolean): String =
-        "MPV render API exports a fenced GBM DMA-BUF into the Nucleus color-managed scene; " +
-            "systemPresentConfirmed=$confirmedPresent."
-
-    private fun publishDesktopTextureFailure(
-        message: String,
-        reason: ColorPipelineFallbackReason = ColorPipelineFallbackReason.RENDERER_CONFIGURATION_FAILED,
-    ) {
-        if (desktopTextureFailurePublished || disposed.get()) return
-        desktopTextureFailurePublished = true
-        desktopTextureFailureDetail = message
-        updateDesktopColorPipelineStatus()
-        publishError(VideoPlayerError.ColorPipelineError(reason, message))
-    }
-
-    private fun windowsTextureRenderingNotes(confirmedPresent: Boolean): String =
-        "MPV render API exports a keyed-mutex D3D11 texture into the Nucleus color-managed scene; " +
-            "systemPresentConfirmed=$confirmedPresent."
-
-    private fun updateDesktopColorPipelineStatus(failureDetail: String? = desktopTextureFailureDetail) {
-        val host =
-            when {
-                isWindowsHost() -> windowsTextureHostCapabilities
-                isMacHost() -> macTextureHostCapabilities
-                isLinuxHost() -> linuxTextureHostCapabilities
-                else -> return
-            }
-        val hostAvailable =
-            host.presentationState != TextureViewHostPresentationState.UNAVAILABLE &&
-                host.producerInfo != null &&
-                host.outputPixelFormat != TextureViewHostPixelFormat.UNKNOWN
-        val hostHdr = hostAvailable && host.actualDynamicRange == TextureViewHostDynamicRange.HDR
-        val displayRanges =
-            if (hostHdr) {
-                setOf(
-                    VideoDynamicRange.SDR,
-                    VideoDynamicRange.HDR10,
-                    VideoDynamicRange.HDR10_PLUS,
-                    VideoDynamicRange.HLG,
-                )
-            } else if (hostAvailable) {
-                setOf(VideoDynamicRange.SDR)
-            } else {
-                emptySet()
-            }
-        val display =
-            DisplayColorCapabilities(
-                isKnown = hostAvailable,
-                supportedDynamicRanges = displayRanges,
-                maxLuminanceNits = host.maximumLuminanceNits,
-                referenceWhiteNits = host.sdrWhiteLevelNits,
-            )
-        val source = sourceColorInfo
-        val nativeDolbyVisionRequired =
-            source.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
-                runtimeConfig.dolbyVisionPolicy == DolbyVisionPolicy.REQUIRE_NATIVE
-        val requiresMissingHdr =
-            source.isHdr &&
-                runtimeConfig.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR &&
-                !hostHdr
-        val plannedOutput =
-            when {
-                failureDetail != null || nativeDolbyVisionRequired || requiresMissingHdr ->
-                    VideoDynamicRange.UNKNOWN
-                runtimeConfig.dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR ->
-                    VideoDynamicRange.SDR
-                !source.isHdr -> source.dynamicRange
-                !hostHdr -> VideoDynamicRange.SDR
-                source.dynamicRange == VideoDynamicRange.DOLBY_VISION -> VideoDynamicRange.HDR10
-                source.dynamicRange == VideoDynamicRange.HDR10_PLUS -> VideoDynamicRange.HDR10
-                else -> source.dynamicRange
-            }
-        val confirmedSerial =
-            when {
-                isWindowsHost() -> windowsTextureConfirmedSerial
-                isMacHost() -> macTextureConfirmedSerial
-                else -> linuxTextureConfirmedSerial
-            }
-        val confirmedGeneration =
-            when {
-                isWindowsHost() -> windowsTextureConfirmedHostGeneration
-                isMacHost() -> macTextureConfirmedHostGeneration
-                else -> linuxTextureConfirmedHostGeneration
-            }
-        val confirmed =
-            confirmedSerial > 0L &&
-                confirmedGeneration == host.generation &&
-                (
-                    !plannedOutput.isHdrSignal() ||
-                        (
-                            host.actualDynamicRange == TextureViewHostDynamicRange.HDR &&
-                                host.outputPixelFormat.componentBitDepth >= 10
-                        )
-                ) &&
-                plannedOutput != VideoDynamicRange.UNKNOWN
-        val fallback =
-            when {
-                failureDetail != null -> ColorPipelineFallbackReason.RENDERER_CONFIGURATION_FAILED
-                nativeDolbyVisionRequired -> ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_UNAVAILABLE
-                requiresMissingHdr -> ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE
-                source.dynamicRange == VideoDynamicRange.UNKNOWN -> ColorPipelineFallbackReason.SOURCE_COLOR_UNKNOWN
-                runtimeConfig.dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR && source.isHdr ->
-                    ColorPipelineFallbackReason.EXPLICIT_SDR_REQUEST
-                source.isHdr && !hostHdr -> ColorPipelineFallbackReason.DISPLAY_DOES_NOT_SUPPORT_SOURCE
-                source.dynamicRange == VideoDynamicRange.DOLBY_VISION ->
-                    ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_USED
-                source.dynamicRange == VideoDynamicRange.SDR -> ColorPipelineFallbackReason.SOURCE_IS_SDR
-                else -> ColorPipelineFallbackReason.NONE
-            }
-        val metadataHandling =
-            when (source.dynamicRange) {
-                VideoDynamicRange.HDR10_PLUS -> DynamicMetadataHandling.APPLIED_BY_RENDERER
-                VideoDynamicRange.DOLBY_VISION -> DynamicMetadataHandling.CONVERTED
-                else -> DynamicMetadataHandling.NONE
-            }
-        mutableColorPipelineStatus.value =
-            VideoColorPipelineStatus(
-                requestedDynamicRangePolicy = runtimeConfig.dynamicRangePolicy,
-                requestedDolbyVisionPolicy = runtimeConfig.dolbyVisionPolicy,
-                source = source,
-                display = display,
-                decoderName = renderingInfo.videoDecoder,
-                decoderCapabilities = MPV_DECODER_COLOR_CAPABILITIES,
-                surface =
-                    if (runtimeConfig.desktopVideoSurfaceMode == DesktopVideoSurfaceMode.COMPOSE) {
-                        VideoSurfaceKind.COMPOSE_CANVAS
-                    } else {
-                        VideoSurfaceKind.TEXTURE_VIEW
-                    },
-                renderer =
-                    if (plannedOutput.isHdrSignal()) {
-                        ColorPipelineRenderer.CONTROLLED_HDR
-                    } else if (plannedOutput == VideoDynamicRange.SDR) {
-                        ColorPipelineRenderer.CONTROLLED_SDR
-                    } else {
-                        ColorPipelineRenderer.UNKNOWN
-                    },
-                rendererCapabilities = MPV_TEXTURE_RENDERER_COLOR_CAPABILITIES,
-                plannedOutputDynamicRange = plannedOutput,
-                outputDynamicRange = plannedOutput.takeIf { confirmed } ?: VideoDynamicRange.UNKNOWN,
-                plannedMetadataHandling = metadataHandling,
-                metadataHandling = metadataHandling.takeIf { confirmed } ?: DynamicMetadataHandling.NONE,
-                verification =
-                    if (confirmed) {
-                        ColorPipelineVerification.RENDERER_CONFIGURED
-                    } else {
-                        ColorPipelineVerification.NONE
-                    },
-                requestHonored = confirmed && !nativeDolbyVisionRequired && !requiresMissingHdr,
-                fallbackReason = fallback,
-                detail = failureDetail,
-            )
-    }
-
     internal fun setContentScaleMode(contentScale: ContentScale) {
         nativeMacContentScaleMode = contentScale.toMpvMacContentScaleMode()
         if (!disposed.get()) applyNativeMacInputGeometry()
@@ -1426,16 +500,48 @@ internal class MpvVideoPlayerState(
                 textureCrop = projectionTextureCrop,
             )
         nativeMacProjectionEnabled = configuration.enabled
-        applyNativeMacInputGeometry()
         renderLock.withLock {
-            if (disposed.get() || nativeMacRenderer == 0L) return@withLock
-            MpvMacNativeBridge.nSetProjection(
-                nativeRenderer = nativeMacRenderer,
-                parameters = configuration.toNativeArray(),
-            )
+            if (disposed.get()) return@withLock
+            if (configuration.enabled && nativeMacVkActive) {
+                switchMacVkToOpenGlLocked("projection requires the OpenGL post-process pass")
+            }
+            applyNativeMacInputGeometry()
+            if (nativeMacRenderer != 0L) {
+                MpvMacNativeBridge.nSetProjection(
+                    nativeRenderer = nativeMacRenderer,
+                    parameters = configuration.toNativeArray(),
+                )
+            }
         }
         mutateSnapshotState {
             renderingInfo.videoProjection = projection.renderingInfoLabel()
+        }
+    }
+
+    /** Returns the Compose-owned macvk host or renderer-owned OpenGL `NSView*`. */
+    internal fun createNativeMacView(): Long {
+        if (!canUseNativeMacSurface) return 0L
+        return renderLock.withLock {
+            if (disposed.get()) return@withLock 0L
+            nativeMacVkHostView.takeIf { it != 0L }
+                ?: runCatching {
+                    MpvMacNativeBridge.nGetViewHandle(nativeMacRenderer)
+                }.getOrDefault(0L)
+        }
+    }
+
+    private fun initializeMacVkRendererBeforePlayback() {
+        renderLock.withLock {
+            if (disposed.get() || !nativeMacVkActive || nativeMacVkHostView == 0L) return
+            frameState.value = null
+            nativeMacProjectionEnabled = false
+            applyNativeMacInputGeometry()
+            configureNativeMacPlaybackProfile()
+            runCatching { engine.setProperty("hwdec", nativeMacDecodeRoute.mpvHwdec) }
+            mutateSnapshotState {
+                renderingInfo.videoRenderer = "libmpv gpu-next/macvk in an embedded Metal surface"
+                renderingInfo.notes = nativeMacRenderingNotes()
+            }
         }
     }
 
@@ -1445,171 +551,183 @@ internal class MpvVideoPlayerState(
      * chain before native playback became usable, and left the initial chain with uneven pacing.
      */
     private fun initializeNativeMacRendererBeforePlayback() {
-        if (!MpvMacNativeBridge.isAvailable ||
-            runtimeConfig.desktopVideoSurfaceMode == DesktopVideoSurfaceMode.COMPOSE ||
-            disposed.get()
-        ) {
-            return
-        }
+        if (!MpvMacNativeBridge.isAvailable || disposed.get()) return
         renderLock.withLock {
-            if (nativeMacRenderer != 0L || disposed.get()) return
-            val target =
-                try {
-                    engine.beginExternalRendering()
-                } catch (_: RuntimeException) {
-                    return
-                }
-            val renderer =
-                try {
+            if (hasNativeMacGpuSurface || disposed.get()) return
+            attachOpenGlRendererLocked()
+        }
+    }
+
+    private fun attachOpenGlRendererLocked(hostView: Long = 0L): Boolean {
+        val target =
+            try {
+                engine.beginExternalRendering()
+            } catch (_: RuntimeException) {
+                return false
+            }
+        val renderer =
+            try {
+                if (hostView != 0L) {
+                    MpvMacNativeBridge.nCreateRendererInHost(
+                        mpvHandle = target.mpvHandle,
+                        libraryLoadName = target.libraryLoadName,
+                        colorMode = nativeMacColorMode.nativeValue,
+                        nativeView = hostView,
+                    )
+                } else {
                     MpvMacNativeBridge.nCreateRenderer(
                         mpvHandle = target.mpvHandle,
                         libraryLoadName = target.libraryLoadName,
                         colorMode = nativeMacColorMode.nativeValue,
                     )
-                } catch (_: Throwable) {
-                    0L
                 }
-            if (renderer == 0L) {
-                if (renderer != 0L) runCatching { MpvMacNativeBridge.nDetach(renderer) }
-                runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
-                runCatching { engine.setProperty("hwdec", SOFTWARE_RENDER_HWDEC) }
-                return
+            } catch (_: Throwable) {
+                0L
             }
+        val nativeView =
+            if (renderer != 0L) {
+                runCatching { MpvMacNativeBridge.nGetViewHandle(renderer) }.getOrDefault(0L)
+            } else {
+                0L
+            }
+        if (renderer == 0L || nativeView == 0L) {
+            if (renderer != 0L) runCatching { MpvMacNativeBridge.nDetach(renderer) }
+            runCatching { engine.endExternalRendering(restoreSoftwareRenderer = true) }
+            runCatching { engine.setProperty("hwdec", SOFTWARE_RENDER_HWDEC) }
+            return false
+        }
 
-            nativeMacRenderer = renderer
-            frameState.value = null
-            applyNativeMacOutputColorMode(nativeMacColorMode)
-            val projectionConfiguration =
-                mpvMacProjectionConfiguration(
-                    projection = projection,
-                    projectionView = projectionView,
-                    textureCrop = projectionTextureCrop,
-                )
-            nativeMacProjectionEnabled = projectionConfiguration.enabled
+        nativeMacRenderer = renderer
+        frameState.value = null
+        applyNativeMacOutputColorMode(nativeMacColorMode)
+        val projectionConfiguration =
+            mpvMacProjectionConfiguration(
+                projection = projection,
+                projectionView = projectionView,
+                textureCrop = projectionTextureCrop,
+            )
+        nativeMacProjectionEnabled = projectionConfiguration.enabled
+        applyNativeMacInputGeometry()
+        MpvMacNativeBridge.nSetProjection(
+            nativeRenderer = nativeMacRenderer,
+            parameters = projectionConfiguration.toNativeArray(),
+        )
+        configureNativeMacPlaybackProfile()
+        runCatching { engine.setProperty("hwdec", nativeMacDecodeRoute.mpvHwdec) }
+        mutateSnapshotState {
+            renderingInfo.videoRenderer = "libmpv OpenGL in a native macOS EDR surface"
+            renderingInfo.notes = nativeMacRenderingNotes()
+        }
+        return true
+    }
+
+    private fun switchMacVkToOpenGlLocked(reason: String): Boolean {
+        if (!nativeMacVkActive) return nativeMacRenderer != 0L
+        val hostView = nativeMacVkHostView
+        if (hostView == 0L) return false
+
+        val selectedVideo = suspendVideoOutputForContextSwitch()
+        runCatching { engine.setProperty("vo", "libmpv") }
+        nativeMacVkActive = false
+        nativeMacBackendFallbackReason = reason
+        val attached = attachOpenGlRendererLocked(hostView)
+        if (attached) {
+            resumeVideoOutputAfterContextSwitch(selectedVideo, nativeMacDecodeRoute.mpvHwdec)
+            if (nativeMacSurfaceAttached) {
+                runCatching { MpvMacNativeBridge.nRequestRedraw(nativeMacRenderer) }
+            }
+            return true
+        }
+
+        resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
+        publishSoftwareRenderingInfo()
+        return false
+    }
+
+    internal fun disposeNativeMacView(
+        @Suppress("UNUSED_PARAMETER") nativeView: Long,
+    ) {
+        nativeMacSurfaceAttached = false
+        nativeMacDecodeReady = false
+        awaitingNativeMacDecodeRestart = false
+        resumePlaybackAfterNativeSurfaceAttach = false
+
+        // Nucleus invokes this callback inside its native-view interop transaction. Blocking that
+        // transaction on renderLock can deadlock with session disposal: dispose() owns renderLock
+        // while nDetach synchronously enters the AppKit main queue, and Tao cannot finish the frame
+        // that lets the main queue advance until this callback returns. Retire a still-live renderer
+        // after leaving the interop transaction; a concurrently disposed state owns the teardown.
+        if (disposed.get()) return
+        scope.launch {
+            if (disposed.get()) return@launch
+            renderLock.withLock {
+                if (disposed.get()) return@withLock
+                detachNativeMacSurfaceLocked(restoreSoftwareRenderer = true)
+            }
+        }
+    }
+
+    internal fun onNativeMacSurfaceAttached() {
+        renderLock.withLock {
+            if (disposed.get() || !hasNativeMacGpuSurface) return
+            nativeMacSurfaceAttached = true
+            val refreshRate =
+                if (nativeMacVkActive) {
+                    runCatching {
+                        MpvMacNativeBridge.nGetMacVkDisplayRefreshRate(nativeMacVkHostView)
+                    }
+                } else {
+                    runCatching { MpvMacNativeBridge.nGetDisplayRefreshRate(nativeMacRenderer) }
+                }
+            refreshRate
+                .getOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+                ?.let { refreshRate ->
+                    runCatching {
+                        engine.setProperty("display-fps-override", refreshRate.toString())
+                    }
+                }
+            if (nativeMacVkActive) {
+                MpvMacNativeBridge.nRequestMacVkRedraw(nativeMacVkHostView)
+            } else {
+                MpvMacNativeBridge.nRequestRedraw(nativeMacRenderer)
+            }
+            resumeNativeMacPlaybackIfReady()
+        }
+    }
+
+    private fun detachNativeMacSurfaceLocked(restoreSoftwareRenderer: Boolean) {
+        val macVkHost = nativeMacVkHostView
+        if (nativeMacVkActive && macVkHost != 0L) {
+            val selectedVideo =
+                if (restoreSoftwareRenderer) {
+                    suspendVideoOutputForContextSwitch()
+                } else {
+                    runCatching { engine.setProperty("vid", "no") }
+                    null
+                }
+            runCatching { engine.setProperty("vo", "libmpv") }
+            nativeMacVkActive = false
+            nativeMacVkHostView = 0L
             applyNativeMacInputGeometry()
-            MpvMacNativeBridge.nSetProjection(
-                nativeRenderer = nativeMacRenderer,
-                parameters = projectionConfiguration.toNativeArray(),
-            )
-            configureNativeMacPlaybackProfile()
-            runCatching { engine.setProperty("hwdec", nativeMacDecodeRoute.mpvHwdec) }
-            mutateSnapshotState {
-                renderingInfo.videoRenderer = "libmpv GPU TextureView (IOSurface)"
-                renderingInfo.notes = nativeMacRenderingNotes()
+            runCatching { MpvMacNativeBridge.nDestroyMacVkHost(macVkHost) }
+            if (restoreSoftwareRenderer) {
+                runCatching { engine.restoreSoftwareRendering() }
+                resetNativeMacTargetColorProperties()
+                resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
+                publishSoftwareRenderingInfo()
             }
-        }
-    }
-
-    internal fun renderMacTextureFrame(
-        requestedWidth: Int,
-        requestedHeight: Int,
-    ): Boolean {
-        if (!usesMacColorManagedTexture || !_hasMedia || requestedWidth <= 0 || requestedHeight <= 0) {
-            return false
-        }
-        val host = macTextureHostCapabilities
-        if (runtimeConfig.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR &&
-            host.actualDynamicRange != TextureViewHostDynamicRange.HDR
-        ) {
-            publishDesktopTextureFailure(
-                message = "The active macOS output cannot present the required HDR texture pipeline.",
-                reason = ColorPipelineFallbackReason.HDR_SURFACE_UNAVAILABLE,
-            )
-            return false
-        }
-        val (width, height) = constrainMpvRenderSize(requestedWidth, requestedHeight, runtimeConfig.maxRenderPixels)
-        return renderLock.withLock {
-            val renderer = nativeMacRenderer
-            if (renderer == 0L || disposed.get()) return@withLock false
-            configureMacTextureOutputLocked(host)
-            val serial =
-                runCatching { MpvMacNativeBridge.nRenderFrame(renderer, width, height) }
-                    .getOrDefault(-1L)
-            if (serial <= macTextureProducerSerial) return@withLock false
-            val values = MpvMacNativeBridge.nGetTextureOutputInfo(renderer) ?: return@withLock false
-            val output = values.toMacTextureOutput() ?: return@withLock false
-            if (output.serial != serial) return@withLock false
-            val frame =
-                TextureViewFrame(
-                    source =
-                        nucleusIOSurfaceTextureSource(
-                            ioSurface = output.ioSurface,
-                            widthPx = output.width,
-                            heightPx = output.height,
-                            colorInfo =
-                                if (output.extendedLinear) {
-                                    mpvExtendedLinearColorInfo(
-                                        macTextureConfiguration?.peakNits ?: MPV_DEFAULT_HDR_PEAK_NITS,
-                                    )
-                                } else {
-                                    TextureColorInfo.SRGB_PREMULTIPLIED
-                                },
-                        ),
-                    onReleased = {
-                        MpvMacNativeBridge.nReleaseTextureFrame(
-                            nativeRenderer = renderer,
-                            generation = output.generation,
-                            serial = output.serial,
-                        )
-                    },
-                )
-            val submitted =
-                runCatching { macTextureStreamController.submitFrame(frame) }
-                    .isSuccess
-            if (!submitted) {
-                MpvMacNativeBridge.nReleaseTextureFrame(renderer, output.generation, output.serial)
-                return@withLock false
-            }
-            macTextureProducerSerial = serial
-            macTextureSubmittedSerial = serial
-            macTextureSubmittedHostGeneration = host.generation
-            macTextureSubmittedPresentCount = host.presentedFrameCount
-            true
-        }
-    }
-
-    internal fun onMacTextureHostCapabilitiesChanged(capabilities: TextureViewHostCapabilities) {
-        macTextureHostCapabilities = capabilities
-        updateDesktopColorPipelineStatus()
-        nativeMacSurfaceAttached =
-            capabilities.presentationState != TextureViewHostPresentationState.UNAVAILABLE
-        resumeNativeMacPlaybackIfReady()
-        val submitted = macTextureSubmittedSerial
-        if (submitted <= macTextureConfirmedSerial ||
-            !capabilities.hasPresentedMpvTextureFrameAfter(
-                submittedGeneration = macTextureSubmittedHostGeneration,
-                submittedPresentCount = macTextureSubmittedPresentCount,
-                outputRequirement =
-                    if (macTextureConfiguration?.extended == true) {
-                        MpvTextureOutputRequirement.FP16_SCRGB_OUTPUT
-                    } else {
-                        MpvTextureOutputRequirement.KNOWN_OUTPUT
-                    },
-            ) ||
-            !renderLock.tryLock()
-        ) {
             return
         }
-        try {
-            val renderer = nativeMacRenderer
-            if (renderer != 0L) {
-                MpvMacNativeBridge.nReportPresented(renderer, submitted)
-                macTextureConfirmedSerial = submitted
-                macTextureConfirmedHostGeneration = capabilities.generation
-                updateDesktopColorPipelineStatus()
-            }
-        } finally {
-            renderLock.unlock()
-        }
-    }
 
-    internal fun onMacTextureSurfaceDetached() {
-        nativeMacSurfaceAttached = false
-    }
-
-    private fun detachNativeMacRendererLocked(restoreSoftwareRenderer: Boolean) {
         val renderer = nativeMacRenderer
-        if (renderer == 0L) return
+        if (renderer == 0L) {
+            if (nativeMacVkHostView != 0L) {
+                runCatching { MpvMacNativeBridge.nDestroyMacVkHost(nativeMacVkHostView) }
+                nativeMacVkHostView = 0L
+            }
+            return
+        }
         val selectedVideo =
             if (restoreSoftwareRenderer) {
                 suspendVideoOutputForContextSwitch()
@@ -1617,20 +735,27 @@ internal class MpvVideoPlayerState(
                 null
             }
         nativeMacRenderer = 0L
-        macTextureConfiguration = null
         applyNativeMacInputGeometry()
         try {
             MpvMacNativeBridge.nDetach(renderer)
         } finally {
             engine.endExternalRendering(restoreSoftwareRenderer)
         }
+        if (nativeMacVkHostView != 0L) {
+            runCatching { MpvMacNativeBridge.nDestroyMacVkHost(nativeMacVkHostView) }
+            nativeMacVkHostView = 0L
+        }
         if (restoreSoftwareRenderer) {
             resetNativeMacTargetColorProperties()
             resumeVideoOutputAfterContextSwitch(selectedVideo, SOFTWARE_RENDER_HWDEC)
-            mutateSnapshotState {
-                renderingInfo.videoRenderer = "libmpv software render API"
-                renderingInfo.notes = softwareRenderingNotes()
-            }
+            publishSoftwareRenderingInfo()
+        }
+    }
+
+    private fun publishSoftwareRenderingInfo() {
+        mutateSnapshotState {
+            renderingInfo.videoRenderer = "libmpv software render API"
+            renderingInfo.notes = softwareRenderingNotes()
         }
     }
 
@@ -1661,6 +786,9 @@ internal class MpvVideoPlayerState(
     }
 
     private fun onFileLoaded() {
+        if (macVkVideoOutputIsConfiguredButUnexpected() && retryCurrentSourceWithOpenGl()) {
+            return
+        }
         refreshSnapshot()
         val decodeRestartRequested = configureNativeMacDecodeRouteForLoadedSource()
         refreshSnapshot()
@@ -1675,6 +803,11 @@ internal class MpvVideoPlayerState(
 
     private fun onEndFile(event: NativeMpvEvent.EndFile) {
         if (!_hasMedia || event.reason == MPV_END_FILE_REASON_STOP || event.reason == MPV_END_FILE_REASON_QUIT) return
+        if ((event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) &&
+            retryCurrentSourceWithOpenGl()
+        ) {
+            return
+        }
         if ((event.reason == MPV_END_FILE_REASON_ERROR || event.errorCode < 0) &&
             System.nanoTime() < renderContextSwitchDeadlineNanos
         ) {
@@ -1692,6 +825,9 @@ internal class MpvVideoPlayerState(
 
     private fun onPlaybackRestarted() {
         renderContextSwitchDeadlineNanos = 0L
+        if (macVkVideoOutputIsConfiguredButUnexpected() && retryCurrentSourceWithOpenGl()) {
+            return
+        }
         if (awaitingNativeMacDecodeRestart) {
             awaitingNativeMacDecodeRestart = false
             mutateSnapshotState { _isSeeking = false }
@@ -1707,6 +843,33 @@ internal class MpvVideoPlayerState(
         }
     }
 
+    private fun macVkVideoOutputIsConfiguredButUnexpected(): Boolean {
+        if (!nativeMacVkActive) return false
+        val configured = engine.getProperty("vo-configured").yesNoOrNull() ?: false
+        if (!configured) return false
+        return !engine.getProperty("current-vo").equals("gpu-next", ignoreCase = true)
+    }
+
+    private fun retryCurrentSourceWithOpenGl(): Boolean {
+        if (!nativeMacVkActive || macVkPlaybackFallbackAttempted || disposed.get()) return false
+        val source = currentSourceUri ?: return false
+        macVkPlaybackFallbackAttempted = true
+        return renderLock.withLock {
+            if (!nativeMacVkActive || disposed.get()) return@withLock false
+            nativeMacDecodeReady = false
+            awaitingNativeMacDecodeRestart = false
+            resumePlaybackAfterNativeSurfaceAttach = currentSourceWantsPlayback
+            runCatching { engine.setProperty("pause", "yes") }
+            if (!switchMacVkToOpenGlLocked("macvk video output failed to configure")) {
+                return@withLock false
+            }
+            runCatching {
+                engine.command("loadfile", source, "replace")
+                engine.setProperty("pause", "yes")
+            }.isSuccess
+        }
+    }
+
     private fun refreshSnapshot() {
         if (!_hasMedia || disposed.get()) return
         val position = engine.getProperty("time-pos").secondsOrNull() ?: _currentTime
@@ -1715,7 +878,7 @@ internal class MpvVideoPlayerState(
         val buffering =
             (engine.getProperty("paused-for-cache").yesNoOrNull() ?: false) ||
                 awaitingNativeMacDecodeRestart ||
-                (nativeMacRenderer != 0L && !nativeMacDecodeReady)
+                (hasNativeMacGpuSurface && !nativeMacDecodeReady)
         val seeking = engine.getProperty("seeking").yesNoOrNull() ?: _isSeeking
         val width = engine.getProperty("video-params/w").positiveIntOrNull()
         val height = engine.getProperty("video-params/h").positiveIntOrNull()
@@ -1735,12 +898,6 @@ internal class MpvVideoPlayerState(
         val audioOutputSampleRate = engine.getProperty("audio-out-params/samplerate").positiveIntOrNull()
         val audioOutputLayout = engine.getProperty("audio-out-params/hr-channels")
         val transfer = engine.getProperty("video-params/gamma")
-        val primaries = engine.getProperty("video-params/primaries")
-        val matrix = engine.getProperty("video-params/colormatrix")
-        val colorLevels = engine.getProperty("video-params/colorlevels")
-        val pixelFormat = engine.getProperty("video-params/pixelformat")
-        val videoFormat = engine.getProperty("video-format")
-        val dolbyVisionProfile = engine.getProperty("video-params/dolby-vision-profile").positiveIntOrNull()
         val decoderDroppedFrames = engine.getProperty("decoder-frame-drop-count").nonNegativeLongOrNull()
         val outputDroppedFrames = engine.getProperty("frame-drop-count").nonNegativeLongOrNull()
         droppedVideoFrames =
@@ -1767,6 +924,8 @@ internal class MpvVideoPlayerState(
                 val absoluteMilliseconds = (kotlin.math.abs(seconds) * MILLIS_PER_SECOND).toFloat()
                 maximumAvSyncOffsetMs = maxOf(maximumAvSyncOffsetMs ?: 0f, absoluteMilliseconds)
             }
+
+        updateNativeMacOutputColorMode(transfer.toMacOutputColorMode())
 
         updatePlaybackPosition(
             position = position,
@@ -1801,31 +960,6 @@ internal class MpvVideoPlayerState(
                     audioOutput != null -> audioOutput
                     else -> "mpv audio output"
                 }
-        }
-        val refreshedColorInfo =
-            mpvVideoColorInfo(
-                transfer = transfer,
-                primaries = primaries,
-                matrix = matrix,
-                colorLevels = colorLevels,
-                pixelFormat = pixelFormat,
-                codecDescription = listOfNotNull(videoDecoder, videoFormat).joinToString(" "),
-                dolbyVisionProfile = dolbyVisionProfile,
-            )
-        if (sourceColorInfo != refreshedColorInfo &&
-            (sourceColorInfo.dynamicRange == VideoDynamicRange.UNKNOWN ||
-                refreshedColorInfo.dynamicRange != VideoDynamicRange.UNKNOWN)
-        ) {
-            sourceColorInfo = refreshedColorInfo
-            updateDesktopColorPipelineStatus()
-            if (refreshedColorInfo.dynamicRange == VideoDynamicRange.DOLBY_VISION &&
-                runtimeConfig.dolbyVisionPolicy == DolbyVisionPolicy.REQUIRE_NATIVE
-            ) {
-                publishDesktopTextureFailure(
-                    message = "Native Dolby Vision presentation is unsupported by desktop TextureView backends.",
-                    reason = ColorPipelineFallbackReason.DOLBY_VISION_BASE_LAYER_UNAVAILABLE,
-                )
-            }
         }
         updateAspectRatio(width, height)
     }
@@ -1963,6 +1097,17 @@ internal class MpvVideoPlayerState(
     private val usesVerifiedBundledRuntime: Boolean
         get() = runtimeConfig.librarySource == MpvLibrarySource.Bundled
 
+    private val hasNativeMacGpuSurface: Boolean
+        get() = nativeMacRenderer != 0L || (nativeMacVkActive && nativeMacVkHostView != 0L)
+
+    private val activeNativeMacBackend: MpvMacNativeBackend?
+        get() =
+            when {
+                nativeMacVkActive && nativeMacVkHostView != 0L -> MpvMacNativeBackend.MACVK
+                nativeMacRenderer != 0L -> MpvMacNativeBackend.OPENGL
+                else -> null
+            }
+
     override fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
         runCatching { engine.command("stop") }
@@ -1972,58 +1117,41 @@ internal class MpvVideoPlayerState(
                 eventJob.cancelAndJoin()
             }
         }
-        windowsTextureStreamController.close()
-        macTextureStreamController.close()
-        linuxTextureStreamController.close()
         renderLock.withLock {
-            detachWindowsTextureRendererLocked(restoreSoftwareRenderer = false)
-            detachNativeMacRendererLocked(restoreSoftwareRenderer = false)
-            detachLinuxTextureRendererLocked(restoreSoftwareRenderer = false)
+            detachNativeMacSurfaceLocked(restoreSoftwareRenderer = false)
             frameState.value = null
             framePool.close()
             engine.close()
         }
-        windowsTextureExecutor.shutdown()
         scope.cancel()
+    }
+
+    private fun updateNativeMacOutputColorMode(mode: MpvMacOutputColorMode) {
+        if (nativeMacColorMode == mode) return
+        nativeMacColorMode = mode
+        renderLock.withLock {
+            if (hasNativeMacGpuSurface) applyNativeMacOutputColorMode(mode)
+        }
     }
 
     private fun applyNativeMacOutputColorMode(mode: MpvMacOutputColorMode) {
         when (mode) {
-            MpvMacOutputColorMode.SDR -> {
-                runCatching { engine.setProperty("fbo-format", "rgba8") }
-                runCatching { engine.setProperty("target-prim", "bt.709") }
-                runCatching { engine.setProperty("target-trc", "srgb") }
-                runCatching { engine.setProperty("target-peak", MPV_SDR_REFERENCE_WHITE_NITS.toString()) }
+            MpvMacOutputColorMode.SDR -> resetNativeMacTargetColorProperties()
+            MpvMacOutputColorMode.BT2100_PQ -> {
+                runCatching { engine.setProperty("target-prim", "bt.2020") }
+                runCatching { engine.setProperty("target-trc", "pq") }
             }
-            MpvMacOutputColorMode.EXTENDED_LINEAR -> {
-                runCatching { engine.setProperty("fbo-format", "rgba16f") }
-                runCatching { engine.setProperty("target-prim", "bt.709") }
-                runCatching { engine.setProperty("target-trc", "linear") }
+            MpvMacOutputColorMode.BT2100_HLG -> {
+                runCatching { engine.setProperty("target-prim", "bt.2020") }
+                runCatching { engine.setProperty("target-trc", "hlg") }
             }
         }
-        runCatching { engine.setProperty("hdr-reference-white", MPV_SDR_REFERENCE_WHITE_NITS.toString()) }
-        MpvMacNativeBridge.nSetColorMode(nativeMacRenderer, mode.nativeValue)
-    }
-
-    private fun configureMacTextureOutputLocked(host: TextureViewHostCapabilities) {
-        val extended =
-            sourceColorInfo.isHdr &&
-                runtimeConfig.dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR &&
-                host.actualDynamicRange == TextureViewHostDynamicRange.HDR
-        val peak =
-            if (extended) {
-                host.maximumLuminanceNits?.coerceAtLeast(MPV_SDR_REFERENCE_WHITE_NITS)
-                    ?: MPV_DEFAULT_HDR_PEAK_NITS
-            } else {
-                MPV_SDR_REFERENCE_WHITE_NITS
-            }
-        val configuration = MpvMacTextureConfiguration(extended = extended, peakNits = peak)
-        if (macTextureConfiguration == configuration) return
-        nativeMacColorMode =
-            if (extended) MpvMacOutputColorMode.EXTENDED_LINEAR else MpvMacOutputColorMode.SDR
-        applyNativeMacOutputColorMode(nativeMacColorMode)
-        runCatching { engine.setProperty("target-peak", peak.toString()) }
-        macTextureConfiguration = configuration
+        if (nativeMacRenderer != 0L) {
+            MpvMacNativeBridge.nSetColorMode(nativeMacRenderer, mode.nativeValue)
+        }
+        if (nativeMacVkActive && nativeMacVkHostView != 0L) {
+            MpvMacNativeBridge.nSetMacVkColorMode(nativeMacVkHostView, mode.nativeValue)
+        }
     }
 
     private fun resetNativeMacTargetColorProperties() {
@@ -2080,20 +1208,31 @@ internal class MpvVideoPlayerState(
             } else {
                 append("User-provided libmpv; runtime license is unverified; ")
             }
-            append("native macOS OpenGL/EDR output with Compose controls; ")
+            when (activeNativeMacBackend) {
+                MpvMacNativeBackend.MACVK ->
+                    append("experimental embedded gpu-next/macvk output through MoltenVK/Metal; ")
+                MpvMacNativeBackend.OPENGL ->
+                    append("native macOS OpenGL/EDR output with Compose controls; ")
+                null -> append("software video output; ")
+            }
+            nativeMacBackendFallbackReason?.let { reason ->
+                append("OpenGL fallback: ")
+                append(reason)
+                append("; ")
+            }
             append(nativeMacDecodeRoute.description)
             append('.')
         }
 
     private fun resetNativeMacDecodeRouteBeforeSourceLoad() {
-        if (nativeMacRenderer == 0L || nativeMacDecodeRoute == MpvMacDecodeRoute.HARDWARE_AUTO) return
+        if (!hasNativeMacGpuSurface || nativeMacDecodeRoute == MpvMacDecodeRoute.HARDWARE_AUTO) return
         nativeMacDecodeRoute = MpvMacDecodeRoute.HARDWARE_AUTO
         runCatching { engine.setProperty("hwdec", nativeMacDecodeRoute.mpvHwdec) }
         mutateSnapshotState { renderingInfo.notes = nativeMacRenderingNotes() }
     }
 
     private fun configureNativeMacDecodeRouteForLoadedSource(): Boolean {
-        if (nativeMacRenderer == 0L || disposed.get()) return false
+        if (!hasNativeMacGpuSurface || disposed.get()) return false
         val selectedRoute =
             selectMpvMacDecodeRoute(
                 videoFormat = engine.getProperty("video-format"),
@@ -2108,7 +1247,7 @@ internal class MpvVideoPlayerState(
 
         var switched = false
         renderLock.withLock {
-            if (nativeMacRenderer == 0L || disposed.get() || selectedRoute == nativeMacDecodeRoute) {
+            if (!hasNativeMacGpuSurface || disposed.get() || selectedRoute == nativeMacDecodeRoute) {
                 return@withLock
             }
             val restartPosition = engine.getProperty("time-pos").secondsOrNull() ?: Duration.ZERO
@@ -2144,7 +1283,7 @@ internal class MpvVideoPlayerState(
         if (!resumePlaybackAfterNativeSurfaceAttach ||
             !nativeMacDecodeReady ||
             !nativeMacSurfaceAttached ||
-            nativeMacRenderer == 0L
+            !hasNativeMacGpuSurface
         ) {
             return
         }
@@ -2165,10 +1304,17 @@ internal class MpvVideoPlayerState(
     }
 
     private fun softwareRenderingNotes(): String =
-        if (usesVerifiedBundledRuntime) {
-            "Verified KMediaMpv runtime with credential-safe loopback HLS input."
-        } else {
-            "User-provided libmpv; native runtime license is unverified."
+        buildString {
+            if (usesVerifiedBundledRuntime) {
+                append("Verified KMediaMpv runtime with credential-safe loopback HLS input.")
+            } else {
+                append("User-provided libmpv; native runtime license is unverified.")
+            }
+            nativeMacBackendFallbackReason?.let { reason ->
+                append(" Native macOS fallback: ")
+                append(reason)
+                append('.')
+            }
         }
 
     companion object {
@@ -2180,9 +1326,6 @@ internal class MpvVideoPlayerState(
         private const val MILLIS_PER_SECOND = 1_000.0
         private const val NEW_VIDEO_FRAME_COUNT_INDEX = 4
         private const val SOFTWARE_RENDER_HWDEC = "no"
-        private const val WINDOWS_TEXTURE_HWDEC = "d3d11va-copy"
-        private const val MPV_SDR_REFERENCE_WHITE_NITS = 203f
-        private const val MPV_DEFAULT_HDR_PEAK_NITS = 1_000f
         private const val MPV_END_FILE_REASON_STOP = 2
         private const val MPV_END_FILE_REASON_QUIT = 3
         private const val MPV_END_FILE_REASON_ERROR = 4
@@ -2190,300 +1333,6 @@ internal class MpvVideoPlayerState(
         private const val SUBTITLE_TRACK_PREFIX = "mpv:subtitle:"
     }
 }
-
-internal data class MpvWindowsTextureOutput(
-    val sharedHandle: Long,
-    val width: Int,
-    val height: Int,
-    val dxgiFormat: Int,
-    val producerGeneration: Long,
-    val serial: Long,
-    val adapterLuid: Long,
-    val extendedLinear: Boolean,
-)
-
-private data class MpvMacTextureOutput(
-    val ioSurface: Long,
-    val width: Int,
-    val height: Int,
-    val pixelFormat: Int,
-    val generation: Long,
-    val serial: Long,
-    val extendedLinear: Boolean,
-)
-
-private fun mpvExtendedLinearColorInfo(targetPeakNits: Float): TextureColorInfo =
-    TextureColorInfo(
-        encoding = TextureColorEncoding.EXTENDED_LINEAR_SRGB,
-        premultipliedAlpha = true,
-        // libmpv's legacy GPU render backend emits a linear target normalized
-        // to target-peak. Tell Nucleus what 1.0 represents so it can convert
-        // the frame to its SDR-white-relative linear scene without guessing.
-        sdrWhiteLevelNits = targetPeakNits,
-    )
-
-private data class MpvMacTextureConfiguration(
-    val extended: Boolean,
-    val peakNits: Float,
-)
-
-private data class MpvWindowsTextureConfiguration(
-    val extendedLinear: Boolean,
-    val targetPeakNits: Float,
-)
-
-private data class MpvLinuxTextureOutput(
-    val frameFd: Int,
-    val width: Int,
-    val height: Int,
-    val stride: Int,
-    val fourcc: Int,
-    val offset: Int,
-    val modifier: Long,
-    val generation: Long,
-    val serial: Long,
-    val acquireFenceFd: Int,
-    val extendedLinear: Boolean,
-)
-
-private data class MpvLinuxTextureConfiguration(
-    val renderNode: String,
-    val fourcc: Int,
-    val modifiers: List<Long>,
-    val extendedLinear: Boolean,
-    val targetPeakNits: Float,
-)
-
-private fun LongArray.toMacTextureOutput(): MpvMacTextureOutput? {
-    if (size < MPV_MAC_TEXTURE_INFO_SIZE) return null
-    val output =
-        MpvMacTextureOutput(
-            ioSurface = get(0),
-            width = get(1).toInt(),
-            height = get(2).toInt(),
-            pixelFormat = get(3).toInt(),
-            generation = get(4),
-            serial = get(5),
-            extendedLinear = get(6) != 0L,
-        )
-    return output.takeIf {
-        it.ioSurface != 0L && it.width > 0 && it.height > 0 && it.generation > 0L && it.serial > 0L
-    }
-}
-
-private fun LongArray.toWindowsTextureOutput(extendedLinear: Boolean): MpvWindowsTextureOutput? {
-    if (size < MPV_WINDOWS_TEXTURE_INFO_SIZE) return null
-    val handle = get(MPV_WINDOWS_TEXTURE_HANDLE_INDEX)
-    val width = get(MPV_WINDOWS_TEXTURE_WIDTH_INDEX).toInt()
-    val height = get(MPV_WINDOWS_TEXTURE_HEIGHT_INDEX).toInt()
-    val format = get(MPV_WINDOWS_TEXTURE_FORMAT_INDEX).toInt()
-    val generation = get(MPV_WINDOWS_TEXTURE_GENERATION_INDEX)
-    val serial = get(MPV_WINDOWS_TEXTURE_SERIAL_INDEX)
-    val adapterLuid = get(MPV_WINDOWS_TEXTURE_ADAPTER_LUID_INDEX)
-    if (handle == 0L || width <= 0 || height <= 0 || generation <= 0L || serial <= 0L || adapterLuid == 0L) {
-        return null
-    }
-    val expectedFormat =
-        if (extendedLinear) DXGI_FORMAT_R16G16B16A16_FLOAT else DXGI_FORMAT_R8G8B8A8_UNORM
-    if (format != expectedFormat) return null
-    return MpvWindowsTextureOutput(
-        sharedHandle = handle,
-        width = width,
-        height = height,
-        dxgiFormat = format,
-        producerGeneration = generation,
-        serial = serial,
-        adapterLuid = adapterLuid,
-        extendedLinear = extendedLinear,
-    )
-}
-
-private fun LongArray.toLinuxTextureOutput(): MpvLinuxTextureOutput? {
-    if (size < MPV_LINUX_TEXTURE_INFO_SIZE) return null
-    val output =
-        MpvLinuxTextureOutput(
-            frameFd = get(0).toInt(),
-            width = get(1).toInt(),
-            height = get(2).toInt(),
-            stride = get(3).toInt(),
-            fourcc = get(4).toInt(),
-            offset = get(5).toInt(),
-            modifier = get(6),
-            generation = get(7),
-            serial = get(8),
-            acquireFenceFd = get(9).toInt(),
-            extendedLinear = get(10) != 0L,
-        )
-    return output.takeIf {
-        it.frameFd >= 0 &&
-            it.width > 0 &&
-            it.height > 0 &&
-            it.stride > 0 &&
-            it.offset >= 0 &&
-            it.fourcc in setOf(NucleusDrmFormat.ARGB8888, NucleusDrmFormat.ABGR16161616F) &&
-            it.generation > 0L &&
-            it.serial > 0L &&
-            it.acquireFenceFd >= TextureViewFrame.NO_FENCE
-    }
-}
-
-private fun constrainMpvRenderSize(
-    requestedWidth: Int,
-    requestedHeight: Int,
-    maxRenderPixels: Int,
-): Pair<Int, Int> {
-    val pixels = requestedWidth.toLong() * requestedHeight.toLong()
-    if (pixels <= maxRenderPixels.toLong()) return requestedWidth to requestedHeight
-    val scale = sqrt(maxRenderPixels.toDouble() / pixels.toDouble())
-    return (requestedWidth * scale).toInt().coerceAtLeast(1) to
-        (requestedHeight * scale).toInt().coerceAtLeast(1)
-}
-
-private fun isWindowsHost(): Boolean = System.getProperty("os.name", "").lowercase().contains("windows")
-
-private fun isMacHost(): Boolean = System.getProperty("os.name", "").lowercase().let { "mac" in it || "darwin" in it }
-
-private fun isLinuxHost(): Boolean = System.getProperty("os.name", "").lowercase().contains("linux")
-
-private const val MPV_WINDOWS_TEXTURE_INFO_SIZE = 8
-private const val MPV_MAC_TEXTURE_INFO_SIZE = 7
-private const val MPV_LINUX_TEXTURE_INFO_SIZE = 11
-private const val MPV_WINDOWS_TEXTURE_HANDLE_INDEX = 0
-private const val MPV_WINDOWS_TEXTURE_WIDTH_INDEX = 1
-private const val MPV_WINDOWS_TEXTURE_HEIGHT_INDEX = 2
-private const val MPV_WINDOWS_TEXTURE_FORMAT_INDEX = 3
-private const val MPV_WINDOWS_TEXTURE_GENERATION_INDEX = 4
-private const val MPV_WINDOWS_TEXTURE_SERIAL_INDEX = 5
-private const val MPV_WINDOWS_TEXTURE_ADAPTER_LUID_INDEX = 6
-private const val DXGI_FORMAT_R16G16B16A16_FLOAT = 10
-private const val DXGI_FORMAT_R8G8B8A8_UNORM = 28
-
-private val MPV_DECODER_COLOR_CAPABILITIES =
-    DecoderColorCapabilities(
-        isKnown = true,
-        supportedDynamicRanges =
-            setOf(
-                VideoDynamicRange.SDR,
-                VideoDynamicRange.HDR10,
-                VideoDynamicRange.HDR10_PLUS,
-                VideoDynamicRange.HLG,
-                VideoDynamicRange.DOLBY_VISION,
-            ),
-        maxBitDepth = 16,
-        isDolbyVisionProfileSupportKnown = false,
-    )
-
-private val MPV_TEXTURE_RENDERER_COLOR_CAPABILITIES =
-    RendererColorCapabilities(
-        controlledHdrDynamicRanges =
-            setOf(
-                VideoDynamicRange.HDR10,
-                VideoDynamicRange.HDR10_PLUS,
-                VideoDynamicRange.HLG,
-            ),
-        controlledOutputConversions =
-            mapOf(
-                VideoDynamicRange.HDR10_PLUS to VideoDynamicRange.HDR10,
-                VideoDynamicRange.DOLBY_VISION to VideoDynamicRange.HDR10,
-            ),
-        supportsToneMappingToSdr = true,
-        supportsHdr10PlusApplication = true,
-        supportsDolbyVisionMetadata = false,
-        supportsDolbyVisionToneMappingToSdr = true,
-    )
-
-private fun mpvVideoColorInfo(
-    transfer: String?,
-    primaries: String?,
-    matrix: String?,
-    colorLevels: String?,
-    pixelFormat: String?,
-    codecDescription: String,
-    dolbyVisionProfile: Int?,
-): VideoColorInfo {
-    val normalizedTransfer = transfer?.lowercase()
-    val isDolbyVision =
-        dolbyVisionProfile != null ||
-            codecDescription.lowercase().let { "dolby vision" in it || "dovi" in it }
-    val dynamicRange =
-        when {
-            isDolbyVision -> VideoDynamicRange.DOLBY_VISION
-            normalizedTransfer in setOf("pq", "st2084", "smpte2084") -> VideoDynamicRange.HDR10
-            normalizedTransfer in setOf("hlg", "arib-std-b67") -> VideoDynamicRange.HLG
-            normalizedTransfer.isNullOrBlank() || normalizedTransfer in setOf("unknown", "auto") ->
-                VideoDynamicRange.UNKNOWN
-            else -> VideoDynamicRange.SDR
-        }
-    return VideoColorInfo(
-        dynamicRange = dynamicRange,
-        bitDepth = pixelFormat.mpvPixelBitDepth(),
-        primaries =
-            when (primaries?.lowercase()) {
-                "bt.2020", "bt2020" -> VideoColorPrimaries.BT2020
-                "bt.709", "bt709" -> VideoColorPrimaries.BT709
-                "display-p3", "dci-p3" -> VideoColorPrimaries.DISPLAY_P3
-                "bt.601-525", "smpte-170m" -> VideoColorPrimaries.BT601_525
-                "bt.601-625", "bt.470bg" -> VideoColorPrimaries.BT601_625
-                else -> VideoColorPrimaries.UNKNOWN
-            },
-        transfer =
-            when (normalizedTransfer) {
-                "pq", "st2084", "smpte2084" -> VideoColorTransfer.PQ
-                "hlg", "arib-std-b67" -> VideoColorTransfer.HLG
-                "linear" -> VideoColorTransfer.LINEAR
-                "srgb" -> VideoColorTransfer.SRGB
-                null -> VideoColorTransfer.UNKNOWN
-                else -> VideoColorTransfer.SDR
-            },
-        matrix =
-            when (matrix?.lowercase()) {
-                "rgb" -> VideoColorMatrix.RGB
-                "bt.709", "bt709" -> VideoColorMatrix.BT709
-                "bt.2020-ncl", "bt2020nc" -> VideoColorMatrix.BT2020_NCL
-                "bt.2020-cl", "bt2020c" -> VideoColorMatrix.BT2020_CL
-                "ictcp" -> VideoColorMatrix.ICTCP
-                "bt.601", "smpte-170m" -> VideoColorMatrix.BT601
-                else -> VideoColorMatrix.UNKNOWN
-            },
-        range =
-            when (colorLevels?.lowercase()) {
-                "full", "pc" -> VideoColorRange.FULL
-                "limited", "tv" -> VideoColorRange.LIMITED
-                else -> VideoColorRange.UNKNOWN
-            },
-        dolbyVision =
-            if (isDolbyVision) {
-                DolbyVisionInfo(
-                    profile = dolbyVisionProfile,
-                    hasHdr10CompatibleBaseLayer =
-                        normalizedTransfer in setOf("pq", "st2084", "smpte2084"),
-                    hasHlgCompatibleBaseLayer = normalizedTransfer in setOf("hlg", "arib-std-b67"),
-                )
-            } else {
-                null
-            },
-    )
-}
-
-private fun String?.mpvPixelBitDepth(): Int? {
-    val value = this?.lowercase() ?: return null
-    if ("p010" in value || "p016" in value) return value.substringAfter("p0").take(2).toIntOrNull()
-    Regex("p(\\d{2})(?:le|be)?")
-        .find(value)
-        ?.groupValues
-        ?.getOrNull(1)
-        ?.toIntOrNull()
-        ?.let { return it }
-    return when {
-        "rgb48" in value || "rgba64" in value -> 16
-        "rgb30" in value || "x2rgb10" in value -> 10
-        value.isNotBlank() -> 8
-        else -> null
-    }
-}
-
-private fun VideoDynamicRange.isHdrSignal(): Boolean =
-    this != VideoDynamicRange.UNKNOWN && this != VideoDynamicRange.SDR
 
 internal enum class MpvMacDecodeRoute(
     val mpvHwdec: String,
@@ -2501,6 +1350,26 @@ internal enum class MpvMacDecodeRoute(
         description = "adaptive software decoding for high-throughput SDR HEVC",
     ),
 }
+
+internal enum class MpvMacNativeBackend {
+    OPENGL,
+    MACVK,
+}
+
+internal fun selectMpvMacNativeBackend(
+    requested: MpvMacRenderer,
+    nativeBridgeAvailable: Boolean,
+    embeddedMacVkApiVersion: Int,
+): MpvMacNativeBackend =
+    if (
+        requested == MpvMacRenderer.MOLTENVK &&
+        nativeBridgeAvailable &&
+        embeddedMacVkApiVersion >= EMBEDDED_MACVK_API_VERSION
+    ) {
+        MpvMacNativeBackend.MACVK
+    } else {
+        MpvMacNativeBackend.OPENGL
+    }
 
 /**
  * FFmpeg's VideoToolbox interop can fall below real time for SDR HEVC streams around two
@@ -2537,7 +1406,18 @@ internal fun selectMpvMacDecodeRoute(
 
 private const val SOFTWARE_HEVC_PIXEL_RATE_THRESHOLD = 1_500_000_000.0
 
-internal fun mpvInitializationOptions(config: MpvRuntimeConfig): Map<String, String> {
+private fun String?.toMacOutputColorMode(): MpvMacOutputColorMode =
+    when (this?.lowercase()) {
+        "pq", "st2084", "smpte2084" -> MpvMacOutputColorMode.BT2100_PQ
+        "hlg", "arib-std-b67" -> MpvMacOutputColorMode.BT2100_HLG
+        else -> MpvMacOutputColorMode.SDR
+    }
+
+internal fun mpvInitializationOptions(
+    config: MpvRuntimeConfig,
+    macBackend: MpvMacNativeBackend = MpvMacNativeBackend.OPENGL,
+    macVkHostView: Long = 0L,
+): Map<String, String> {
     val subtitleFontsDirectory =
         config.subtitleFontsDirectory?.let { directory ->
             require(
@@ -2550,12 +1430,28 @@ internal fun mpvInitializationOptions(config: MpvRuntimeConfig): Map<String, Str
         }
 
     return buildMap {
-        put("vo", "libmpv")
+        if (macBackend == MpvMacNativeBackend.MACVK) {
+            require(macVkHostView > 0L) { "macvk requires a valid embedded NSView handle." }
+            put("vo", "gpu-next")
+            put("gpu-api", "vulkan")
+            put("gpu-context", "macvk")
+            put("wid", macVkHostView.toString())
+            put("target-colorspace-hint", "yes")
+        } else {
+            put("vo", "libmpv")
+        }
         put("config", "no")
         put("load-scripts", "no")
         put("input-default-bindings", "no")
         put("input-vo-keyboard", "no")
-        put("hwdec", "no")
+        put(
+            "hwdec",
+            if (macBackend == MpvMacNativeBackend.MACVK) {
+                MpvMacDecodeRoute.HARDWARE_AUTO.mpvHwdec
+            } else {
+                "no"
+            },
+        )
         put("framedrop", "vo")
         put("keep-open", "yes")
         put("sub-ass-override", if (config.preserveAssStyles) "no" else "strip")
@@ -2563,6 +1459,8 @@ internal fun mpvInitializationOptions(config: MpvRuntimeConfig): Map<String, Str
         subtitleFontsDirectory?.let { put("sub-fonts-dir", it) }
     }
 }
+
+private const val EMBEDDED_MACVK_API_VERSION = 1
 
 internal fun createDesktopMpvVideoPlayerState(config: MpvRuntimeConfig): MpvVideoPlayerState {
     val resolved =
@@ -2578,7 +1476,6 @@ internal fun createDesktopMpvVideoPlayerState(config: MpvRuntimeConfig): MpvVide
                 cause = failure,
             )
         }
-    val options = mpvInitializationOptions(config) + resolved.requiredOptions
     val library =
         try {
             LibMpvLibrary.open(resolved.librarySource)
@@ -2592,38 +1489,99 @@ internal fun createDesktopMpvVideoPlayerState(config: MpvRuntimeConfig): MpvVide
                 cause = failure,
             )
         }
+    val macVkRequested = config.macRenderer == MpvMacRenderer.MOLTENVK
+    val nativeBridgeAvailable = MpvMacNativeBridge.isAvailable
+    val embeddedMacVkApiVersion = library.embeddedMacVkApiVersion
+    var initialMacBackendFallbackReason =
+        when {
+            !macVkRequested -> null
+            !nativeBridgeAvailable -> "the native macOS bridge is unavailable"
+            embeddedMacVkApiVersion < EMBEDDED_MACVK_API_VERSION ->
+                "the runtime does not expose embedded macvk capability version $EMBEDDED_MACVK_API_VERSION"
+            else -> null
+        }
+    var macBackend =
+        selectMpvMacNativeBackend(
+            requested = config.macRenderer,
+            nativeBridgeAvailable = nativeBridgeAvailable,
+            embeddedMacVkApiVersion = embeddedMacVkApiVersion,
+        )
+    var macVkHostView =
+        if (macBackend == MpvMacNativeBackend.MACVK) {
+            runCatching { MpvMacNativeBridge.nCreateMacVkHost() }.getOrDefault(0L)
+        } else {
+            0L
+        }
+    if (macBackend == MpvMacNativeBackend.MACVK && macVkHostView == 0L) {
+        initialMacBackendFallbackReason = "the native macOS bridge could not create an embedded host view"
+        macBackend = MpvMacNativeBackend.OPENGL
+    }
+
     val engine =
         try {
-            library.createEngine(options)
-        } catch (failure: MpvLoadFailure) {
-            library.close()
-            throw MpvBackendUnavailableException(
-                availability =
-                    MpvBackendAvailability.Unavailable(
-                        reason = failure.reason.toPublicReason(),
-                        guidance = failure.guidance,
-                    ),
-                cause = failure,
+            library.createEngine(
+                options =
+                    mpvInitializationOptions(config, macBackend, macVkHostView) +
+                        resolved.requiredOptions,
+                createSoftwareRenderer = macBackend != MpvMacNativeBackend.MACVK,
             )
         } catch (failure: RuntimeException) {
-            library.close()
-            throw MpvBackendUnavailableException(
-                availability =
-                    MpvBackendAvailability.Unavailable(
-                        reason = MpvBackendUnavailableReason.INITIALIZATION_FAILED,
-                        guidance =
-                            "The verified libmpv runtime could not initialize the software backend.",
-                    ),
-                cause = failure,
-            )
+            if (macBackend != MpvMacNativeBackend.MACVK) {
+                library.close()
+                throw failure.asMpvBackendInitializationFailure()
+            }
+
+            runCatching { MpvMacNativeBridge.nDestroyMacVkHost(macVkHostView) }
+            macVkHostView = 0L
+            macBackend = MpvMacNativeBackend.OPENGL
+            initialMacBackendFallbackReason = "libmpv rejected embedded macvk initialization"
+            try {
+                library.createEngine(
+                    options = mpvInitializationOptions(config) + resolved.requiredOptions,
+                )
+            } catch (fallbackFailure: RuntimeException) {
+                fallbackFailure.addSuppressed(failure)
+                library.close()
+                throw fallbackFailure.asMpvBackendInitializationFailure()
+            }
         }
     return try {
-        MpvVideoPlayerState(config, engine)
+        MpvVideoPlayerState(
+            config,
+            engine,
+            initialMacVkHostView = macVkHostView,
+            initialMacBackendFallbackReason = initialMacBackendFallbackReason,
+        )
     } catch (failure: RuntimeException) {
-        engine.close()
+        runCatching { engine.close() }
+        if (macVkHostView != 0L) {
+            runCatching { MpvMacNativeBridge.nDestroyMacVkHost(macVkHostView) }
+        }
         throw failure
     }
 }
+
+private fun RuntimeException.asMpvBackendInitializationFailure(): MpvBackendUnavailableException =
+    when (this) {
+        is MpvLoadFailure ->
+            MpvBackendUnavailableException(
+                availability =
+                    MpvBackendAvailability.Unavailable(
+                        reason = reason.toPublicReason(),
+                        guidance = guidance,
+                    ),
+                cause = this,
+            )
+        else ->
+            MpvBackendUnavailableException(
+                availability =
+                    MpvBackendAvailability.Unavailable(
+                        reason = MpvBackendUnavailableReason.INITIALIZATION_FAILED,
+                        guidance = "The verified libmpv runtime could not initialize the desktop backend.",
+                    ),
+                cause = this,
+            )
+    }
 
 private fun MpvUnavailableReason.toPublicReason(): MpvBackendUnavailableReason =
     when (this) {

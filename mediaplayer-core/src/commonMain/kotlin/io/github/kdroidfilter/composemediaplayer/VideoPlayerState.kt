@@ -403,6 +403,41 @@ interface VideoPlayerState {
             }
             ?: selectAudioTrack(null as AudioTrack?)
 
+    /**
+     * App-provided audio sources currently attached to this content session.
+     *
+     * A track can replace programme audio or play as an overlay according to [ExternalAudioTrack.playbackMode]. A new
+     * primary source or [releaseSource] clears these session-bound tracks. Callers must check
+     * [PlayerCapabilities.supportsExternalAudioTracks] before registering tracks.
+     */
+    val externalAudioTracks: List<ExternalAudioTrack>
+        get() = emptyList()
+
+    /** Current primary-audio handling while an app-provided audio track is selected. */
+    val externalAudioPlaybackStatus: ExternalAudioPlaybackStatus
+        get() = ExternalAudioPlaybackStatus.Inactive
+
+    fun addExternalAudioTrack(track: ExternalAudioTrack) = Unit
+
+    fun removeExternalAudioTrack(trackId: String) = Unit
+
+    fun removeExternalAudioTrack(track: ExternalAudioTrack) {
+        removeExternalAudioTrack(track.id)
+    }
+
+    fun clearExternalAudioTracks() = Unit
+
+    /**
+     * Replaces only app-provided audio sources while preserving audio tracks embedded in the primary source.
+     *
+     * If the selected external track is present in [tracks] with the same id, platform implementations should restore
+     * that selection after rebuilding the source.
+     */
+    fun replaceExternalAudioTracks(tracks: List<ExternalAudioTrack>) {
+        clearExternalAudioTracks()
+        tracks.forEach(::addExternalAudioTrack)
+    }
+
     // Subtitle management
     var subtitlesEnabled: Boolean
     var currentSubtitleTrack: SubtitleTrack?
@@ -624,7 +659,7 @@ data class PreviewableVideoPlayerState(
     override var projectionViewControlMode: VideoProjectionViewControlMode = VideoProjectionViewControlMode.AUTO,
     override var projectionTextureCrop: VideoTextureCrop = VideoTextureCrop(),
     override var currentAudioTrack: AudioTrack? = null,
-    override val availableAudioTracks: List<AudioTrack> = emptyList(),
+    override val availableAudioTracks: List<AudioTrack> = mutableListOf(),
     override var subtitlesEnabled: Boolean = false,
     override var currentSubtitleTrack: SubtitleTrack? = null,
     override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableListOf(),
@@ -638,6 +673,10 @@ data class PreviewableVideoPlayerState(
 ) : VideoPlayerState {
     private var disposed = false
     private var previewSubtitleOffset = Duration.ZERO
+    private val previewExternalAudioTracks = mutableListOf<ExternalAudioTrack>()
+
+    override val externalAudioTracks: List<ExternalAudioTrack>
+        get() = previewExternalAudioTracks
 
     override var subtitleOffset: Duration
         get() = previewSubtitleOffset
@@ -741,6 +780,44 @@ data class PreviewableVideoPlayerState(
                     ?: TrackSelectionResult.NotFound(id)
             }
             ?: selectAudioTrack(null as AudioTrack?)
+    }
+
+    override fun addExternalAudioTrack(track: ExternalAudioTrack) {
+        ensureNotDisposed()
+        previewExternalAudioTracks.removeAll { existing -> existing.id == track.id }
+        previewExternalAudioTracks += track
+        (availableAudioTracks as? MutableList<AudioTrack>)?.let { audioTracks ->
+            audioTracks.removeAll { existing -> existing.id == track.id && existing.isExternal }
+            audioTracks += track.asAudioTrack()
+        }
+    }
+
+    override fun removeExternalAudioTrack(trackId: String) {
+        ensureNotDisposed()
+        previewExternalAudioTracks.removeAll { track -> track.id == trackId }
+        (availableAudioTracks as? MutableList<AudioTrack>)
+            ?.removeAll { track -> track.id == trackId && track.isExternal }
+        if (currentAudioTrack?.id == trackId && currentAudioTrack?.isExternal == true) {
+            currentAudioTrack = null
+        }
+    }
+
+    override fun clearExternalAudioTracks() {
+        ensureNotDisposed()
+        val selectedExternal = currentAudioTrack?.isExternal == true
+        previewExternalAudioTracks.clear()
+        (availableAudioTracks as? MutableList<AudioTrack>)?.removeAll(AudioTrack::isExternal)
+        if (selectedExternal) currentAudioTrack = null
+    }
+
+    override fun replaceExternalAudioTracks(tracks: List<ExternalAudioTrack>) {
+        ensureNotDisposed()
+        val selectedExternalTrackId = currentAudioTrack?.takeIf(AudioTrack::isExternal)?.id
+        clearExternalAudioTracks()
+        tracks.forEach(::addExternalAudioTrack)
+        selectedExternalTrackId
+            ?.let { id -> availableAudioTracks.firstOrNull { track -> track.id == id && track.isExternal } }
+            ?.let { track -> currentAudioTrack = track }
     }
 
     override fun selectSubtitleTrack(track: SubtitleTrack?): TrackSelectionResult {

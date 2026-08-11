@@ -12,12 +12,14 @@ import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.BackendVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.consumeTaoVideoOverlayPointerEvents
+import io.github.kdroidfilter.composemediaplayer.unwrapDelegatingState
 
 /**
  * Renders a desktop playback session inside the caller's current Tao window.
  *
- * The application owns window creation and fullscreen. GPU video textures and [overlay] are
- * composited in the same Nucleus scene.
+ * The application owns window creation and fullscreen. Video surfaces are mounted at this
+ * composable's bounds, with [overlay] kept in Nucleus' Compose scene.
  */
 @Composable
 public fun DesktopPlaybackSurface(
@@ -117,14 +119,17 @@ private fun DesktopBackendPlaybackSurface(
     overlay: @Composable (VideoPlayerState) -> Unit,
     onSurfaceAttached: (VideoPlayerState) -> Unit,
 ) {
-    val provider = playerState as? TaoPlaybackSurfaceProvider
+    val provider = playerState.unwrapDelegatingState() as? TaoPlaybackSurfaceProvider
     if (provider != null) {
         provider.RenderTaoPlaybackSurface(
             modifier = modifier,
             contentScale = contentScale,
             overlay = {
                 Box(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .consumeTaoVideoOverlayPointerEvents(),
                 ) {
                     overlay(playerState)
                 }
@@ -145,7 +150,7 @@ private fun DesktopBackendPlaybackSurface(
     }
 }
 
-/** Backend SPI used by [DesktopPlaybackSurface] to observe TextureView host attachment. */
+/** Backend SPI used by [DesktopPlaybackSurface] to observe Tao surface attachment. */
 @Stable
 @ExperimentalComposeMediaPlayerBackendApi
 public interface TaoPlaybackSurfaceProvider {

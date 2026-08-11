@@ -97,7 +97,7 @@ class VideoPlayerStateTest {
     @Test
     fun releaseSourceDetachesMediaAndKeepsEngineReusable() {
         withPlayerState { playerState ->
-            val androidState = playerState as DefaultVideoPlayerState
+            val androidState = playerState.unwrapDelegatingState() as DefaultVideoPlayerState
             playerState.openUri("https://example.invalid/first.mp4", InitialPlayerState.PAUSE)
             assertTrue(playerState.hasMedia)
             assertEquals(1, androidState.exoPlayer?.mediaItemCount)
@@ -119,7 +119,7 @@ class VideoPlayerStateTest {
     @Test
     fun stopRetainsSourceForLaterPlayback() {
         withPlayerState { playerState ->
-            val androidState = playerState as DefaultVideoPlayerState
+            val androidState = playerState.unwrapDelegatingState() as DefaultVideoPlayerState
             playerState.openUri("https://example.invalid/video.mp4", InitialPlayerState.PAUSE)
 
             playerState.stop()
@@ -169,7 +169,7 @@ class VideoPlayerStateTest {
     @Suppress("LongMethod", "MagicNumber")
     fun disposeIsIdempotentAndCommandsFailAfterwards() {
         val playerState = createVideoPlayerState()
-        val androidState = playerState as DefaultVideoPlayerState
+        val androidState = playerState.unwrapDelegatingState() as DefaultVideoPlayerState
         val audioTrack = AudioTrack(id = "audio", label = "Audio")
         val subtitleTrack = SubtitleTrack(label = "Subtitle", language = "en", src = "subtitle.vtt")
         playerState.dispose()
@@ -214,6 +214,18 @@ class VideoPlayerStateTest {
             { playerState.currentAudioTrack = audioTrack },
             { playerState.selectAudioTrack("missing") },
             { playerState.selectAudioTrack(audioTrack) },
+            {
+                playerState.addExternalAudioTrack(
+                    ExternalAudioTrack(
+                        id = "external-audio",
+                        label = "External audio",
+                        source = MediaSourceSpec("https://example.invalid/audio.m4a"),
+                    ),
+                )
+            },
+            { playerState.removeExternalAudioTrack("external-audio") },
+            { playerState.clearExternalAudioTracks() },
+            { playerState.replaceExternalAudioTracks(emptyList()) },
             { playerState.subtitlesEnabled = true },
             { playerState.currentSubtitleTrack = subtitleTrack },
             { playerState.subtitleTextStyle = TextStyle.Default },
@@ -232,6 +244,29 @@ class VideoPlayerStateTest {
         ).forEach { command ->
             val error = assertFailsWith<IllegalStateException> { command() }
             assertEquals("VideoPlayerState has been disposed", error.message)
+        }
+    }
+
+    @Test
+    fun externalAudioTracksAreBoundToTheCurrentMediaSource() {
+        withPlayerState { playerState ->
+            val track =
+                ExternalAudioTrack(
+                    id = "narration-pl",
+                    label = "Polish narration",
+                    source = MediaSourceSpec("https://example.invalid/narration.m4a", "audio/mp4"),
+                    language = "pl",
+                )
+            playerState.openUri("https://example.invalid/first.mp4", InitialPlayerState.PAUSE)
+
+            playerState.addExternalAudioTrack(track)
+
+            assertTrue(playerState.capabilities.supportsExternalAudioTracks)
+            assertEquals(listOf(track), playerState.externalAudioTracks)
+
+            playerState.openUri("https://example.invalid/second.mp4", InitialPlayerState.PAUSE)
+
+            assertTrue(playerState.externalAudioTracks.isEmpty())
         }
     }
 

@@ -4,7 +4,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 
-/** JNI bridge from libmpv's OpenGL render API to a rotating IOSurface pool. */
+/** JNI bridge for the embedded macOS libmpv OpenGL/EDR and macvk host surfaces. */
 internal object MpvMacNativeBridge {
     private const val LIBRARY_NAME = "ComposeMediaPlayerMpvMac"
     private const val RESOURCE_PATH =
@@ -22,26 +22,31 @@ internal object MpvMacNativeBridge {
         colorMode: Int,
     ): Long
 
-    @JvmStatic external fun nRenderFrame(
-        nativeRenderer: Long,
-        width: Int,
-        height: Int,
+    @JvmStatic
+    external fun nCreateRendererInHost(
+        mpvHandle: Long,
+        libraryLoadName: String,
+        colorMode: Int,
+        nativeView: Long,
     ): Long
 
-    /** IOSurface, size, pixel format, producer generation/serial, extended-linear flag. */
-    @JvmStatic external fun nGetTextureOutputInfo(nativeRenderer: Long): LongArray?
+    /** Creates the Compose-owned `NSView*` consumed by the patched windowless macvk VO. */
+    @JvmStatic external fun nCreateMacVkHost(): Long
 
-    @JvmStatic external fun nReleaseTextureFrame(
-        nativeRenderer: Long,
-        generation: Long,
-        serial: Long,
+    @JvmStatic external fun nDestroyMacVkHost(nativeView: Long)
+
+    @JvmStatic external fun nRequestMacVkRedraw(nativeView: Long)
+
+    @JvmStatic external fun nGetMacVkDisplayRefreshRate(nativeView: Long): Double
+
+    @JvmStatic
+    external fun nSetMacVkColorMode(
+        nativeView: Long,
+        colorMode: Int,
     )
 
-    /** Acknowledges libmpv only after Nucleus confirms a later system Present. */
-    @JvmStatic external fun nReportPresented(
-        nativeRenderer: Long,
-        serial: Long,
-    )
+    /** Returns the renderer-owned `NSView*` mounted by Nucleus Tao. */
+    @JvmStatic external fun nGetViewHandle(nativeRenderer: Long): Long
 
     @JvmStatic external fun nDetach(nativeRenderer: Long)
 
@@ -123,5 +128,6 @@ internal enum class MpvMacOutputColorMode(
     val nativeValue: Int,
 ) {
     SDR(0),
-    EXTENDED_LINEAR(1),
+    BT2100_PQ(1),
+    BT2100_HLG(2),
 }

@@ -208,6 +208,7 @@ jobs:
         shell: bash
         run: >-
           ./gradlew :mediaplayer-core:publishAndReleaseToMavenCentral
+          :mediaplayer-ads-core:publishAndReleaseToMavenCentral
           :mediaplayer-extension-api:publishAndReleaseToMavenCentral
           :mediaplayer-desktop-tao:publishAndReleaseToMavenCentral
           :mediaplayer:publishAndReleaseToMavenCentral
