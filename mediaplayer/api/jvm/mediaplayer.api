@@ -180,7 +180,7 @@ public final class io/github/kdroidfilter/composemediaplayer/DesktopPlaybackBack
 	public static synthetic fun kMediaBridgeRemuxDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static final fun kMediaBridgeTranscodeDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static synthetic fun kMediaBridgeTranscodeDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
-	public static final fun libVlcDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
+	public static final synthetic fun libVlcDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static synthetic fun libVlcDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static final fun platformDesktopPlaybackBackend (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
 	public static synthetic fun platformDesktopPlaybackBackend$default (Lio/github/kdroidfilter/composemediaplayer/AudioMode;Lio/github/kdroidfilter/composemediaplayer/CacheConfig;Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;ILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/desktop/DesktopPlaybackBackend;
@@ -196,14 +196,6 @@ public final class io/github/kdroidfilter/composemediaplayer/DesktopVideoBackend
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;
 	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/DesktopVideoBackend;
-}
-
-public final class io/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode : java/lang/Enum {
-	public static final field COMPOSE Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
-	public static final field PREFER_NATIVE Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
-	public static fun getEntries ()Lkotlin/enums/EnumEntries;
-	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
-	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/ExternalMediaToolStatus {
@@ -1081,7 +1073,6 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/ComposableSingl
 	public static final field INSTANCE Lio/github/kdroidfilter/composemediaplayer/mac/ComposableSingletons$MacVideoPlayerSurfaceKt;
 	public fun <init> ()V
 	public final fun getLambda$-1849073323$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
-	public final fun getLambda$1223988048$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/mac/MacNativeWindowFullscreen {

@@ -23,22 +23,6 @@ static inline LibVlcCanvasPlayer* toLibVlc(jlong handle) {
 
 static constexpr double HUNDRED_NANOSECOND_TICKS_PER_SECOND = 10000000.0;
 
-static HWND createNativeVideoWindow() {
-    return CreateWindowExW(
-        0,
-        L"STATIC",
-        L"",
-        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-        0,
-        0,
-        1,
-        1,
-        GetDesktopWindow(),
-        nullptr,
-        GetModuleHandleW(nullptr),
-        nullptr);
-}
-
 // ---------------------------------------------------------------------------
 // JNI implementations
 // ---------------------------------------------------------------------------
@@ -284,40 +268,31 @@ static jint JNICALL jni_ConfigureHdrOutput(
         values.size());
 }
 
-static jlong JNICALL jni_CreateNativeVideoWindow(JNIEnv*, jclass, jlong handle, jboolean libVlc) {
-    if (!handle) return 0;
-    HWND hwnd = createNativeVideoWindow();
-    if (!hwnd) return 0;
-    const bool attached = libVlc == JNI_TRUE
-        ? lvc_set_native_window(toLibVlc(handle), hwnd)
-        : SUCCEEDED(AttachHdrOutput(toInstance(handle), hwnd));
-    if (!attached) {
-        DestroyWindow(hwnd);
-        return 0;
-    }
-    return reinterpret_cast<jlong>(hwnd);
-}
-
-static void JNICALL jni_DisposeNativeVideoWindow(
-    JNIEnv*,
-    jclass,
-    jlong handle,
-    jlong hwndHandle,
-    jboolean libVlc
-) {
-    if (handle) {
-        if (libVlc == JNI_TRUE) {
-            lvc_set_native_window(toLibVlc(handle), nullptr);
-        } else {
-            DetachHdrOutput(toInstance(handle));
-        }
-    }
-    HWND hwnd = reinterpret_cast<HWND>(hwndHandle);
-    if (hwnd && IsWindow(hwnd)) DestroyWindow(hwnd);
-}
-
 static jint JNICALL jni_RenderHdrFrame(JNIEnv*, jclass, jlong handle) {
     return handle ? RenderHdrFrame(toInstance(handle)) : E_INVALIDARG;
+}
+
+static jlongArray JNICALL jni_GetHdrTextureOutputInfo(JNIEnv* env, jclass, jlong handle) {
+    if (!handle) return nullptr;
+    HdrTextureOutputInfo output{};
+    const HRESULT hr = GetHdrTextureOutputInfo(toInstance(handle), &output);
+    if (hr != S_OK) return nullptr;
+    const uint64_t adapterLuid =
+        (static_cast<uint64_t>(static_cast<uint32_t>(output.adapterLuid.HighPart)) << 32u) |
+        static_cast<uint32_t>(output.adapterLuid.LowPart);
+    const jlong values[8] = {
+        reinterpret_cast<jlong>(output.sharedHandle),
+        static_cast<jlong>(output.width),
+        static_cast<jlong>(output.height),
+        static_cast<jlong>(output.format),
+        static_cast<jlong>(output.generation),
+        static_cast<jlong>(output.frameSerial),
+        static_cast<jlong>(adapterLuid),
+        output.extendedLinear ? 1 : 0,
+    };
+    jlongArray result = env->NewLongArray(8);
+    if (result) env->SetLongArrayRegion(result, 0, 8, values);
+    return result;
 }
 
 static jint JNICALL jni_GetHdrOutputStatus(
@@ -644,9 +619,8 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nWrapPointer"),         const_cast<char*>("(JJ)Ljava/nio/ByteBuffer;"),    (void*)jni_WrapPointer },
     { const_cast<char*>("nSetOutputSize"),      const_cast<char*>("(JII)I"),                       (void*)jni_SetOutputSize },
     { const_cast<char*>("nConfigureHdrOutput"), const_cast<char*>("(J[I[F)I"),                    (void*)jni_ConfigureHdrOutput },
-    { const_cast<char*>("nCreateNativeVideoWindow"), const_cast<char*>("(JZ)J"),                  (void*)jni_CreateNativeVideoWindow },
-    { const_cast<char*>("nDisposeNativeVideoWindow"), const_cast<char*>("(JJZ)V"),                (void*)jni_DisposeNativeVideoWindow },
     { const_cast<char*>("nRenderHdrFrame"),     const_cast<char*>("(J)I"),                         (void*)jni_RenderHdrFrame },
+    { const_cast<char*>("nGetHdrTextureOutputInfo"), const_cast<char*>("(J)[J"),                  (void*)jni_GetHdrTextureOutputInfo },
     { const_cast<char*>("nGetHdrOutputStatus"), const_cast<char*>("(J[I[F)I"),                    (void*)jni_GetHdrOutputStatus },
     { const_cast<char*>("nGetDecodedVideoColorInfo"), const_cast<char*>("(J)[I"),              (void*)jni_GetDecodedVideoColorInfo },
     { const_cast<char*>("nGetVideoPlaybackDiagnostics"), const_cast<char*>("(J)[J"),            (void*)jni_GetVideoPlaybackDiagnostics },

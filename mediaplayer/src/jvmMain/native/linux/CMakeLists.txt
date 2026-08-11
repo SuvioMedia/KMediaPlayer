@@ -77,6 +77,11 @@ add_library(KMediaPlayerVulkanProjection SHARED
     "${LinuxHdrProjection.frag.spv.h}"
 )
 target_compile_definitions(KMediaPlayerVulkanProjection PRIVATE
+    linux_vulkan_texture_create=kmp_vulkan_texture_create
+    linux_vulkan_texture_update=kmp_vulkan_texture_update
+    linux_vulkan_texture_acquire_frame=kmp_vulkan_texture_acquire_frame
+    linux_vulkan_texture_release_frame=kmp_vulkan_texture_release_frame
+    linux_vulkan_texture_render_bgra=kmp_vulkan_texture_render_bgra
     linux_vulkan_projection_create=kmp_vulkan_projection_create
     linux_vulkan_projection_update_geometry=kmp_vulkan_projection_update_geometry
     linux_vulkan_projection_update_configuration=kmp_vulkan_projection_update_configuration

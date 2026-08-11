@@ -1,4 +1,4 @@
-package io.github.kdroidfilter.composemediaplayer.mpv
+package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -9,35 +9,20 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.snapshots.SnapshotApplyConflictException
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import io.github.kdroidfilter.composemediaplayer.AudioTrack
-import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.MediaChapter
-import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
-import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
-import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
-import io.github.kdroidfilter.composemediaplayer.TrackKind
-import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
-import io.github.kdroidfilter.composemediaplayer.VideoMetadata
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
-import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
-import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
-import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlin.time.Clock
 import kotlin.time.Duration
 
 /**
- * Shared observable state and command semantics for MPV platform adapters.
+ * Shared observable state and command semantics for optional player backends.
  *
- * Android, iOS, and desktop keep only native source resolution, runtime polling and rendering.
- * This class deliberately contains no KMediaMpv or libmpv types, which keeps the common
- * adapter contract testable without loading a native runtime.
+ * Concrete adapters keep native runtime resolution, polling, and rendering in their own module.
+ * This base contains no decoder-specific types and is intended only for backend implementors.
  */
 @Stable
-internal abstract class AbstractMpvVideoPlayerState protected constructor() : VideoPlayerState {
+@ExperimentalComposeMediaPlayerBackendApi
+public abstract class AbstractBackendVideoPlayerState protected constructor() : VideoPlayerState {
     protected val events = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = EVENT_BUFFER_CAPACITY)
     protected val audioTracks = mutableStateListOf<AudioTrack>()
     protected val subtitleTracks = mutableStateListOf<SubtitleTrack>()
@@ -124,7 +109,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
     protected abstract fun removeBackendExternalSubtitle(track: SubtitleTrack)
 
     protected open val seekFailureMessage: String
-        get() = "MPV rejected the seek request."
+        get() = "The video backend rejected the seek request."
 
     final override var volume: Float
         get() = _volume
@@ -351,7 +336,7 @@ internal abstract class AbstractMpvVideoPlayerState protected constructor() : Vi
     }
 
     protected fun ensureOpen() {
-        check(!backendDisposed) { "${this::class.simpleName ?: "MPV player"} has been disposed." }
+        check(!backendDisposed) { "${this::class.simpleName ?: "video player"} has been disposed." }
     }
 
     protected fun beginSourcePreparation(

@@ -22,16 +22,12 @@ class PlayerCapabilitiesJvmTest {
     }
 
     @Test
-    fun `libvlc native backend follows libvlc availability on desktop`() {
-        val libVlcCapabilities =
-            jvmPlayerCapabilities(
-                VideoPlaybackOptions(desktopVideoBackend = DesktopVideoBackend.LIBVLC),
-            )
+    fun `libvlc native compatibility backend never advertises container support`() {
         val libVlcNativeCapabilities =
             jvmPlayerCapabilities(
                 VideoPlaybackOptions(desktopVideoBackend = DesktopVideoBackend.LIBVLC_NATIVE),
             )
-        assertEquals(libVlcCapabilities.supportsMkv, libVlcNativeCapabilities.supportsMkv)
+        assertFalse(libVlcNativeCapabilities.supportsMkv)
     }
 
     @Test

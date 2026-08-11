@@ -188,6 +188,20 @@ vec3 pqEotf(vec3 encoded) {
     return pow(max((p - c1) / max(c2 - c3 * p, vec3(1e-6)), vec3(0.0)), vec3(1.0 / m1)) * 10000.0;
 }
 
+vec3 srgbEotf(vec3 encoded) {
+    bvec3 low = lessThanEqual(encoded, vec3(0.04045));
+    vec3 linearLow = encoded / 12.92;
+    vec3 linearHigh = pow((encoded + 0.055) / 1.055, vec3(2.4));
+    return mix(linearHigh, linearLow, low);
+}
+
+vec3 srgbOetf(vec3 linearValue) {
+    bvec3 low = lessThanEqual(linearValue, vec3(0.0031308));
+    vec3 encodedLow = linearValue * 12.92;
+    vec3 encodedHigh = 1.055 * pow(max(linearValue, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
+    return mix(encodedHigh, encodedLow, low);
+}
+
 vec3 pqOetf(vec3 nits) {
     const float m1 = 2610.0 / 16384.0;
     const float m2 = 2523.0 / 32.0;
@@ -315,6 +329,14 @@ vec3 sourcePrimariesToBt2020(vec3 linearRgb) {
     return linearRgb;
 }
 
+vec3 bt2020ToLinearSrgb(vec3 linearRgb) {
+    return vec3(
+        1.660491 * linearRgb.r - 0.587641 * linearRgb.g - 0.072850 * linearRgb.b,
+        -0.124550 * linearRgb.r + 1.132900 * linearRgb.g - 0.008350 * linearRgb.b,
+        -0.018151 * linearRgb.r - 0.100579 * linearRgb.g + 1.118730 * linearRgb.b
+    );
+}
+
 float hashNoise(vec2 position) {
     return fract(sin(dot(position, vec2(12.9898, 78.233))) * 43758.5453);
 }
@@ -332,10 +354,35 @@ void main() {
         return;
     }
     vec3 encoded = sampleP010(sourceUv);
-    vec3 nits = configuration.modes.x == 1 ? hlgToNits(encoded) : pqEotf(encoded);
+    vec3 nits;
+    if (configuration.modes.x == 1) {
+        nits = hlgToNits(encoded);
+    } else if (configuration.modes.x == 2) {
+        nits = srgbEotf(encoded) * max(configuration.view.w, 1.0);
+    } else {
+        nits = pqEotf(encoded);
+    }
     nits = sourcePrimariesToBt2020(nits);
-    nits = applyHdr10Plus(nits);
+    if (configuration.modes.x != 2) nits = applyHdr10Plus(nits);
     nits = toneMapNits(nits);
+
+    if (configuration.flags.y == 2) {
+        // Windows-scRGB semantics in the shared FP16 scene: 1.0 is the
+        // producer's declared SDR reference white and values stay unclamped.
+        outColor = vec4(
+            bt2020ToLinearSrgb(nits) / max(configuration.view.w, 1.0),
+            1.0
+        );
+        return;
+    }
+    if (configuration.flags.y == 3) {
+        vec3 linearSrgb = bt2020ToLinearSrgb(nits) / max(configuration.view.w, 1.0);
+        vec3 outputSignal = srgbOetf(clamp(linearSrgb, 0.0, 1.0));
+        outputSignal += vec3(triangularDither(gl_FragCoord.xy) * (1023.0 / 255.0));
+        outColor = vec4(clamp(outputSignal, 0.0, 1.0), 1.0);
+        return;
+    }
+
     vec3 outputSignal = configuration.flags.y == 1 ? nitsToHlg(nits) : pqOetf(nits);
     outputSignal += vec3(triangularDither(gl_FragCoord.xy));
     outColor = vec4(clamp(outputSignal, 0.0, 1.0), 1.0);

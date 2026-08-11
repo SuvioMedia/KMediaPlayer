@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 // Native API version — bump when the exported JNI/native API changes.
-#define NATIVE_VIDEO_PLAYER_VERSION 12
+#define NATIVE_VIDEO_PLAYER_VERSION 13
 
 enum {
     NVP_GSTREAMER_WAYLAND_SINK = 1 << 0,
@@ -63,6 +63,26 @@ void    nvp_unlock_latest_frame(VideoPlayer* p);
 int32_t nvp_get_frame_width(VideoPlayer* p);
 int32_t nvp_get_frame_height(VideoPlayer* p);
 int32_t nvp_set_output_size(VideoPlayer* p, int32_t width, int32_t height);
+
+// Headless color-managed TextureView producer. The returned frame owns its
+// dma_buf_fd and acquire_fence_fd until nvp_release_texture_frame.
+int32_t nvp_configure_texture_output(
+    VideoPlayer* p,
+    int32_t width,
+    int32_t height,
+    int32_t input_p010,
+    int32_t output_hdr,
+    const LinuxVulkanProjectionConfiguration* configuration
+);
+void nvp_detach_texture_output(VideoPlayer* p);
+int32_t nvp_acquire_texture_frame(VideoPlayer* p, LinuxVulkanTextureFrame* frame);
+void nvp_release_texture_frame(
+    VideoPlayer* p,
+    uint64_t generation,
+    uint64_t serial,
+    int32_t dma_buf_fd,
+    int32_t release_fence_fd
+);
 
 // GTK/Tao + GStreamer waylandsink direct-output path.
 int32_t nvp_attach_wayland_output(

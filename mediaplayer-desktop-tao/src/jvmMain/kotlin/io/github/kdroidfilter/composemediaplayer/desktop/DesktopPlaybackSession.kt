@@ -5,6 +5,7 @@ import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerBackendInfo
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewControlMode
@@ -147,6 +148,11 @@ public class DesktopPlaybackSession(
             val previousRequest = activeRequest
             val bookmark = previous?.captureBookmark()
             val isSameMedia = previousRequest?.hasSameMediaAs(request) == true
+            traceDesktopSession(
+                "SWITCH_CAPTURE from=${previousBackend?.info?.id ?: "none"} " +
+                    "to=${backendId ?: "automatic"} playing=${bookmark?.wasPlaying} " +
+                    "positionMs=${bookmark?.position?.inWholeMilliseconds}",
+            )
 
             if (isSameExplicitBackendSelection(previous, previousBackend, isSameMedia, backendId)) {
                 mutableSessionState.value = DesktopPlaybackSessionState.Ready(checkNotNull(previousBackend).info)
@@ -216,6 +222,12 @@ public class DesktopPlaybackSession(
                     ) {
                         candidate.play()
                     }
+                    traceDesktopSession(
+                        "SWITCH_COMMIT backend=${backend.info.id} " +
+                            "resume=${isSameMedia && bookmark?.wasPlaying == true} " +
+                            "playing=${candidate.isPlaying} " +
+                            "positionMs=${candidate.preciseCurrentTime.inWholeMilliseconds}",
+                    )
                     mutableSessionState.value = DesktopPlaybackSessionState.Ready(backend.info)
                     return@withLock candidate
                 }
@@ -319,6 +331,7 @@ public class DesktopPlaybackSession(
             }
             return candidate
         } catch (failure: Exception) {
+            traceDesktopBackendOpenFailure(backend, candidate, failure)
             runCatching(candidate::releaseSource)
             runCatching(candidate::dispose)
             preparedRequest.ownedSource?.close()
@@ -562,6 +575,83 @@ public class DesktopPlaybackSession(
     }
 }
 
+private fun traceDesktopBackendOpenFailure(
+    backend: DesktopPlaybackBackend,
+    player: VideoPlayerState,
+    failure: Throwable,
+) {
+    if (System.getProperty(DESKTOP_PLAYBACK_TRACE_PROPERTY)?.toBooleanStrictOrNull() != true) return
+    val color = player.colorPipelineStatus.value
+    val playerError = player.error
+    val errorMessage = playerError.traceMessageOrNull()
+    val message =
+        "[KMEDIA_DESKTOP] BACKEND_OPEN_FAILED " +
+            "backend=${backend.info.id} failure=${failure::class.simpleName} " +
+            "failureMessage=${failure.message?.replace(Regex("\\s+"), "_")} " +
+            "playerError=${playerError?.let { it::class.simpleName }} " +
+            "errorStage=${errorMessage.traceStage()} hresult=${errorMessage.traceHresult()} " +
+            "hasMedia=${player.hasMedia} loading=${player.isLoading} " +
+            "source=${color.source.dynamicRange.name} output=${color.outputDynamicRange.name} " +
+            "surface=${color.surface.name} verification=${color.verification.name} " +
+            "fallback=${color.fallbackReason.name}"
+    println(message)
+    System
+        .getProperty(DESKTOP_PLAYBACK_TRACE_FILE_PROPERTY)
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?.let { value -> Path.of(value) }
+        ?.let { traceFile ->
+            runCatching {
+                traceFile.parent?.let { parent -> Files.createDirectories(parent) }
+                Files.writeString(
+                    traceFile,
+                    "$message\n",
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND,
+                )
+            }
+        }
+}
+
+private fun traceDesktopSession(message: String) {
+    if (System.getProperty(DESKTOP_PLAYBACK_TRACE_PROPERTY)?.toBooleanStrictOrNull() != true) return
+    println("[KMEDIA_DESKTOP] $message")
+}
+
+private fun VideoPlayerError?.traceMessageOrNull(): String? =
+    when (this) {
+        is VideoPlayerError.CodecError -> message
+        is VideoPlayerError.UnsupportedCodecError -> message
+        is VideoPlayerError.NetworkError -> message
+        is VideoPlayerError.CorsError -> message
+        is VideoPlayerError.SourceError -> message
+        is VideoPlayerError.NoSourceError -> message
+        is VideoPlayerError.TimeoutError -> message
+        is VideoPlayerError.HlsError -> message
+        is VideoPlayerError.DrmError -> message
+        is VideoPlayerError.ColorPipelineError -> message
+        is VideoPlayerError.UnknownError -> message
+        null -> null
+    }
+
+private fun String?.traceStage(): String =
+    when {
+        this == null -> "NONE"
+        startsWith("Failed to open media") -> "OPEN_MEDIA"
+        startsWith("Failed to retrieve video size") -> "VIDEO_SIZE"
+        startsWith("Failed to retrieve duration") -> "DURATION"
+        startsWith("Player initialization timed out") -> "INITIALIZATION_TIMEOUT"
+        startsWith("Error while waiting for initialization") -> "INITIALIZATION"
+        startsWith("Error while opening media") -> "OPEN_EXCEPTION"
+        startsWith("File not found") -> "FILE_NOT_FOUND"
+        else -> "OTHER"
+    }
+
+private fun String?.traceHresult(): String =
+    this
+        ?.let { message -> TRACE_HRESULT_REGEX.find(message)?.value }
+        ?: "NONE"
+
 private data class PreparedDesktopRequest(
     val request: DesktopPlaybackRequest,
     val ownedSource: Closeable? = null,
@@ -608,6 +698,9 @@ private fun String.safeMediaSuffix(): String {
 private const val MATERIALIZED_FILE_PREFIX = "composemediaplayer-secure-"
 private const val MATERIALIZED_READ_BUFFER_BYTES = 256 * 1024
 private const val MAX_CONSECUTIVE_EMPTY_READS = 8
+private const val DESKTOP_PLAYBACK_TRACE_PROPERTY = "composemediaplayer.desktopPlaybackTrace"
+private const val DESKTOP_PLAYBACK_TRACE_FILE_PROPERTY = "composemediaplayer.desktopPlaybackTraceFile"
+private val TRACE_HRESULT_REGEX = Regex("hr=0x[0-9a-fA-F]+")
 
 /** Failure intentionally omitting the source URI, request headers and native error text. */
 public class DesktopPlaybackOpenException internal constructor(

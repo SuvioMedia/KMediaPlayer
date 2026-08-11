@@ -1,3 +1,204 @@
+public abstract class io/github/kdroidfilter/composemediaplayer/AbstractBackendVideoPlayerState : io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
+	public static final field $stable I
+	protected fun <init> ()V
+	public fun addExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
+	public final fun addSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
+	protected final fun beginSourcePreparation (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
+	public fun canPlaySource (Ljava/lang/String;Ljava/lang/String;)Z
+	public fun clearCache ()Lio/github/kdroidfilter/composemediaplayer/CacheClearResult;
+	public final fun clearError ()V
+	public fun clearExternalAudioTracks ()V
+	public final fun clearExternalSubtitleTracks ()V
+	protected final fun clearMetadata ()V
+	protected abstract fun disableBackendSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public final fun disableSubtitles ()Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	protected final fun emitEvent (Lio/github/kdroidfilter/composemediaplayer/PlaybackEvent;)V
+	protected final fun emitPlaybackEnded (Z)V
+	public static synthetic fun emitPlaybackEnded$default (Lio/github/kdroidfilter/composemediaplayer/AbstractBackendVideoPlayerState;ZILjava/lang/Object;)V
+	protected final fun emitSeekCompleted-LRDsOJo (J)V
+	public static synthetic fun emitSeekCompleted-LRDsOJo$default (Lio/github/kdroidfilter/composemediaplayer/AbstractBackendVideoPlayerState;JILjava/lang/Object;)V
+	protected final fun emitTrackChanged (Lio/github/kdroidfilter/composemediaplayer/TrackKind;Ljava/lang/String;)V
+	protected final fun ensureOpen ()V
+	public fun enterPip (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun getAdaptiveQualityMode ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode;
+	public final fun getAspectRatio ()F
+	protected final fun getAudioTracks ()Landroidx/compose/runtime/snapshots/SnapshotStateList;
+	public fun getAvailableAdaptiveQualities ()Ljava/util/List;
+	public final fun getAvailableAudioTracks ()Ljava/util/List;
+	public fun getAvailableHlsQualities ()Ljava/util/List;
+	public final fun getAvailableSubtitleTracks ()Ljava/util/List;
+	protected abstract fun getBackendDisposed ()Z
+	public fun getBufferedPercent ()F
+	public fun getBufferedRanges ()Ljava/util/List;
+	public fun getCapabilities ()Lio/github/kdroidfilter/composemediaplayer/PlayerCapabilities;
+	public final fun getChapters ()Ljava/util/List;
+	public fun getColorPipelineStatus ()Lkotlinx/coroutines/flow/StateFlow;
+	public fun getCurrentAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityVariant;
+	public final fun getCurrentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
+	public fun getCurrentChapter ()Lio/github/kdroidfilter/composemediaplayer/MediaChapter;
+	public fun getCurrentHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityVariant;
+	public final fun getCurrentSubtitleTrack ()Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;
+	public final fun getCurrentTime-UwyO8pc ()J
+	public fun getCurrentTimeMs ()J
+	public fun getDiagnostics ()Lio/github/kdroidfilter/composemediaplayer/PlaybackDiagnostics;
+	public final fun getDuration-UwyO8pc ()J
+	public fun getDurationMs ()J
+	public final fun getDurationText ()Ljava/lang/String;
+	public final fun getError ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	protected final fun getEvents ()Lkotlinx/coroutines/flow/MutableSharedFlow;
+	public fun getExternalAudioPlaybackStatus ()Lio/github/kdroidfilter/composemediaplayer/ExternalAudioPlaybackStatus;
+	public fun getExternalAudioTracks ()Ljava/util/List;
+	protected final fun getExternalSubtitles ()Ljava/util/Map;
+	public final fun getHasMedia ()Z
+	public fun getHlsQualityMode ()Lio/github/kdroidfilter/composemediaplayer/HlsQualityMode;
+	public fun getLoadingState ()Lio/github/kdroidfilter/composemediaplayer/PlaybackLoadingState;
+	public final fun getLoop ()Z
+	public final fun getMediaSessionId ()J
+	public final fun getMetadata ()Lio/github/kdroidfilter/composemediaplayer/VideoMetadata;
+	public final fun getOnPlaybackEnded ()Lkotlin/jvm/functions/Function0;
+	public final fun getOnRestart ()Lkotlin/jvm/functions/Function0;
+	public final fun getPlaybackEvents ()Lkotlinx/coroutines/flow/SharedFlow;
+	public final fun getPlaybackSpeed ()F
+	public final fun getPositionText ()Ljava/lang/String;
+	public fun getPreciseCurrentTimeMs ()J
+	public final fun getProjection ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;
+	public final fun getProjectionTextureCrop ()Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;
+	public final fun getProjectionView ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;
+	public final fun getProjectionViewControlMode ()Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;
+	protected final fun getRegisteredExternalSubtitles ()Ljava/util/LinkedHashMap;
+	public fun getRenderingInfo ()Lio/github/kdroidfilter/composemediaplayer/VideoRenderingInfo;
+	protected fun getSeekFailureMessage ()Ljava/lang/String;
+	public final fun getSliderPos ()F
+	public final fun getSubtitleBackgroundColor-0d7_KjU ()J
+	public final fun getSubtitleOffset-UwyO8pc ()J
+	public final fun getSubtitleTextStyle ()Landroidx/compose/ui/text/TextStyle;
+	protected final fun getSubtitleTracks ()Landroidx/compose/runtime/snapshots/SnapshotStateList;
+	public final fun getSubtitlesEnabled ()Z
+	public final fun getUserDragging ()Z
+	public final fun getVolume ()F
+	protected final fun get_aspectRatio ()F
+	protected final fun get_chapters ()Ljava/util/List;
+	protected final fun get_currentAudioTrack ()Lio/github/kdroidfilter/composemediaplayer/AudioTrack;
+	protected final fun get_currentSubtitleTrack ()Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;
+	protected final fun get_currentTime-UwyO8pc ()J
+	protected final fun get_duration-UwyO8pc ()J
+	protected final fun get_error ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;
+	protected final fun get_hasMedia ()Z
+	protected final fun get_isFullscreen ()Z
+	protected final fun get_isLoading ()Z
+	protected final fun get_isPlaying ()Z
+	protected final fun get_isSeeking ()Z
+	protected final fun get_loop ()Z
+	protected final fun get_mediaSessionId ()J
+	protected final fun get_playbackSpeed ()F
+	protected final fun get_sliderPos ()F
+	protected final fun get_subtitleOffset-UwyO8pc ()J
+	protected final fun get_subtitlesEnabled ()Z
+	protected final fun get_userDragging ()Z
+	protected final fun get_volume ()F
+	public fun isBuffering ()Z
+	public final fun isFullscreen ()Z
+	public final fun isLoading ()Z
+	public fun isPipActive ()Z
+	public fun isPipEnabled ()Z
+	public fun isPipSupported ()Z
+	public final fun isPlaying ()Z
+	public final fun isSeeking ()Z
+	protected final fun mutateSnapshotState (Lkotlin/jvm/functions/Function0;)V
+	public fun openAsset (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;)V
+	public fun openSource (Lio/github/kdroidfilter/composemediaplayer/MediaSourceSpec;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
+	public final fun pause ()V
+	protected abstract fun pauseBackend ()V
+	public final fun play ()V
+	protected abstract fun playBackend ()V
+	public fun playbackSnapshot ()Lio/github/kdroidfilter/composemediaplayer/PlaybackSnapshot;
+	public fun prepare (Ljava/lang/String;Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;Ljava/util/Map;)V
+	protected final fun publishError (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;)V
+	public fun releaseSource ()V
+	protected abstract fun removeBackendExternalSubtitle (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
+	public fun removeExternalAudioTrack (Lio/github/kdroidfilter/composemediaplayer/ExternalAudioTrack;)V
+	public fun removeExternalAudioTrack (Ljava/lang/String;)V
+	public fun removeSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
+	public final fun removeSubtitleTrack (Ljava/lang/String;)V
+	protected final fun replaceDiscoveredChapters (Ljava/util/List;)V
+	protected final fun replaceDiscoveredTracks (Ljava/util/List;Ljava/util/List;Lio/github/kdroidfilter/composemediaplayer/AudioTrack;Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
+	public fun replaceExternalAudioTracks (Ljava/util/List;)V
+	public fun replaceExternalSubtitleTracks (Ljava/util/List;)V
+	protected final fun resetSourceState ()V
+	public fun restart ()V
+	protected abstract fun seekBackend-LRDsOJo (J)V
+	public fun seekBy-LRDsOJo (J)V
+	public fun seekByMs (J)V
+	public fun seekFinished ()V
+	public fun seekStart (F)V
+	public final fun seekTo (F)V
+	public final fun seekTo-LRDsOJo (J)V
+	public fun seekToChapter (Lio/github/kdroidfilter/composemediaplayer/MediaChapter;)V
+	public fun seekToMs (J)V
+	public fun seekToProgress (F)V
+	public fun selectAdaptiveQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
+	public final fun selectAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectAudioTrack (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectAutoAdaptiveQuality ()Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualitySelectionResult;
+	public fun selectAutoHlsQuality ()Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
+	protected abstract fun selectBackendAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	protected abstract fun selectBackendSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectHlsQuality (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/HlsQualitySelectionResult;
+	public final fun selectSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	public fun selectSubtitleTrack (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/TrackSelectionResult;
+	protected abstract fun setBackendLoop (Z)V
+	protected abstract fun setBackendPlaybackSpeed (F)V
+	protected abstract fun setBackendSubtitleOffset-LRDsOJo (J)V
+	protected abstract fun setBackendVolume (F)V
+	public final fun setCurrentAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)V
+	public final fun setCurrentSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
+	public final fun setFullscreen (Z)V
+	public final fun setLoop (Z)V
+	public final fun setOnPlaybackEnded (Lkotlin/jvm/functions/Function0;)V
+	public final fun setOnRestart (Lkotlin/jvm/functions/Function0;)V
+	public fun setPipActive (Z)V
+	public fun setPipEnabled (Z)V
+	public final fun setPlaybackSpeed (F)V
+	public final fun setProjection (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionSettings;)V
+	public final fun setProjectionTextureCrop (Lio/github/kdroidfilter/composemediaplayer/VideoTextureCrop;)V
+	public final fun setProjectionView (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewSettings;)V
+	public final fun setProjectionViewControlMode (Lio/github/kdroidfilter/composemediaplayer/VideoProjectionViewControlMode;)V
+	public final fun setSliderPos (F)V
+	public final fun setSubtitleBackgroundColor-8_81llA (J)V
+	public final fun setSubtitleOffset-LRDsOJo (J)V
+	public final fun setSubtitleTextStyle (Landroidx/compose/ui/text/TextStyle;)V
+	public final fun setSubtitlesEnabled (Z)V
+	public final fun setUserDragging (Z)V
+	public final fun setVolume (F)V
+	protected final fun set_aspectRatio (F)V
+	protected final fun set_chapters (Ljava/util/List;)V
+	protected final fun set_currentAudioTrack (Lio/github/kdroidfilter/composemediaplayer/AudioTrack;)V
+	protected final fun set_currentSubtitleTrack (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
+	protected final fun set_currentTime-LRDsOJo (J)V
+	protected final fun set_duration-LRDsOJo (J)V
+	protected final fun set_error (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerError;)V
+	protected final fun set_hasMedia (Z)V
+	protected final fun set_isFullscreen (Z)V
+	protected final fun set_isLoading (Z)V
+	protected final fun set_isPlaying (Z)V
+	protected final fun set_isSeeking (Z)V
+	protected final fun set_loop (Z)V
+	protected final fun set_mediaSessionId (J)V
+	protected final fun set_playbackSpeed (F)V
+	protected final fun set_sliderPos (F)V
+	protected final fun set_subtitleOffset-LRDsOJo (J)V
+	protected final fun set_subtitlesEnabled (Z)V
+	protected final fun set_userDragging (Z)V
+	protected final fun set_volume (F)V
+	protected final fun sourceLoaded ()V
+	public final fun stop ()V
+	public final fun toggleFullscreen ()V
+	protected final fun updateAspectRatio (Ljava/lang/Integer;Ljava/lang/Integer;)V
+	protected final fun updatePlaybackPosition-ePrTys8 (JJLjava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;)V
+	public static synthetic fun updatePlaybackPosition-ePrTys8$default (Lio/github/kdroidfilter/composemediaplayer/AbstractBackendVideoPlayerState;JJLjava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;ILjava/lang/Object;)V
+	protected abstract fun validateExternalSubtitle (Lio/github/kdroidfilter/composemediaplayer/SubtitleTrack;)V
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode : java/lang/Enum {
 	public static final field AUTO Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode;
 	public static final field MANUAL Lio/github/kdroidfilter/composemediaplayer/AdaptiveQualityMode;
@@ -320,6 +521,15 @@ public final class io/github/kdroidfilter/composemediaplayer/DecoderColorCapabil
 
 public abstract interface class io/github/kdroidfilter/composemediaplayer/DelegatingVideoPlayerState {
 	public abstract fun getDelegateState ()Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode : java/lang/Enum {
+	public static final field COMPOSE Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public static final field PREFER_COLOR_MANAGED_TEXTURE Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public static final field PREFER_NATIVE Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
+	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/DesktopVideoSurfaceMode;
 }
 
 public final class io/github/kdroidfilter/composemediaplayer/DisplayColorCapabilities {

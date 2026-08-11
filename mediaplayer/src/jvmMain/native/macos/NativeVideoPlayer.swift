@@ -392,7 +392,9 @@ class MacVideoPlayer {
     private var toneMapsHdrToSdr: Bool = false
     private var usesMetalProjectionSurface: Bool = false
     private var metalProjectionConfiguration: String?
-    private var useHdrPlayerLayerForSurface: Bool { !usesMetalProjectionSurface }
+    // Desktop presentation is always exported through Metal -> IOSurface -> TextureView.
+    // AVPlayerLayer is no longer an automatic flat-video fallback.
+    private var useHdrPlayerLayerForSurface: Bool { false }
 
     // Timer for capturing frames at adaptive rate
     private var displayLink: Timer?
@@ -2578,10 +2580,10 @@ class MacVideoPlayer {
             guard hdrMetalRenderer?.configure(serialized) == true else { return false }
             hdrPlayerLayer?.player = nil
         } else {
-            hdrMetalRenderer?.detachFromItem()
-            if prefersHdrMetalOutput {
-                configureHdrPlayerLayer(with: player)
+            if hdrMetalRenderer == nil {
+                hdrMetalRenderer = makeHdrMetalRenderer()
             }
+            guard hdrMetalRenderer?.configure(serialized) == true else { return false }
         }
 
         if modeChanged, prefersHdrMetalOutput, let item = player?.currentItem {

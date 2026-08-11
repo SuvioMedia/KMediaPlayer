@@ -28,6 +28,26 @@ import kotlin.test.assertTrue
 
 class WindowsHdrOutputConfigurationTest {
     @Test
+    fun `SDR selects the shared RGBA8 TextureView producer`() {
+        val configuration =
+            buildWindowsHdrNativeConfiguration(
+                source =
+                    VideoColorInfo(
+                        dynamicRange = VideoDynamicRange.SDR,
+                        primaries = VideoColorPrimaries.BT709,
+                        matrix = VideoColorMatrix.BT709,
+                    ),
+                projection = VideoProjectionSettings(),
+                projectionView = VideoProjectionViewSettings(),
+                textureCrop = VideoTextureCrop(),
+            )
+
+        assertNotNull(configuration)
+        assertEquals(2, configuration.integers[0])
+        assertEquals(1, configuration.integers[9])
+    }
+
+    @Test
     fun `HDR10 projection and mastering metadata map to fixed native ABI`() {
         val configuration =
             buildWindowsHdrNativeConfiguration(
@@ -238,19 +258,29 @@ class WindowsHdrOutputConfigurationTest {
         assertEquals(1, hlgConfiguration.integers[0])
         assertEquals(
             setOf(VideoDynamicRange.HLG),
-            windowsConfirmedHdrDecoderDynamicRanges(profile84Source),
+            windowsConfirmedDecoderDynamicRanges(profile84Source),
         )
         assertEquals(
             setOf(VideoDynamicRange.HDR10),
-            windowsConfirmedHdrDecoderDynamicRanges(profile8Source),
+            windowsConfirmedDecoderDynamicRanges(profile8Source),
         )
         assertTrue(
-            windowsConfirmedHdrDecoderDynamicRanges(
+            windowsConfirmedDecoderDynamicRanges(
                 VideoColorInfo(
                     dynamicRange = VideoDynamicRange.DOLBY_VISION,
                     dolbyVision = DolbyVisionInfo(profile = 5),
                 ),
             ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `confirmed NV12 decoder advertises SDR`() {
+        assertEquals(
+            setOf(VideoDynamicRange.SDR),
+            windowsConfirmedDecoderDynamicRanges(
+                VideoColorInfo(dynamicRange = VideoDynamicRange.SDR, bitDepth = 8),
+            ),
         )
     }
 

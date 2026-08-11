@@ -18,7 +18,6 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                     supportsDesktopMkvPlayback(
                         playbackOptions = playbackOptions,
                         nativePlatformSupportsMkv = false,
-                        supportsLibVlcNativeBackend = true,
                     ),
             )
         CurrentPlatform.OS.MAC ->
@@ -33,7 +32,6 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                         supportsDesktopMkvPlayback(
                             playbackOptions = playbackOptions,
                             nativePlatformSupportsMkv = false,
-                            supportsLibVlcNativeBackend = true,
                         ),
                     // A desktop player has no active display until its native layer is attached.
                     // MacVideoPlayerState replaces this with capabilities of that layer's NSScreen.
@@ -54,7 +52,6 @@ internal fun jvmPlayerCapabilities(playbackOptions: VideoPlaybackOptions): Playe
                     supportsDesktopMkvPlayback(
                         playbackOptions = playbackOptions,
                         nativePlatformSupportsMkv = true,
-                        supportsLibVlcNativeBackend = true,
                     ),
             )
     }.withPipelineExtensions(playbackOptions)
@@ -64,12 +61,11 @@ private val JVM_SUPPORTED_URI_SCHEMES = setOf("file", "http", "https")
 private fun supportsDesktopMkvPlayback(
     playbackOptions: VideoPlaybackOptions,
     nativePlatformSupportsMkv: Boolean,
-    supportsLibVlcNativeBackend: Boolean,
 ): Boolean =
     when (playbackOptions.desktopVideoBackend) {
         DesktopVideoBackend.PLATFORM -> nativePlatformSupportsMkv
         DesktopVideoBackend.LIBVLC -> hasLibVlcBackend()
-        DesktopVideoBackend.LIBVLC_NATIVE -> supportsLibVlcNativeBackend && hasLibVlcBackend()
+        DesktopVideoBackend.LIBVLC_NATIVE -> false
         DesktopVideoBackend.AUTO ->
             nativePlatformSupportsMkv ||
                 hasLibVlcBackend() ||

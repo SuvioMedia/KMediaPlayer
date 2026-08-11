@@ -22,9 +22,8 @@ internal fun ColorConversionCapabilities.mergedWith(other: ColorConversionCapabi
  * Selects the JVM desktop playback backend.
  *
  * [AUTO] keeps the platform default and optional fallback policy. [PLATFORM] disables optional fallbacks.
- * [LIBVLC] selects the in-process libVLC frame-copy backend where it is supported; on macOS it is retained as
- * a compatibility alias for [LIBVLC_NATIVE]. [LIBVLC_NATIVE] requires the libVLC native-view backend: NSView on
- * macOS, HWND on Windows, and X11/XWayland xwindow on Linux.
+ * [LIBVLC] selects the in-process libVLC frame-copy backend where it is supported. [LIBVLC_NATIVE] is retained
+ * for source compatibility, but desktop child-window presentation is no longer supported.
  */
 enum class DesktopVideoBackend {
     /**
@@ -44,25 +43,12 @@ enum class DesktopVideoBackend {
      */
     LIBVLC,
 
-    /**
-     * Use a user-installed libVLC backend with VLC rendering directly into a native desktop view. This avoids the
-     * Compose frame-copy path but is not evidence of a configured HDR swapchain or HDR display output.
-     */
+    /** Retained for source compatibility; selecting it reports a controlled unsupported backend. */
     LIBVLC_NATIVE,
 }
 
-/**
- * Selects how the default desktop platform backend presents video.
- *
- * [PREFER_NATIVE] uses the platform's direct video surface when it is compatible with the
- * requested color pipeline and the state is hosted in a Nucleus Tao `NativeView`.
- * [COMPOSE] copies decoded frames into Compose and is intended for thumbnails, feeds, and other
- * embedded mini players that must remain inside their parent layout.
- */
-enum class DesktopVideoSurfaceMode {
-    PREFER_NATIVE,
-    COMPOSE,
-}
+internal val DesktopVideoSurfaceMode.prefersColorManagedTexture: Boolean
+    get() = this != DesktopVideoSurfaceMode.COMPOSE
 
 /**
  * Selects how an unsupported desktop source is adapted before it reaches the renderer.

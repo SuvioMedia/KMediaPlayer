@@ -49,6 +49,9 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
     abstract val mpvBackendDependencies: SetProperty<String>
 
     @get:Input
+    abstract val libVlcBackendDependencies: SetProperty<String>
+
+    @get:Input
     abstract val optionalExtensionDependencies: SetProperty<String>
 
     @TaskAction
@@ -59,6 +62,7 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         val defaultPlayer = defaultPlayerDependencies.get()
         val defaultPlayerExternal = defaultPlayerExternalDependencies.get()
         val mpvBackend = mpvBackendDependencies.get()
+        val libVlcBackend = libVlcBackendDependencies.get()
         val optionalExtensions = optionalExtensionDependencies.get()
 
         check(":mediaplayer-core" in defaultPlayer) {
@@ -82,8 +86,17 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         check(":mediaplayer-core" in mpvBackend) {
             "The MPV backend must consume the backend-neutral :mediaplayer-core contracts."
         }
+        check(":mediaplayer-desktop-tao" in libVlcBackend) {
+            "The libVLC JVM backend must implement the Tao playback SPI."
+        }
+        check(":mediaplayer-core" in libVlcBackend) {
+            "The libVLC backend must consume the backend-neutral :mediaplayer-core contracts."
+        }
         check(":mediaplayer-mpv" !in defaultPlayer) {
             ":mediaplayer must not depend on the optional :mediaplayer-mpv implementation."
+        }
+        check(":mediaplayer-libvlc" !in defaultPlayer) {
+            ":mediaplayer must not depend on the optional :mediaplayer-libvlc implementation."
         }
         check(":mediaplayer-ads-core" !in defaultPlayer) {
             ":mediaplayer must not depend on the optional :mediaplayer-ads-core contracts."
@@ -94,13 +107,16 @@ abstract class VerifyBackendModuleBoundaries : DefaultTask() {
         check(":mediaplayer" !in mpvBackend) {
             ":mediaplayer-mpv must not depend on the default :mediaplayer implementation."
         }
-        check(core.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
+        check(":mediaplayer" !in libVlcBackend) {
+            ":mediaplayer-libvlc must not depend on the default :mediaplayer implementation."
+        }
+        check(core.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" || it == ":mediaplayer-libvlc" }) {
             ":mediaplayer-core must not depend on a player implementation."
         }
-        check(extensionApi.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
+        check(extensionApi.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" || it == ":mediaplayer-libvlc" }) {
             ":mediaplayer-extension-api must not depend on a player implementation."
         }
-        check(desktopTao.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" }) {
+        check(desktopTao.none { it == ":mediaplayer" || it == ":mediaplayer-mpv" || it == ":mediaplayer-libvlc" }) {
             ":mediaplayer-desktop-tao must not depend on a player implementation."
         }
         check(optionalExtensions.none { edge -> edge.endsWith("->:mediaplayer") }) {
@@ -202,6 +218,30 @@ tasks.register("publishConsumerSmokeArtifacts") {
     )
 }
 
+tasks.register("publishLibVlcConsumerSmokeArtifacts") {
+    group = "verification"
+    description = "Publishes the minimal desktop and Android graph for the isolated libVLC consumer smoke test."
+    dependsOn(
+        ":mediaplayer-core:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-core:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-core:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-tao:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-tao:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishAndroidPublicationToConsumerSmokeRepository",
+    )
+}
+
+tasks.register("libVlcConsumerSmokeTest") {
+    group = "verification"
+    description = "Compiles Android and runs JVM consumers against locally published libVLC adapter artifacts."
+    dependsOn(
+        ":consumer-smoke-libvlc:compileAndroidMain",
+        ":consumer-smoke-libvlc:jvmTest",
+    )
+}
+
 val verifyBackendModuleBoundaries =
     tasks.register<VerifyBackendModuleBoundaries>("verifyBackendModuleBoundaries") {
         group = "verification"
@@ -240,6 +280,7 @@ gradle.projectsEvaluated {
         defaultPlayerDependencies.set(project(":mediaplayer").productionProjectDependencyPaths())
         defaultPlayerExternalDependencies.set(project(":mediaplayer").productionExternalDependencyCoordinates())
         mpvBackendDependencies.set(project(":mediaplayer-mpv").productionProjectDependencyPaths())
+        libVlcBackendDependencies.set(project(":mediaplayer-libvlc").productionProjectDependencyPaths())
         optionalExtensionDependencies.set(
             setOf(
                 project(":mediaplayer-ass"),

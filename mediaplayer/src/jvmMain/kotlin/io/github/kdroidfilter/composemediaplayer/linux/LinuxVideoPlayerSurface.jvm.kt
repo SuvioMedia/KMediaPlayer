@@ -13,15 +13,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
-/** Renders Linux video through a GTK child widget or the Java-toolkit-free Skia fallback. */
+/** Renders Linux video through Nucleus TextureView, or explicit CPU/SDR Compose mode. */
 @Composable
 internal fun LinuxVideoPlayerSurface(
     playerState: LinuxVideoPlayerState,
@@ -31,8 +29,7 @@ internal fun LinuxVideoPlayerSurface(
     onSurfaceAttached: () -> Unit = {},
 ) {
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
-    val nativeSurfaceRequested =
-        playerState.shouldUseWaylandColorSurface() || playerState.shouldUseLibVlcNativeSurface()
+    val textureSurfaceRequested = playerState.shouldUseColorManagedTexture()
     val videoModifier =
         contentScale.toCanvasModifier(
             playerState.aspectRatio,
@@ -41,10 +38,10 @@ internal fun LinuxVideoPlayerSurface(
         )
 
     val hostModifier =
-        if (nativeSurfaceRequested) {
-            modifier
-        } else {
-            modifier.onSizeChanged { size ->
+        modifier.onSizeChanged { size ->
+            if (textureSurfaceRequested) {
+                playerState.onTextureSurfaceResized(size.width, size.height)
+            } else {
                 playerState.onResized(size.width, size.height)
             }
         }
@@ -53,28 +50,22 @@ internal fun LinuxVideoPlayerSurface(
         modifier = hostModifier,
         contentAlignment = Alignment.Center,
     ) {
-        if (nativeSurfaceRequested) {
-            val surface =
-                remember(playerState, playerState.nativeSurfaceGeneration, nativeSurfaceRequested) {
-                    TaoNativeVideoSurface(
-                        kind = TaoNativeVideoSurfaceKind.LINUX_GTK_WIDGET,
-                        createHandle = playerState::createNativeVideoWidget,
-                        disposeHandle = playerState::disposeNativeVideoWidget,
-                    )
-                }
-            TaoNativeVideoView(
-                surface = surface,
-                // GTK owns media scaling inside the native child. The child and its Compose
-                // overlay must continue to cover the complete player viewport.
+        if (textureSurfaceRequested) {
+            DesktopColorManagedTextureVideoView(
+                streamController = playerState.textureStreamController,
                 modifier = Modifier.fillMaxSize(),
+                contentScale = contentScale,
+                onHostCapabilitiesChanged = playerState::onTextureViewHostCapabilities,
+                onSurfaceAttached = {
+                    playerState.onColorManagedTextureHostAttached()
+                    latestOnSurfaceAttached()
+                },
                 overlay = { LinuxVideoOverlayContent(playerState, overlay) },
-                onAttached = { latestOnSurfaceAttached() },
-                onUnavailable = { latestOnSurfaceAttached() },
             )
         } else {
             val currentFrame by remember(playerState) { playerState.currentFrameState }
             currentFrame?.let { frame ->
-                JvmProjectedVideoCanvas(
+                DesktopProjectedVideoCanvas(
                     frame = frame,
                     projection = playerState.projection,
                     projectionView = playerState.projectionView,

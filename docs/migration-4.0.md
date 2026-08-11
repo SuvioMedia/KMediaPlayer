@@ -14,12 +14,19 @@ implementation("io.github.shusek:composemediaplayer-desktop-tao:4.0.1")
 
 // Optional backends; add only those selected by the application.
 implementation("io.github.shusek:composemediaplayer-mpv:4.0.1")
+implementation("io.github.shusek:composemediaplayer-libvlc:4.0.1")
 implementation("io.github.shusek:composemediaplayer-kmediabridge:4.0.1")
 ```
 
 The default player and MPV JVM artifacts already expose the desktop Tao
 contract transitively. A direct desktop Tao dependency is useful when the
 application owns its desktop bootstrap explicitly.
+
+The optional libVLC coordinate selects the bundled KMediaVlc/libVLC 4 runtime;
+it does not search for or download a user-installed VLC. Its Android variant
+requires API 28+ and an ARM64 or ARMv7 device. Until the KMediaVlc native
+payloads pass their release gates, use the local composite workflow documented
+in the README instead of treating the candidate version as published.
 
 The former `composemediaplayer-desktop-window` coordinate is not published as
 an alias. Replace it directly; the removed window APIs have no deprecated

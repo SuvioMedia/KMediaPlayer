@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import io.github.kdroidfilter.composemediaplayer.AbstractBackendVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
@@ -64,7 +65,7 @@ internal class MpvVideoPlayerState(
     private val engine: LibMpvEngine,
     initialMacVkHostView: Long = 0L,
     initialMacBackendFallbackReason: String? = null,
-) : AbstractMpvVideoPlayerState(),
+) : AbstractBackendVideoPlayerState(),
     VideoPlayerSurfaceProvider,
     TaoPlaybackSurfaceProvider {
     private val disposed = AtomicBoolean(false)

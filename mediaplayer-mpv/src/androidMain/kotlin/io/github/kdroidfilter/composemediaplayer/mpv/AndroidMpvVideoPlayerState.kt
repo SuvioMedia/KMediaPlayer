@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import io.github.kdroidfilter.composemediaplayer.AbstractBackendVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
@@ -51,7 +52,7 @@ internal class AndroidMpvVideoPlayerState(
     private val subtitleFontsDirectory: File?,
     private val decodeMode: RuntimeMpvAndroidDecodeMode,
     private val certificateAuthorityFile: File?,
-) : AbstractMpvVideoPlayerState(),
+) : AbstractBackendVideoPlayerState(),
     VideoPlayerSurfaceProvider {
     private val disposed = AtomicBoolean(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

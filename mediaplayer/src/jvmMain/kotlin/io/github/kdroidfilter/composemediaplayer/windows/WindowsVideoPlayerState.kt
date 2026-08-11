@@ -11,6 +11,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import dev.nucleusframework.window.tao.TextureViewHostCapabilities
+import dev.nucleusframework.window.tao.TextureViewHostDynamicRange
+import dev.nucleusframework.window.tao.TextureViewHostPixelFormat
+import dev.nucleusframework.window.tao.TextureViewHostPresentationState
+import dev.nucleusframework.window.tao.WindowsTextureViewProducerInfo
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.CacheClearResult
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
@@ -44,6 +49,7 @@ import io.github.kdroidfilter.composemediaplayer.PreparedVideoPipelineSource
 import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.TexturePresentationOutputRequirement
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
 import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineController
@@ -64,13 +70,15 @@ import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import io.github.kdroidfilter.composemediaplayer.allowsExternalSourceAdapter
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.desktopCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.externalHlsTrackStreamIndex
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
+import io.github.kdroidfilter.composemediaplayer.hasPresentedTextureFrameAfter
 import io.github.kdroidfilter.composemediaplayer.isExternalHlsAudioTrackId
 import io.github.kdroidfilter.composemediaplayer.isExternalHlsSubtitleTrackId
 import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
-import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
+import io.github.kdroidfilter.composemediaplayer.prefersColorManagedTexture
 import io.github.kdroidfilter.composemediaplayer.prepareSourceWithExtensions
 import io.github.kdroidfilter.composemediaplayer.profile7To81MappingOrNull
 import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
@@ -84,6 +92,7 @@ import io.github.kdroidfilter.composemediaplayer.subtitle.isAssLikeDesktopTrack
 import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
 import io.github.kdroidfilter.composemediaplayer.subtitleTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.toConfirmedDecoderCapabilities
+import io.github.kdroidfilter.composemediaplayer.unsupportedDesktopNativeVideoSurfaceException
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.hundredNanosecondsAsDuration
@@ -131,10 +140,37 @@ import kotlin.time.Duration.Companion.milliseconds
 
 internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
 
-private data class WindowsNativeVideoWindowOwner(
-    val instance: Long,
-    val libVlc: Boolean,
+internal data class WindowsColorManagedTextureFrame(
+    val sharedHandle: Long,
+    val width: Int,
+    val height: Int,
+    val generation: Long,
+    val frameSerial: Long,
+    val adapterLuid: Long,
+    val extendedLinear: Boolean,
 )
+
+private fun TextureViewHostCapabilities.toWindowsDisplayColorCapabilities(): DisplayColorCapabilities {
+    if (presentationState == TextureViewHostPresentationState.UNAVAILABLE) {
+        return DisplayColorCapabilities()
+    }
+    return DisplayColorCapabilities(
+        isKnown = true,
+        supportedDynamicRanges =
+            buildSet {
+                add(VideoDynamicRange.SDR)
+                if (actualDynamicRange == TextureViewHostDynamicRange.HDR) {
+                    add(VideoDynamicRange.HDR10)
+                    add(VideoDynamicRange.HDR10_PLUS)
+                    add(VideoDynamicRange.HLG)
+                    add(VideoDynamicRange.DOLBY_VISION)
+                }
+            },
+        minLuminanceNits = null,
+        maxLuminanceNits = maximumLuminanceNits,
+        referenceWhiteNits = sdrWhiteLevelNits,
+    )
+}
 
 private val windowsHdr10PlusMetadataUnavailableHresult = 0x80000004.toInt()
 private const val WINDOWS_PLAYBACK_DIAGNOSTICS_VALUE_COUNT = 5
@@ -266,7 +302,7 @@ internal fun shouldFailClosedForUnsupportedWindowsDolbyVision(
         !nativeHdrRouteAvailable &&
         hasColorPipelineError
 
-internal fun windowsConfirmedHdrDecoderDynamicRanges(source: VideoColorInfo): Set<VideoDynamicRange> =
+internal fun windowsConfirmedDecoderDynamicRanges(source: VideoColorInfo): Set<VideoDynamicRange> =
     when (source.dynamicRange) {
         VideoDynamicRange.HDR10_PLUS -> setOf(VideoDynamicRange.HDR10_PLUS, VideoDynamicRange.HDR10)
         VideoDynamicRange.DOLBY_VISION ->
@@ -276,9 +312,8 @@ internal fun windowsConfirmedHdrDecoderDynamicRanges(source: VideoColorInfo): Se
                 .orEmpty()
         VideoDynamicRange.HDR10 -> setOf(VideoDynamicRange.HDR10)
         VideoDynamicRange.HLG -> setOf(VideoDynamicRange.HLG)
-        VideoDynamicRange.UNKNOWN,
-        VideoDynamicRange.SDR,
-        -> emptySet()
+        VideoDynamicRange.SDR -> setOf(VideoDynamicRange.SDR)
+        VideoDynamicRange.UNKNOWN -> emptySet()
     }
 
 /**
@@ -401,9 +436,8 @@ class WindowsVideoPlayerState(
             videoPlayerInstanceAtomic.set(value)
         }
 
-    /** Serializes handle replacement/destruction with native-surface attachment. */
+    /** Serializes native handle replacement/destruction. */
     private val nativeInstanceLock = Any()
-    private val nativeVideoWindowOwners = mutableMapOf<Long, WindowsNativeVideoWindowOwner>()
     internal var nativeSurfaceGeneration: Long by mutableStateOf(0L)
         private set
 
@@ -553,12 +587,26 @@ class WindowsVideoPlayerState(
 
     private fun updateProjectionRenderingInfo() {
         renderingInfo.videoProjection = projection.renderingInfoLabel()
+        if (shouldUseWindowsHdrSurface()) {
+            renderingInfo.videoRenderer =
+                when {
+                    !activeDecoderInputColorInfo.isHdr ->
+                        "Media Foundation NV12 -> controlled SDR RGBA8 -> Tao TextureView"
+                    shouldProduceSdrTexture() ->
+                        "Media Foundation P010 -> controlled SDR RGBA8 -> Tao TextureView"
+                    projection.requiresProjectionRenderer ->
+                        "Media Foundation P010 -> D3D11 FP16 projection -> Tao TextureView"
+                    else ->
+                        "Media Foundation P010 -> D3D11 FP16/scRGB -> Tao TextureView"
+                }
+            return
+        }
         if (!shouldUseLibVlcNativeSurface()) {
             renderingInfo.videoRenderer =
                 if (libVlcBackendActive && nativeBackendLibVlcRenderMode == WindowsLibVlcRenderMode.MEMORY) {
                     libVlcVideoRenderer(WindowsLibVlcRenderMode.MEMORY)
                 } else {
-                    projection.jvmCanvasRendererLabel(projectionTextureCrop)
+                    projection.desktopCanvasRendererLabel(projectionTextureCrop)
                 }
         }
     }
@@ -703,11 +751,21 @@ class WindowsVideoPlayerState(
     private var windowsNativeHdrOutputStatus: WindowsNativeHdrOutputStatus? = null
     private var windowsHdr10PlusApplicationUnavailable = false
     private var windowsSdrToneMappingRequested = false
+    private var windowsHostForcedSdrToneMapping = false
     private var windowsHdrFallbackSourceUri: String? = null
     private val windowsHdrFailureRecoveryScheduled = AtomicBoolean(false)
     internal var windowsHdrSurfaceRequested: Boolean by mutableStateOf(false)
         private set
     private var windowsHdrSurfaceAttached: Boolean = false
+    internal val currentColorManagedTextureFrameState =
+        mutableStateOf<WindowsColorManagedTextureFrame?>(null)
+
+    @Volatile private var textureViewHostCapabilities: TextureViewHostCapabilities =
+        TextureViewHostCapabilities.UNAVAILABLE
+    private val textureProducerFrameSerial = AtomicLong(-1L)
+    private val textureProducerOutputGeneration = AtomicLong(-1L)
+    private val textureProducerHostGeneration = AtomicLong(-1L)
+    private val textureProducerHostPresentCount = AtomicLong(-1L)
     private var libVlcBackendActive: Boolean = false
     private var libVlcSourceUri: String? = null
     private var libVlcTrackInfo: JvmLibVlcTrackInfo? = null
@@ -1069,6 +1127,8 @@ class WindowsVideoPlayerState(
                             playbackOptions.dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR ||
                                 (skipFailedHdrRoute && !strictHdrRequest)
                         )
+                val requestColorManagedSdrOutput =
+                    !decoderInputColorInfo.isHdr || requestNativeSdrToneMapping
                 val nativeHdrConfiguration =
                     buildWindowsHdrNativeConfiguration(
                         source = decoderInputColorInfo,
@@ -1087,15 +1147,16 @@ class WindowsVideoPlayerState(
                             } else {
                                 DynamicMetadataHandling.NONE
                             },
-                        forceSdrOutput = requestNativeSdrToneMapping,
+                        forceSdrOutput = requestColorManagedSdrOutput,
                     )
-                val canAttemptNativeHdr =
-                    !isHlsSource &&
+                val canAttemptColorManagedTexture =
+                    playbackOptions.desktopVideoSurfaceMode.prefersColorManagedTexture &&
+                        !isHlsSource &&
                         (!skipFailedHdrRoute || requestNativeSdrToneMapping) &&
                         nativeHdrConfiguration != null
                 var needsManagedSdrFallback =
                     !strictHdrRequest &&
-                        !canAttemptNativeHdr &&
+                        !canAttemptColorManagedTexture &&
                         !sourceProbe.videoColorInfo.isSafeForUnmanagedSdrFallback()
                 val libVlcBackend =
                     if (needsManagedSdrFallback || strictHdrRequest || pendingPreparedSource != null) {
@@ -1155,9 +1216,14 @@ class WindowsVideoPlayerState(
                     decoderCapabilities = DecoderColorCapabilities(),
                     isLive = sourceIsLive,
                 )
-                windowsHdrNativeConfiguration = nativeHdrConfiguration.takeIf { canAttemptNativeHdr }
-                windowsHdrSurfaceRequested = canAttemptNativeHdr
+                windowsHdrNativeConfiguration = nativeHdrConfiguration.takeIf { canAttemptColorManagedTexture }
+                windowsHdrSurfaceRequested = canAttemptColorManagedTexture
                 windowsHdrSurfaceAttached = false
+                currentColorManagedTextureFrameState.value = null
+                textureProducerFrameSerial.set(-1L)
+                textureProducerOutputGeneration.set(-1L)
+                textureProducerHostGeneration.set(-1L)
+                textureProducerHostPresentCount.set(-1L)
                 windowsNativeHdrOutputStatus = null
                 refreshWindowsColorPipeline()
                 sourcePreparationError?.let { pipelineError ->
@@ -1171,14 +1237,18 @@ class WindowsVideoPlayerState(
                 if (
                     shouldFailClosedForUnsupportedWindowsDolbyVision(
                         source = sourceProbe.videoColorInfo,
-                        nativeHdrRouteAvailable = canAttemptNativeHdr,
+                        nativeHdrRouteAvailable = canAttemptColorManagedTexture,
                         hasColorPipelineError = colorPipelineController.pipelineErrorOrNull() != null,
                     )
                 ) {
                     publishWindowsColorPipelineError()
                     return@withLock
                 }
-                if (strictHdrRequest && !canAttemptNativeHdr && colorPipelineController.pipelineErrorOrNull() != null) {
+                if (
+                    strictHdrRequest &&
+                    !canAttemptColorManagedTexture &&
+                    colorPipelineController.pipelineErrorOrNull() != null
+                ) {
                     publishWindowsColorPipelineError(
                         messageOverride =
                             if (isHlsSource && sourceProbe.videoColorInfo.isHdr) {
@@ -1214,7 +1284,7 @@ class WindowsVideoPlayerState(
                         windowsHdrNativeConfiguration = null
                         if (strictHdrRequest) {
                             publishWindowsColorPipelineError(
-                                "The native P010/D3D11 presenter rejected its configuration " +
+                                "The native color-managed D3D11 presenter rejected its configuration " +
                                     "(hr=0x${configureHr.toUInt().toString(16)}).",
                             )
                             return@withLock
@@ -1295,7 +1365,12 @@ class WindowsVideoPlayerState(
                         player.nOpenMediaWithHeaders(instance, playbackUri, requestHeaderLines, false)
                     }
                 ensureSourceIsCurrent()
-                if (hrOpen < 0 && windowsHdrSurfaceRequested && !strictHdrRequest) {
+                if (
+                    hrOpen < 0 &&
+                    windowsHdrSurfaceRequested &&
+                    !strictHdrRequest &&
+                    sourceProbe.videoColorInfo.isHdr
+                ) {
                     windowsLogger.w {
                         "P010 Media Foundation open failed (hr=0x${hrOpen.toUInt().toString(16)}); " +
                             "retrying through the verified HDR-to-SDR bridge."
@@ -1545,10 +1620,8 @@ class WindowsVideoPlayerState(
                 ExternalVlcLocator.findLibVlc()?.let {
                     WindowsResolvedLibVlcBackend(it, WindowsLibVlcRenderMode.MEMORY)
                 }
-            "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-hwnd" ->
-                ExternalVlcLocator.findLibVlc()?.let {
-                    WindowsResolvedLibVlcBackend(it, WindowsLibVlcRenderMode.NATIVE_VIEW)
-                } ?: throw missingLibVlcBackendException()
+            "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-hwnd", "unsupported-native-view" ->
+                throw unsupportedDesktopNativeVideoSurfaceException()
             "ffmpeg", "kmediabridge", "bridge", "vlc" -> null
             else -> null
         }
@@ -1651,7 +1724,7 @@ class WindowsVideoPlayerState(
     private fun libVlcVideoRenderer(renderMode: WindowsLibVlcRenderMode): String =
         when (renderMode) {
             WindowsLibVlcRenderMode.MEMORY ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "libVLC vmem -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )
@@ -1800,12 +1873,7 @@ class WindowsVideoPlayerState(
         }
     }
 
-    internal fun shouldUseLibVlcNativeSurface(): Boolean =
-        !lifecycle.isDisposed &&
-            libVlcNativeSurfaceRequested &&
-            libVlcBackendActive &&
-            nativeBackendUsesLibVlc &&
-            nativeBackendLibVlcRenderMode == WindowsLibVlcRenderMode.NATIVE_VIEW
+    internal fun shouldUseLibVlcNativeSurface(): Boolean = false
 
     internal fun shouldUseWindowsHdrSurface(): Boolean =
         !lifecycle.isDisposed &&
@@ -1813,101 +1881,158 @@ class WindowsVideoPlayerState(
             !nativeBackendUsesLibVlc &&
             windowsHdrNativeConfiguration != null
 
-    internal fun createNativeVideoWindow(): Long {
-        synchronized(nativeInstanceLock) {
-            val usesLibVlc = shouldUseLibVlcNativeSurface()
-            val usesHdr = shouldUseWindowsHdrSurface()
-            if (!usesLibVlc && !usesHdr) return 0L
-            val instance = videoPlayerInstance
-            if (instance == 0L) return 0L
-            if (usesHdr) updateWindowsHdrNativeConfiguration()
-            val hwnd =
-                runCatching { WindowsNativeBridge.nCreateNativeVideoWindow(instance, usesLibVlc) }
-                    .getOrElse { error ->
-                        windowsLogger.e { "Failed to create the native Windows video child: ${error.message}" }
-                        0L
-                    }
-            if (hwnd != 0L) {
-                nativeVideoWindowOwners[hwnd] = WindowsNativeVideoWindowOwner(instance, usesLibVlc)
-            }
-
-            if (usesLibVlc) {
-                libVlcNativeSurfaceAttached = hwnd != 0L
-                if (hwnd != 0L && _isPlaying) {
-                    val hrPlay = nativeSetPlaybackState(instance, true, stop = false)
-                    if (hrPlay < 0) {
-                        windowsLogger.e {
-                            "Failed to start Windows libVLC native playback after attach: 0x${hrPlay.toString(16)}"
-                        }
-                    }
-                }
-                return hwnd
-            }
-
-            windowsHdrSurfaceAttached = hwnd != 0L
-            windowsNativeHdrOutputStatus = WindowsNativeBridge.hdrOutputStatus(instance)
-            refreshWindowsColorPipeline()
-            if (hwnd == 0L) {
-                handleWindowsHdrRouteFailure(
-                    windowsNativeHdrOutputStatus?.let { status ->
-                        "The active monitor rejected the HDR swapchain " +
-                            "(hr=0x${status.lastError.toUInt().toString(16)})."
-                    } ?: "The active monitor rejected the HDR swapchain.",
-                )
-                return 0L
-            }
-            renderingInfo.update(
-                backend = "Media Foundation + D3D11",
-                videoDecoder = "Media Foundation decoder (P010 GPU surface; component not exposed)",
-                videoRenderer =
-                    if (windowsSdrToneMappingRequested) {
-                        if (projection.requiresProjectionRenderer) {
-                            "D3D11 P010 projection shader + BT.2390 tone mapper -> G22/BT.709 flip-model swapchain"
-                        } else {
-                            "D3D11 P010 BT.2390 tone mapper -> G22/BT.709 flip-model swapchain"
-                        }
-                    } else if (projection.requiresProjectionRenderer) {
-                        "D3D11 P010 projection shader -> Advanced Color flip-model swapchain"
-                    } else {
-                        "D3D11 P010 shader -> Advanced Color flip-model swapchain"
-                    },
-                notes =
-                    if (windowsSdrToneMappingRequested) {
-                        "SDR output is confirmed only after P010, G22/BT.709 color space and the first Present succeed."
-                    } else {
-                        "HDR output is confirmed only after P010, DXGI color space and the first Present succeed."
-                    },
-            )
-            if (_isPlaying) {
-                val playHr = nativeSetPlaybackState(instance, true, stop = false)
-                if (playHr < 0) {
-                    handleWindowsHdrRouteFailure(
-                        "Media Foundation could not start the attached HDR route " +
-                            "(hr=0x${playHr.toUInt().toString(16)}).",
-                    )
-                    return 0L
-                }
-            }
-            return hwnd
-        }
+    internal fun onTextureProducerFrameSubmitted(frame: WindowsColorManagedTextureFrame) {
+        val capabilities = textureViewHostCapabilities
+        textureProducerFrameSerial.set(frame.frameSerial)
+        textureProducerOutputGeneration.set(frame.generation)
+        textureProducerHostGeneration.set(capabilities.generation)
+        textureProducerHostPresentCount.set(capabilities.presentedFrameCount)
+        confirmWindowsTextureOutputIfReady()
     }
 
-    internal fun disposeNativeVideoWindow(hwnd: Long) {
-        if (hwnd == 0L) return
-        synchronized(nativeInstanceLock) {
-            val owner = nativeVideoWindowOwners.remove(hwnd) ?: return
-            if (owner.instance == videoPlayerInstance && owner.instance != 0L) {
-                runCatching {
-                    WindowsNativeBridge.nDisposeNativeVideoWindow(owner.instance, hwnd, owner.libVlc)
-                }.onFailure { error ->
-                    windowsLogger.e { "Failed to dispose the native Windows video child: ${error.message}" }
-                }
-            }
-            libVlcNativeSurfaceAttached = false
+    internal fun onTextureViewHostCapabilities(capabilities: TextureViewHostCapabilities) {
+        textureViewHostCapabilities = capabilities
+        val producerInfo = capabilities.producerInfo as? WindowsTextureViewProducerInfo
+        val hostAvailable =
+            capabilities.presentationState != TextureViewHostPresentationState.UNAVAILABLE &&
+                producerInfo != null &&
+                capabilities.outputPixelFormat != TextureViewHostPixelFormat.UNKNOWN
+        if (!hostAvailable) {
             windowsHdrSurfaceAttached = false
             colorOutputVerified = false
             refreshWindowsColorPipeline()
+            return
         }
+
+        currentColorManagedTextureFrameState.value?.let { frame ->
+            if (frame.adapterLuid != producerInfo.adapterLuid) {
+                handleWindowsHdrRouteFailure(
+                    "The Media Foundation texture and Nucleus window use different D3D11 adapters.",
+                )
+                return
+            }
+        }
+
+        if (
+            activeSourceColorInfo.isHdr &&
+            playbackOptions.dynamicRangePolicy != DynamicRangePolicy.FORCE_SDR
+        ) {
+            if (capabilities.actualDynamicRange == TextureViewHostDynamicRange.SDR) {
+                if (playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR) {
+                    handleWindowsHdrRouteFailure(
+                        "The Nucleus window is currently presented on an SDR output.",
+                    )
+                    return
+                }
+                if (!windowsSdrToneMappingRequested) {
+                    windowsHostForcedSdrToneMapping = true
+                    windowsSdrToneMappingRequested = true
+                    colorOutputVerified = false
+                    updateWindowsHdrNativeConfiguration()
+                }
+            } else if (windowsHostForcedSdrToneMapping) {
+                windowsHostForcedSdrToneMapping = false
+                windowsSdrToneMappingRequested = false
+                colorOutputVerified = false
+                updateWindowsHdrNativeConfiguration()
+            }
+        }
+        confirmWindowsTextureOutputIfReady()
+    }
+
+    internal fun onColorManagedTextureHostAttached() {
+        val capabilities = textureViewHostCapabilities
+        if (
+            capabilities.presentationState == TextureViewHostPresentationState.UNAVAILABLE ||
+            capabilities.producerInfo !is WindowsTextureViewProducerInfo
+        ) {
+            return
+        }
+        val wasAttached = windowsHdrSurfaceAttached
+        windowsHdrSurfaceAttached = true
+        if (!wasAttached && _isPlaying) {
+            val instance = videoPlayerInstance
+            if (instance != 0L) {
+                val playHr = nativeSetPlaybackState(instance, true, stop = false)
+                if (playHr < 0) {
+                    handleWindowsHdrRouteFailure(
+                        "Media Foundation could not start the color-managed texture route " +
+                            "(hr=0x${playHr.toUInt().toString(16)}).",
+                    )
+                }
+            }
+        }
+        refreshWindowsColorPipeline()
+    }
+
+    private fun hasPresentedSubmittedTextureFrame(): Boolean {
+        val frame = currentColorManagedTextureFrameState.value ?: return false
+        if (
+            frame.frameSerial < textureProducerFrameSerial.get() ||
+            frame.generation != textureProducerOutputGeneration.get()
+        ) {
+            return false
+        }
+        val capabilities = textureViewHostCapabilities
+        val producerInfo = capabilities.producerInfo as? WindowsTextureViewProducerInfo ?: return false
+        return producerInfo.adapterLuid == frame.adapterLuid &&
+            capabilities.hasPresentedTextureFrameAfter(
+                submittedGeneration = textureProducerHostGeneration.get(),
+                submittedPresentCount = textureProducerHostPresentCount.get(),
+                outputRequirement =
+                    if (frame.extendedLinear) {
+                        TexturePresentationOutputRequirement.FP16_SCRGB_OUTPUT
+                    } else {
+                        TexturePresentationOutputRequirement.KNOWN_OUTPUT
+                    },
+            )
+    }
+
+    private fun confirmWindowsTextureOutputIfReady() {
+        if (!hasPresentedSubmittedTextureFrame()) {
+            refreshWindowsColorPipeline()
+            return
+        }
+        if (!colorOutputVerified) {
+            colorOutputVerified = true
+            activeDecoderName =
+                if (activeDecoderInputColorInfo.isHdr) {
+                    "Media Foundation decoder (P010 GPU surface; component not exposed)"
+                } else {
+                    "Media Foundation decoder (NV12 GPU surface; component not exposed)"
+                }
+            colorPipelineController.updateSource(
+                source = activeSourceColorInfo,
+                decoderInput = activeDecoderInputColorInfo,
+                appliedDolbyVisionProfileMapping =
+                    preparedPipelineOriginalColorInfo?.profile7To81MappingOrNull(activeDecoderInputColorInfo),
+                decoderName = activeDecoderName,
+                decoderCapabilities = confirmedWindowsDecoderCapabilities(),
+                isLive = false,
+            )
+            isLoading = false
+        }
+        refreshWindowsColorPipeline()
+    }
+
+    private fun queryWindowsColorManagedTextureFrame(instance: Long): WindowsColorManagedTextureFrame? {
+        val values =
+            runCatching { WindowsNativeBridge.nGetHdrTextureOutputInfo(instance) }
+                .getOrNull()
+                ?.takeIf { it.size >= 8 }
+                ?: return null
+        val width = values[1].toInt()
+        val height = values[2].toInt()
+        if (values[0] == 0L || width <= 0 || height <= 0) return null
+        return WindowsColorManagedTextureFrame(
+            sharedHandle = values[0],
+            width = width,
+            height = height,
+            generation = values[4],
+            frameSerial = values[5],
+            adapterLuid = values[6],
+            extendedLinear = values[7] != 0L,
+        )
     }
 
     private fun updateWindowsHdrNativeConfiguration() {
@@ -1930,9 +2055,10 @@ class WindowsVideoPlayerState(
                     colorPipelineStatus.value.plannedMetadataHandling.takeUnless {
                         windowsHdr10PlusApplicationUnavailable
                     } ?: DynamicMetadataHandling.DROPPED,
-                forceSdrOutput = windowsSdrToneMappingRequested,
+                forceSdrOutput = shouldProduceSdrTexture(),
             ) ?: return
         windowsHdrNativeConfiguration = configuration
+        updateProjectionRenderingInfo()
         val instance = videoPlayerInstance
         if (instance == 0L || nativeBackendUsesLibVlc) return
         val hr = WindowsNativeBridge.configureHdrOutput(instance, configuration)
@@ -2233,7 +2359,6 @@ class WindowsVideoPlayerState(
                         -1
                     }
                 windowsNativeHdrOutputStatus = WindowsNativeBridge.hdrOutputStatus(instance)
-                val status = windowsNativeHdrOutputStatus
                 if (refreshWindowsDecodedColorInfo(instance)) {
                     if (!shouldUseWindowsHdrSurface()) break
                     delay(2.milliseconds)
@@ -2253,34 +2378,17 @@ class WindowsVideoPlayerState(
                 }
                 if (renderHr < 0) {
                     handleWindowsHdrRouteFailure(
-                        "The P010/D3D11 render route failed " +
+                        "The color-managed D3D11 texture render route failed " +
                             "(hr=0x${renderHr.toUInt().toString(16)}).",
                     )
                     break
                 }
-                val nativeOutputConfirmed =
-                    if (windowsSdrToneMappingRequested) {
-                        status?.isConfirmedSdrOutput == true
-                    } else {
-                        status?.isConfirmedHdrOutput == true
+                queryWindowsColorManagedTextureFrame(instance)?.let { frame ->
+                    if (currentColorManagedTextureFrameState.value != frame) {
+                        currentColorManagedTextureFrameState.value = frame
                     }
-                if (nativeOutputConfirmed && !colorOutputVerified) {
-                    colorOutputVerified = true
-                    activeDecoderName = "Media Foundation decoder (P010 GPU surface; component not exposed)"
-                    colorPipelineController.updateSource(
-                        source = activeSourceColorInfo,
-                        decoderInput = activeDecoderInputColorInfo,
-                        appliedDolbyVisionProfileMapping =
-                            preparedPipelineOriginalColorInfo?.profile7To81MappingOrNull(
-                                activeDecoderInputColorInfo,
-                            ),
-                        decoderName = activeDecoderName,
-                        decoderCapabilities = confirmedWindowsHdrDecoderCapabilities(),
-                        isLive = false,
-                    )
-                    refreshWindowsColorPipeline()
-                    isLoading = false
                 }
+                confirmWindowsTextureOutputIfReady()
                 val position = LongArray(1)
                 if (nativeGetMediaPosition(instance, position) >= 0) {
                     _currentTime = position[0].hundredNanosecondsAsDuration()
@@ -2291,17 +2399,17 @@ class WindowsVideoPlayerState(
                                 .coerceIn(0f, 1f)
                     }
                 }
-                // AcquireNextSample and DXGI Present(1) already pace this route. Adding a full
-                // frame interval here makes 59.94/60 fps playback systematically under-run.
+                // AcquireNextSample paces the producer. The Nucleus window owns system-present
+                // pacing, so this loop must not add another full video-frame delay.
                 delay(2.milliseconds)
             }
         }
 
-    private fun confirmedWindowsHdrDecoderCapabilities(): DecoderColorCapabilities =
+    private fun confirmedWindowsDecoderCapabilities(): DecoderColorCapabilities =
         DecoderColorCapabilities(
             isKnown = true,
-            supportedDynamicRanges = windowsConfirmedHdrDecoderDynamicRanges(activeDecoderInputColorInfo),
-            maxBitDepth = 10,
+            supportedDynamicRanges = windowsConfirmedDecoderDynamicRanges(activeDecoderInputColorInfo),
+            maxBitDepth = activeDecoderInputColorInfo.bitDepth ?: if (activeDecoderInputColorInfo.isHdr) 10 else 8,
         )
 
     private fun refreshWindowsDecodedColorInfo(instance: Long): Boolean {
@@ -2331,7 +2439,7 @@ class WindowsVideoPlayerState(
             appliedDolbyVisionProfileMapping =
                 preparedPipelineOriginalColorInfo?.profile7To81MappingOrNull(activeDecoderInputColorInfo),
             decoderName = activeDecoderName,
-            decoderCapabilities = confirmedWindowsHdrDecoderCapabilities(),
+            decoderCapabilities = confirmedWindowsDecoderCapabilities(),
             isLive = false,
         )
 
@@ -2359,12 +2467,12 @@ class WindowsVideoPlayerState(
                     } else {
                         DynamicMetadataHandling.NONE
                     },
-                forceSdrOutput = windowsSdrToneMappingRequested,
+                forceSdrOutput = shouldProduceSdrTexture(),
             )
         if (configuration == null) {
             refreshWindowsColorPipeline()
             handleWindowsHdrRouteFailure(
-                "The active Media Foundation stream changed to a signal unsupported by the D3D11 HDR route.",
+                "The active Media Foundation stream changed to a signal unsupported by the D3D11 texture route.",
             )
             return true
         }
@@ -2938,12 +3046,8 @@ class WindowsVideoPlayerState(
         val renderedComposeFrame = colorOutputVerified
         val nativeStatus = windowsNativeHdrOutputStatus.takeIf { windowsHdrSurfaceRequested }
         val nativeRoute = windowsHdrSurfaceRequested && windowsHdrNativeConfiguration != null
-        val nativeConfirmed =
-            if (windowsSdrToneMappingRequested) {
-                nativeStatus?.isConfirmedSdrOutput == true
-            } else {
-                nativeStatus?.isConfirmedHdrOutput == true
-            }
+        val hostCapabilities = textureViewHostCapabilities
+        val nativeConfirmed = nativeRoute && hasPresentedSubmittedTextureFrame()
         val supportsHdr10PlusApplication =
             nativeRoute && !windowsHdr10PlusApplicationUnavailable
         val composeSdrOutputConfirmed =
@@ -2957,27 +3061,25 @@ class WindowsVideoPlayerState(
         val runtimeDetail =
             when {
                 !activeSourceColorInfo.isHdr -> null
-                nativeRoute && nativeStatus == null ->
-                    "Windows controlled color output is waiting for the D3D11 child surface and active-output query."
-                nativeRoute &&
-                    !windowsSdrToneMappingRequested &&
-                    nativeStatus?.displayQueried == true &&
-                    nativeStatus.advancedColorEnabled == false ->
-                    "HDR/Advanced Color is disabled on the monitor containing the player window " +
-                        "(bitsPerColor=${nativeStatus.bitsPerColor}, " +
-                        "colorSpace=${nativeStatus.displayColorSpace})."
+                nativeRoute && hostCapabilities.presentationState == TextureViewHostPresentationState.UNAVAILABLE ->
+                    "Windows color-managed output is waiting for a Nucleus TextureView host."
                 nativeRoute && (nativeStatus?.lastError ?: 0) < 0 ->
-                    "The native P010/D3D11 route failed with " +
+                    "The native color-managed D3D11 route failed with " +
                         "hr=0x${nativeStatus?.lastError?.toUInt()?.toString(16)}."
                 nativeRoute && !nativeConfirmed && windowsSdrToneMappingRequested ->
-                    "Windows controlled SDR output is pending the first P010 frame and successful G22/BT.709 Present."
+                    "Windows controlled SDR output is pending a producer frame and Nucleus system Present."
                 nativeRoute && !nativeConfirmed ->
-                    "Windows controlled HDR output is pending the first P010 frame and successful flip-model Present."
+                    "Windows controlled HDR output is pending a producer frame and FP16 Nucleus system Present."
                 !nativeRoute && !externalFallbackToneMappedHdrToSdr -> WindowsHdrRuntimeProbe.query().detail
                 else -> null
             }
         colorPipelineController.updateOutput(
-            displayCapabilities = nativeStatus?.displayCapabilities() ?: DisplayColorCapabilities(),
+            displayCapabilities =
+                if (nativeRoute) {
+                    hostCapabilities.toWindowsDisplayColorCapabilities()
+                } else {
+                    DisplayColorCapabilities()
+                },
             rendererCapabilities =
                 RendererColorCapabilities(
                     controlledHdrDynamicRanges =
@@ -2997,7 +3099,7 @@ class WindowsVideoPlayerState(
                 ),
             surfaceKind =
                 if (nativeRoute) {
-                    VideoSurfaceKind.CONTROLLED_GPU_SURFACE
+                    VideoSurfaceKind.TEXTURE_VIEW
                 } else {
                     VideoSurfaceKind.COMPOSE_CANVAS
                 },
@@ -3017,6 +3119,9 @@ class WindowsVideoPlayerState(
         )
     }
 
+    private fun shouldProduceSdrTexture(): Boolean =
+        !activeDecoderInputColorInfo.isHdr || windowsSdrToneMappingRequested
+
     private fun resetWindowsColorPipeline() {
         activeSourceColorInfo = VideoColorInfo()
         activeDecoderInputColorInfo = VideoColorInfo()
@@ -3026,10 +3131,16 @@ class WindowsVideoPlayerState(
         externalFallbackToneMappedHdrToSdr = false
         windowsHdrSurfaceRequested = false
         windowsHdrSurfaceAttached = false
+        currentColorManagedTextureFrameState.value = null
+        textureProducerFrameSerial.set(-1L)
+        textureProducerOutputGeneration.set(-1L)
+        textureProducerHostGeneration.set(-1L)
+        textureProducerHostPresentCount.set(-1L)
         windowsHdrNativeConfiguration = null
         windowsNativeHdrOutputStatus = null
         windowsHdr10PlusApplicationUnavailable = false
         windowsSdrToneMappingRequested = false
+        windowsHostForcedSdrToneMapping = false
         colorPipelineController.resetSource()
     }
 
@@ -3293,17 +3404,6 @@ class WindowsVideoPlayerState(
         instance: Long,
         usesLibVlc: Boolean = nativeBackendUsesLibVlc,
     ) {
-        val ownedWindows =
-            nativeVideoWindowOwners
-                .filterValues { owner -> owner.instance == instance }
-                .toList()
-        ownedWindows.forEach { (hwnd, owner) ->
-            runCatching { WindowsNativeBridge.nDisposeNativeVideoWindow(owner.instance, hwnd, owner.libVlc) }
-                .onFailure { error ->
-                    windowsLogger.e { "Failed to dispose a native Windows video child: ${error.message}" }
-                }
-            nativeVideoWindowOwners.remove(hwnd)
-        }
         if (usesLibVlc) {
             WindowsNativeBridge.destroyLibVlcInstance(instance)
         } else {

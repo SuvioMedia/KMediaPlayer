@@ -1,6 +1,9 @@
 @echo off
 setlocal
 
+set "VS_CMAKE=%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
+if exist "%VS_CMAKE%\cmake.exe" set "PATH=%VS_CMAKE%;%PATH%"
+
 echo === Starting compilation for x64 and ARM64 ===
 
 rem Clean previous build directories to ensure a fresh build

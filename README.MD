@@ -500,6 +500,97 @@ by the MPV and KMediaBridge adapters.
 See [Player backend architecture](docs/backend-architecture.md) for the module
 rules and the checklist for implementing another backend.
 
+### Optional bundled libVLC 4 backend
+
+The optional `composemediaplayer-libvlc` adapter consumes an audited KMediaVlc runtime and never
+downloads VLC at playback time. On desktop, `inspectLibVlcBackend()` checks the payload manifest
+before native code is loaded. Flat playback uses the platform GPU transport selected by KMediaVlc:
+D3D11 on Windows, IOSurface/OpenGL on Apple Silicon macOS, and DMA-BUF/GLES2 on Linux.
+
+The adapter contains no copied KMediaVlc implementation. It uses the same
+backend-neutral `AbstractBackendVideoPlayerState` as MPV and talks to the
+separately published LGPL-2.1-or-later KMediaVlc runtime through its ISC client
+ABI. KMediaPlayer can therefore remain private without changing the runtime's
+source, notice, replacement, or relinking rights.
+
+Projected, stereo, rotated, or cropped video currently uses the bounded RGBA8 CPU-pull route and
+the shared Skia projection shader. Configure the initial projection in `LibVlcPlaybackOptions` so
+`AUTO` can choose that route:
+
+```kotlin
+val playerState = rememberLibVlcVideoPlayerState(
+    LibVlcPlaybackOptions(
+        projection = VideoProjectionSettings(
+            projectionType = VideoProjectionType.Equirect360,
+        ),
+        projectionViewControlMode = VideoProjectionViewControlMode.MANUAL,
+    ),
+)
+```
+
+This fallback is intentionally SDR and therefore rejects `REQUIRE_HDR`. `GPU_PUSH` with a
+projection also fails closed until KMediaVlc exposes a native GPU projection pass. If projection
+will be changed after creating the state, select `CPU_PULL` explicitly; a GPU player is not silently
+recreated or allowed to display the wrong flat image.
+
+Android uses the bundled KMediaVlc AAR and libVLC's direct Surface transport on API 28+ ARM64 and
+ARMv7 devices. It accepts local paths, `file:`, `content:`, and HTTP(S) sources and exposes
+automatic or software-only decoding through `LibVlcAndroidDecodeMode`. The Android probe loads the
+native graph and checks its path-free build identity before creating a player. Explicit
+`GPU_PUSH`/`CPU_PULL`, projected or cropped video, non-`AUTO` dynamic-range policies, and non-default
+Dolby Vision policies all fail closed because this first Surface bridge cannot render projection or verify
+the final color pipeline. Its first bounded layout contract accepts `ContentScale.Fit`; other
+scales fail closed instead of silently displaying different geometry. A delayed callback from an
+old Surface cannot detach a newer fullscreen Surface.
+
+iOS ARM64 device and simulator variants consume the exact KMediaVlc CocoaPod and resolve its signed
+XCFramework graph only from the application's private `Frameworks` directory; there is no system
+VLC or user-installed fallback. The first iOS transport is bounded CPU pull: KMediaVlc supplies
+premultiplied RGBA8/sRGB frames, the adapter copies them into owned CoreGraphics images, and Compose
+renders those images through UIKit. Local paths, `file:`, and HTTP(S) sources are accepted.
+Projection/crop, `GPU_PUSH`, non-`AUTO` dynamic-range policies, and non-default Dolby Vision
+policies fail closed until the native output and color pipeline can be verified.
+
+The Android runtime and Apple XCFramework graph remain release candidates until their legal and
+physical-device gates are complete; successful source and host tests do not make those payloads
+publication-eligible.
+
+The desktop host acceptance gate decodes a real fixture through a relocated bundled libVLC 4
+runtime, waits for multiple CPU frames, and sends one of those frames through the production Skia
+stereo/360 projection shader. It verifies visible output for both eyes and a changed output after a
+90-degree yaw. Run it only against clean, exact KMediaPlayer and KMediaVlc commits:
+
+```shell
+./.github/scripts/run_libvlc_vr_acceptance.sh \
+  /absolute/path/to/KMediaVlc \
+  /absolute/path/to/relocated-kmediavlc-runtime \
+  /absolute/path/to/fixture.mkv \
+  <full-kmediaplayer-commit> \
+  <full-kmediavlc-commit>
+```
+
+The runner derives the platform bridge from the relocated runtime and rejects partial inputs,
+symlinks, dirty trees, commit mismatches, and unsupported hosts. This is deterministic offscreen
+consumer evidence; it is not a physical headset, display, GPU-import, or render-node acceptance
+result.
+
+Before KMediaVlc reaches a public version, its published-adapter consumer check uses the local
+composite explicitly and runs in two Gradle invocations:
+
+```shell
+./gradlew publishLibVlcConsumerSmokeArtifacts \
+  -PpublicationVersion=0.0.0-consumer.local \
+  -PkmediaVlcProjectDir=/absolute/path/to/KMediaVlc \
+  --no-configuration-cache
+python3 .github/scripts/verify_maven_poms.py \
+  build/consumer-repository \
+  0.0.0-consumer.local
+./gradlew libVlcConsumerSmokeTest \
+  -PpublicationVersion=0.0.0-consumer.local \
+  -PkmediaVlcProjectDir=/absolute/path/to/KMediaVlc \
+  --no-configuration-cache
+```
+
 The repository commits Kotlin/Wasm Yarn lockfiles. CI fails instead of silently replacing them when an npm dependency changes; run `./gradlew kotlinWasmUpgradeYarnLock` after an intentional npm update and review the resulting lockfile diff.
 
 Gradle dependency verification pins external build artifacts by SHA-256. The only checksum exception is restricted to the locally generated `dev` and `0.0.0-consumer.*` smoke-test publications under this project's own coordinates, whose binaries change with the source under test.
@@ -508,7 +599,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 
 | Library Version | Kotlin Version | Compose Version | Java | Android toolchain |
 |-----------------|----------------|-----------------|------|-------------------|
-| 4.0.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
+| 4.0.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV/libVLC minSdk 28 |
 | 3.0.x           | 2.4.10         | 1.12.0-beta03   | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 2.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 1.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23 |

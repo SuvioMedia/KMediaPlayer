@@ -98,10 +98,10 @@ internal fun buildWindowsHdrNativeConfiguration(
                     .takeIf { it == source.dolbyVision?.compatibleBaseLayerDynamicRange }
                     ?.windowsHdrTransfer()
 
-            VideoDynamicRange.UNKNOWN,
-            VideoDynamicRange.SDR,
-            -> null
+            VideoDynamicRange.SDR -> WINDOWS_TRANSFER_SDR
+            VideoDynamicRange.UNKNOWN -> null
         } ?: return null
+    val isSdrSource = source.dynamicRange == VideoDynamicRange.SDR
     val normalizedProjection = projection.normalized()
     val normalizedView = projectionView.normalized()
     val crop = textureCrop.normalized()
@@ -117,9 +117,10 @@ internal fun buildWindowsHdrNativeConfiguration(
         }
     val matrix =
         when (source.matrix) {
-            VideoColorMatrix.UNKNOWN,
-            VideoColorMatrix.BT2020_NCL,
-            -> WINDOWS_HDR_MATRIX_BT2020
+            VideoColorMatrix.UNKNOWN ->
+                if (isSdrSource) WINDOWS_HDR_MATRIX_BT709 else WINDOWS_HDR_MATRIX_BT2020
+
+            VideoColorMatrix.BT2020_NCL -> WINDOWS_HDR_MATRIX_BT2020
 
             VideoColorMatrix.BT709 -> WINDOWS_HDR_MATRIX_BT709
             VideoColorMatrix.BT601 -> WINDOWS_HDR_MATRIX_BT601
@@ -130,20 +131,21 @@ internal fun buildWindowsHdrNativeConfiguration(
         }
     val primaries =
         when (source.primaries) {
-            VideoColorPrimaries.UNKNOWN,
-            VideoColorPrimaries.BT2020,
-            -> WINDOWS_HDR_PRIMARIES_BT2020
+            VideoColorPrimaries.UNKNOWN ->
+                if (isSdrSource) WINDOWS_HDR_PRIMARIES_BT709 else WINDOWS_HDR_PRIMARIES_BT2020
+
+            VideoColorPrimaries.BT2020 -> WINDOWS_HDR_PRIMARIES_BT2020
 
             VideoColorPrimaries.BT709 -> WINDOWS_HDR_PRIMARIES_BT709
             VideoColorPrimaries.DISPLAY_P3 -> WINDOWS_HDR_PRIMARIES_DISPLAY_P3
             VideoColorPrimaries.BT601_525,
             VideoColorPrimaries.BT601_625,
-            -> return null
+            -> WINDOWS_HDR_PRIMARIES_BT709
         }
     val sourcePeak =
         contentLight?.maxContentLightLevelNits?.toFloat()
             ?: mastering?.maxLuminanceNits
-            ?: DEFAULT_HDR_SOURCE_PEAK_NITS
+            ?: if (isSdrSource) DEFAULT_SDR_SOURCE_PEAK_NITS else DEFAULT_HDR_SOURCE_PEAK_NITS
     return WindowsHdrNativeConfiguration(
         integers =
             intArrayOf(
@@ -163,7 +165,7 @@ internal fun buildWindowsHdrNativeConfiguration(
                 } else {
                     0
                 },
-                if (forceSdrOutput) 1 else 0,
+                if (forceSdrOutput || isSdrSource) 1 else 0,
             ),
         floats =
             floatArrayOf(
@@ -222,6 +224,7 @@ private fun Float.positiveOrNull(allowZero: Boolean = false): Float? =
 
 private const val WINDOWS_HDR_TRANSFER_PQ = 0
 private const val WINDOWS_HDR_TRANSFER_HLG = 1
+private const val WINDOWS_TRANSFER_SDR = 2
 private const val WINDOWS_HDR_RANGE_LIMITED = 0
 private const val WINDOWS_HDR_RANGE_FULL = 1
 private const val WINDOWS_HDR_MATRIX_BT2020 = 0
@@ -234,4 +237,5 @@ private const val WINDOWS_HDR10_SWAP_CHAIN_COLOR_SPACE = 12
 private const val WINDOWS_SCRGB_SWAP_CHAIN_COLOR_SPACE = 1
 private const val WINDOWS_SDR_SWAP_CHAIN_COLOR_SPACE = 0
 private const val DEFAULT_HDR_SOURCE_PEAK_NITS = 1_000f
+private const val DEFAULT_SDR_SOURCE_PEAK_NITS = 100f
 private const val WINDOWS_SCRGB_REFERENCE_WHITE_NITS = 80f

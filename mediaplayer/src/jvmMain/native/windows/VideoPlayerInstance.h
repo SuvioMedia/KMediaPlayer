@@ -34,10 +34,10 @@ struct VideoPlayerInstance {
     UINT32 nativeHeight     = 0;
     std::atomic<bool> bEOF{false};
 
-    // ---- Controlled D3D11 HDR output ----
-    // In this mode the source reader emits P010 DXGI surfaces and the native
-    // presenter owns the swapchain. HDR pixels are never copied through the
-    // JVM/Compose BGRA canvas.
+    // ---- Controlled D3D11 color-managed texture output ----
+    // In this mode the source reader emits P010 HDR or NV12 SDR DXGI surfaces.
+    // The presenter produces a shared FP16/RGBA8 texture; Nucleus owns the only
+    // window swapchain and system Present. Pixels never cross the JVM canvas.
     bool bHdrOutputRequested = false;
     std::unique_ptr<WindowsHdrPresenter> hdrPresenter;
     std::atomic<int32_t> decodedColorGeneration{0};

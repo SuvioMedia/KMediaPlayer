@@ -17,6 +17,18 @@ This fork is provided "as is", without warranties, maintenance obligations,
 support commitments, or issue-response guarantees. The maintainer does not have
 the resources to support third-party use of this fork.
 
+LGPL interoperability exception
+
+When the maintainer or an authorized distributor lawfully conveys an executable
+combined work containing this software together with a library covered by the
+GNU Lesser General Public License, this license does not restrict the
+recipient's rights under that library's license. The recipient may modify the
+combined work for their own use solely to replace or relink the LGPL-covered
+library with a compatible modified version, and may reverse engineer the
+combined work solely as necessary to debug modifications to that library. This
+exception does not grant permission to copy, modify, or distribute this
+repository's source code beyond the permissions stated above.
+
 For public, external, or general-purpose use, please use the original upstream
 library instead:
 
