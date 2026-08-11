@@ -439,6 +439,16 @@ app-private absolute PEM path through
 `MpvPlaybackOptions(tlsCertificateAuthorityFile = ...)`; there is no option to
 disable certificate verification.
 
+On Android, the bundled MPV runtime defaults to `gpu-next` with the `androidvk`
+Vulkan context and changes the swapchain colorspace for each loaded source.
+`VideoPlayerState.colorPipelineStatus` combines libmpv's decoded color and
+mastering metadata with the producer-configured `ANativeWindow` dataspace and
+pixel format. The adapter confirms HDR only for a PQ or HLG Surface backed by
+10-bit RGBA or FP16; it confirms SDR independently after source transitions.
+HDR10 and HLG are controlled native-range outputs. HDR10+ is reported as an
+HDR10-compatible output with dynamic metadata dropped, and Dolby Vision is not
+claimed as native output by this route.
+
 The macOS MPV renderer defaults to `MpvMacRenderer.MOLTENVK`. A libmpv carrying
 KMediaMpv's versioned embedded-macvk capability uses the windowless
 `gpu-next`/Vulkan route in the Compose-owned Metal surface:

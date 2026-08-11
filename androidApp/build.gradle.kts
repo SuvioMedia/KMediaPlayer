@@ -73,7 +73,9 @@ fun registerAndroidBackendGraphVerification(
     outputs.file(report)
     commandLine(
         if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3",
-        rootProject.layout.projectDirectory.file(".github/scripts/verify_android_backend_graph.py").asFile.absolutePath,
+        rootProject.layout.projectDirectory
+            .file(".github/scripts/verify_android_backend_graph.py")
+            .asFile.absolutePath,
         "--archive",
         archive.get().asFile.absolutePath,
         "--report",

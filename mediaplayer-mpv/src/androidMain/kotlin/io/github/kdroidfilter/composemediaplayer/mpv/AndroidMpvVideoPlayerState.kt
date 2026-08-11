@@ -16,6 +16,7 @@ import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineStatus
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurfaceProvider
 import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
@@ -29,6 +30,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -58,6 +62,9 @@ internal class AndroidMpvVideoPlayerState(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val ownedTemporaryFiles = linkedSetOf<File>()
     private val activeMediaDescriptors = linkedSetOf<ParcelFileDescriptor>()
+    private val displayColorCapabilities = context.mpvDisplayColorCapabilities()
+    private val pipelineState =
+        MutableStateFlow(initialAndroidMpvColorPipelineStatus(displayColorCapabilities))
 
     private val player = createPlayer()
     private var handledEndOfFile = false
@@ -78,6 +85,7 @@ internal class AndroidMpvVideoPlayerState(
             supportedUriSchemes = setOf("file", "content", "http", "https"),
             supportsHls = true,
         )
+    override val colorPipelineStatus: StateFlow<VideoColorPipelineStatus> = pipelineState.asStateFlow()
 
     init {
         scope.launch { pollPlayback() }
@@ -152,6 +160,7 @@ internal class AndroidMpvVideoPlayerState(
             "HTTP headers require an HTTP(S) media source."
         }
         beginSourcePreparation(uri, initializePlayerState)
+        pipelineState.value = initialAndroidMpvColorPipelineStatus(displayColorCapabilities)
         handledEndOfFile = false
         try {
             if (!source.isMpvHttpSource()) readMetadata(source)
@@ -279,6 +288,7 @@ internal class AndroidMpvVideoPlayerState(
         runCatching { player.stop() }
         closeActiveMediaDescriptors()
         resetSourceState()
+        pipelineState.value = initialAndroidMpvColorPipelineStatus(displayColorCapabilities)
     }
 
     internal fun attachSurface(
@@ -319,6 +329,7 @@ internal class AndroidMpvVideoPlayerState(
 
     private fun refreshSnapshot() {
         val snapshot = player.playbackSnapshot()
+        pipelineState.value = snapshot.toAndroidMpvColorPipelineStatus(displayColorCapabilities)
         val position = snapshot.timePositionSeconds.toSafeDuration() ?: _currentTime
         val mediaDuration = snapshot.durationSeconds.toSafeDuration() ?: _duration
         val seekCompleted = _isSeeking && snapshot.isSeekingStateKnown && !snapshot.isSeeking

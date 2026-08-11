@@ -26,19 +26,21 @@ import io.github.shusek.kmediabridge.SubtitleHandling
 import io.github.shusek.kmediabridge.VideoHandling
 import io.github.shusek.kmediabridge.ffmpeg.AndroidFfmpegNativeDriver
 import io.github.shusek.kmediampv.runtime.android.MpvAndroidDecodeMode
+import io.github.shusek.kmediampv.runtime.android.MpvAndroidPlaybackSnapshot
 import io.github.shusek.kmediampv.runtime.android.MpvAndroidPlayer
+import io.github.shusek.kmediampv.runtime.android.MpvAndroidSurfaceDynamicRange
 import io.github.shusek.kmediampv.runtime.android.MpvAndroidTrackInfo
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import java.io.File
 
@@ -68,6 +70,12 @@ internal class AndroidKMediaBridgeSelfTest(
         val mpvOnly = activity.intent.getBooleanExtra(EXTRA_MPV_ONLY, false)
         val skipMpvSurfaceRecreation =
             activity.intent.getBooleanExtra(EXTRA_MPV_SKIP_SURFACE_RECREATION, false)
+        val mpvSustainedTestSeconds =
+            activity.intent.getLongExtra(EXTRA_MPV_SUSTAINED_TEST_SECONDS, 0L).coerceIn(0L, 60L)
+        val mpvTransitionInputPath = activity.intent.getStringExtra(EXTRA_MPV_TRANSITION_INPUT_PATH)
+        val mpvTransitionTestSeconds =
+            activity.intent.getLongExtra(EXTRA_MPV_TRANSITION_TEST_SECONDS, 0L).coerceIn(0L, 60L)
+        val mpvColorOutputOnly = activity.intent.getBooleanExtra(EXTRA_MPV_COLOR_OUTPUT_ONLY, false)
         val mpvSurfaceView = subtitlePath?.let { SurfaceView(activity).also(activity::setContentView) }
         if ((activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
             Log.e(TAG, "KMB_SELF_TEST=REJECTED_NON_DEBUGGABLE")
@@ -88,6 +96,10 @@ internal class AndroidKMediaBridgeSelfTest(
                             expectMpvSoftware = expectMpvSoftware,
                             runBridgeConcurrently = !mpvOnly,
                             skipMpvSurfaceRecreation = skipMpvSurfaceRecreation,
+                            mpvSustainedTestSeconds = mpvSustainedTestSeconds,
+                            mpvTransitionInputPath = mpvTransitionInputPath,
+                            mpvTransitionTestSeconds = mpvTransitionTestSeconds,
+                            mpvColorOutputOnly = mpvColorOutputOnly,
                             mpvSurfaceView = mpvSurfaceView,
                         )
                     }
@@ -97,8 +109,9 @@ internal class AndroidKMediaBridgeSelfTest(
                     val summary =
                         "PASS init=${result.initializationFragments} " +
                             "media=${result.mediaFragments} bytes=${result.totalBytes} " +
-                            "mpv=${result.mpvVerified} audio=${result.mpvVerified} " +
-                            "seek=${result.mpvVerified} ass=${result.mpvVerified} " +
+                            "mpv=${result.mpvVerified} color=${result.mpvColorOutputVerified} " +
+                            "audio=${result.mpvAudioVerified} seek=${result.mpvSeekVerified} " +
+                            "ass=${result.mpvAssVerified} " +
                             "surface=${result.mpvSurfaceVerified}"
                     Log.i(
                         TAG,
@@ -135,11 +148,18 @@ internal class AndroidKMediaBridgeSelfTest(
         expectMpvSoftware: Boolean?,
         runBridgeConcurrently: Boolean,
         skipMpvSurfaceRecreation: Boolean,
+        mpvSustainedTestSeconds: Long,
+        mpvTransitionInputPath: String?,
+        mpvTransitionTestSeconds: Long,
+        mpvColorOutputOnly: Boolean,
         mpvSurfaceView: SurfaceView?,
     ): Result {
         check(File(inputPath).isFile) { "Missing test input." }
         if (subtitlePath != null) check(File(subtitlePath).isFile) { "Missing MPV subtitle input." }
         if (subtitlePath != null) check(File(mpvInputPath).isFile) { "Missing MPV media input." }
+        if (mpvTransitionInputPath != null) {
+            check(File(mpvTransitionInputPath).isFile) { "Missing MPV transition media input." }
+        }
         val mpv =
             subtitlePath?.let {
                 ConcurrentMpvSession(
@@ -149,6 +169,10 @@ internal class AndroidKMediaBridgeSelfTest(
                     decodeMode = mpvDecodeMode,
                     expectSoftwareDecode = expectMpvSoftware,
                     skipSurfaceRecreation = skipMpvSurfaceRecreation,
+                    sustainedTestSeconds = mpvSustainedTestSeconds,
+                    transitionInputPath = mpvTransitionInputPath,
+                    transitionTestSeconds = mpvTransitionTestSeconds,
+                    colorOutputOnly = mpvColorOutputOnly,
                     surfaceView = checkNotNull(mpvSurfaceView),
                 )
             }
@@ -162,10 +186,14 @@ internal class AndroidKMediaBridgeSelfTest(
                     } else {
                         Result(0, 0, 0, mpvVerified = false)
                     }
-                val surfaceVerified = mpvVerification?.await() ?: false
+                val verified = mpvVerification?.await() ?: MpvVerification()
                 bridgeResult.copy(
                     mpvVerified = mpv != null,
-                    mpvSurfaceVerified = surfaceVerified,
+                    mpvColorOutputVerified = verified.colorOutputVerified,
+                    mpvAudioVerified = verified.audioVerified,
+                    mpvSeekVerified = verified.seekVerified,
+                    mpvAssVerified = verified.assVerified,
+                    mpvSurfaceVerified = verified.surfaceVerified,
                 )
             }
         } finally {
@@ -239,7 +267,19 @@ internal class AndroidKMediaBridgeSelfTest(
         val mediaFragments: Int,
         val totalBytes: Long,
         val mpvVerified: Boolean,
+        val mpvColorOutputVerified: Boolean = false,
+        val mpvAudioVerified: Boolean = false,
+        val mpvSeekVerified: Boolean = false,
+        val mpvAssVerified: Boolean = false,
         val mpvSurfaceVerified: Boolean = false,
+    )
+
+    private data class MpvVerification(
+        val colorOutputVerified: Boolean = false,
+        val audioVerified: Boolean = false,
+        val seekVerified: Boolean = false,
+        val assVerified: Boolean = false,
+        val surfaceVerified: Boolean = false,
     )
 
     private class ConcurrentMpvSession(
@@ -249,6 +289,10 @@ internal class AndroidKMediaBridgeSelfTest(
         decodeMode: MpvAndroidDecodeMode,
         private val expectSoftwareDecode: Boolean?,
         private val skipSurfaceRecreation: Boolean,
+        private val sustainedTestSeconds: Long,
+        private val transitionInputPath: String?,
+        private val transitionTestSeconds: Long,
+        private val colorOutputOnly: Boolean,
         surfaceView: SurfaceView,
     ) : AutoCloseable {
         private val activity = activity
@@ -262,7 +306,7 @@ internal class AndroidKMediaBridgeSelfTest(
             player.setPaused(false)
         }
 
-        suspend fun awaitVerified(): Boolean {
+        suspend fun awaitVerified(): MpvVerification {
             Log.i(TAG, "KMB_SELF_TEST=MPV_WAIT_VIDEO")
             try {
                 withTimeout(MPV_VERIFICATION_TIMEOUT_MS) {
@@ -282,7 +326,7 @@ internal class AndroidKMediaBridgeSelfTest(
                                 } else {
                                     snapshot.timePositionSeconds.isFinite()
                                 }
-                            if (decodePolicyVerified) {
+                            if (decodePolicyVerified && snapshot.hasConsistentColorOutput()) {
                                 return@withTimeout
                             }
                         }
@@ -298,6 +342,34 @@ internal class AndroidKMediaBridgeSelfTest(
                         "time=${snapshot.timePositionSeconds} eof=${snapshot.isEndOfFileReached} " +
                         "idle=${snapshot.isIdleActive}",
                 )
+            }
+            player.playbackSnapshot().also { snapshot ->
+                logColorSnapshot("MPV_RENDERER", snapshot)
+            }
+            if (sustainedTestSeconds > 0L) delay(sustainedTestSeconds * 1_000L)
+            transitionInputPath?.let { transition ->
+                val before = player.playbackSnapshot()
+                Log.i(TAG, "KMB_SELF_TEST=MPV_TRANSITION_LOAD")
+                player.loadFile(transition)
+                player.setPaused(false)
+                val transitioned =
+                    withTimeout(MPV_VERIFICATION_TIMEOUT_MS) {
+                        while (true) {
+                            val snapshot = player.playbackSnapshot()
+                            val sourceChanged =
+                                snapshot.sourceColorInfo.transfer != before.sourceColorInfo.transfer ||
+                                    snapshot.surfaceOutputInfo.dataSpace != before.surfaceOutputInfo.dataSpace
+                            if (sourceChanged && snapshot.hasConsistentColorOutput()) return@withTimeout snapshot
+                            delay(MPV_POLL_INTERVAL_MS)
+                        }
+                        error("Unreachable MPV color-transition state.")
+                    }
+                logColorSnapshot("MPV_TRANSITION_VERIFIED", transitioned)
+                if (transitionTestSeconds > 0L) delay(transitionTestSeconds * 1_000L)
+            }
+            if (colorOutputOnly) {
+                Log.i(TAG, "KMB_SELF_TEST=MPV_COLOR_OUTPUT_VERIFIED")
+                return MpvVerification(colorOutputVerified = true)
             }
             Log.i(TAG, "KMB_SELF_TEST=MPV_WAIT_AUDIO")
             withTimeout(MPV_VERIFICATION_TIMEOUT_MS) {
@@ -349,14 +421,25 @@ internal class AndroidKMediaBridgeSelfTest(
             }
             if (skipSurfaceRecreation) {
                 Log.i(TAG, "KMB_SELF_TEST=MPV_VERIFIED_WITHOUT_SURFACE_RECREATION")
-                return false
+                return MpvVerification(
+                    colorOutputVerified = true,
+                    audioVerified = true,
+                    seekVerified = true,
+                    assVerified = true,
+                )
             }
             Log.i(TAG, "KMB_SELF_TEST=MPV_RECREATE_SURFACE")
             val positionBeforeRecreate = player.playbackSnapshot().timePositionSeconds
             recreateSurface()
             awaitRenderedFrame(positionBeforeRecreate)
             Log.i(TAG, "KMB_SELF_TEST=MPV_VERIFIED")
-            return true
+            return MpvVerification(
+                colorOutputVerified = true,
+                audioVerified = true,
+                seekVerified = true,
+                assVerified = true,
+                surfaceVerified = true,
+            )
         }
 
         private suspend fun recreateSurface() {
@@ -449,6 +532,53 @@ internal class AndroidKMediaBridgeSelfTest(
         override fun close() {
             player.close()
         }
+
+        private fun MpvAndroidPlaybackSnapshot.hasConsistentColorOutput(): Boolean {
+            if (
+                currentVideoOutput != "gpu-next" ||
+                currentGpuContext != "androidvk" ||
+                !isVideoOutputConfigured ||
+                surfaceOutputInfo.pixelFormat <= 0
+            ) {
+                return false
+            }
+            val expected =
+                when (sourceColorInfo.transfer?.lowercase()) {
+                    "pq" -> MpvAndroidSurfaceDynamicRange.HDR10
+                    "hlg" -> MpvAndroidSurfaceDynamicRange.HLG
+                    "bt.1886", "srgb", "linear", "gamma1.8", "gamma2.0", "gamma2.2", "gamma2.4",
+                    "gamma2.6", "gamma2.8",
+                    -> MpvAndroidSurfaceDynamicRange.SDR
+                    else -> return false
+                }
+            return surfaceOutputInfo.dynamicRange == expected &&
+                (
+                    expected == MpvAndroidSurfaceDynamicRange.SDR ||
+                        surfaceOutputInfo.isHdrCapablePixelFormat
+                )
+        }
+
+        private fun logColorSnapshot(
+            phase: String,
+            snapshot: MpvAndroidPlaybackSnapshot,
+        ) {
+            Log.i(
+                TAG,
+                "KMB_SELF_TEST=$phase " +
+                    "vo=${snapshot.currentVideoOutput ?: "none"} " +
+                    "gpu=${snapshot.currentGpuContext ?: "none"} " +
+                    "hwdec=${snapshot.currentHardwareDecoder ?: "none"} " +
+                    "transfer=${snapshot.sourceColorInfo.transfer ?: "none"} " +
+                    "primaries=${snapshot.sourceColorInfo.primaries ?: "none"} " +
+                    "minLuma=${snapshot.sourceColorInfo.minimumLuminanceNits} " +
+                    "maxLuma=${snapshot.sourceColorInfo.maximumLuminanceNits} " +
+                    "redX=${snapshot.sourceColorInfo.primaryRedX} " +
+                    "redY=${snapshot.sourceColorInfo.primaryRedY} " +
+                    "range=${snapshot.surfaceOutputInfo.dynamicRange} " +
+                    "dataspace=${snapshot.surfaceOutputInfo.dataSpace} " +
+                    "format=${snapshot.surfaceOutputInfo.pixelFormat}",
+            )
+        }
     }
 
     private companion object {
@@ -461,7 +591,15 @@ internal class AndroidKMediaBridgeSelfTest(
         const val EXTRA_MPV_ONLY = "sample.app.extra.MPV_SELF_TEST_ONLY"
         const val EXTRA_MPV_SKIP_SURFACE_RECREATION =
             "sample.app.extra.MPV_SELF_TEST_SKIP_SURFACE_RECREATION"
-        const val SELF_TEST_TIMEOUT_MS = 45_000L
+        const val EXTRA_MPV_SUSTAINED_TEST_SECONDS =
+            "sample.app.extra.MPV_SELF_TEST_SUSTAINED_SECONDS"
+        const val EXTRA_MPV_TRANSITION_INPUT_PATH =
+            "sample.app.extra.MPV_SELF_TEST_TRANSITION_INPUT_PATH"
+        const val EXTRA_MPV_TRANSITION_TEST_SECONDS =
+            "sample.app.extra.MPV_SELF_TEST_TRANSITION_SECONDS"
+        const val EXTRA_MPV_COLOR_OUTPUT_ONLY =
+            "sample.app.extra.MPV_SELF_TEST_COLOR_OUTPUT_ONLY"
+        const val SELF_TEST_TIMEOUT_MS = 150_000L
         const val MPV_VERIFICATION_TIMEOUT_MS = 15_000L
         const val MPV_SURFACE_TIMEOUT_MS = 5_000L
         const val MPV_POLL_INTERVAL_MS = 50L
