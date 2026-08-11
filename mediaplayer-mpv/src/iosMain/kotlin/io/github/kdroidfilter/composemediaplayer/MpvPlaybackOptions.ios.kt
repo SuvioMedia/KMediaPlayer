@@ -24,23 +24,24 @@ internal actual fun mpvBackendInfo(): VideoPlayerBackendInfo =
         capabilities =
             PlayerCapabilities(
                 supportsMkv = true,
-                supportedUriSchemes = setOf("file", "http", "https", "rtmp", "rtsp"),
+                supportedUriSchemes = setOf("file", "http", "https"),
+                supportsHls = true,
             ),
     )
 
 actual fun inspectMpvBackend(options: MpvPlaybackOptions): MpvBackendAvailability {
-    val fontError = options.validateIosSubtitleFontsDirectory()
-    if (fontError != null) {
+    val pathError = options.validateIosPaths()
+    if (pathError != null) {
         return MpvBackendAvailability.Unavailable(
             reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
-            guidance = fontError,
+            guidance = pathError,
         )
     }
     return inspectIosMpvRuntime(options)
 }
 
 actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerState {
-    options.validateIosSubtitleFontsDirectory()?.let { guidance ->
+    options.validateIosPaths()?.let { guidance ->
         throw MpvBackendUnavailableException(
             MpvBackendAvailability.Unavailable(
                 reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
@@ -94,6 +95,9 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
     }
 }
 
+private fun MpvPlaybackOptions.validateIosPaths(): String? =
+    validateIosSubtitleFontsDirectory() ?: validateIosTlsCertificateAuthorityFile()
+
 private fun MpvPlaybackOptions.validateIosSubtitleFontsDirectory(): String? {
     val path = subtitleFontsDirectory ?: return null
     val bundlePath = NSBundle.mainBundle.bundlePath.trimEnd('/')
@@ -118,5 +122,32 @@ private fun MpvPlaybackOptions.validateIosSubtitleFontsDirectory(): String? {
         null
     } else {
         "The configured iOS subtitle-font directory does not exist."
+    }
+}
+
+private fun MpvPlaybackOptions.validateIosTlsCertificateAuthorityFile(): String? {
+    val path = tlsCertificateAuthorityFile ?: return null
+    val bundlePath = NSBundle.mainBundle.bundlePath.trimEnd('/')
+    val homePath = NSHomeDirectory().trimEnd('/')
+    if (!path.startsWith('/') ||
+        path.split('/').any { it == ".." } ||
+        (!path.startsWith("$bundlePath/") && !path.startsWith("$homePath/"))
+    ) {
+        return "The iOS TLS CA file must be an app-private absolute path without parent traversal."
+    }
+    val isRegularFile =
+        memScoped {
+            val directory = alloc<BooleanVar>()
+            val exists =
+                NSFileManager.defaultManager.fileExistsAtPath(
+                    path,
+                    isDirectory = directory.ptr,
+                )
+            exists && !directory.value
+        }
+    return if (isRegularFile) {
+        null
+    } else {
+        "The configured iOS TLS CA file does not exist or is not a regular file."
     }
 }

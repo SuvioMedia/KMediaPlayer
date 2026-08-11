@@ -32,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -41,8 +42,8 @@ import io.github.shusek.kmediampv.runtime.android.MpvAndroidDecodeMode as Runtim
 /**
  * Android adapter for the optional KMediaMpv runtime.
  *
- * The audited KMediaMpv runtime intentionally enables local files only. Network URLs and
- * request headers are rejected instead of silently crossing that boundary.
+ * The audited KMediaMpv runtime accepts local files and direct HTTP(S) input. HTTPS peer
+ * verification is mandatory and uses either an app-supplied CA file or Android's trust store.
  */
 @Stable
 @OptIn(ExperimentalComposeMediaPlayerBackendApi::class)
@@ -50,6 +51,7 @@ internal class AndroidMpvVideoPlayerState(
     private val context: Context,
     private val subtitleFontsDirectory: File?,
     private val decodeMode: RuntimeMpvAndroidDecodeMode,
+    private val certificateAuthorityFile: File?,
 ) : AbstractBackendVideoPlayerState(),
     VideoPlayerSurfaceProvider {
     private val disposed = AtomicBoolean(false)
@@ -68,12 +70,13 @@ internal class AndroidMpvVideoPlayerState(
             videoRenderer = "libmpv Android Surface",
             audioRenderer = "mpv AudioTrack",
             subtitleRenderer = "mpv/libass",
-            notes = "Audited KMediaMpv local-file runtime; Android API 28+ on ARM only.",
+            notes = "Audited KMediaMpv direct-network runtime; Android API 28+ on ARM only.",
         )
     override val capabilities =
         PlayerCapabilities(
             supportsMkv = true,
-            supportedUriSchemes = setOf("file", "content"),
+            supportedUriSchemes = setOf("file", "content", "http", "https"),
+            supportsHls = true,
         )
 
     init {
@@ -141,17 +144,26 @@ internal class AndroidMpvVideoPlayerState(
         requestHeaders: Map<String, String>,
     ) {
         ensureOpen()
-        require(requestHeaders.isEmpty()) {
-            "The audited Android KMediaMpv runtime has networking disabled and does not accept request headers."
-        }
+        val sanitizedHeaders = requestHeaders.sanitizedMpvHttpHeaders()
         if (_hasMedia) runCatching { player.stop() }
         closeActiveMediaDescriptors()
-        val localSource = resolveMediaSource(uri)
+        val source = resolveMediaSource(uri)
+        require(source.isMpvHttpSource() || sanitizedHeaders.isEmpty()) {
+            "HTTP headers require an HTTP(S) media source."
+        }
         beginSourcePreparation(uri, initializePlayerState)
         handledEndOfFile = false
         try {
-            readMetadata(localSource)
-            player.loadFile(localSource)
+            if (!source.isMpvHttpSource()) readMetadata(source)
+            player.loadFile(
+                source,
+                sanitizedHeaders,
+                if (source.isMpvHttpsSource()) {
+                    AndroidMpvTls.certificateAuthorityFile(context, certificateAuthorityFile)
+                } else {
+                    null
+                },
+            )
             player.setVolume(_volume.toDouble())
             player.setSpeed(_playbackSpeed.toDouble())
             player.setLoop(_loop)
@@ -168,7 +180,7 @@ internal class AndroidMpvVideoPlayerState(
         } catch (_: RuntimeException) {
             _hasMedia = false
             closeActiveMediaDescriptors()
-            publishError(VideoPlayerError.SourceError("KMediaMpv rejected the local media source."))
+            publishError(VideoPlayerError.SourceError("KMediaMpv rejected the media source."))
         }
     }
 
@@ -480,11 +492,33 @@ internal class AndroidMpvVideoPlayerState(
                 activeMediaDescriptors += descriptor
                 "/proc/self/fd/${descriptor.fd}"
             }
+            uri.scheme.equals("http", ignoreCase = true) ||
+                uri.scheme.equals("https", ignoreCase = true) -> validateDirectNetworkSource(value)
             else ->
                 throw IllegalArgumentException(
-                    "The audited Android KMediaMpv runtime accepts file: and content: sources only.",
+                    "The audited Android KMediaMpv runtime accepts file:, content:, http:, and https: sources only.",
                 )
         }
+    }
+
+    private fun validateDirectNetworkSource(value: String): String {
+        require(value.isSafeDirectMpvHttpSource()) {
+            "HTTP(S) sources require a host and must not contain user information."
+        }
+        val uri =
+            runCatching { URI(value) }.getOrElse {
+                throw IllegalArgumentException("The HTTP(S) media source is invalid.", it)
+            }
+        require(
+            !uri.isOpaque &&
+                uri.rawUserInfo == null &&
+                !uri.host.isNullOrBlank() &&
+                uri.port != 0 &&
+                uri.port <= 65_535,
+        ) {
+            "HTTP(S) sources require a host and must not contain user information."
+        }
+        return value
     }
 
     private fun closeActiveMediaDescriptors() {

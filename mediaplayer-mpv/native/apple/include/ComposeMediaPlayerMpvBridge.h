@@ -84,6 +84,14 @@ int cmp_mpv_player_set_property(
     const char *value
 );
 
+/** Sets an mpv string-list property as an MPV_FORMAT_NODE_ARRAY. */
+int cmp_mpv_player_set_string_list_property(
+    cmp_mpv_player *player,
+    const char *name,
+    const char *const *values,
+    size_t count
+);
+
 /**
  * Returns an mpv-owned UTF-8 value. Release it with
  * cmp_mpv_player_free_property.

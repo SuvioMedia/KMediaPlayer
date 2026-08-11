@@ -421,6 +421,24 @@ val options = MpvPlaybackOptions(
 )
 ```
 
+The reviewed MPV runtime accepts local files plus direct `http` and `https`
+sources on Android, iOS, macOS, Linux, and Windows. Request headers are passed as
+a structured libmpv string array and are cleared before each source change:
+
+```kotlin
+playerState.openUri(
+    uri = mediaUrl,
+    requestHeaders = mapOf("Referer" to playbackReferer),
+)
+```
+
+TLS peer verification is always enabled. Apple uses SecureTransport, Windows
+uses SChannel, and Android/Linux use the reviewed OpenSSL runtime with a CA PEM
+derived from the platform/JVM trust store. Private PKI can provide an
+app-private absolute PEM path through
+`MpvPlaybackOptions(tlsCertificateAuthorityFile = ...)`; there is no option to
+disable certificate verification.
+
 The macOS MPV renderer defaults to `MpvMacRenderer.MOLTENVK`. A libmpv carrying
 KMediaMpv's versioned embedded-macvk capability uses the windowless
 `gpu-next`/Vulkan route in the Compose-owned Metal surface:
@@ -461,12 +479,11 @@ The verified bundled runtime supports Android API 28+ on `arm64-v8a` and
 `armeabi-v7a`, Linux on x86_64 and ARM64, macOS on ARM64, and Windows x86_64.
 The exact iOS pod supports ARM64 device/simulator. Android x86, Android x86_64,
 macOS x86_64, Intel iOS simulators, and Windows ARM64 are not supported. The
-bundled runtime rejects direct remote input. On macOS ARM64,
-`DesktopPlaybackSession` can nevertheless play internet HLS through
-`JvmHttpHlsMediaProxyFactory`: HTTPS, redirects, headers, cookies, and manifest
-rewriting stay in the JVM, while libmpv receives only an uncredentialed numeric
-loopback URL. Other bundled targets continue to accept local media and subtitle
-files only.
+bundled runtime exposes only the reviewed `file`, `http`, and `https` input
+surface (plus the internal protocols required by FFmpeg for those transports);
+RTSP and RTMP are deliberately not enabled. `JvmHttpHlsMediaProxyFactory`
+remains available as a source-adaptation tool for non-MPV desktop backends, but
+MPV no longer needs a loopback proxy for normal HTTP(S) playback.
 Desktop applications run on Java 25 with `--enable-native-access=ALL-UNNAMED`.
 
 The core, default player, and adapter code remain under this repository's own
@@ -476,6 +493,9 @@ reviewed native payload, notices, exact corresponding source, and recipient
 relinking path required for the LGPL components. Only the KMediaMpv/native
 boundary is subject to those separate terms; the application and the
 backend-neutral player modules are not relicensed as LGPL.
+libass is not loaded as an unrelated application plugin: KMediaMpv links against
+the same version-pinned KMediaFfmpegRuntime/KMediaAssRuntime graph already shared
+by the MPV and KMediaBridge adapters.
 
 See [Player backend architecture](docs/backend-architecture.md) for the module
 rules and the checklist for implementing another backend.

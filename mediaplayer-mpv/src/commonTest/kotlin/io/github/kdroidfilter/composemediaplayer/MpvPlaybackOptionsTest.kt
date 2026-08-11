@@ -20,6 +20,7 @@ class MpvPlaybackOptionsTest {
         )
         assertEquals(MpvRuntimeSource.Bundled, options.runtimeSource)
         assertEquals(null, options.desktopRuntimeDirectory)
+        assertEquals(null, options.tlsCertificateAuthorityFile)
     }
 
     @Test
@@ -38,6 +39,12 @@ class MpvPlaybackOptionsTest {
         }
         assertFailsWith<IllegalArgumentException> {
             MpvPlaybackOptions(desktopRuntimeDirectory = "/runtime\u0000escape")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            MpvPlaybackOptions(tlsCertificateAuthorityFile = " ")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            MpvPlaybackOptions(tlsCertificateAuthorityFile = "/certs\u0000escape")
         }
         assertFailsWith<IllegalArgumentException> {
             MpvPlaybackOptions(

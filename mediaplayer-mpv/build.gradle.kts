@@ -29,7 +29,7 @@ val projectVersion =
         ?: "dev"
 val projectGroup = "io.github.shusek"
 val kmediaMpvVersion = libs.versions.kmediaMpv.get()
-val kmediaFfmpegRuntimeVersion = "0.1.0-rc.6"
+val kmediaFfmpegRuntimeVersion = "0.1.0-rc.7"
 val windowsMpvRuntimeVerification =
     configurations.create("windowsMpvRuntimeVerification") {
         description = "Resolves the complete published MPV runtime graph for Windows DLL verification."
@@ -369,6 +369,9 @@ tasks.withType<Test>().configureEach {
     }
     providers.gradleProperty("composeMediaPlayerLoopbackHttpTestSource").orNull?.let { source ->
         systemProperty("composemediaplayer.test.loopbackHttpSource", source)
+    }
+    providers.gradleProperty("composeMediaPlayerDirectHttpTestSource").orNull?.let { source ->
+        systemProperty("composemediaplayer.test.directHttpSource", source)
     }
 }
 tasks.named<Test>("jvmTest") {

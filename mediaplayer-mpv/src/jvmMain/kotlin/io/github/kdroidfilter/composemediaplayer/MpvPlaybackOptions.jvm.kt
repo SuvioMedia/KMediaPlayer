@@ -10,7 +10,9 @@ import io.github.kdroidfilter.composemediaplayer.mpv.MpvRuntimeAvailability
 import io.github.kdroidfilter.composemediaplayer.mpv.MpvRuntimeConfig
 import io.github.kdroidfilter.composemediaplayer.mpv.MpvUnavailableReason
 import io.github.kdroidfilter.composemediaplayer.mpv.createDesktopMpvVideoPlayerState
+import java.nio.file.Files
 import java.nio.file.InvalidPathException
+import java.nio.file.LinkOption
 import java.nio.file.Path
 
 internal actual fun mpvBackendInfo(): VideoPlayerBackendInfo =
@@ -20,7 +22,8 @@ internal actual fun mpvBackendInfo(): VideoPlayerBackendInfo =
         capabilities =
             PlayerCapabilities(
                 supportsMkv = true,
-                supportedUriSchemes = setOf("file"),
+                supportedUriSchemes = setOf("file", "http", "https"),
+                supportsHls = true,
             ),
     )
 
@@ -33,7 +36,7 @@ actual fun inspectMpvBackend(options: MpvPlaybackOptions): MpvBackendAvailabilit
                 reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
                 guidance =
                     "MPV runtime paths must be valid absolute desktop paths; " +
-                        "configured runtime and subtitle-font directories must also exist " +
+                        "configured runtime, TLS CA, and subtitle-font paths must also exist " +
                         "before player creation.",
             )
         }
@@ -67,7 +70,7 @@ actual fun createMpvVideoPlayerState(options: MpvPlaybackOptions): VideoPlayerSt
                         reason = MpvBackendUnavailableReason.INVALID_RUNTIME,
                         guidance =
                             "MPV runtime paths must be valid absolute desktop paths; " +
-                                "configured runtime and subtitle-font directories must also exist " +
+                                "configured runtime, TLS CA, and subtitle-font paths must also exist " +
                                 "before player creation.",
                     ),
                 cause = failure,
@@ -114,6 +117,22 @@ private fun MpvPlaybackOptions.toDesktopRuntimeConfig(): MpvRuntimeConfig {
                 require(path.isAbsolute) { "The desktop runtime directory must be absolute." }
             }
         }
+    val tlsCertificateAuthorityFile =
+        tlsCertificateAuthorityFile?.let { configuredPath ->
+            try {
+                Path.of(configuredPath)
+            } catch (failure: InvalidPathException) {
+                throw IllegalArgumentException("Invalid TLS CA file.", failure)
+            }.also { path ->
+                require(path.isAbsolute) { "The TLS CA file must be absolute." }
+                require(
+                    Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) &&
+                        !Files.isSymbolicLink(path),
+                ) {
+                    "The TLS CA file must identify an existing, non-symbolic-link regular file."
+                }
+            }
+        }
     return MpvRuntimeConfig(
         librarySource =
             when (val source = runtimeSource) {
@@ -135,6 +154,7 @@ private fun MpvPlaybackOptions.toDesktopRuntimeConfig(): MpvRuntimeConfig {
         macRenderer = macRenderer,
         subtitleFontsDirectory = fontsDirectory,
         desktopRuntimeDirectory = runtimeDirectory,
+        tlsCertificateAuthorityFile = tlsCertificateAuthorityFile,
         maxRenderPixels = maxDesktopRenderPixels,
     )
 }

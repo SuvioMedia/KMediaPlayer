@@ -287,6 +287,7 @@ class DesktopPlaybackSessionTest {
                 fakeBackend(
                     id = "mpv",
                     tier = DesktopBackendRoutingTier.MPV_NATIVE,
+                    capabilities = PlayerCapabilities(supportedUriSchemes = setOf("file")),
                     sourceProbe = { DesktopBackendProbeResult.Unsupported("Direct remote input is disabled.") },
                 ) {
                     PreviewableVideoPlayerState(isPlaying = false)
@@ -336,6 +337,7 @@ class DesktopPlaybackSessionTest {
                 fakeBackend(
                     id = "mpv",
                     tier = DesktopBackendRoutingTier.MPV_NATIVE,
+                    capabilities = PlayerCapabilities(supportedUriSchemes = setOf("file")),
                     sourceProbe = { DesktopBackendProbeResult.Unsupported("Direct remote input is disabled.") },
                 ) {
                     PreviewableVideoPlayerState(isPlaying = false)
@@ -380,12 +382,78 @@ class DesktopPlaybackSessionTest {
                 assertTrue(proxyClosed)
             }
         }
+
+    @Test
+    fun directNetworkMpvBypassesConfiguredAdaptersAndPreservesHeaders() =
+        runTest {
+            var proxyOpened = false
+            var dataSourceOpened = false
+            val player = SourceReplacingVideoPlayerState()
+            val mpv =
+                object : DesktopPlaybackBackend {
+                    override val routingTier = DesktopBackendRoutingTier.MPV_NATIVE
+                    override val info =
+                        VideoPlayerBackendInfo(
+                            id = "mpv-direct",
+                            displayName = "mpv-direct",
+                            capabilities =
+                                PlayerCapabilities(
+                                    supportsMkv = true,
+                                    supportedUriSchemes = setOf("file", "http", "https"),
+                                    supportsHls = true,
+                                ),
+                        )
+
+                    override fun inspectAvailability() = DesktopBackendAvailability.Available()
+
+                    override fun probe(request: DesktopPlaybackRequest) =
+                        DesktopBackendProbeResult.Supported(routingTier)
+
+                    override fun createPlayerState(): VideoPlayerState = player
+                }
+            val session =
+                DesktopPlaybackSession(
+                    backends = listOf(mpv),
+                    readyTimeout = 1.seconds,
+                    seekableMediaDataSourceFactory =
+                        JvmSeekableMediaDataSourceFactory {
+                            dataSourceOpened = true
+                            error("Direct-network MPV must not materialize the source.")
+                        },
+                    hlsMediaProxyFactory =
+                        JvmHlsMediaProxyFactory {
+                            proxyOpened = true
+                            error("Direct-network MPV must not open a loopback proxy.")
+                        },
+                )
+            val source = "https://media.invalid/master.m3u8"
+            val headers = mapOf("Referer" to "https://app.invalid/")
+
+            try {
+                session.open(
+                    request =
+                        DesktopPlaybackRequest(
+                            source = MediaSourceSpec(source),
+                            requestHeaders = headers,
+                        ),
+                    backendId = "mpv-direct",
+                )
+
+                assertTrue(!proxyOpened)
+                assertTrue(!dataSourceOpened)
+                assertEquals(listOf(source), player.openedUris)
+                assertEquals(listOf(headers), player.openedHeaders)
+            } finally {
+                session.close()
+            }
+        }
 }
 
 private fun fakeBackend(
     id: String,
     tier: DesktopBackendRoutingTier,
     automaticSelection: Boolean = true,
+    capabilities: PlayerCapabilities = PlayerCapabilities(supportsMkv = true),
     sourceProbe: (DesktopPlaybackRequest) -> DesktopBackendProbeResult = {
         DesktopBackendProbeResult.Supported(tier)
     },
@@ -395,7 +463,7 @@ private fun fakeBackend(
         override val routingTier: DesktopBackendRoutingTier = tier
         override val automaticSelection: Boolean = automaticSelection
         override val info: VideoPlayerBackendInfo =
-            VideoPlayerBackendInfo(id, id, PlayerCapabilities(supportsMkv = true))
+            VideoPlayerBackendInfo(id, id, capabilities)
 
         override fun inspectAvailability(): DesktopBackendAvailability = DesktopBackendAvailability.Available()
 
@@ -409,6 +477,7 @@ private class SourceReplacingVideoPlayerState : VideoPlayerState by PreviewableV
     private var mutableMediaSessionId = 0L
 
     val openedUris = mutableListOf<String>()
+    val openedHeaders = mutableListOf<Map<String, String>>()
     var disposeCount = 0
         private set
 
@@ -423,6 +492,7 @@ private class SourceReplacingVideoPlayerState : VideoPlayerState by PreviewableV
         requestHeaders: Map<String, String>,
     ) {
         openedUris += source.uri
+        openedHeaders += requestHeaders
         mutableMediaSessionId += 1L
         mutablePlaybackEvents.tryEmit(
             PlaybackEvent.SourceLoaded(

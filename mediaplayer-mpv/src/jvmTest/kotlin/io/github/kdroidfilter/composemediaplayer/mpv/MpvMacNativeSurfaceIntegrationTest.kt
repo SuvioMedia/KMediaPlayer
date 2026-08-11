@@ -5,6 +5,7 @@ package io.github.kdroidfilter.composemediaplayer.mpv
 import androidx.compose.ui.graphics.toPixelMap
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvMacRenderer
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
@@ -14,6 +15,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionType
 import io.github.kdroidfilter.composemediaplayer.createMpvVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.createVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.inspectMpvBackend
 import io.github.kdroidfilter.composemediaplayer.mpv.internal.LibMpvLibrary
 import java.nio.file.Files
 import java.nio.file.Path
@@ -25,6 +27,26 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 
 class MpvMacNativeSurfaceIntegrationTest {
+    @Test
+    fun bundledMacVkOpensAfterAvailabilityProbe() {
+        if (!isMacArm64()) return
+        val media = configuredFile(NATIVE_SURFACE_MEDIA_PROPERTY) ?: return
+        assertIs<MpvBackendAvailability.Available>(inspectMpvBackend())
+        val player = assertIs<MpvVideoPlayerState>(createMpvVideoPlayerState())
+
+        try {
+            assertContains(player.renderingInfo.videoRenderer.orEmpty(), "macvk")
+            player.openUri(media.toUri().toString(), InitialPlayerState.PAUSE)
+            await("Bundled macvk did not load media after the availability probe.") {
+                player.error != null || (player.hasMedia && !player.isLoading)
+            }
+            assertEquals(null, player.error)
+            assertTrue(player.hasMedia)
+        } finally {
+            player.dispose()
+        }
+    }
+
     @Test
     fun playsThroughCapabilityMarkedEmbeddedMacVk() {
         if (!isMacArm64()) return
