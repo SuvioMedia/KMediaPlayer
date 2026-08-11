@@ -217,7 +217,7 @@ class MpvRuntimeTest {
             selectMpvMacNativeBackend(
                 requested = config.macRenderer,
                 nativeBridgeAvailable = true,
-                embeddedMacVkApiVersion = 1,
+                embeddedMacVkApiVersion = 4,
             )
         val options =
             mpvInitializationOptions(
@@ -243,7 +243,7 @@ class MpvRuntimeTest {
             selectMpvMacNativeBackend(
                 requested = MpvMacRenderer.MOLTENVK,
                 nativeBridgeAvailable = true,
-                embeddedMacVkApiVersion = 0,
+                embeddedMacVkApiVersion = 3,
             ),
         )
         assertEquals(
@@ -251,7 +251,7 @@ class MpvRuntimeTest {
             selectMpvMacNativeBackend(
                 requested = MpvMacRenderer.OPENGL,
                 nativeBridgeAvailable = true,
-                embeddedMacVkApiVersion = 1,
+                embeddedMacVkApiVersion = 4,
             ),
         )
         assertEquals(
@@ -259,7 +259,7 @@ class MpvRuntimeTest {
             selectMpvMacNativeBackend(
                 requested = MpvMacRenderer.MOLTENVK,
                 nativeBridgeAvailable = true,
-                embeddedMacVkApiVersion = 1,
+                embeddedMacVkApiVersion = 4,
             ),
         )
 

@@ -54,7 +54,7 @@ class MpvMacNativeSurfaceIntegrationTest {
         val media = configuredFile(NATIVE_SURFACE_MEDIA_PROPERTY) ?: return
         val loadedLibrary = LibMpvLibrary.open(MpvLibrarySource.ExplicitPath(library))
         try {
-            assertEquals(2, loadedLibrary.embeddedMacVkApiVersion)
+            assertEquals(4, loadedLibrary.embeddedMacVkApiVersion)
         } finally {
             loadedLibrary.close()
         }
@@ -97,7 +97,7 @@ class MpvMacNativeSurfaceIntegrationTest {
                     !player.isLoading &&
                     player.currentTime >= 250.milliseconds
             }
-            await("Embedded macvk did not report a presented frame.") {
+            await("Embedded macvk did not report a submitted frame.") {
                 telemetryLibrary
                     .embeddedMacVkPresentedFrames(nativeView)
                     ?.let { it > presentationsBeforePlayback } == true

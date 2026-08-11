@@ -550,12 +550,13 @@ internal class MpvVideoPlayerState(
     /** Returns the Compose-owned macvk host or renderer-owned OpenGL `NSView*`. */
     internal fun createNativeMacView(): Long {
         if (!canUseNativeMacSurface) return 0L
+        val macVkHost = nativeMacVkHostView
+        if (nativeMacVkActive && macVkHost != 0L) return macVkHost
         return renderLock.withLock {
             if (disposed.get()) return@withLock 0L
-            nativeMacVkHostView.takeIf { it != 0L }
-                ?: runCatching {
-                    MpvMacNativeBridge.nGetViewHandle(nativeMacRenderer)
-                }.getOrDefault(0L)
+            runCatching {
+                MpvMacNativeBridge.nGetViewHandle(nativeMacRenderer)
+            }.getOrDefault(0L)
         }
     }
 
@@ -1491,7 +1492,7 @@ internal fun mpvInitializationOptions(
     }
 }
 
-private const val EMBEDDED_MACVK_API_VERSION = 1
+private const val EMBEDDED_MACVK_API_VERSION = 4
 
 internal fun createDesktopMpvVideoPlayerState(config: MpvRuntimeConfig): MpvVideoPlayerState {
     val resolved =

@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -33,6 +34,7 @@ import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Uses a Tao-hosted native macOS Metal or OpenGL/EDR view, with Skia as the portable fallback. */
@@ -62,6 +64,7 @@ private fun MpvVideoSurfaceContent(
     onSurfaceAttached: () -> Unit = {},
 ) {
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
+    val surfaceScope = rememberCoroutineScope()
     var nativeAttachFailed by remember(playerState) { mutableStateOf(false) }
     val useNativeMacSurface =
         playerState.canUseNativeMacSurface &&
@@ -73,16 +76,20 @@ private fun MpvVideoSurfaceContent(
             height = playerState.metadata.height,
         )
 
-    LaunchedEffect(playerState, contentScale, playerState.aspectRatio) {
-        playerState.setContentScaleMode(contentScale)
-    }
     LaunchedEffect(
         playerState,
+        contentScale,
+        playerState.aspectRatio,
         playerState.projection,
         playerState.projectionView,
         playerState.projectionTextureCrop,
     ) {
-        playerState.updateNativeMacProjection()
+        // libmpv property updates can synchronously wait for VO work. Keep that wait
+        // off AppKit's event thread so the native-view transaction can keep presenting.
+        withContext(Dispatchers.IO) {
+            playerState.setContentScaleMode(contentScale)
+            playerState.updateNativeMacProjection()
+        }
     }
     LaunchedEffect(playerState.hasMedia) {
         if (playerState.hasMedia) nativeAttachFailed = false
@@ -111,8 +118,12 @@ private fun MpvVideoSurfaceContent(
                 modifier = Modifier.fillMaxSize().background(Color.Black),
                 overlay = { Box(modifier = Modifier.fillMaxSize()) { overlay() } },
                 onAttached = {
-                    playerState.onNativeMacSurfaceAttached()
-                    latestOnSurfaceAttached()
+                    surfaceScope.launch {
+                        withContext(Dispatchers.IO) {
+                            playerState.onNativeMacSurfaceAttached()
+                        }
+                        latestOnSurfaceAttached()
+                    }
                 },
                 onUnavailable = { nativeAttachFailed = true },
             )
