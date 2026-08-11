@@ -1,11 +1,7 @@
-package io.github.kdroidfilter.composemediaplayer.mpv
+@file:OptIn(ExperimentalComposeMediaPlayerBackendApi::class)
 
-import io.github.kdroidfilter.composemediaplayer.AudioTrack
-import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
-import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
-import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
-import io.github.kdroidfilter.composemediaplayer.VideoRenderingInfo
+package io.github.kdroidfilter.composemediaplayer
+
 import io.github.vinceglb.filekit.PlatformFile
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -14,10 +10,10 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-class AbstractMpvVideoPlayerStateTest {
+class AbstractBackendVideoPlayerStateTest {
     @Test
     fun commonCommandsNormalizeValuesBeforeCallingBackend() {
-        val state = FakeMpvVideoPlayerState()
+        val state = FakeBackendVideoPlayerState()
 
         state.volume = 2f
         state.playbackSpeed = 20f
@@ -32,7 +28,7 @@ class AbstractMpvVideoPlayerStateTest {
 
     @Test
     fun sourceAndSeekStateAreManagedByCommonController() {
-        val state = FakeMpvVideoPlayerState()
+        val state = FakeBackendVideoPlayerState()
 
         state.openUri("file:///movie.mkv", InitialPlayerState.PAUSE)
         state.updateSnapshot(position = 2.seconds, duration = 10.seconds)
@@ -50,15 +46,15 @@ class AbstractMpvVideoPlayerStateTest {
     }
 
     @Test
-    fun trackBookkeepingIsSharedAcrossPlatformAdapters() {
-        val state = FakeMpvVideoPlayerState()
-        val audio = AudioTrack(id = "mpv:audio:1", label = "Audio")
+    fun trackBookkeepingIsSharedAcrossBackendAdapters() {
+        val state = FakeBackendVideoPlayerState()
+        val audio = AudioTrack(id = "backend:audio:1", label = "Audio")
         val embedded =
             SubtitleTrack(
-                id = "mpv:subtitle:2",
+                id = "backend:subtitle:2",
                 label = "Embedded",
                 language = "en",
-                src = "mpv://subtitle/2",
+                src = "backend://subtitle/2",
                 isEmbedded = true,
             )
         val external =
@@ -85,8 +81,8 @@ class AbstractMpvVideoPlayerStateTest {
     }
 }
 
-private class FakeMpvVideoPlayerState : AbstractMpvVideoPlayerState() {
-    override val renderingInfo = VideoRenderingInfo(backend = "fake-mpv")
+private class FakeBackendVideoPlayerState : AbstractBackendVideoPlayerState() {
+    override val renderingInfo = VideoRenderingInfo(backend = "fake-backend")
     override val capabilities = PlayerCapabilities(supportsMkv = true)
     override val preciseCurrentTime: Duration
         get() = currentTime
