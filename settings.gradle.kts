@@ -144,6 +144,20 @@ dependencyResolutionManagement {
                 }
             }
         }
+        providers.gradleProperty("kmediaMpvMavenRepository").orNull?.let { repositoryPath ->
+            exclusiveContent {
+                forRepository {
+                    maven {
+                        name = "kmediaMpvLocal"
+                        url = uri(repositoryPath)
+                    }
+                }
+                filter {
+                    includeModule("io.github.shusek", "kmedia-mpv-runtime-android")
+                    includeModule("io.github.shusek", "kmedia-mpv-runtime-desktop")
+                }
+            }
+        }
         providers.gradleProperty("kmediaWasmEngineMavenRepository").orNull?.let { repositoryPath ->
             exclusiveContent {
                 forRepository {

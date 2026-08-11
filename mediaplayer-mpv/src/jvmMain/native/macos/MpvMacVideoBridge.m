@@ -13,6 +13,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreVideo/CoreVideo.h>
+#import <Metal/Metal.h>
 #import <OpenGL/OpenGL.h>
 #import <OpenGL/gl3.h>
 #import <QuartzCore/QuartzCore.h>
@@ -696,10 +697,30 @@ static BOOL choose_pixel_format(
 - (void)refreshNativeGeometry;
 @end
 
+@interface KMPMpvMacVkMetalLayer : CAMetalLayer
+@end
+
 /** Compose-owned host used by the capability-marked, windowless macvk VO. */
 @interface KMPMpvMacVkHostView : KMPMpvVideoView {
     NSInteger _embeddedColorMode;
+    KMPMpvMacVkMetalLayer* _embeddedMetalLayer;
+    atomic_int_fast32_t _pixelWidth;
+    atomic_int_fast32_t _pixelHeight;
+    atomic_int_fast32_t _displayWidth;
+    atomic_int_fast32_t _displayHeight;
+    atomic_int_fast32_t _scaleMilli;
+    atomic_int_fast32_t _refreshMilliHz;
+    atomic_uint_fast64_t _presentedFrames;
 }
+- (CAMetalLayer*)kmediampvMetalLayer;
+- (int)kmediampvPixelWidth;
+- (int)kmediampvPixelHeight;
+- (int)kmediampvDisplayWidth;
+- (int)kmediampvDisplayHeight;
+- (double)kmediampvScale;
+- (double)kmediampvRefreshRate;
+- (void)kmediampvRecordPresentation;
+- (uint64_t)kmediampvPresentedFrames;
 - (void)setEmbeddedMetalColorMode:(NSInteger)colorMode;
 - (void)refreshEmbeddedMetalGeometry;
 @end
@@ -1266,18 +1287,88 @@ static void renderer_update_callback(void* context) {
 
 @end
 
+@implementation KMPMpvMacVkMetalLayer
+
+- (void)setDrawableSize:(CGSize)size {
+    if (size.width > 1.0 && size.height > 1.0) {
+        [super setDrawableSize:size];
+    }
+}
+
+@end
+
 @implementation KMPMpvMacVkHostView
 
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         _embeddedColorMode = 0;
+        atomic_init(&_pixelWidth, 2);
+        atomic_init(&_pixelHeight, 2);
+        atomic_init(&_displayWidth, 1);
+        atomic_init(&_displayHeight, 1);
+        atomic_init(&_scaleMilli, 1000);
+        atomic_init(&_refreshMilliHz, 0);
+        atomic_init(&_presentedFrames, 0);
         [self setWantsLayer:YES];
         [[self layer] setMasksToBounds:YES];
         [[self layer] setBackgroundColor:[[NSColor blackColor] CGColor]];
+        _embeddedMetalLayer = [[KMPMpvMacVkMetalLayer alloc] init];
+        [_embeddedMetalLayer setPixelFormat:MTLPixelFormatRGBA16Float];
+        [_embeddedMetalLayer setBackgroundColor:[[NSColor blackColor] CGColor]];
+        [_embeddedMetalLayer setOpaque:YES];
+        [_embeddedMetalLayer setWantsExtendedDynamicRangeContent:NO];
+        [_embeddedMetalLayer setFrame:[self bounds]];
+        [_embeddedMetalLayer setContentsScale:1.0];
+        [_embeddedMetalLayer setDrawableSize:CGSizeMake(2.0, 2.0)];
+        [[self layer] addSublayer:_embeddedMetalLayer];
         [self setAutoresizingMask:NSViewNotSizable];
+        [self refreshEmbeddedMetalGeometry];
     }
     return self;
+}
+
+- (void)dealloc {
+    [_embeddedMetalLayer removeFromSuperlayer];
+    [_embeddedMetalLayer release];
+    _embeddedMetalLayer = nil;
+    [super dealloc];
+}
+
+- (CAMetalLayer*)kmediampvMetalLayer {
+    return _embeddedMetalLayer;
+}
+
+- (int)kmediampvPixelWidth {
+    return (int)atomic_load_explicit(&_pixelWidth, memory_order_relaxed);
+}
+
+- (int)kmediampvPixelHeight {
+    return (int)atomic_load_explicit(&_pixelHeight, memory_order_relaxed);
+}
+
+- (int)kmediampvDisplayWidth {
+    return (int)atomic_load_explicit(&_displayWidth, memory_order_relaxed);
+}
+
+- (int)kmediampvDisplayHeight {
+    return (int)atomic_load_explicit(&_displayHeight, memory_order_relaxed);
+}
+
+- (double)kmediampvScale {
+    return atomic_load_explicit(&_scaleMilli, memory_order_relaxed) / 1000.0;
+}
+
+- (double)kmediampvRefreshRate {
+    return atomic_load_explicit(&_refreshMilliHz, memory_order_relaxed) / 1000.0;
+}
+
+- (void)kmediampvRecordPresentation {
+    atomic_fetch_add_explicit(&_presentedFrames, 1, memory_order_relaxed);
+}
+
+- (uint64_t)kmediampvPresentedFrames {
+    return atomic_load_explicit(&_presentedFrames, memory_order_relaxed);
 }
 
 - (NSView*)hitTest:(NSPoint)point {
@@ -1289,18 +1380,7 @@ static void renderer_update_callback(void* context) {
     return NO;
 }
 
-- (void)viewDidMoveToWindow {
-    [super viewDidMoveToWindow];
-    [self refreshEmbeddedMetalGeometry];
-}
-
-- (void)viewDidChangeBackingProperties {
-    [super viewDidChangeBackingProperties];
-    [self refreshEmbeddedMetalGeometry];
-}
-
-- (void)setFrameSize:(NSSize)newSize {
-    [super setFrameSize:newSize];
+- (void)refreshNativeGeometry {
     [self refreshEmbeddedMetalGeometry];
 }
 
@@ -1324,24 +1404,38 @@ static void renderer_update_callback(void* context) {
         (int)_embeddedColorMode
     );
 
+    int pixel_width = MAX(2, (int)llround(bounds.size.width * scale));
+    int pixel_height = MAX(2, (int)llround(bounds.size.height * scale));
+
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    for (CALayer* child in [[self layer] sublayers]) {
-        [child setFrame:bounds];
-        [child setContentsScale:scale];
-        if ([child isKindOfClass:[CAMetalLayer class]]) {
-            CAMetalLayer* metal = (CAMetalLayer*)child;
-            CGSize drawable_size = CGSizeMake(
-                MAX(1.0, bounds.size.width * scale),
-                MAX(1.0, bounds.size.height * scale)
-            );
-            [metal setDrawableSize:drawable_size];
-            if (color_space) [metal setColorspace:color_space];
-            [metal setWantsExtendedDynamicRangeContent:extended_range];
-        }
-    }
+    [_embeddedMetalLayer setFrame:bounds];
+    [_embeddedMetalLayer setContentsScale:scale];
+    [_embeddedMetalLayer setDrawableSize:CGSizeMake(pixel_width, pixel_height)];
+    if (color_space) [_embeddedMetalLayer setColorspace:color_space];
+    [_embeddedMetalLayer setWantsExtendedDynamicRangeContent:extended_range];
     [CATransaction commit];
     if (color_space) CGColorSpaceRelease(color_space);
+
+    NSScreen* screen = [[self window] screen] ?: [NSScreen mainScreen];
+    int display_width = 1;
+    int display_height = 1;
+    int refresh_millihz = 0;
+    if (screen) {
+        NSRect screen_backing = [screen convertRectToBacking:[screen frame]];
+        display_width = MAX(1, (int)llround(screen_backing.size.width));
+        display_height = MAX(1, (int)llround(screen_backing.size.height));
+        if (@available(macOS 12.0, *)) {
+            NSInteger fps = [screen maximumFramesPerSecond];
+            if (fps > 0) refresh_millihz = (int)fps * 1000;
+        }
+    }
+    atomic_store_explicit(&_pixelWidth, pixel_width, memory_order_relaxed);
+    atomic_store_explicit(&_pixelHeight, pixel_height, memory_order_relaxed);
+    atomic_store_explicit(&_displayWidth, display_width, memory_order_relaxed);
+    atomic_store_explicit(&_displayHeight, display_height, memory_order_relaxed);
+    atomic_store_explicit(&_scaleMilli, (int)llround(scale * 1000.0), memory_order_relaxed);
+    atomic_store_explicit(&_refreshMilliHz, refresh_millihz, memory_order_relaxed);
 }
 
 @end
@@ -1498,43 +1592,6 @@ static void destroy_macvk_host_on_main(void* raw_view) {
     }
 }
 
-typedef struct {
-    KMPMpvMacVkHostView* view;
-    double refresh_rate;
-} KMPMpvMacVkRefreshRateContext;
-
-typedef struct {
-    KMPMpvMacVkHostView* view;
-    NSInteger color_mode;
-} KMPMpvMacVkColorContext;
-
-static void update_macvk_color_mode_on_main(void* raw_context) {
-    KMPMpvMacVkColorContext* context = (KMPMpvMacVkColorContext*)raw_context;
-    if (!context || !context->view) return;
-    [context->view setEmbeddedMetalColorMode:context->color_mode];
-}
-
-static void read_macvk_refresh_rate_on_main(void* raw_context) {
-    KMPMpvMacVkRefreshRateContext* context =
-        (KMPMpvMacVkRefreshRateContext*)raw_context;
-    if (!context || !context->view) return;
-    NSScreen* screen = [[context->view window] screen] ?: [NSScreen mainScreen];
-    if (!screen) return;
-    if (@available(macOS 12.0, *)) {
-        NSInteger frames_per_second = [screen maximumFramesPerSecond];
-        if (frames_per_second > 0) context->refresh_rate = (double)frames_per_second;
-    }
-    if (context->refresh_rate > 0.0) return;
-
-    NSNumber* screen_number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
-    if (!screen_number) return;
-    CGDisplayModeRef mode = CGDisplayCopyDisplayMode([screen_number unsignedIntValue]);
-    if (!mode) return;
-    double refresh_rate = CGDisplayModeGetRefreshRate(mode);
-    CGDisplayModeRelease(mode);
-    if (refresh_rate > 0.0) context->refresh_rate = refresh_rate;
-}
-
 static void update_color_mode_on_main(void* raw_context) {
     KMPMpvColorContext* context = (KMPMpvColorContext*)raw_context;
     if (!context || !context->renderer ||
@@ -1599,7 +1656,11 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nDestroyMa
     (void)bridge_class;
     KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
     if (!view) return;
-    run_on_appkit_main_sync(destroy_macvk_host_on_main, view);
+    if (pthread_main_np()) {
+        destroy_macvk_host_on_main(view);
+    } else {
+        dispatch_async_f(dispatch_get_main_queue(), view, destroy_macvk_host_on_main);
+    }
 }
 
 JNIEXPORT void JNICALL
@@ -1612,9 +1673,11 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nRequestMa
     (void)bridge_class;
     KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
     if (!view) return;
+    [view retain];
     void (^redraw)(void) = ^{
         [view refreshEmbeddedMetalGeometry];
         [view setNeedsDisplay:YES];
+        [view release];
     };
     if (pthread_main_np()) {
         redraw();
@@ -1633,12 +1696,7 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nGetMacVkD
     (void)bridge_class;
     KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
     if (!view) return 0.0;
-    KMPMpvMacVkRefreshRateContext context = {
-        .view = view,
-        .refresh_rate = 0.0,
-    };
-    run_on_appkit_main_sync(read_macvk_refresh_rate_on_main, &context);
-    return context.refresh_rate;
+    return [view kmediampvRefreshRate];
 }
 
 JNIEXPORT void JNICALL
@@ -1652,11 +1710,16 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nSetMacVkC
     (void)bridge_class;
     KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
     if (!view) return;
-    KMPMpvMacVkColorContext context = {
-        .view = view,
-        .color_mode = (NSInteger)color_mode,
-    };
-    run_on_appkit_main_sync(update_macvk_color_mode_on_main, &context);
+    NSInteger requested_mode = (NSInteger)color_mode;
+    if (pthread_main_np()) {
+        [view setEmbeddedMetalColorMode:requested_mode];
+    } else {
+        [view retain];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [view setEmbeddedMetalColorMode:requested_mode];
+            [view release];
+        });
+    }
 }
 
 static jlong create_renderer(
