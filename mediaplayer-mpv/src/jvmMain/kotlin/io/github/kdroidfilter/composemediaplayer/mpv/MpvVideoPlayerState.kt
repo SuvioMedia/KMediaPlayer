@@ -169,21 +169,33 @@ internal class MpvVideoPlayerState(
 
     override val diagnostics: PlaybackDiagnostics
         get() {
-            val nativePresentation =
+            val (nativePresentation, macVkPresentedFrames) =
                 renderLock.withLock {
-                    nativeMacRenderer
-                        .takeIf { it != 0L }
-                        ?.let { renderer ->
-                            runCatching {
-                                MpvMacNativeBridge.nGetPresentationDiagnostics(renderer)
-                            }.getOrNull()
-                        }
+                    val openGlPresentation =
+                        nativeMacRenderer
+                            .takeIf { it != 0L }
+                            ?.let { renderer ->
+                                runCatching {
+                                    MpvMacNativeBridge.nGetPresentationDiagnostics(renderer)
+                                }.getOrNull()
+                            }
+                    val macVkPresentation =
+                        nativeMacVkHostView
+                            .takeIf { nativeMacVkActive && it != 0L }
+                            ?.let { nativeView ->
+                                runCatching {
+                                    engine.embeddedMacVkPresentedFrames(nativeView)
+                                }.getOrNull()
+                            }
+                    openGlPresentation to macVkPresentation
                 }
-            val renderedFrames = nativePresentation?.getOrNull(NEW_VIDEO_FRAME_COUNT_INDEX)
+            val renderedFrames =
+                nativePresentation?.getOrNull(NEW_VIDEO_FRAME_COUNT_INDEX) ?: macVkPresentedFrames
             val droppedFrames = droppedVideoFrames
             val presentationNotes =
-                nativePresentation
-                    ?.let { values ->
+                when {
+                    nativePresentation != null -> {
+                        val values = nativePresentation
                         val renders = values.getOrNull(2)?.coerceAtLeast(1L) ?: 1L
                         val averageRenderMicros = values.getOrNull(10)?.div(renders)?.div(1_000L)
                         val maximumRenderMicros = values.getOrNull(11)?.div(1_000L)
@@ -198,7 +210,12 @@ internal class MpvVideoPlayerState(
                             "liveResizeAspectErrorPpm=${values.getOrNull(15)} " +
                             "renderAvgUs=$averageRenderMicros renderMaxUs=$maximumRenderMicros " +
                             "flushAvgUs=$averageFlushMicros flushMaxUs=$maximumFlushMicros"
-                    }.orEmpty()
+                    }
+
+                    macVkPresentedFrames != null -> " macvkPresents=$macVkPresentedFrames"
+                    nativeMacVkActive -> " macvkPresents=unavailable"
+                    else -> ""
+                }
             return PlaybackDiagnostics(
                 totalVideoFrames =
                     if (renderedFrames != null && droppedFrames != null) {

@@ -54,7 +54,7 @@ class MpvMacNativeSurfaceIntegrationTest {
         val media = configuredFile(NATIVE_SURFACE_MEDIA_PROPERTY) ?: return
         val loadedLibrary = LibMpvLibrary.open(MpvLibrarySource.ExplicitPath(library))
         try {
-            assertEquals(1, loadedLibrary.embeddedMacVkApiVersion)
+            assertEquals(2, loadedLibrary.embeddedMacVkApiVersion)
         } finally {
             loadedLibrary.close()
         }
@@ -80,11 +80,14 @@ class MpvMacNativeSurfaceIntegrationTest {
         probeEngine.close()
         MpvMacNativeBridge.nDestroyMacVkHost(probeHost)
         val player = createExplicitMpvPlayer(library)
+        val telemetryLibrary = LibMpvLibrary.open(MpvLibrarySource.ExplicitPath(library))
 
         try {
             assertContains(player.renderingInfo.videoRenderer.orEmpty(), "macvk")
             val nativeView = player.createNativeMacView()
             assertTrue(nativeView != 0L, "The embedded macvk NSView was not created.")
+            val presentationsBeforePlayback =
+                checkNotNull(telemetryLibrary.embeddedMacVkPresentedFrames(nativeView))
             player.onNativeMacSurfaceAttached()
             player.openUri(media.toUri().toString(), InitialPlayerState.PLAY)
 
@@ -93,6 +96,11 @@ class MpvMacNativeSurfaceIntegrationTest {
                     player.isPlaying &&
                     !player.isLoading &&
                     player.currentTime >= 250.milliseconds
+            }
+            await("Embedded macvk did not report a presented frame.") {
+                telemetryLibrary
+                    .embeddedMacVkPresentedFrames(nativeView)
+                    ?.let { it > presentationsBeforePlayback } == true
             }
             assertContains(player.renderingInfo.videoRenderer.orEmpty(), "macvk")
             assertEquals(null, player.error)
@@ -116,6 +124,7 @@ class MpvMacNativeSurfaceIntegrationTest {
             assertEquals(null, player.error)
         } finally {
             player.dispose()
+            telemetryLibrary.close()
         }
     }
 

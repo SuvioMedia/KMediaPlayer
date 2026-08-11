@@ -155,6 +155,18 @@ internal class LibMpvLibrary private constructor(
                     FunctionDescriptor.of(ValueLayout.JAVA_INT),
                 )
             }.orElse(null)
+    private val embeddedMacVkPresentedFramesHandle: MethodHandle? =
+        lookup
+            .find(EMBEDDED_MACVK_PRESENTED_FRAMES_SYMBOL)
+            .map { symbol ->
+                linker.downcallHandle(
+                    symbol,
+                    FunctionDescriptor.of(
+                        ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_LONG,
+                    ),
+                )
+            }.orElse(null)
 
     val clientApiVersion: MpvClientApiVersion
         get() {
@@ -179,6 +191,18 @@ internal class LibMpvLibrary private constructor(
                     runCatching { (handle.invokeWithArguments() as Number).toInt() }
                         .getOrDefault(0)
                 } ?: 0
+
+    fun embeddedMacVkPresentedFrames(nativeView: Long): Long? {
+        if (nativeView <= 0L) return null
+        return embeddedMacVkPresentedFramesHandle
+            ?.let { handle ->
+                runCatching {
+                    (handle.invokeWithArguments(nativeView) as Number)
+                        .toLong()
+                        .takeIf { it >= 0L }
+                }.getOrNull()
+            }
+    }
 
     fun createEngine(
         options: Map<String, String>,
@@ -454,6 +478,8 @@ internal class LibMpvLibrary private constructor(
     companion object {
         private const val EMBEDDED_MACVK_API_VERSION_SYMBOL =
             "kmediampv_embedded_macvk_api_version"
+        private const val EMBEDDED_MACVK_PRESENTED_FRAMES_SYMBOL =
+            "kmediampv_embedded_macvk_presented_frames"
         private const val MAX_PROPERTY_BYTES = 64L * 1024L
         private const val MAX_ERROR_BYTES = 4L * 1024L
         private const val BYTES_PER_PIXEL = 4L
@@ -746,6 +772,11 @@ internal class LibMpvEngine(
     fun getProperty(name: String): String? {
         checkOpen()
         return library.getProperty(handle, name)
+    }
+
+    fun embeddedMacVkPresentedFrames(nativeView: Long): Long? {
+        checkOpen()
+        return library.embeddedMacVkPresentedFrames(nativeView)
     }
 
     fun waitEvent(timeoutSeconds: Double): NativeMpvEvent {

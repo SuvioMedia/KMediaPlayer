@@ -161,7 +161,7 @@ internal fun DesktopMpvPerformanceSelfTest(
     )
 }
 
-private data class NativePresentationCounters(
+internal data class NativePresentationCounters(
     val fresh: Long,
     val repeated: Long,
 )
@@ -170,7 +170,7 @@ private data class PlaybackWindow(
     val elapsedSeconds: Double,
     val freshFrames: Long,
     val repeatedFrames: Long,
-    val droppedFrames: Long,
+    val droppedFrames: Long?,
     val freshFps: Double,
     val presentedFps: Double,
     val minimumFreshWindowFps: Double,
@@ -202,12 +202,13 @@ private data class PlaybackWindow(
     fun describe(): String =
         String.format(
             Locale.US,
-            "duration=%.3fs fresh=%d repeated=%d dropped=%d freshFps=%.3f " +
+            "duration=%.3fs fresh=%d repeated=%d dropped=%s dropTelemetry=%s freshFps=%.3f " +
                 "presentedFps=%.3f minFreshWindowFps=%.3f positionAdvance=%.3fs",
             elapsedSeconds,
             freshFrames,
             repeatedFrames,
-            droppedFrames,
+            droppedFrames?.toString() ?: "unavailable",
+            if (droppedFrames == null) "unavailable" else "available",
             freshFps,
             presentedFps,
             minimumFreshWindowFps,
@@ -221,7 +222,7 @@ private suspend fun measurePlaybackWindow(
 ): PlaybackWindow {
     val initialDiagnostics = playerState.diagnostics
     val baselinePresentation = checkNotNull(initialDiagnostics.nativePresentationCounters())
-    val baselineDropped = checkNotNull(initialDiagnostics.droppedVideoFrames)
+    val baselineDropped = initialDiagnostics.droppedVideoFrames
     val baselinePosition = playerState.preciseCurrentTime
     val started = TimeSource.Monotonic.markNow()
     var previousFresh = baselinePresentation.fresh
@@ -248,7 +249,10 @@ private suspend fun measurePlaybackWindow(
     val presentation = checkNotNull(diagnostics.nativePresentationCounters())
     val fresh = presentation.fresh - baselinePresentation.fresh
     val repeated = presentation.repeated - baselinePresentation.repeated
-    val dropped = checkNotNull(diagnostics.droppedVideoFrames) - baselineDropped
+    val dropped =
+        baselineDropped?.let { baseline ->
+            diagnostics.droppedVideoFrames?.minus(baseline)
+        }
     val positionAdvance =
         (playerState.preciseCurrentTime - baselinePosition).inWholeMilliseconds / MILLIS_PER_SECOND
     return PlaybackWindow(
@@ -264,10 +268,20 @@ private suspend fun measurePlaybackWindow(
 }
 
 private fun PlaybackDiagnostics.nativePresentationCounters(): NativePresentationCounters? {
-    val match = NATIVE_PRESENTATION_PATTERN.find(notes.orEmpty()) ?: return null
+    return parseNativePresentationCounters(notes)
+}
+
+internal fun parseNativePresentationCounters(notes: String?): NativePresentationCounters? {
+    NATIVE_PRESENTATION_PATTERN.find(notes.orEmpty())?.let { match ->
+        return NativePresentationCounters(
+            fresh = match.groupValues[1].toLong(),
+            repeated = match.groupValues[2].toLong(),
+        )
+    }
+    val macVkMatch = MACVK_PRESENTATION_PATTERN.find(notes.orEmpty()) ?: return null
     return NativePresentationCounters(
-        fresh = match.groupValues[1].toLong(),
-        repeated = match.groupValues[2].toLong(),
+        fresh = macVkMatch.groupValues[1].toLong(),
+        repeated = 0L,
     )
 }
 
@@ -282,6 +296,7 @@ private fun chooseSeekTarget(playerState: VideoPlayerState): Duration {
 }
 
 private val NATIVE_PRESENTATION_PATTERN = Regex("new=(\\d+) repeats=(\\d+)")
+private val MACVK_PRESENTATION_PATTERN = Regex("macvkPresents=(\\d+)")
 private val SEEK_FORWARD_DISTANCE = 120.seconds
 private val SEEK_END_MARGIN = 5.seconds
 private const val START_TIMEOUT_MS = 90_000L
