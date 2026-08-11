@@ -487,6 +487,12 @@ downloads VLC at playback time. On desktop, `inspectLibVlcBackend()` checks the 
 before native code is loaded. Flat playback uses the platform GPU transport selected by KMediaVlc:
 D3D11 on Windows, IOSurface/OpenGL on Apple Silicon macOS, and DMA-BUF/GLES2 on Linux.
 
+The adapter contains no copied KMediaVlc implementation. It uses the same
+backend-neutral `AbstractBackendVideoPlayerState` as MPV and talks to the
+separately published LGPL-2.1-or-later KMediaVlc runtime through its ISC client
+ABI. KMediaPlayer can therefore remain private without changing the runtime's
+source, notice, replacement, or relinking rights.
+
 Projected, stereo, rotated, or cropped video currently uses the bounded RGBA8 CPU-pull route and
 the shared Skia projection shader. Configure the initial projection in `LibVlcPlaybackOptions` so
 `AUTO` can choose that route:

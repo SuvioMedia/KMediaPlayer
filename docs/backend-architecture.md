@@ -42,6 +42,12 @@ Backend and extension implementations never depend on the default player:
   projection path. Each target depends directly on its matching KMediaVlc
   runtime artifact; this adapter never searches for a user-installed VLC.
 
+Both native adapters inherit their command normalization, observable state,
+source lifecycle, event/error handling, metadata, chapter, and track bookkeeping
+from `AbstractBackendVideoPlayerState` in core. Backend modules must not fork
+that state machine. They retain only runtime-specific commands, events,
+availability checks, source resolution, and rendering.
+
 The `verifyBackendModuleBoundaries` Gradle task rejects a dependency from the
 default player to MPV or KMediaBridge/FFmpeg, from an optional implementation
 to the default player, from MPV or libVLC to the default player, or from core and the
@@ -197,10 +203,10 @@ runtime types out of its public ABI.
 
 ## MPV split
 
-`AbstractMpvVideoPlayerState` contains the shared state machine, value
-normalization, seek semantics, source lifecycle, events, metadata, callbacks,
-and audio/subtitle bookkeeping. Android, iOS, and desktop implementations retain
-only native source resolution, runtime commands/events, polling, and rendering.
+The MPV Android, iOS, and desktop states extend core's
+`AbstractBackendVideoPlayerState`, the same base used by libVLC. They retain
+only native source resolution, runtime commands/events, polling, and rendering;
+there is no MPV-specific copy of the backend-neutral state machine.
 
 The adapter publishes Android, JVM, `iosArm64`, and `iosSimulatorArm64`
 variants. Its verified KMediaMpv runtime supports Android API 28+ on
@@ -249,8 +255,9 @@ the consumer never trusts or publishes the candidate runtime itself.
 
 ## Distribution and licensing boundary
 
-The core, extension API, default player, and adapters use this repository's license. The
-separately published KMediaMpv packages contain the MPV-specific client and consume
+The core, extension API, default player, and adapters use this repository's license. They contain
+no copied KMediaMpv or KMediaVlc runtime implementation. The separately published KMediaMpv
+packages contain the MPV-specific client and consume
 KMediaFfmpegRuntime as an exact dependency. The shared runtime carries FFmpeg/libass notices,
 corresponding source and recipient relinking materials. Android/desktop use Maven variants and
 Apple uses exact-version CocoaPods; none of these boundaries relicense the application-facing
@@ -262,8 +269,11 @@ library and binds the same KMediaFfmpegRuntime ID as KMediaMpv. An application c
 both backends but only one shared FFmpeg/libass graph. A caller-selected external compatible runtime
 remains the caller's licensing responsibility.
 
-KMediaVlc follows the same adapter/runtime boundary. KMediaPlayer publishes only the backend-facing
-Kotlin adapter. The separately versioned KMediaVlc packages own the pinned libVLC 4 binaries,
-manifests, source/relinking material, notices, and platform eligibility decisions. Android and Apple
+KMediaVlc follows the same adapter/runtime boundary. KMediaPlayer publishes only the independently
+implemented backend-facing Kotlin adapter and uses KMediaVlc's ISC client ABI. The separately
+versioned, LGPL-2.1-or-later KMediaVlc repository and packages own the runtime clients, native
+bridges, pinned libVLC 4 binaries, manifests, source/relinking material, notices, and platform
+eligibility decisions. Making KMediaPlayer private does not change those public LGPL artifacts or
+their recipients' replacement and relinking rights. Android and Apple
 native payloads remain unpublished candidates until their legal and physical-device gates close;
 local source, host, emulator, or consumer-smoke success does not promote them to release artifacts.

@@ -8,6 +8,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import io.github.kdroidfilter.composemediaplayer.AbstractBackendVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
@@ -56,7 +57,7 @@ internal class IosMpvVideoPlayerState(
     private val engine: IosLibMpvEngine,
     metalSurface: IosMpvMetalSurface? = null,
     rendererFallbackReason: String? = null,
-) : AbstractMpvVideoPlayerState(),
+) : AbstractBackendVideoPlayerState(),
     VideoPlayerSurfaceProvider {
     private val lifecycleLock = NSLock()
     private val renderLock = NSLock()
