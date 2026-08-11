@@ -1211,6 +1211,7 @@ class LinuxVideoPlayerState(
             }
     }
 
+    @Suppress("ComplexCondition", "CyclomaticComplexMethod")
     private suspend fun configureTextureOutputIfPossible() {
         if (!shouldUseColorManagedTexture()) return
         val ptr = playerPtr
@@ -2045,7 +2046,9 @@ class LinuxVideoPlayerState(
             val offset = values[7].toInt()
             val modifier = values[8]
             val acquireFenceFd = values[9].toInt()
-            if (serial <= 0L || width <= 0 || height <= 0 || dmaBufFd < 0 || stride <= 0) {
+            val invalidDimensions = width <= 0 || height <= 0
+            val invalidBufferLayout = dmaBufFd < 0 || stride <= 0
+            if (serial <= 0L || invalidDimensions || invalidBufferLayout) {
                 LinuxNativeBridge.nReleaseTextureFrame(
                     ptr,
                     generation,
@@ -3245,6 +3248,7 @@ class LinuxVideoPlayerState(
         resetLinuxColorPipeline()
     }
 
+    @Suppress("CyclomaticComplexMethod")
     private fun refreshLinuxColorPipeline() {
         val usesTexture = shouldUseColorManagedTexture()
         if (usesTexture) {

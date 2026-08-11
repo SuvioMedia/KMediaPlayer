@@ -2588,6 +2588,7 @@ class MacVideoPlayerState(
             else -> false
         }
 
+    @Suppress("ThrowsCount")
     private suspend fun resolveLibVlcBackendForUri(
         uri: String,
         requestHeaders: Map<String, String>,

@@ -1873,6 +1873,7 @@ class WindowsVideoPlayerState(
         }
     }
 
+    @Suppress("FunctionOnlyReturningConstant")
     internal fun shouldUseLibVlcNativeSurface(): Boolean = false
 
     internal fun shouldUseWindowsHdrSurface(): Boolean =

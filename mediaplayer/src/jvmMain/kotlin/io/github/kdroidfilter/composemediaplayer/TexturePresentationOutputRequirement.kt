@@ -5,6 +5,8 @@ import dev.nucleusframework.window.tao.TextureViewHostDynamicRange
 import dev.nucleusframework.window.tao.TextureViewHostPixelFormat
 import dev.nucleusframework.window.tao.TextureViewHostPresentationState
 
+private const val HDR_TEN_BIT_COMPONENT_DEPTH = 10
+
 /** The output evidence required before a producer frame can be reported as configured. */
 internal enum class TexturePresentationOutputRequirement {
     KNOWN_OUTPUT,
@@ -30,7 +32,7 @@ internal fun TextureViewHostCapabilities.hasPresentedTextureFrameAfter(
         TexturePresentationOutputRequirement.KNOWN_OUTPUT -> true
         TexturePresentationOutputRequirement.HDR_TEN_BIT_OUTPUT ->
             actualDynamicRange == TextureViewHostDynamicRange.HDR &&
-                outputPixelFormat.componentBitDepth >= 10
+                outputPixelFormat.componentBitDepth >= HDR_TEN_BIT_COMPONENT_DEPTH
         TexturePresentationOutputRequirement.FP16_SCRGB_OUTPUT ->
             actualDynamicRange == TextureViewHostDynamicRange.HDR &&
                 outputPixelFormat == TextureViewHostPixelFormat.RGBA16_FLOAT_SCRGB
