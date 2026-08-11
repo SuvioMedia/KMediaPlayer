@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -13,15 +14,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
+import dev.nucleusframework.window.tao.TextureColorInfo
+import dev.nucleusframework.window.tao.nucleusD3D11SharedTextureSource
+import dev.nucleusframework.window.tao.rememberTextureViewController
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 
-/** Renders Windows video through a native child HWND or the Java-toolkit-free Skia fallback. */
+/** Renders Windows video as a color-managed Nucleus texture or the explicit CPU/SDR canvas. */
 @Composable
 internal fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
@@ -31,8 +33,7 @@ internal fun WindowsVideoPlayerSurface(
     onSurfaceAttached: () -> Unit = {},
 ) {
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
-    val nativeSurfaceRequested =
-        playerState.shouldUseWindowsHdrSurface() || playerState.shouldUseLibVlcNativeSurface()
+    val textureSurfaceRequested = playerState.shouldUseWindowsHdrSurface()
     val videoModifier =
         contentScale.toCanvasModifier(
             playerState.aspectRatio,
@@ -41,40 +42,60 @@ internal fun WindowsVideoPlayerSurface(
         )
 
     val hostModifier =
-        if (nativeSurfaceRequested) {
-            modifier
-        } else {
-            modifier.onSizeChanged { size ->
-                playerState.onResized(size.width, size.height)
-            }
+        modifier.onSizeChanged { size ->
+            playerState.onResized(size.width, size.height)
         }
 
     Box(
         modifier = hostModifier,
         contentAlignment = Alignment.Center,
     ) {
-        if (nativeSurfaceRequested) {
-            val surface =
-                remember(playerState, playerState.nativeSurfaceGeneration, nativeSurfaceRequested) {
-                    TaoNativeVideoSurface(
-                        kind = TaoNativeVideoSurfaceKind.WINDOWS_HWND,
-                        createHandle = playerState::createNativeVideoWindow,
-                        disposeHandle = playerState::disposeNativeVideoWindow,
-                    )
+        if (textureSurfaceRequested) {
+            val frame by remember(playerState) { playerState.currentColorManagedTextureFrameState }
+            val controller = rememberTextureViewController()
+            val source =
+                frame?.let { current ->
+                    remember(
+                        current.sharedHandle,
+                        current.width,
+                        current.height,
+                        current.extendedLinear,
+                    ) {
+                        nucleusD3D11SharedTextureSource(
+                            sharedHandle = current.sharedHandle,
+                            widthPx = current.width,
+                            heightPx = current.height,
+                            colorInfo =
+                                if (current.extendedLinear) {
+                                    TextureColorInfo.EXTENDED_LINEAR_SRGB_PREMULTIPLIED
+                                } else {
+                                    TextureColorInfo.SRGB_PREMULTIPLIED
+                                },
+                        )
+                    }
                 }
-            TaoNativeVideoView(
-                surface = surface,
-                // Keep controls and the native child bound to the complete player viewport;
-                // the Win32 renderer is responsible for fitting the media within that child.
+            LaunchedEffect(frame?.generation, frame?.frameSerial) {
+                frame?.let { current ->
+                    controller.markFrameAvailable()
+                    playerState.onTextureProducerFrameSubmitted(current)
+                }
+            }
+            DesktopColorManagedTextureVideoView(
+                source = source,
+                controller = controller,
                 modifier = Modifier.fillMaxSize(),
+                contentScale = contentScale,
+                onHostCapabilitiesChanged = playerState::onTextureViewHostCapabilities,
                 overlay = { WindowsVideoOverlayContent(playerState, overlay) },
-                onAttached = { latestOnSurfaceAttached() },
-                onUnavailable = { latestOnSurfaceAttached() },
+                onSurfaceAttached = {
+                    playerState.onColorManagedTextureHostAttached()
+                    latestOnSurfaceAttached()
+                },
             )
         } else {
             val currentFrame by remember(playerState) { playerState.currentFrameState }
             currentFrame?.let { frame ->
-                JvmProjectedVideoCanvas(
+                DesktopProjectedVideoCanvas(
                     frame = frame,
                     projection = playerState.projection,
                     projectionView = playerState.projectionView,

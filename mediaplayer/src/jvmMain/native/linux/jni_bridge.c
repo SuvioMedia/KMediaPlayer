@@ -450,6 +450,102 @@ static jint JNICALL jni_SetOutputSize(JNIEnv* env, jclass cls, jlong handle, jin
     return handle ? (jint)nvp_set_output_size(toCtx(handle), (int32_t)width, (int32_t)height) : 0;
 }
 
+static jboolean JNICALL jni_ConfigureTextureOutput(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jint width,
+    jint height,
+    jboolean input_p010,
+    jboolean output_hdr,
+    jintArray integer_values,
+    jfloatArray floating_values
+) {
+    (void)cls;
+    if (!handle) return JNI_FALSE;
+    LinuxVulkanProjectionConfiguration configuration;
+    if (!read_projection_configuration(env, integer_values, floating_values, &configuration)) {
+        return JNI_FALSE;
+    }
+    return nvp_configure_texture_output(
+        toCtx(handle),
+        (int32_t)width,
+        (int32_t)height,
+        input_p010 == JNI_TRUE,
+        output_hdr == JNI_TRUE,
+        &configuration
+    ) ? JNI_TRUE : JNI_FALSE;
+}
+
+static void JNICALL jni_DetachTextureOutput(JNIEnv* env, jclass cls, jlong handle) {
+    (void)env;
+    (void)cls;
+    if (handle) nvp_detach_texture_output(toCtx(handle));
+}
+
+static jlongArray JNICALL jni_AcquireTextureFrame(JNIEnv* env, jclass cls, jlong handle) {
+    (void)cls;
+    if (!handle) return NULL;
+    LinuxVulkanTextureFrame frame;
+    memset(&frame, 0, sizeof(frame));
+    if (!nvp_acquire_texture_frame(toCtx(handle), &frame)) return NULL;
+    jlong values[10] = {
+        (jlong)frame.serial,
+        (jlong)frame.generation,
+        (jlong)frame.width,
+        (jlong)frame.height,
+        (jlong)frame.fourcc,
+        (jlong)frame.dma_buf_fd,
+        (jlong)frame.stride,
+        (jlong)frame.offset,
+        (jlong)frame.modifier,
+        (jlong)frame.acquire_fence_fd,
+    };
+    jlongArray result = (*env)->NewLongArray(env, 10);
+    if (!result) {
+        nvp_release_texture_frame(
+            toCtx(handle),
+            frame.generation,
+            frame.serial,
+            frame.dma_buf_fd,
+            frame.acquire_fence_fd
+        );
+        return NULL;
+    }
+    (*env)->SetLongArrayRegion(env, result, 0, 10, values);
+    if ((*env)->ExceptionCheck(env)) {
+        nvp_release_texture_frame(
+            toCtx(handle),
+            frame.generation,
+            frame.serial,
+            frame.dma_buf_fd,
+            frame.acquire_fence_fd
+        );
+        return NULL;
+    }
+    return result;
+}
+
+static void JNICALL jni_ReleaseTextureFrame(
+    JNIEnv* env,
+    jclass cls,
+    jlong handle,
+    jlong generation,
+    jlong serial,
+    jint dma_buf_fd,
+    jint release_fence_fd
+) {
+    (void)env;
+    (void)cls;
+    nvp_release_texture_frame(
+        handle ? toCtx(handle) : NULL,
+        (uint64_t)generation,
+        (uint64_t)serial,
+        (int32_t)dma_buf_fd,
+        (int32_t)release_fence_fd
+    );
+}
+
 static jdouble JNICALL jni_GetVideoDuration(JNIEnv* env, jclass cls, jlong handle) {
     return handle ? nvp_get_duration(toCtx(handle)) : 0.0;
 }
@@ -465,6 +561,7 @@ static void JNICALL jni_SeekTo(JNIEnv* env, jclass cls, jlong handle, jdouble ti
 static void JNICALL jni_DisposePlayer(JNIEnv* env, jclass cls, jlong handle) {
     if (handle) {
         VideoPlayer* player = toCtx(handle);
+        nvp_detach_texture_output(player);
         nvp_detach_wayland_output(player);
         nvp_destroy(player);
     }
@@ -579,6 +676,10 @@ static const JNINativeMethod g_methods[] = {
     { "nGetFrameWidth",          "(J)I",                        (void*)jni_GetFrameWidth },
     { "nGetFrameHeight",         "(J)I",                        (void*)jni_GetFrameHeight },
     { "nSetOutputSize",          "(JII)I",                      (void*)jni_SetOutputSize },
+    { "nConfigureTextureOutput", "(JIIZZ[I[F)Z",               (void*)jni_ConfigureTextureOutput },
+    { "nDetachTextureOutput",    "(J)V",                        (void*)jni_DetachTextureOutput },
+    { "nAcquireTextureFrame",    "(J)[J",                       (void*)jni_AcquireTextureFrame },
+    { "nReleaseTextureFrame",    "(JJJII)V",                   (void*)jni_ReleaseTextureFrame },
     { "nGetVideoDuration",       "(J)D",                        (void*)jni_GetVideoDuration },
     { "nGetCurrentTime",         "(J)D",                        (void*)jni_GetCurrentTime },
     { "nSeekTo",                 "(JD)V",                       (void*)jni_SeekTo },

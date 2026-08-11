@@ -10,9 +10,33 @@
 #include <wayland-client.h>
 
 #include <pthread.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <math.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#define KMP_TEXTURE_POOL_SIZE 4
+#define KMP_DRM_FORMAT_ARGB8888 0x34325241
+#define KMP_DRM_FORMAT_ABGR16161616F 0x48344241
+
+typedef struct LinuxVulkanTextureSlot {
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView view;
+    VkFramebuffer framebuffer;
+    int dma_buf_fd;
+    int acquire_fence_fd;
+    int release_fence_fd;
+    uint32_t stride;
+    uint32_t offset;
+    uint64_t modifier;
+    uint64_t serial;
+    int ready;
+    int leased;
+} LinuxVulkanTextureSlot;
 
 typedef struct HdrUniforms {
     int32_t modes[4];
@@ -67,7 +91,18 @@ struct LinuxVulkanProjection {
     VkCommandBuffer command_buffer;
     VkSemaphore image_available;
     VkSemaphore render_finished;
+    VkSemaphore pending_export_semaphore;
     VkFence render_fence;
+
+    int texture_mode;
+    int texture_input_p010;
+    int texture_output_hdr;
+    uint64_t texture_generation;
+    uint64_t texture_serial;
+    LinuxVulkanTextureSlot texture_slots[KMP_TEXTURE_POOL_SIZE];
+    PFN_vkGetMemoryFdKHR get_memory_fd;
+    PFN_vkGetSemaphoreFdKHR get_semaphore_fd;
+    PFN_vkGetImageDrmFormatModifierPropertiesEXT get_image_modifier_properties;
 
     VkBuffer uniform_buffer;
     VkDeviceMemory uniform_memory;
@@ -392,8 +427,207 @@ static VkShaderModule create_shader_module(LinuxVulkanProjection* renderer, cons
     return shader;
 }
 
+static int texture_release_fence_ready(LinuxVulkanTextureSlot* slot) {
+    if (slot->release_fence_fd < 0) return 1;
+    struct pollfd descriptor = {
+        .fd = slot->release_fence_fd,
+        .events = POLLIN,
+    };
+    const int result = poll(&descriptor, 1, 0);
+    if (result == 0) return 0;
+    close(slot->release_fence_fd);
+    slot->release_fence_fd = -1;
+    return 1;
+}
+
+static void destroy_texture_slots(LinuxVulkanProjection* renderer) {
+    for (uint32_t index = 0; index < KMP_TEXTURE_POOL_SIZE; index++) {
+        LinuxVulkanTextureSlot* slot = &renderer->texture_slots[index];
+        if (slot->framebuffer) vkDestroyFramebuffer(renderer->device, slot->framebuffer, NULL);
+        if (slot->view) vkDestroyImageView(renderer->device, slot->view, NULL);
+        if (slot->image) vkDestroyImage(renderer->device, slot->image, NULL);
+        if (slot->memory) vkFreeMemory(renderer->device, slot->memory, NULL);
+        if (slot->dma_buf_fd >= 0) close(slot->dma_buf_fd);
+        if (slot->acquire_fence_fd >= 0) close(slot->acquire_fence_fd);
+        if (slot->release_fence_fd >= 0) close(slot->release_fence_fd);
+        memset(slot, 0, sizeof(*slot));
+        slot->dma_buf_fd = -1;
+        slot->acquire_fence_fd = -1;
+        slot->release_fence_fd = -1;
+    }
+}
+
+static int choose_drm_modifier(
+    LinuxVulkanProjection* renderer,
+    VkFormat format,
+    VkFormatFeatureFlags required_features,
+    uint64_t* modifier
+) {
+    VkDrmFormatModifierPropertiesListEXT modifier_list = {
+        .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
+    };
+    VkFormatProperties2 properties = {
+        .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
+        .pNext = &modifier_list,
+    };
+    vkGetPhysicalDeviceFormatProperties2(renderer->physical_device, format, &properties);
+    if (modifier_list.drmFormatModifierCount == 0) return 0;
+    VkDrmFormatModifierPropertiesEXT* values = calloc(
+        modifier_list.drmFormatModifierCount,
+        sizeof(*values)
+    );
+    if (!values) return 0;
+    modifier_list.pDrmFormatModifierProperties = values;
+    vkGetPhysicalDeviceFormatProperties2(renderer->physical_device, format, &properties);
+    int found = 0;
+    for (uint32_t index = 0; index < modifier_list.drmFormatModifierCount; index++) {
+        const VkDrmFormatModifierPropertiesEXT* candidate = &values[index];
+        if (candidate->drmFormatModifierPlaneCount == 1 &&
+            (candidate->drmFormatModifierTilingFeatures & required_features) == required_features) {
+            *modifier = candidate->drmFormatModifier;
+            found = 1;
+            break;
+        }
+    }
+    free(values);
+    return found;
+}
+
+static int create_texture_slot(
+    LinuxVulkanProjection* renderer,
+    LinuxVulkanTextureSlot* slot,
+    VkFormat format,
+    uint64_t modifier
+) {
+    const VkExternalMemoryImageCreateInfo external_info = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    const VkImageDrmFormatModifierListCreateInfoEXT modifier_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT,
+        .pNext = &external_info,
+        .drmFormatModifierCount = 1,
+        .pDrmFormatModifiers = &modifier,
+    };
+    VkImageCreateInfo image_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = &modifier_info,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = {renderer->extent.width, renderer->extent.height, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    if (vkCreateImage(renderer->device, &image_info, NULL, &slot->image) != VK_SUCCESS) return 0;
+
+    VkMemoryRequirements requirements;
+    vkGetImageMemoryRequirements(renderer->device, slot->image, &requirements);
+    const uint32_t memory_type = find_memory_type(
+        renderer,
+        requirements.memoryTypeBits,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    if (memory_type == UINT32_MAX) return 0;
+    const VkExportMemoryAllocateInfo export_info = {
+        .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    const VkMemoryAllocateInfo allocation = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = &export_info,
+        .allocationSize = requirements.size,
+        .memoryTypeIndex = memory_type,
+    };
+    if (vkAllocateMemory(renderer->device, &allocation, NULL, &slot->memory) != VK_SUCCESS ||
+        vkBindImageMemory(renderer->device, slot->image, slot->memory, 0) != VK_SUCCESS) return 0;
+
+    const VkImageViewCreateInfo view_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = slot->image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        },
+    };
+    if (vkCreateImageView(renderer->device, &view_info, NULL, &slot->view) != VK_SUCCESS) return 0;
+
+    const VkFramebufferCreateInfo framebuffer_info = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = renderer->render_pass,
+        .attachmentCount = 1,
+        .pAttachments = &slot->view,
+        .width = renderer->extent.width,
+        .height = renderer->extent.height,
+        .layers = 1,
+    };
+    if (vkCreateFramebuffer(renderer->device, &framebuffer_info, NULL, &slot->framebuffer) != VK_SUCCESS) return 0;
+
+    VkMemoryGetFdInfoKHR fd_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
+        .memory = slot->memory,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    if (!renderer->get_memory_fd ||
+        renderer->get_memory_fd(renderer->device, &fd_info, &slot->dma_buf_fd) != VK_SUCCESS ||
+        slot->dma_buf_fd < 0) return 0;
+
+    VkImageDrmFormatModifierPropertiesEXT modifier_properties = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT,
+    };
+    if (!renderer->get_image_modifier_properties ||
+        renderer->get_image_modifier_properties(
+            renderer->device,
+            slot->image,
+            &modifier_properties
+        ) != VK_SUCCESS) return 0;
+    slot->modifier = modifier_properties.drmFormatModifier;
+    const VkImageSubresource subresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT};
+    VkSubresourceLayout layout;
+    vkGetImageSubresourceLayout(renderer->device, slot->image, &subresource, &layout);
+    if (layout.rowPitch > UINT32_MAX || layout.offset > UINT32_MAX) return 0;
+    slot->stride = (uint32_t)layout.rowPitch;
+    slot->offset = (uint32_t)layout.offset;
+    slot->acquire_fence_fd = -1;
+    slot->release_fence_fd = -1;
+    return 1;
+}
+
+static int create_texture_pool(LinuxVulkanProjection* renderer) {
+    const VkFormat format = renderer->texture_output_hdr
+        ? VK_FORMAT_R16G16B16A16_SFLOAT
+        : VK_FORMAT_B8G8R8A8_UNORM;
+    const VkFormatFeatureFlags features = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+        VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    uint64_t modifier = 0;
+    if (!choose_drm_modifier(renderer, format, features, &modifier)) return 0;
+    for (uint32_t index = 0; index < KMP_TEXTURE_POOL_SIZE; index++) {
+        LinuxVulkanTextureSlot* slot = &renderer->texture_slots[index];
+        slot->dma_buf_fd = -1;
+        slot->acquire_fence_fd = -1;
+        slot->release_fence_fd = -1;
+        if (!create_texture_slot(renderer, slot, format, modifier)) return 0;
+    }
+    return 1;
+}
+
 static void destroy_swapchain(LinuxVulkanProjection* renderer) {
     if (!renderer->device) return;
+    if (renderer->texture_mode) {
+        destroy_texture_slots(renderer);
+        if (renderer->pipeline) vkDestroyPipeline(renderer->device, renderer->pipeline, NULL);
+        if (renderer->render_pass) vkDestroyRenderPass(renderer->device, renderer->render_pass, NULL);
+        renderer->pipeline = VK_NULL_HANDLE;
+        renderer->render_pass = VK_NULL_HANDLE;
+        return;
+    }
     if (renderer->framebuffers) {
         for (uint32_t index = 0; index < renderer->swapchain_image_count; index++) {
             if (renderer->framebuffers[index]) {
@@ -492,7 +726,9 @@ static int create_graphics_pipeline(LinuxVulkanProjection* renderer) {
         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .finalLayout = renderer->texture_mode
+            ? VK_IMAGE_LAYOUT_GENERAL
+            : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
     };
     VkAttachmentReference color_reference = {
         .attachment = 0,
@@ -753,6 +989,23 @@ static int create_swapchain(LinuxVulkanProjection* renderer) {
 }
 
 static int create_vulkan_instance(LinuxVulkanProjection* renderer) {
+    VkApplicationInfo application_info = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = renderer->texture_mode
+            ? "KMediaPlayer color-managed texture"
+            : "KMediaPlayer Linux HDR projection",
+        .applicationVersion = VK_MAKE_VERSION(4, 1, 0),
+        .pEngineName = "KMediaPlayer",
+        .engineVersion = VK_MAKE_VERSION(4, 1, 0),
+        .apiVersion = VK_API_VERSION_1_1,
+    };
+    if (renderer->texture_mode) {
+        const VkInstanceCreateInfo create_info = {
+            .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+            .pApplicationInfo = &application_info,
+        };
+        return vkCreateInstance(&create_info, NULL, &renderer->instance) == VK_SUCCESS;
+    }
     uint32_t extension_count = 0;
     if (vkEnumerateInstanceExtensionProperties(NULL, &extension_count, NULL) != VK_SUCCESS) return 0;
     VkExtensionProperties* extensions = calloc(extension_count, sizeof(*extensions));
@@ -773,14 +1026,6 @@ static int create_vulkan_instance(LinuxVulkanProjection* renderer) {
         }
     }
     free(extensions);
-    VkApplicationInfo application_info = {
-        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "KMediaPlayer Linux HDR projection",
-        .applicationVersion = VK_MAKE_VERSION(2, 0, 0),
-        .pEngineName = "KMediaPlayer",
-        .engineVersion = VK_MAKE_VERSION(2, 0, 0),
-        .apiVersion = VK_API_VERSION_1_1,
-    };
     VkInstanceCreateInfo create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &application_info,
@@ -816,13 +1061,16 @@ static int create_vulkan_device(LinuxVulkanProjection* renderer) {
         vkGetPhysicalDeviceQueueFamilyProperties(devices[device_index], &queue_count, queues);
         for (uint32_t queue_index = 0; queue_index < queue_count; queue_index++) {
             VkBool32 present = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(
-                devices[device_index],
-                queue_index,
-                renderer->vk_surface,
-                &present
-            );
-            if ((queues[queue_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) && present) {
+            if (!renderer->texture_mode) {
+                vkGetPhysicalDeviceSurfaceSupportKHR(
+                    devices[device_index],
+                    queue_index,
+                    renderer->vk_surface,
+                    &present
+                );
+            }
+            if ((queues[queue_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+                (renderer->texture_mode || present)) {
                 renderer->physical_device = devices[device_index];
                 renderer->queue_family = queue_index;
                 found = 1;
@@ -839,18 +1087,34 @@ static int create_vulkan_device(LinuxVulkanProjection* renderer) {
     VkExtensionProperties* extensions = calloc(extension_count, sizeof(*extensions));
     if (!extensions) return 0;
     vkEnumerateDeviceExtensionProperties(renderer->physical_device, NULL, &extension_count, extensions);
-    if (!extension_available(extensions, extension_count, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+    const char* texture_extensions[] = {
+        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+        VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+        VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
+        VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
+    };
+    if (renderer->texture_mode) {
+        for (size_t index = 0; index < sizeof(texture_extensions) / sizeof(texture_extensions[0]); index++) {
+            if (!extension_available(extensions, extension_count, texture_extensions[index])) {
+                free(extensions);
+                return 0;
+            }
+        }
+    } else if (!extension_available(extensions, extension_count, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
         free(extensions);
         return 0;
     }
     const int has_hdr_metadata = extension_available(extensions, extension_count, VK_EXT_HDR_METADATA_EXTENSION_NAME);
-    if (renderer->configuration.output_transfer == 0 && !has_hdr_metadata) {
+    if (!renderer->texture_mode && renderer->configuration.output_transfer == 0 && !has_hdr_metadata) {
         free(extensions);
         return 0;
     }
     free(extensions);
-    const char* device_extensions[2] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_HDR_METADATA_EXTENSION_NAME};
-    uint32_t enabled_extension_count = has_hdr_metadata ? 2u : 1u;
+    const char* surface_extensions[2] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_HDR_METADATA_EXTENSION_NAME};
+    const char** device_extensions = renderer->texture_mode ? texture_extensions : surface_extensions;
+    uint32_t enabled_extension_count = renderer->texture_mode
+        ? (uint32_t)(sizeof(texture_extensions) / sizeof(texture_extensions[0]))
+        : (has_hdr_metadata ? 2u : 1u);
     float queue_priority = 1.0f;
     VkDeviceQueueCreateInfo queue_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -869,6 +1133,19 @@ static int create_vulkan_device(LinuxVulkanProjection* renderer) {
         return 0;
     }
     vkGetDeviceQueue(renderer->device, renderer->queue_family, 0, &renderer->queue);
+    if (renderer->texture_mode) {
+        renderer->get_memory_fd =
+            (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(renderer->device, "vkGetMemoryFdKHR");
+        renderer->get_semaphore_fd =
+            (PFN_vkGetSemaphoreFdKHR)vkGetDeviceProcAddr(renderer->device, "vkGetSemaphoreFdKHR");
+        renderer->get_image_modifier_properties =
+            (PFN_vkGetImageDrmFormatModifierPropertiesEXT)vkGetDeviceProcAddr(
+                renderer->device,
+                "vkGetImageDrmFormatModifierPropertiesEXT"
+            );
+        if (!renderer->get_memory_fd || !renderer->get_semaphore_fd ||
+            !renderer->get_image_modifier_properties) return 0;
+    }
     return renderer->queue != VK_NULL_HANDLE;
 }
 
@@ -997,6 +1274,14 @@ static int create_renderer_resources(LinuxVulkanProjection* renderer) {
         .flags = VK_FENCE_CREATE_SIGNALED_BIT,
     };
     if (vkCreateFence(renderer->device, &fence_info, NULL, &renderer->render_fence) != VK_SUCCESS) return 0;
+    if (renderer->texture_mode) {
+        renderer->extent.width = (uint32_t)renderer->width;
+        renderer->extent.height = (uint32_t)renderer->height;
+        renderer->swapchain_format = renderer->texture_output_hdr
+            ? VK_FORMAT_R16G16B16A16_SFLOAT
+            : VK_FORMAT_B8G8R8A8_UNORM;
+        return create_graphics_pipeline(renderer) && create_texture_pool(renderer);
+    }
     return create_swapchain(renderer);
 }
 
@@ -1080,7 +1365,79 @@ static int recreate_swapchain(LinuxVulkanProjection* renderer) {
     if (renderer->width <= 0 || renderer->height <= 0) return 0;
     vkDeviceWaitIdle(renderer->device);
     destroy_swapchain(renderer);
+    if (renderer->texture_mode) {
+        renderer->extent.width = (uint32_t)renderer->width;
+        renderer->extent.height = (uint32_t)renderer->height;
+        renderer->swapchain_format = renderer->texture_output_hdr
+            ? VK_FORMAT_R16G16B16A16_SFLOAT
+            : VK_FORMAT_B8G8R8A8_UNORM;
+        return create_graphics_pipeline(renderer) && create_texture_pool(renderer);
+    }
     return create_swapchain(renderer);
+}
+
+LinuxVulkanProjection* linux_vulkan_texture_create(
+    int32_t width,
+    int32_t height,
+    int32_t input_p010,
+    int32_t output_hdr,
+    const LinuxVulkanProjectionConfiguration* configuration
+) {
+    if (width <= 0 || height <= 0 || !configuration) return NULL;
+    LinuxVulkanProjection* renderer = calloc(1, sizeof(*renderer));
+    if (!renderer) return NULL;
+    pthread_mutex_init(&renderer->lock, NULL);
+    renderer->texture_mode = 1;
+    renderer->texture_input_p010 = input_p010 != 0;
+    renderer->texture_output_hdr = output_hdr != 0;
+    renderer->width = width;
+    renderer->height = height;
+    renderer->configuration = *configuration;
+    renderer->configuration.output_transfer = renderer->texture_output_hdr ? 2 : 3;
+    renderer->texture_generation = 1;
+    for (uint32_t index = 0; index < KMP_TEXTURE_POOL_SIZE; index++) {
+        renderer->texture_slots[index].dma_buf_fd = -1;
+        renderer->texture_slots[index].acquire_fence_fd = -1;
+        renderer->texture_slots[index].release_fence_fd = -1;
+    }
+    if (!create_vulkan_instance(renderer) ||
+        !create_vulkan_device(renderer) ||
+        !create_renderer_resources(renderer)) {
+        linux_vulkan_projection_destroy(renderer);
+        return NULL;
+    }
+    renderer->state = NVP_WAYLAND_OUTPUT_ATTACHED;
+    return renderer;
+}
+
+int linux_vulkan_texture_update(
+    LinuxVulkanProjection* renderer,
+    int32_t width,
+    int32_t height,
+    int32_t input_p010,
+    int32_t output_hdr,
+    const LinuxVulkanProjectionConfiguration* configuration
+) {
+    if (!renderer || !renderer->texture_mode || width <= 0 || height <= 0 || !configuration) return 0;
+    pthread_mutex_lock(&renderer->lock);
+    const int recreate = renderer->width != width || renderer->height != height ||
+        renderer->texture_output_hdr != (output_hdr != 0);
+    const int input_changed = renderer->texture_input_p010 != (input_p010 != 0);
+    renderer->width = width;
+    renderer->height = height;
+    renderer->texture_input_p010 = input_p010 != 0;
+    renderer->texture_output_hdr = output_hdr != 0;
+    renderer->configuration = *configuration;
+    renderer->configuration.output_transfer = renderer->texture_output_hdr ? 2 : 3;
+    if (input_changed) destroy_input_images(renderer);
+    int result = 1;
+    if (recreate) {
+        result = recreate_swapchain(renderer);
+        if (result) renderer->texture_generation++;
+    }
+    if (!result) renderer->failed = 1;
+    pthread_mutex_unlock(&renderer->lock);
+    return result;
 }
 
 LinuxVulkanProjection* linux_vulkan_projection_create(
@@ -1149,6 +1506,10 @@ void linux_vulkan_projection_update_configuration(
     int hdr10_plus_changed =
         renderer->configuration.applies_hdr10_plus != configuration->applies_hdr10_plus;
     renderer->configuration = *configuration;
+    if (renderer->texture_mode) {
+        renderer->configuration.output_transfer = renderer->texture_output_hdr ? 2 : 3;
+        output_transfer_changed = 0;
+    }
     if (hdr10_plus_changed || !configuration->applies_hdr10_plus) {
         renderer->hdr10_plus_curve_valid = 0;
         renderer->hdr10_plus_source_peak_nits = 0.0f;
@@ -1267,23 +1628,44 @@ int linux_vulkan_projection_render_p010(
     memcpy(renderer->uniform_mapped, &uniforms, sizeof(uniforms));
 
     uint32_t image_index = 0;
-    VkResult acquire = vkAcquireNextImageKHR(
-        renderer->device,
-        renderer->swapchain,
-        UINT64_MAX,
-        renderer->image_available,
-        VK_NULL_HANDLE,
-        &image_index
-    );
-    if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
-        int recreated = recreate_swapchain(renderer);
-        pthread_mutex_unlock(&renderer->lock);
-        return recreated;
-    }
-    if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
-        renderer->failed = 1;
-        pthread_mutex_unlock(&renderer->lock);
-        return 0;
+    LinuxVulkanTextureSlot* texture_slot = NULL;
+    if (renderer->texture_mode) {
+        for (uint32_t index = 0; index < KMP_TEXTURE_POOL_SIZE; index++) {
+            LinuxVulkanTextureSlot* candidate = &renderer->texture_slots[index];
+            if (!candidate->leased && texture_release_fence_ready(candidate)) {
+                texture_slot = candidate;
+                image_index = index;
+                break;
+            }
+        }
+        if (!texture_slot) {
+            pthread_mutex_unlock(&renderer->lock);
+            return 1;
+        }
+        if (texture_slot->acquire_fence_fd >= 0) {
+            close(texture_slot->acquire_fence_fd);
+            texture_slot->acquire_fence_fd = -1;
+        }
+        texture_slot->ready = 0;
+    } else {
+        VkResult acquire = vkAcquireNextImageKHR(
+            renderer->device,
+            renderer->swapchain,
+            UINT64_MAX,
+            renderer->image_available,
+            VK_NULL_HANDLE,
+            &image_index
+        );
+        if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
+            int recreated = recreate_swapchain(renderer);
+            pthread_mutex_unlock(&renderer->lock);
+            return recreated;
+        }
+        if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
+            renderer->failed = 1;
+            pthread_mutex_unlock(&renderer->lock);
+            return 0;
+        }
     }
     vkResetFences(renderer->device, 1, &renderer->render_fence);
     vkResetCommandBuffer(renderer->command_buffer, 0);
@@ -1383,7 +1765,9 @@ int linux_vulkan_projection_render_p010(
     VkRenderPassBeginInfo render_pass_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = renderer->render_pass,
-        .framebuffer = renderer->framebuffers[image_index],
+        .framebuffer = renderer->texture_mode
+            ? texture_slot->framebuffer
+            : renderer->framebuffers[image_index],
         .renderArea = {.offset = {0, 0}, .extent = renderer->extent},
         .clearValueCount = 1,
         .pClearValues = &clear,
@@ -1419,20 +1803,73 @@ int linux_vulkan_projection_render_p010(
         return 0;
     }
     VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSemaphore texture_complete = VK_NULL_HANDLE;
+    if (renderer->texture_mode) {
+        const VkExportSemaphoreCreateInfo export_info = {
+            .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+            .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+        };
+        const VkSemaphoreCreateInfo semaphore_info = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            .pNext = &export_info,
+        };
+        if (vkCreateSemaphore(renderer->device, &semaphore_info, NULL, &texture_complete) != VK_SUCCESS) {
+            renderer->failed = 1;
+            pthread_mutex_unlock(&renderer->lock);
+            return 0;
+        }
+    }
     VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &renderer->image_available,
-        .pWaitDstStageMask = &wait_stage,
+        .waitSemaphoreCount = renderer->texture_mode ? 0u : 1u,
+        .pWaitSemaphores = renderer->texture_mode ? NULL : &renderer->image_available,
+        .pWaitDstStageMask = renderer->texture_mode ? NULL : &wait_stage,
         .commandBufferCount = 1,
         .pCommandBuffers = &renderer->command_buffer,
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &renderer->render_finished,
+        .pSignalSemaphores = renderer->texture_mode ? &texture_complete : &renderer->render_finished,
     };
     if (vkQueueSubmit(renderer->queue, 1, &submit_info, renderer->render_fence) != VK_SUCCESS) {
+        if (texture_complete) vkDestroySemaphore(renderer->device, texture_complete, NULL);
         renderer->failed = 1;
         pthread_mutex_unlock(&renderer->lock);
         return 0;
+    }
+    if (renderer->pending_export_semaphore) {
+        vkDestroySemaphore(renderer->device, renderer->pending_export_semaphore, NULL);
+        renderer->pending_export_semaphore = VK_NULL_HANDLE;
+    }
+    if (renderer->texture_mode) {
+        const VkSemaphoreGetFdInfoKHR fd_info = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+            .semaphore = texture_complete,
+            .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+        };
+        int fence_fd = -1;
+        const VkResult exported = renderer->get_semaphore_fd(
+            renderer->device,
+            &fd_info,
+            &fence_fd
+        );
+        if (exported != VK_SUCCESS || fence_fd < 0) {
+            vkWaitForFences(renderer->device, 1, &renderer->render_fence, VK_TRUE, UINT64_MAX);
+            vkDestroySemaphore(renderer->device, texture_complete, NULL);
+            fence_fd = -1;
+        } else {
+            renderer->pending_export_semaphore = texture_complete;
+        }
+        texture_slot->acquire_fence_fd = fence_fd;
+        texture_slot->serial = ++renderer->texture_serial;
+        texture_slot->ready = 1;
+        renderer->input_initialized = 1;
+        renderer->state =
+            NVP_WAYLAND_OUTPUT_ATTACHED |
+            NVP_WAYLAND_OUTPUT_CAPS_NEGOTIATED |
+            NVP_WAYLAND_OUTPUT_FIRST_FRAME |
+            NVP_WAYLAND_OUTPUT_DMABUF |
+            (renderer->texture_output_hdr ? NVP_WAYLAND_OUTPUT_TEN_BIT : 0);
+        pthread_mutex_unlock(&renderer->lock);
+        return 1;
     }
     VkPresentInfoKHR present_info = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -1468,6 +1905,252 @@ int linux_vulkan_projection_render_p010(
     return success;
 }
 
+static int ensure_bgra_staging(
+    LinuxVulkanProjection* renderer,
+    int32_t width,
+    int32_t height
+) {
+    const VkDeviceSize required = (VkDeviceSize)(uint32_t)width * (uint32_t)height * 4u;
+    if (renderer->staging_buffer && renderer->input_width == width &&
+        renderer->input_height == height && renderer->staging_size >= required) return 1;
+    vkDeviceWaitIdle(renderer->device);
+    destroy_input_images(renderer);
+    renderer->staging_size = required;
+    if (!create_buffer(
+            renderer,
+            required,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &renderer->staging_buffer,
+            &renderer->staging_memory,
+            &renderer->staging_mapped)) return 0;
+    renderer->input_width = width;
+    renderer->input_height = height;
+    return 1;
+}
+
+int linux_vulkan_texture_render_bgra(
+    LinuxVulkanProjection* renderer,
+    const uint8_t* pixels,
+    int32_t stride,
+    int32_t width,
+    int32_t height
+) {
+    if (!renderer || !renderer->texture_mode || renderer->texture_input_p010 ||
+        !pixels || width <= 0 || height <= 0 || stride < width * 4) return 0;
+    pthread_mutex_lock(&renderer->lock);
+    if (renderer->failed || !ensure_bgra_staging(renderer, width, height) ||
+        vkWaitForFences(renderer->device, 1, &renderer->render_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        renderer->failed = 1;
+        pthread_mutex_unlock(&renderer->lock);
+        return 0;
+    }
+    if (renderer->pending_export_semaphore) {
+        vkDestroySemaphore(renderer->device, renderer->pending_export_semaphore, NULL);
+        renderer->pending_export_semaphore = VK_NULL_HANDLE;
+    }
+
+    LinuxVulkanTextureSlot* slot = NULL;
+    for (uint32_t index = 0; index < KMP_TEXTURE_POOL_SIZE; index++) {
+        LinuxVulkanTextureSlot* candidate = &renderer->texture_slots[index];
+        if (!candidate->leased && texture_release_fence_ready(candidate)) {
+            slot = candidate;
+            break;
+        }
+    }
+    if (!slot) {
+        pthread_mutex_unlock(&renderer->lock);
+        return 1;
+    }
+    if (slot->acquire_fence_fd >= 0) close(slot->acquire_fence_fd);
+    slot->acquire_fence_fd = -1;
+    slot->ready = 0;
+
+    uint8_t* destination = renderer->staging_mapped;
+    const size_t row_bytes = (size_t)(uint32_t)width * 4u;
+    for (int32_t row = 0; row < height; row++) {
+        memcpy(destination + (size_t)row * row_bytes, pixels + (size_t)row * (size_t)stride, row_bytes);
+    }
+
+    vkResetFences(renderer->device, 1, &renderer->render_fence);
+    vkResetCommandBuffer(renderer->command_buffer, 0);
+    const VkCommandBufferBeginInfo begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    if (vkBeginCommandBuffer(renderer->command_buffer, &begin_info) != VK_SUCCESS) {
+        renderer->failed = 1;
+        pthread_mutex_unlock(&renderer->lock);
+        return 0;
+    }
+    image_barrier(
+        renderer->command_buffer,
+        slot->image,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        0,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    );
+    const VkBufferImageCopy copy = {
+        .bufferOffset = 0,
+        .bufferRowLength = (uint32_t)width,
+        .bufferImageHeight = (uint32_t)height,
+        .imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .layerCount = 1,
+        },
+        .imageExtent = {(uint32_t)width, (uint32_t)height, 1},
+    };
+    vkCmdCopyBufferToImage(
+        renderer->command_buffer,
+        renderer->staging_buffer,
+        slot->image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &copy
+    );
+    image_barrier(
+        renderer->command_buffer,
+        slot->image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_ACCESS_MEMORY_READ_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
+    );
+    if (vkEndCommandBuffer(renderer->command_buffer) != VK_SUCCESS) {
+        renderer->failed = 1;
+        pthread_mutex_unlock(&renderer->lock);
+        return 0;
+    }
+
+    const VkExportSemaphoreCreateInfo export_info = {
+        .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+        .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+    };
+    const VkSemaphoreCreateInfo semaphore_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = &export_info,
+    };
+    VkSemaphore complete = VK_NULL_HANDLE;
+    if (vkCreateSemaphore(renderer->device, &semaphore_info, NULL, &complete) != VK_SUCCESS) {
+        renderer->failed = 1;
+        pthread_mutex_unlock(&renderer->lock);
+        return 0;
+    }
+    const VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &renderer->command_buffer,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &complete,
+    };
+    if (vkQueueSubmit(renderer->queue, 1, &submit_info, renderer->render_fence) != VK_SUCCESS) {
+        vkDestroySemaphore(renderer->device, complete, NULL);
+        renderer->failed = 1;
+        pthread_mutex_unlock(&renderer->lock);
+        return 0;
+    }
+    const VkSemaphoreGetFdInfoKHR fd_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+        .semaphore = complete,
+        .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+    };
+    int fence_fd = -1;
+    if (renderer->get_semaphore_fd(renderer->device, &fd_info, &fence_fd) != VK_SUCCESS || fence_fd < 0) {
+        vkWaitForFences(renderer->device, 1, &renderer->render_fence, VK_TRUE, UINT64_MAX);
+        vkDestroySemaphore(renderer->device, complete, NULL);
+        fence_fd = -1;
+    } else {
+        renderer->pending_export_semaphore = complete;
+    }
+    slot->acquire_fence_fd = fence_fd;
+    slot->serial = ++renderer->texture_serial;
+    slot->ready = 1;
+    renderer->state =
+        NVP_WAYLAND_OUTPUT_ATTACHED |
+        NVP_WAYLAND_OUTPUT_CAPS_NEGOTIATED |
+        NVP_WAYLAND_OUTPUT_FIRST_FRAME |
+        NVP_WAYLAND_OUTPUT_DMABUF;
+    pthread_mutex_unlock(&renderer->lock);
+    return 1;
+}
+
+int linux_vulkan_texture_acquire_frame(
+    LinuxVulkanProjection* renderer,
+    LinuxVulkanTextureFrame* frame
+) {
+    if (!renderer || !renderer->texture_mode || !frame) return 0;
+    pthread_mutex_lock(&renderer->lock);
+    LinuxVulkanTextureSlot* selected = NULL;
+    for (uint32_t index = 0; index < KMP_TEXTURE_POOL_SIZE; index++) {
+        LinuxVulkanTextureSlot* candidate = &renderer->texture_slots[index];
+        if (candidate->ready && (!selected || candidate->serial > selected->serial)) {
+            selected = candidate;
+        }
+    }
+    if (!selected) {
+        pthread_mutex_unlock(&renderer->lock);
+        return 0;
+    }
+    const int dma_buf_fd = fcntl(selected->dma_buf_fd, F_DUPFD_CLOEXEC, 0);
+    if (dma_buf_fd < 0) {
+        pthread_mutex_unlock(&renderer->lock);
+        return 0;
+    }
+    memset(frame, 0, sizeof(*frame));
+    frame->serial = selected->serial;
+    frame->generation = renderer->texture_generation;
+    frame->width = renderer->width;
+    frame->height = renderer->height;
+    frame->fourcc = renderer->texture_output_hdr
+        ? KMP_DRM_FORMAT_ABGR16161616F
+        : KMP_DRM_FORMAT_ARGB8888;
+    frame->dma_buf_fd = dma_buf_fd;
+    frame->stride = (int32_t)selected->stride;
+    frame->offset = (int32_t)selected->offset;
+    frame->modifier = selected->modifier;
+    frame->acquire_fence_fd = selected->acquire_fence_fd;
+    selected->acquire_fence_fd = -1;
+    selected->ready = 0;
+    selected->leased = 1;
+    pthread_mutex_unlock(&renderer->lock);
+    return 1;
+}
+
+void linux_vulkan_texture_release_frame(
+    LinuxVulkanProjection* renderer,
+    uint64_t serial,
+    int32_t dma_buf_fd,
+    int32_t release_fence_fd
+) {
+    if (dma_buf_fd >= 0) close(dma_buf_fd);
+    if (!renderer || !renderer->texture_mode) {
+        if (release_fence_fd >= 0) close(release_fence_fd);
+        return;
+    }
+    pthread_mutex_lock(&renderer->lock);
+    LinuxVulkanTextureSlot* selected = NULL;
+    for (uint32_t index = 0; index < KMP_TEXTURE_POOL_SIZE; index++) {
+        LinuxVulkanTextureSlot* candidate = &renderer->texture_slots[index];
+        if (candidate->leased && candidate->serial == serial) {
+            selected = candidate;
+            break;
+        }
+    }
+    if (!selected) {
+        if (release_fence_fd >= 0) close(release_fence_fd);
+    } else {
+        if (selected->release_fence_fd >= 0) close(selected->release_fence_fd);
+        selected->release_fence_fd = release_fence_fd;
+        selected->leased = 0;
+    }
+    pthread_mutex_unlock(&renderer->lock);
+}
+
 int32_t linux_vulkan_projection_get_state(LinuxVulkanProjection* renderer) {
     if (!renderer) return 0;
     pthread_mutex_lock(&renderer->lock);
@@ -1483,6 +2166,9 @@ void linux_vulkan_projection_destroy(LinuxVulkanProjection* renderer) {
     destroy_input_images(renderer);
     destroy_swapchain(renderer);
     if (renderer->render_fence) vkDestroyFence(renderer->device, renderer->render_fence, NULL);
+    if (renderer->pending_export_semaphore) {
+        vkDestroySemaphore(renderer->device, renderer->pending_export_semaphore, NULL);
+    }
     if (renderer->render_finished) vkDestroySemaphore(renderer->device, renderer->render_finished, NULL);
     if (renderer->image_available) vkDestroySemaphore(renderer->device, renderer->image_available, NULL);
     if (renderer->command_pool) vkDestroyCommandPool(renderer->device, renderer->command_pool, NULL);

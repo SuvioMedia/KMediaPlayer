@@ -48,17 +48,6 @@ final enum class io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend :
     final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend> // io.github.kdroidfilter.composemediaplayer/DesktopVideoBackend.values|values#static(){}[0]
 }
 
-final enum class io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode> { // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode|null[0]
-    enum entry COMPOSE // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.COMPOSE|null[0]
-    enum entry PREFER_NATIVE // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.PREFER_NATIVE|null[0]
-
-    final val entries // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.entries|#static{}entries[0]
-        final fun <get-entries>(): kotlin.enums/EnumEntries<io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode> // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.entries.<get-entries>|<get-entries>#static(){}[0]
-
-    final fun valueOf(kotlin/String): io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.valueOf|valueOf#static(kotlin.String){}[0]
-    final fun values(): kotlin/Array<io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode> // io.github.kdroidfilter.composemediaplayer/DesktopVideoSurfaceMode.values|values#static(){}[0]
-}
-
 final enum class io.github.kdroidfilter.composemediaplayer/InterruptionMode : kotlin/Enum<io.github.kdroidfilter.composemediaplayer/InterruptionMode> { // io.github.kdroidfilter.composemediaplayer/InterruptionMode|null[0]
     enum entry DoNotMix // io.github.kdroidfilter.composemediaplayer/InterruptionMode.DoNotMix|null[0]
     enum entry DuckOthers // io.github.kdroidfilter.composemediaplayer/InterruptionMode.DuckOthers|null[0]

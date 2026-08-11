@@ -34,11 +34,19 @@ class JvmDesktopBackendSelectionTest {
             ).forcedJvmDesktopBackend(),
         )
         assertEquals(
-            JVM_DESKTOP_BACKEND_LIBVLC_NATIVE_VIEW,
+            JVM_DESKTOP_BACKEND_UNSUPPORTED_NATIVE_VIEW,
             VideoPlaybackOptions(
                 dynamicRangePolicy = DynamicRangePolicy.FORCE_SDR,
                 desktopVideoBackend = DesktopVideoBackend.LIBVLC_NATIVE,
             ).forcedJvmDesktopBackend(),
+        )
+    }
+
+    @Test
+    fun `native child view compatibility value resolves to controlled unsupported route`() {
+        assertEquals(
+            "Desktop native child-view video output is unsupported. Use the platform or MPV TextureView backend.",
+            unsupportedDesktopNativeVideoSurfaceException().message,
         )
     }
 }

@@ -8,6 +8,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import dev.nucleusframework.window.tao.MacTextureViewProducerInfo
+import dev.nucleusframework.window.tao.TextureViewHostCapabilities
+import dev.nucleusframework.window.tao.TextureViewHostDynamicRange
+import dev.nucleusframework.window.tao.TextureViewHostPixelFormat
+import dev.nucleusframework.window.tao.TextureViewHostPresentationState
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
@@ -51,6 +56,7 @@ import io.github.kdroidfilter.composemediaplayer.RendererColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.StartedExternalHlsFallback
 import io.github.kdroidfilter.composemediaplayer.SubtitleFormat
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.TexturePresentationOutputRequirement
 import io.github.kdroidfilter.composemediaplayer.TrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
 import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineController
@@ -71,11 +77,14 @@ import io.github.kdroidfilter.composemediaplayer.VideoSurfaceKind
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import io.github.kdroidfilter.composemediaplayer.allowsExternalSourceAdapter
 import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.desktopCanvasRendererLabel
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.usesDesktopCanvasProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.explicitFallbackBackend
+import io.github.kdroidfilter.composemediaplayer.hasPresentedTextureFrameAfter
 import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
-import io.github.kdroidfilter.composemediaplayer.jvmCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
 import io.github.kdroidfilter.composemediaplayer.normalizeUnixLocalFileUriForPlayback
+import io.github.kdroidfilter.composemediaplayer.prefersColorManagedTexture
 import io.github.kdroidfilter.composemediaplayer.prepareSourceWithExtensions
 import io.github.kdroidfilter.composemediaplayer.profile7To81MappingOrNull
 import io.github.kdroidfilter.composemediaplayer.renderingInfoLabel
@@ -85,7 +94,6 @@ import io.github.kdroidfilter.composemediaplayer.sanitizedRequestHeaders
 import io.github.kdroidfilter.composemediaplayer.subtitle.loadSubtitleContent
 import io.github.kdroidfilter.composemediaplayer.subtitleTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.toConfirmedDecoderCapabilities
-import io.github.kdroidfilter.composemediaplayer.usesJvmCanvasProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.secondsAsDuration
@@ -176,7 +184,32 @@ internal fun visibleLibVlcFrameDimension(
 ): Int = probedDimension?.takeIf { it in 1..decodedDimension } ?: decodedDimension
 
 internal fun shouldUseMacNativeAvFoundationPresentation(surfaceMode: DesktopVideoSurfaceMode): Boolean =
-    surfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE
+    surfaceMode.prefersColorManagedTexture
+
+private fun TextureViewHostCapabilities.toDisplayColorCapabilities(): DisplayColorCapabilities {
+    if (presentationState == TextureViewHostPresentationState.UNAVAILABLE) {
+        return DisplayColorCapabilities()
+    }
+    val ranges =
+        buildSet {
+            add(VideoDynamicRange.SDR)
+            if (actualDynamicRange == TextureViewHostDynamicRange.HDR) {
+                add(VideoDynamicRange.HDR10)
+                add(VideoDynamicRange.HDR10_PLUS)
+                add(VideoDynamicRange.HLG)
+                // The controlled renderer converts supported Dolby Vision profiles into
+                // extended-linear output; this is not native Dolby Vision passthrough.
+                add(VideoDynamicRange.DOLBY_VISION)
+            }
+        }
+    return DisplayColorCapabilities(
+        isKnown = true,
+        supportedDynamicRanges = ranges,
+        minLuminanceNits = null,
+        maxLuminanceNits = maximumLuminanceNits,
+        referenceWhiteNits = sdrWhiteLevelNits,
+    )
+}
 
 /**
  * libVLC's AppKit drawable can present ordinary flat video without copying pixels. Projection and
@@ -186,7 +219,7 @@ internal fun shouldUseMacNativeAvFoundationPresentation(surfaceMode: DesktopVide
 internal fun shouldUseMacLibVlcNativeVideoOutput(
     projection: VideoProjectionSettings,
     textureCrop: VideoTextureCrop,
-): Boolean = !projection.usesJvmCanvasProjectionRenderer(textureCrop)
+): Boolean = !projection.usesDesktopCanvasProjectionRenderer(textureCrop)
 
 internal data class MacProjectionTextureViewport(
     val width: Int,
@@ -262,10 +295,8 @@ private fun DesktopVideoBackend.requestsLibVlcExplicitly(): Boolean =
 
 private fun DesktopVideoBackend.forcedMacFallbackBackend(): String? =
     when (this) {
-        // Preserve the public legacy enum value while removing the duplicate frame-copy backend
-        // from the macOS runtime model.
-        DesktopVideoBackend.LIBVLC -> "libvlc-native-view"
-        DesktopVideoBackend.LIBVLC_NATIVE -> "libvlc-native-view"
+        DesktopVideoBackend.LIBVLC -> "libvlc"
+        DesktopVideoBackend.LIBVLC_NATIVE -> "unsupported-native-view"
         DesktopVideoBackend.PLATFORM -> "platform"
         DesktopVideoBackend.AUTO -> null
     }
@@ -436,13 +467,19 @@ class MacVideoPlayerState(
     private val dynamicRangePolicy: DynamicRangePolicy = playbackOptions.dynamicRangePolicy
     private val desktopVideoBackend: DesktopVideoBackend = playbackOptions.desktopVideoBackend
     private val nativeAvFoundationSurfaceRequested: Boolean =
-        playbackOptions.desktopVideoSurfaceMode == DesktopVideoSurfaceMode.PREFER_NATIVE
+        playbackOptions.desktopVideoSurfaceMode.prefersColorManagedTexture
     private val hdrToneMappingRequested: Boolean =
         dynamicRangePolicy == DynamicRangePolicy.AUTO ||
             dynamicRangePolicy == DynamicRangePolicy.PREFER_HDR ||
             dynamicRangePolicy == DynamicRangePolicy.FORCE_SDR
     private var hdrMetalSurfaceAllowed: Boolean by mutableStateOf(false)
     private var nativeHdrSurfaceAttached: Boolean = false
+
+    @Volatile private var textureViewHostCapabilities: TextureViewHostCapabilities =
+        TextureViewHostCapabilities.UNAVAILABLE
+    private val textureProducerFrameSerial = AtomicLong(-1L)
+    private val textureProducerHostGeneration = AtomicLong(-1L)
+    private val textureProducerHostPresentCount = AtomicLong(-1L)
     private var metalTextureNativeView: Long = 0L
     private val metalTextureAttachmentMutex = Mutex()
     private val metalTextureAttachmentToken = AtomicLong(0L)
@@ -1126,7 +1163,7 @@ class MacVideoPlayerState(
     }
 
     private fun usesMacMetalProjectionRenderer(): Boolean =
-        projection.usesJvmCanvasProjectionRenderer(projectionTextureCrop)
+        projection.usesDesktopCanvasProjectionRenderer(projectionTextureCrop)
 
     private fun activeMacRendererColorCapabilities(): RendererColorCapabilities =
         macControlledMetalRendererCapabilities(
@@ -1283,9 +1320,8 @@ class MacVideoPlayerState(
         val surfaceKind =
             when {
                 wantsNativeSurface && nativeHdrSurfaceAttached ->
-                    VideoSurfaceKind.CONTROLLED_GPU_SURFACE
+                    VideoSurfaceKind.TEXTURE_VIEW
                 wantsNativeSurface -> VideoSurfaceKind.UNKNOWN
-                shouldUseLibVlcNativeSurface() -> VideoSurfaceKind.NATIVE_LAYER
                 else -> VideoSurfaceKind.COMPOSE_CANVAS
             }
         val plan =
@@ -1629,6 +1665,27 @@ class MacVideoPlayerState(
         }
     }
 
+    internal fun onTextureProducerFrameSubmitted(frameSerial: Long) {
+        val capabilities = textureViewHostCapabilities
+        textureProducerFrameSerial.set(frameSerial)
+        textureProducerHostGeneration.set(capabilities.generation)
+        textureProducerHostPresentCount.set(capabilities.presentedFrameCount)
+        requestAttachedHdrColorPipelineRefresh()
+    }
+
+    internal fun onTextureViewHostCapabilities(capabilities: TextureViewHostCapabilities) {
+        textureViewHostCapabilities = capabilities
+        val hostAvailable =
+            capabilities.presentationState != TextureViewHostPresentationState.UNAVAILABLE &&
+                capabilities.producerInfo is MacTextureViewProducerInfo &&
+                capabilities.outputPixelFormat != TextureViewHostPixelFormat.UNKNOWN
+        if (!hostAvailable) {
+            nativeHdrSurfaceAttached = false
+        }
+        activeDisplayColorCapabilities = capabilities.toDisplayColorCapabilities()
+        requestAttachedHdrColorPipelineRefresh()
+    }
+
     internal fun usesProjectedMetalTexture(): Boolean = usesMacMetalProjectionRenderer()
 
     private fun retireNativePlayerLocked(ptr: Long) {
@@ -1694,7 +1751,10 @@ class MacVideoPlayerState(
             }
 
             val nextVerification =
-                if (runCatching { MacNativeBridge.nIsHdrOutputReady(ptr) }.getOrDefault(false)) {
+                if (
+                    runCatching { MacNativeBridge.nIsHdrOutputReady(ptr) }.getOrDefault(false) &&
+                    hasPresentedSubmittedTextureFrame()
+                ) {
                     ColorPipelineVerification.RENDERER_CONFIGURED
                 } else {
                     ColorPipelineVerification.NONE
@@ -1703,6 +1763,16 @@ class MacVideoPlayerState(
                 refreshColorPipelineOutput(nextVerification)
             }
         }
+    }
+
+    private fun hasPresentedSubmittedTextureFrame(): Boolean {
+        if (textureProducerFrameSerial.get() < 0L) return false
+        val capabilities = textureViewHostCapabilities
+        return capabilities.hasPresentedTextureFrameAfter(
+            submittedGeneration = textureProducerHostGeneration.get(),
+            submittedPresentCount = textureProducerHostPresentCount.get(),
+            outputRequirement = TexturePresentationOutputRequirement.FP16_SCRGB_OUTPUT,
+        )
     }
 
     private fun handleMetalProjectionRendererFailure(detail: String) {
@@ -1807,12 +1877,12 @@ class MacVideoPlayerState(
         when {
             shouldUseNativeVideoSurface() -> null
             ffmpegHlsFallback != null ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )
             nativeBackendUsesLibVlc ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "libVLC viewport BGRA -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )
@@ -1827,12 +1897,12 @@ class MacVideoPlayerState(
             shouldUseHdrMetalSurface() ->
                 "AVPlayerItemVideoOutput P010/NV12 -> FP16 Metal -> Tao TextureView"
             hdrToneMappingRequested ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "AVPlayerItemVideoOutput tone-mapped BT.709 -> Compose Canvas",
                     textureCrop = projectionTextureCrop,
                 )
             else ->
-                projection.jvmCanvasRendererLabel(
+                projection.desktopCanvasRendererLabel(
                     baseRenderer = "CVPixelBuffer -> Compose Canvas (Skia)",
                     textureCrop = projectionTextureCrop,
                 )
@@ -2109,7 +2179,7 @@ class MacVideoPlayerState(
                     if (usesNativeVideoOutput) {
                         "libVLC native NSView"
                     } else {
-                        projection.jvmCanvasRendererLabel(projectionTextureCrop)
+                        projection.desktopCanvasRendererLabel(projectionTextureCrop)
                     },
                 audioRenderer = "libVLC / AUHAL",
                 subtitleRenderer = null,
@@ -2522,6 +2592,10 @@ class MacVideoPlayerState(
         uri: String,
         requestHeaders: Map<String, String>,
     ): MacResolvedLibVlcBackend? {
+        if (desktopVideoBackend == DesktopVideoBackend.LIBVLC_NATIVE) {
+            throw io.github.kdroidfilter.composemediaplayer
+                .unsupportedDesktopNativeVideoSurfaceException()
+        }
         val forcedDesktopBackend = desktopVideoBackend.forcedMacFallbackBackend()
         if (playbackOptions.desktopMediaSourcePolicy != DesktopMediaSourcePolicy.INHERIT &&
             !desktopVideoBackend.requestsLibVlcExplicitly()
@@ -2552,8 +2626,11 @@ class MacVideoPlayerState(
             "auto" ->
                 ExternalVlcLocator.findLibVlc()?.let(::MacResolvedLibVlcBackend)
             "libvlc-native-view", "libvlc-native", "libvlc-view", "libvlc-nsview" ->
-                ExternalVlcLocator.findLibVlc()?.let(::MacResolvedLibVlcBackend)
-                    ?: throw missingLibVlcBackendException()
+                throw io.github.kdroidfilter.composemediaplayer
+                    .unsupportedDesktopNativeVideoSurfaceException()
+            "unsupported-native-view" ->
+                throw io.github.kdroidfilter.composemediaplayer
+                    .unsupportedDesktopNativeVideoSurfaceException()
             "ffmpeg", "kmediabridge", "bridge", "vlc" -> null
             else -> null
         }
@@ -2709,8 +2786,7 @@ class MacVideoPlayerState(
         }
 
         val wantsLibVlc = libVlcBackend != null
-        val wantsLibVlcNativeVideoOutput =
-            wantsLibVlc && shouldUseMacLibVlcNativeVideoOutput(projection, projectionTextureCrop)
+        val wantsLibVlcNativeVideoOutput = false
         val needsBackendReplacement =
             synchronized(nativeInstanceLock) {
                 playerPtr != 0L &&

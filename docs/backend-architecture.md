@@ -10,7 +10,8 @@ application
 ├── composemediaplayer-dolbyvision ─────> composemediaplayer-extension-api ──┤
 ├── composemediaplayer-kmediabridge ────> composemediaplayer-extension-api ──┤
 ├── composemediaplayer-desktop-tao ────────────────────────────────────> composemediaplayer-core
-└── composemediaplayer-mpv ───────────────────────────────────────────────> desktop-tao ──> core
+├── composemediaplayer-mpv ───────────────────────────────────────────────> desktop-tao ──> core
+└── composemediaplayer-libvlc ────────────────────────────────────────────> desktop-tao ──> core
 ```
 
 Backend and extension implementations never depend on the default player:
@@ -35,10 +36,15 @@ Backend and extension implementations never depend on the default player:
   and all bundled desktop paths depend directly on the matching KMediaMpv
   runtime. On iOS, the matching KMediaMpv CocoaPod embeds the signed
   XCFramework graph at build time. Custom native runtimes remain opt-in.
+- `composemediaplayer-libvlc` owns the optional Android/JVM KMediaVlc adapter.
+  Android uses the runtime's direct `Surface` boundary, while JVM uses the
+  shared Tao renderer for GPU TextureView output or the bounded CPU/Skia
+  projection path. Each target depends directly on its matching KMediaVlc
+  runtime artifact; this adapter never searches for a user-installed VLC.
 
 The `verifyBackendModuleBoundaries` Gradle task rejects a dependency from the
-default player to MPV or KMediaBridge/FFmpeg, from an extension implementation
-to the default player, from MPV to the default player, or from core and the
+default player to MPV or KMediaBridge/FFmpeg, from an optional implementation
+to the default player, from MPV or libVLC to the default player, or from core and the
 extension API to implementation modules.
 
 ## Full desktop playback
@@ -162,10 +168,11 @@ platform renderer.
 
 An application that uses only an optional backend can omit
 `composemediaplayer` entirely and render through `BackendVideoPlayerSurface`
-from core. The isolated MPV consumer test is intentionally compiled with only
-the published `composemediaplayer-mpv` coordinate; its transitive graph contains
-core and the platform runtime where one is published, but no default-player
-implementation.
+from core. The isolated MPV and libVLC consumer tests are intentionally compiled
+with only their published adapter coordinate; each transitive graph contains
+core and its platform runtime, but no default-player implementation. The libVLC
+consumer remains an explicit local-composite gate until the KMediaVlc runtime is
+publication-eligible.
 
 ## Implementing another backend
 
@@ -208,6 +215,38 @@ bundle after CocoaPods embeds the audited graph. This keeps signing and App
 Store packaging under the application's control and avoids an invalid
 extract-and-load design inside the iOS sandbox.
 
+## Bundled libVLC 4 split
+
+The libVLC adapter keeps target-neutral options, backend selection, and public
+availability types in `commonMain`. Its JVM actual retains the existing desktop
+API facade and selects KMediaVlc GPU push for flat playback or CPU pull for
+projected, stereo, rotated, and cropped SDR playback. The CPU route feeds the
+same Skia projection shader as the other Tao desktop backends. Native GPU VR is
+not claimed until the runtime and host expose a verified projection pass.
+
+The Android actual supports API 28+ on `arm64-v8a` and `armeabi-v7a`. It owns a
+single direct libVLC `Surface`, preserves source intent across surface and
+fullscreen replacement, accepts path, `file:`, `content:`, and HTTP(S) input,
+and supports automatic or software-only decoding. Its first layout contract is
+`ContentScale.Fit`. Projection, texture crop, other content scales, explicit
+desktop frame transports, non-default dynamic-range policies, and non-default Dolby
+Vision fail closed rather than silently selecting different geometry or color.
+
+The iOS actual publishes ARM64 device and simulator variants through CocoaPods.
+It loads the stable KMediaVlc ABI only from the signed application's private
+framework directory and never searches for a system or user-installed VLC.
+The first transport is CPU pull: bounded premultiplied RGBA8/sRGB frames are
+copied into adapter-owned CoreGraphics images before the native frame is
+released. Media generations fence stale snapshots and frames, while looping
+reopens the exact source request. GPU push, projection/crop, unverified HDR or
+Dolby Vision policies, and desktop runtime paths fail closed.
+
+The isolated consumer publishes core, desktop Tao, and all current libVLC
+adapter variants to a runner-local Maven repository in one Gradle invocation,
+then compiles Android and runs JVM tests in a second invocation. KMediaVlc is
+provided as an explicit composite only while its native release remains gated;
+the consumer never trusts or publishes the candidate runtime itself.
+
 ## Distribution and licensing boundary
 
 The core, extension API, default player, and adapters use this repository's license. The
@@ -222,3 +261,9 @@ API and translation layer. The separately published KMediaBridge client contains
 library and binds the same KMediaFfmpegRuntime ID as KMediaMpv. An application can therefore contain
 both backends but only one shared FFmpeg/libass graph. A caller-selected external compatible runtime
 remains the caller's licensing responsibility.
+
+KMediaVlc follows the same adapter/runtime boundary. KMediaPlayer publishes only the backend-facing
+Kotlin adapter. The separately versioned KMediaVlc packages own the pinned libVLC 4 binaries,
+manifests, source/relinking material, notices, and platform eligibility decisions. Android and Apple
+native payloads remain unpublished candidates until their legal and physical-device gates close;
+local source, host, emulator, or consumer-smoke success does not promote them to release artifacts.

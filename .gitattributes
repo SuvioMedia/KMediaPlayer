@@ -11,4 +11,5 @@ mediaplayer-ass/api/** whitespace=-blank-at-eof
 mediaplayer-ass/src/androidMain/native/ass/** whitespace=-blank-at-eof,-blank-at-eol
 mediaplayer-ass/src/androidMain/resources/META-INF/kmediaplayer/android-ass/** whitespace=-blank-at-eof,-blank-at-eol
 mediaplayer-core/api/** whitespace=-blank-at-eof
+mediaplayer-libvlc/api/** whitespace=-blank-at-eof
 mediaplayer-mpv/api/** whitespace=-blank-at-eof

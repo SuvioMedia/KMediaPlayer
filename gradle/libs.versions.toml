@@ -9,8 +9,9 @@ kotlinx-coroutines = "1.11.0"
 kotlinxBrowserWasmJs = "0.5.0"
 kotlinxDatetime = "0.8.0"
 compose = "1.11.1"
-nucleus = "2.3.2-kmp-hdr.1"
+nucleus = "2.3.2-kmp-hdr.2"
 kmediaMpv = "0.3.0-rc.9"
+kmediaVlc = "0.1.0-SNAPSHOT"
 kmediaBridge = "0.5.0-rc.7"
 kmediaWasmEngine = "0.4.0-alpha.2"
 androidx-activityCompose = "1.13.0"
@@ -45,6 +46,8 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 kmedia-mpv-runtime-android = { module = "io.github.shusek:kmedia-mpv-runtime-android", version.ref = "kmediaMpv" }
 kmedia-mpv-runtime-desktop = { module = "io.github.shusek:kmedia-mpv-runtime-desktop", version.ref = "kmediaMpv" }
+kmedia-vlc-runtime-android = { module = "io.github.shusek:kmedia-vlc-runtime-android", version.ref = "kmediaVlc" }
+kmedia-vlc-runtime-desktop = { module = "io.github.shusek:kmedia-vlc-runtime-desktop", version.ref = "kmediaVlc" }
 kmedia-bridge-api = { module = "io.github.shusek:kmedia-bridge-api", version.ref = "kmediaBridge" }
 kmedia-bridge-ffmpeg = { module = "io.github.shusek:kmedia-bridge-ffmpeg", version.ref = "kmediaBridge" }
 kmedia-wasm-engine = { module = "io.github.shusek:kmedia-wasm-engine", version.ref = "kmediaWasmEngine" }

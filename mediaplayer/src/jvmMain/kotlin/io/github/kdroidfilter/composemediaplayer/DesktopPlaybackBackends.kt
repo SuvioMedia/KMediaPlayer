@@ -17,7 +17,7 @@ fun automaticDesktopPlaybackBackend(
         playbackOptions =
             playbackOptions.copy(
                 desktopVideoBackend = DesktopVideoBackend.AUTO,
-                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
                 desktopMediaSourcePolicy = DesktopMediaSourcePolicy.AUTO,
             ),
     ).asDesktopPlaybackBackend(
@@ -39,7 +39,7 @@ fun platformDesktopPlaybackBackend(
         playbackOptions =
             playbackOptions.copy(
                 desktopVideoBackend = DesktopVideoBackend.PLATFORM,
-                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
                 desktopMediaSourcePolicy = DesktopMediaSourcePolicy.DIRECT,
             ),
     ).asDesktopPlaybackBackend(
@@ -49,7 +49,11 @@ fun platformDesktopPlaybackBackend(
         sourceProbe = { request -> platformDirectDesktopProbe(request, playbackOptions) },
     )
 
-/** System libVLC rendered into a native desktop view; never a Compose frame-copy route. */
+/** Compatibility entry for the removed desktop libVLC child-view backend. */
+@Deprecated(
+    message = "Add composemediaplayer-libvlc and use its libVlcDesktopPlaybackBackend.",
+    level = DeprecationLevel.HIDDEN,
+)
 fun libVlcDesktopPlaybackBackend(
     audioMode: AudioMode = AudioMode(),
     cacheConfig: CacheConfig = CacheConfig(),
@@ -61,7 +65,7 @@ fun libVlcDesktopPlaybackBackend(
         playbackOptions =
             playbackOptions.copy(
                 desktopVideoBackend = DesktopVideoBackend.LIBVLC_NATIVE,
-                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
                 desktopMediaSourcePolicy = DesktopMediaSourcePolicy.DIRECT,
             ),
     ).asDesktopPlaybackBackend(
@@ -69,14 +73,10 @@ fun libVlcDesktopPlaybackBackend(
         id = "libvlc",
         displayName = "libVLC native view",
         availabilityProbe = {
-            if (hasLibVlcBackend()) {
-                DesktopBackendAvailability.Available("System libVLC native view")
-            } else {
-                DesktopBackendAvailability.Unavailable(
-                    reason = "libVLC was not found.",
-                    guidance = "Install VLC/libVLC or select Auto, Platform or MPV.",
-                )
-            }
+            DesktopBackendAvailability.Unavailable(
+                reason = "Desktop libVLC native child views are no longer supported.",
+                guidance = "Select Auto, Platform or MPV for GPU TextureView presentation.",
+            )
         },
     )
 
@@ -92,7 +92,7 @@ fun adaptedPlatformDesktopPlaybackBackend(
         playbackOptions =
             playbackOptions.copy(
                 desktopVideoBackend = DesktopVideoBackend.PLATFORM,
-                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
                 desktopMediaSourcePolicy = DesktopMediaSourcePolicy.AUTO,
             ),
     ).asDesktopPlaybackBackend(
@@ -165,7 +165,7 @@ fun vlcHlsDesktopPlaybackBackend(
         playbackOptions =
             playbackOptions.copy(
                 desktopVideoBackend = DesktopVideoBackend.PLATFORM,
-                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
                 desktopMediaSourcePolicy = DesktopMediaSourcePolicy.VLC_HLS,
             ),
     ).asDesktopPlaybackBackend(
@@ -202,7 +202,7 @@ private fun kMediaBridgeDesktopPlaybackBackend(
         playbackOptions =
             playbackOptions.copy(
                 desktopVideoBackend = DesktopVideoBackend.PLATFORM,
-                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_NATIVE,
+                desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
                 desktopMediaSourcePolicy = DesktopMediaSourcePolicy.KMEDIA_BRIDGE,
             ),
     ).asDesktopPlaybackBackend(

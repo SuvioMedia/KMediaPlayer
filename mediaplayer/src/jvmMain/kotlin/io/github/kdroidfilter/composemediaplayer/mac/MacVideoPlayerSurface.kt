@@ -18,15 +18,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import dev.nucleusframework.window.tao.TextureColorInfo
 import dev.nucleusframework.window.tao.TextureView
 import dev.nucleusframework.window.tao.currentMacMetalTextureHost
 import dev.nucleusframework.window.tao.nucleusIOSurfaceTextureSource
 import dev.nucleusframework.window.tao.rememberTextureViewController
-import io.github.kdroidfilter.composemediaplayer.JvmProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurface
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoSurfaceKind
-import io.github.kdroidfilter.composemediaplayer.desktop.tao.TaoNativeVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopColorManagedTextureVideoView
+import io.github.kdroidfilter.composemediaplayer.desktop.tao.DesktopProjectedVideoCanvas
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import kotlinx.coroutines.Dispatchers
@@ -34,7 +33,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
-/** Renders macOS video through an AppKit `NSView` or the Java-toolkit-free Skia fallback. */
+/** Renders macOS video through the color-managed TextureView or the explicit SDR canvas. */
 @Composable
 internal fun MacVideoPlayerSurface(
     playerState: MacVideoPlayerState,
@@ -56,7 +55,6 @@ private fun MacVideoSurfaceContent(
 ) {
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
     val metalTextureRequested = playerState.shouldUseHdrMetalSurface()
-    val nativeSurfaceRequested = playerState.shouldUseLibVlcNativeSurface()
     val videoModifier =
         contentScale.toCanvasModifier(
             playerState.aspectRatio,
@@ -65,7 +63,7 @@ private fun MacVideoSurfaceContent(
         )
 
     val hostModifier =
-        if (metalTextureRequested || nativeSurfaceRequested) {
+        if (metalTextureRequested) {
             modifier
         } else {
             modifier.onSizeChanged { size ->
@@ -97,31 +95,10 @@ private fun MacVideoSurfaceContent(
             // The media follows the same aspect-ratio rectangle as the Canvas path, while player
             // chrome continues to own the complete viewport.
             MacVideoOverlayContent(playerState, overlay)
-        } else if (nativeSurfaceRequested) {
-            val surface =
-                remember(playerState, playerState.nativeSurfaceGeneration, nativeSurfaceRequested, contentScale) {
-                    TaoNativeVideoSurface(
-                        kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
-                        createHandle = { playerState.createNativeVideoView(contentScale.toHdrMetalMode()) },
-                        disposeHandle = { handle -> playerState.disposeNativeVideoView(handle) },
-                    )
-                }
-            TaoNativeVideoView(
-                surface = surface,
-                // The native view and Compose overlay represent the complete player viewport.
-                // AVPlayerLayer/Metal applies ContentScale to the media inside that viewport.
-                modifier = Modifier.fillMaxSize(),
-                overlay = { MacVideoOverlayContent(playerState, overlay) },
-                onAttached = {
-                    playerState.onNativeVideoSurfaceAttached()
-                    latestOnSurfaceAttached()
-                },
-                onUnavailable = { latestOnSurfaceAttached() },
-            )
         } else {
             val currentFrame by remember(playerState) { playerState.currentFrameState }
             currentFrame?.let { frame ->
-                JvmProjectedVideoCanvas(
+                DesktopProjectedVideoCanvas(
                     frame = frame,
                     projection = playerState.projection,
                     projectionView = playerState.projectionView,
@@ -157,20 +134,13 @@ private fun MacMetalTextureVideoView(
     val nativeView = host?.nativeView ?: 0L
     val latestOnSurfaceAttached by rememberUpdatedState(onSurfaceAttached)
     if (commandQueue == 0L || nativeView == 0L) {
-        val fallbackSurface =
-            remember(playerState, playerState.nativeSurfaceGeneration, contentScale) {
-                TaoNativeVideoSurface(
-                    kind = TaoNativeVideoSurfaceKind.MACOS_NS_VIEW,
-                    createHandle = { playerState.createNativeVideoView(contentScale.toHdrMetalMode()) },
-                    disposeHandle = { handle -> playerState.disposeNativeVideoView(handle) },
-                )
-            }
-        TaoNativeVideoView(
-            surface = fallbackSurface,
+        DesktopColorManagedTextureVideoView(
+            source = null,
+            controller = rememberTextureViewController(),
             modifier = modifier,
-            overlay = {},
-            onAttached = { latestOnSurfaceAttached() },
-            onUnavailable = { latestOnSurfaceAttached() },
+            contentScale = contentScale,
+            onHostCapabilitiesChanged = playerState::onTextureViewHostCapabilities,
+            onSurfaceAttached = { latestOnSurfaceAttached() },
         )
         return
     }
@@ -231,6 +201,7 @@ private fun MacMetalTextureVideoView(
                             ioSurface = frame.ioSurface,
                             widthPx = frame.width,
                             heightPx = frame.height,
+                            colorInfo = TextureColorInfo.EXTENDED_LINEAR_SRGB_PREMULTIPLIED,
                         )
                     previousSource = source
                     source = nextSource
@@ -238,6 +209,7 @@ private fun MacMetalTextureVideoView(
                 if (frame.frameSerial != lastFrameSerial) {
                     lastFrameSerial = frame.frameSerial
                     controller.markFrameAvailable()
+                    playerState.onTextureProducerFrameSubmitted(frame.frameSerial)
                 }
             }
             delay(METAL_TEXTURE_POLL_INTERVAL)
@@ -261,8 +233,9 @@ private fun MacMetalTextureVideoView(
                 contentScale = contentScale,
             )
         }
-        TextureView(
+        DesktopColorManagedTextureVideoView(
             source = source,
+            controller = controller,
             modifier =
                 Modifier
                     .fillMaxSize()
@@ -277,10 +250,11 @@ private fun MacMetalTextureVideoView(
                             )
                         playerState.recordMetalTextureGeometry(scale.scaleX, scale.scaleY)
                     },
-            controller = controller,
             // A projected texture is rebuilt for the final viewport aspect. Until that new texture is
             // ready, honour the caller's scale mode for the previous one instead of stretching it.
             contentScale = contentScale,
+            onHostCapabilitiesChanged = playerState::onTextureViewHostCapabilities,
+            onSurfaceAttached = { latestOnSurfaceAttached() },
         )
     }
 }
@@ -316,21 +290,8 @@ private fun MacVideoOverlayContent(
     Box(modifier = Modifier.fillMaxSize()) { overlay() }
 }
 
-private fun ContentScale.toHdrMetalMode(): Int =
-    when (this) {
-        ContentScale.Crop,
-        ContentScale.FillWidth,
-        ContentScale.FillHeight,
-        -> HDR_METAL_SCALE_CROP
-        ContentScale.FillBounds -> HDR_METAL_SCALE_FILL
-        else -> HDR_METAL_SCALE_FIT
-    }
-
 private fun ContentScale.preservesMediaAspectRatio(): Boolean =
     this != ContentScale.Crop && this != ContentScale.FillBounds
 
-private const val HDR_METAL_SCALE_FIT = 0
-private const val HDR_METAL_SCALE_CROP = 1
-private const val HDR_METAL_SCALE_FILL = 2
 private const val METAL_TEXTURE_INFO_SIZE = 4
 private val METAL_TEXTURE_POLL_INTERVAL = 8.milliseconds

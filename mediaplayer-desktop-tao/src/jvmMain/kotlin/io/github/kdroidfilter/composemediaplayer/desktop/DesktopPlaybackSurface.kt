@@ -18,8 +18,8 @@ import io.github.kdroidfilter.composemediaplayer.unwrapDelegatingState
 /**
  * Renders a desktop playback session inside the caller's current Tao window.
  *
- * The application owns window creation and fullscreen. Native renderers are mounted as child views
- * at this composable's bounds, with [overlay] kept in Nucleus' Compose overlay scene.
+ * The application owns window creation and fullscreen. Video surfaces are mounted at this
+ * composable's bounds, with [overlay] kept in Nucleus' Compose scene.
  */
 @Composable
 public fun DesktopPlaybackSurface(
@@ -150,7 +150,7 @@ private fun DesktopBackendPlaybackSurface(
     }
 }
 
-/** Backend SPI used by [DesktopPlaybackSurface] to observe native child attachment. */
+/** Backend SPI used by [DesktopPlaybackSurface] to observe Tao surface attachment. */
 @Stable
 @ExperimentalComposeMediaPlayerBackendApi
 public interface TaoPlaybackSurfaceProvider {

@@ -1,0 +1,5 @@
+package = io.github.kdroidfilter.composemediaplayer.libvlc.native
+headers = ComposeMediaPlayerLibVlcBridge.h
+headerFilter = ComposeMediaPlayerLibVlcBridge.h
+staticLibraries = libcomposemediaplayer_libvlc_bridge.a
+linkerOpts = -framework CoreFoundation -framework CoreGraphics -framework UIKit

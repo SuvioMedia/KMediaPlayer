@@ -202,6 +202,30 @@ tasks.register("publishConsumerSmokeArtifacts") {
     )
 }
 
+tasks.register("publishLibVlcConsumerSmokeArtifacts") {
+    group = "verification"
+    description = "Publishes the minimal desktop and Android graph for the isolated libVLC consumer smoke test."
+    dependsOn(
+        ":mediaplayer-core:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-core:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-core:publishAndroidPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-tao:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-desktop-tao:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishKotlinMultiplatformPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishJvmPublicationToConsumerSmokeRepository",
+        ":mediaplayer-libvlc:publishAndroidPublicationToConsumerSmokeRepository",
+    )
+}
+
+tasks.register("libVlcConsumerSmokeTest") {
+    group = "verification"
+    description = "Compiles Android and runs JVM consumers against locally published libVLC adapter artifacts."
+    dependsOn(
+        ":consumer-smoke-libvlc:compileAndroidMain",
+        ":consumer-smoke-libvlc:jvmTest",
+    )
+}
+
 val verifyBackendModuleBoundaries =
     tasks.register<VerifyBackendModuleBoundaries>("verifyBackendModuleBoundaries") {
         group = "verification"
@@ -246,6 +270,7 @@ gradle.projectsEvaluated {
                 project(":mediaplayer-ads-core"),
                 project(":mediaplayer-dolbyvision"),
                 project(":mediaplayer-kmediabridge"),
+                project(":mediaplayer-libvlc"),
             ).flatMap { extensionProject ->
                 extensionProject
                     .productionProjectDependencyPaths()

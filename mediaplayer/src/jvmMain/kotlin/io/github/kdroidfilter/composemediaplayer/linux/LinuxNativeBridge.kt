@@ -9,7 +9,7 @@ import java.nio.ByteBuffer
  */
 internal object LinuxNativeBridge {
     /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the Linux .so. */
-    private const val EXPECTED_NATIVE_VERSION = 12
+    private const val EXPECTED_NATIVE_VERSION = 13
 
     init {
         runCatching {
@@ -181,6 +181,29 @@ internal object LinuxNativeBridge {
         width: Int,
         height: Int,
     ): Int
+
+    @JvmStatic external fun nConfigureTextureOutput(
+        handle: Long,
+        width: Int,
+        height: Int,
+        inputP010: Boolean,
+        outputHdr: Boolean,
+        integerConfiguration: IntArray,
+        floatingConfiguration: FloatArray,
+    ): Boolean
+
+    @JvmStatic external fun nDetachTextureOutput(handle: Long)
+
+    /** serial, generation, size, FourCC, fd, stride, offset, modifier and acquire fence. */
+    @JvmStatic external fun nAcquireTextureFrame(handle: Long): LongArray?
+
+    @JvmStatic external fun nReleaseTextureFrame(
+        handle: Long,
+        generation: Long,
+        serial: Long,
+        dmaBufFd: Int,
+        releaseFenceFd: Int,
+    )
 
     // Timing
     @JvmStatic external fun nGetVideoDuration(handle: Long): Double

@@ -133,6 +133,84 @@ internal fun buildLinuxHdrProjectionNativeConfiguration(
     )
 }
 
+/**
+ * Configuration for the headless TextureView producer. HDR keeps the full
+ * metadata-aware path above; SDR uses transfer code 2 and is either copied as
+ * BGRA or promoted to P010 for the same projection shader.
+ */
+internal fun buildLinuxTextureNativeConfiguration(
+    source: VideoColorInfo,
+    display: DisplayColorCapabilities,
+    dolbyVisionPolicy: DolbyVisionPolicy,
+    projection: VideoProjectionSettings,
+    projectionView: VideoProjectionViewSettings,
+    textureCrop: VideoTextureCrop,
+    metadataHandling: DynamicMetadataHandling = DynamicMetadataHandling.NONE,
+): LinuxHdrProjectionConfiguration =
+    buildLinuxHdrProjectionNativeConfiguration(
+        source = source,
+        display = display,
+        dolbyVisionPolicy = dolbyVisionPolicy,
+        projection = projection,
+        projectionView = projectionView,
+        textureCrop = textureCrop,
+        metadataHandling = metadataHandling,
+    ) ?: run {
+        val normalizedProjection = projection.normalized()
+        val normalizedView = projectionView.normalized()
+        val crop = textureCrop.normalized()
+        val referenceWhite = display.referenceWhiteNits ?: DEFAULT_HDR_REFERENCE_WHITE_NITS
+        LinuxHdrProjectionConfiguration(
+            integers =
+                intArrayOf(
+                    LINUX_TRANSFER_SDR,
+                    normalizedProjection.projectionType.projectionShaderCode,
+                    normalizedProjection.stereoLayout.nativeCode,
+                    normalizedProjection.eyeOrder.nativeCode,
+                    normalizedProjection.rotation.ordinal,
+                    if (source.range == VideoColorRange.FULL) LINUX_HDR_RANGE_FULL else LINUX_HDR_RANGE_LIMITED,
+                    when (source.matrix) {
+                        VideoColorMatrix.BT601 -> LINUX_HDR_MATRIX_BT601
+                        VideoColorMatrix.BT2020_NCL -> LINUX_HDR_MATRIX_BT2020
+                        else -> LINUX_HDR_MATRIX_BT709
+                    },
+                    when (source.primaries) {
+                        VideoColorPrimaries.BT2020 -> LINUX_HDR_PRIMARIES_BT2020
+                        VideoColorPrimaries.DISPLAY_P3 -> LINUX_HDR_PRIMARIES_DISPLAY_P3
+                        else -> LINUX_HDR_PRIMARIES_BT709
+                    },
+                    0,
+                ),
+            floats =
+                floatArrayOf(
+                    normalizedProjection.fovDegrees,
+                    normalizedView.yawDegrees,
+                    normalizedView.pitchDegrees,
+                    normalizedView.rollDegrees,
+                    normalizedView.zoom,
+                    crop.left,
+                    crop.top,
+                    crop.right,
+                    crop.bottom,
+                    referenceWhite,
+                    0f,
+                    0f,
+                    0f,
+                    0f,
+                    0f,
+                    0f,
+                    0f,
+                    0f,
+                    0f,
+                    referenceWhite,
+                    0f,
+                    0f,
+                    referenceWhite,
+                    referenceWhite,
+                ),
+        )
+    }
+
 private val VideoStereoLayout.nativeCode: Int
     get() =
         when (this) {
@@ -150,6 +228,7 @@ private val VideoEyeOrder.nativeCode: Int
 
 private const val LINUX_HDR_TRANSFER_PQ = 0
 private const val LINUX_HDR_TRANSFER_HLG = 1
+private const val LINUX_TRANSFER_SDR = 2
 private const val LINUX_HDR_RANGE_LIMITED = 0
 private const val LINUX_HDR_RANGE_FULL = 1
 private const val LINUX_HDR_MATRIX_BT2020 = 0

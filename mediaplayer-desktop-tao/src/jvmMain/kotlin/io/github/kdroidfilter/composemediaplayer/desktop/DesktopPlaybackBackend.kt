@@ -10,6 +10,7 @@ public enum class DesktopBackendRoutingTier {
     PLATFORM_DIRECT,
     KMEDIA_BRIDGE_REMUX,
     MPV_NATIVE,
+    LIBVLC_TEXTURE,
     LIBVLC_NATIVE,
     KMEDIA_BRIDGE_TRANSCODE,
 }

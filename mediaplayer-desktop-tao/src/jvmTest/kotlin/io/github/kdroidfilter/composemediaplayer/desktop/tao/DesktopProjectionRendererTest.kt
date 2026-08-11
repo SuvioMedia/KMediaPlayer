@@ -1,5 +1,9 @@
-package io.github.kdroidfilter.composemediaplayer
+@file:OptIn(io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi::class)
 
+package io.github.kdroidfilter.composemediaplayer.desktop.tao
+
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
+import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
@@ -12,14 +16,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class JvmProjectionRendererTest {
+class DesktopProjectionRendererTest {
     @Test
     fun flatVideoWithoutTextureCropUsesPlainCanvasRenderer() {
         val projection = VideoProjectionSettings()
         val textureCrop = VideoTextureCrop()
 
-        assertFalse(projection.usesJvmCanvasProjectionRenderer(textureCrop))
-        assertEquals("Compose Canvas (Skia)", projection.jvmCanvasRendererLabel(textureCrop))
+        assertFalse(projection.usesDesktopCanvasProjectionRenderer(textureCrop))
+        assertEquals("Compose Canvas (Skia)", projection.desktopCanvasRendererLabel(textureCrop))
     }
 
     @Test
@@ -27,8 +31,8 @@ class JvmProjectionRendererTest {
         val projection = VideoProjectionSettings()
         val textureCrop = VideoTextureCrop(left = 0.1f)
 
-        assertTrue(projection.usesJvmCanvasProjectionRenderer(textureCrop))
-        assertEquals("Compose Canvas -> Skia projection shader", projection.jvmCanvasRendererLabel(textureCrop))
+        assertTrue(projection.usesDesktopCanvasProjectionRenderer(textureCrop))
+        assertEquals("Compose Canvas -> Skia projection shader", projection.desktopCanvasRendererLabel(textureCrop))
     }
 
     @Test
@@ -37,7 +41,7 @@ class JvmProjectionRendererTest {
 
         assertEquals(
             "libVLC vmem -> Compose Canvas -> Skia projection shader",
-            projection.jvmCanvasRendererLabel(
+            projection.desktopCanvasRendererLabel(
                 baseRenderer = "libVLC vmem -> Compose Canvas (Skia)",
                 textureCrop = VideoTextureCrop(top = 0.1f),
             ),
@@ -56,7 +60,7 @@ class JvmProjectionRendererTest {
                 lateinit var capturedProjectionShader: Shader
                 lateinit var capturedPaint: Paint
 
-                withJvmProjectionPaint(
+                withDesktopProjectionPaint(
                     textureShader = textureShader,
                     configure = { capturedBuilder = it },
                     draw = { paint, projectionShader ->
