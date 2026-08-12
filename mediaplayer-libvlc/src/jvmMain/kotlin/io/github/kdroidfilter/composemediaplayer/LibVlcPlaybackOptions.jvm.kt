@@ -14,6 +14,7 @@ import io.github.shusek.kmediavlc.runtime.desktop.VlcDesktopRuntime
 import io.github.shusek.kmediavlc.runtime.desktop.VlcDesktopRuntimeResolution
 import io.github.shusek.kmediavlc.runtime.desktop.VlcFrameDeliveryMode
 import io.github.shusek.kmediavlc.runtime.desktop.VlcRenderEngine
+import io.github.shusek.kmediavlc.runtime.desktop.VlcRuntimeException
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
 
@@ -54,13 +55,8 @@ actual fun inspectLibVlcBackend(options: LibVlcPlaybackOptions): LibVlcBackendAv
             LibVlcRuntimeSource.Bundled -> {
                 val inspection = VlcDesktopRuntime.inspectBundled()
                 inspection.capabilities().orElse(null)
-                    ?: return unavailableLibVlcBackend(
-                        if (inspection.unavailableReason().orElse(null)?.name == "UNSUPPORTED_PLATFORM") {
-                            LibVlcBackendUnavailableReason.UNSUPPORTED_PLATFORM
-                        } else {
-                            LibVlcBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING
-                        },
-                        "Add the audited kmedia-vlc-runtime-desktop artifact for this platform.",
+                    ?: return unavailableBundledLibVlcBackend(
+                        inspection.unavailableReason().orElse(null),
                     )
             }
             is LibVlcRuntimeSource.Resolved -> source.runtime.capabilities()
@@ -90,6 +86,27 @@ actual fun inspectLibVlcBackend(options: LibVlcPlaybackOptions): LibVlcBackendAv
         deliveryMode = delivery.toPublicDeliveryMode(),
     )
 }
+
+internal fun unavailableBundledLibVlcBackend(
+    reason: VlcRuntimeException.Reason?,
+): LibVlcBackendAvailability.Unavailable =
+    when (reason) {
+        VlcRuntimeException.Reason.UNSUPPORTED_PLATFORM ->
+            unavailableLibVlcBackend(
+                LibVlcBackendUnavailableReason.UNSUPPORTED_PLATFORM,
+                "The bundled KMediaVlc runtime does not support this desktop platform.",
+            )
+        VlcRuntimeException.Reason.PAYLOAD_MISSING, null ->
+            unavailableLibVlcBackend(
+                LibVlcBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING,
+                "Add the audited kmedia-vlc-runtime-desktop artifact for this platform.",
+            )
+        else ->
+            unavailableLibVlcBackend(
+                LibVlcBackendUnavailableReason.INVALID_RUNTIME,
+                "The bundled KMediaVlc runtime failed manifest or integrity validation.",
+            )
+    }
 
 /** Creates a libVLC 4 state and loads native code only after the availability probe succeeds. */
 actual fun createLibVlcVideoPlayerState(options: LibVlcPlaybackOptions): VideoPlayerState {

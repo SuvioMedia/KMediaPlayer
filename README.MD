@@ -594,9 +594,9 @@ symlinks, dirty trees, commit mismatches, and unsupported hosts. This is determi
 consumer evidence; it is not a physical headset, display, GPU-import, or render-node acceptance
 result.
 
-The `4.1.x` adapter catalog targets KMediaVlc `0.1.0-rc.1`. Before that coordinate is available
-from the public repository, its published-adapter consumer check uses the local composite
-explicitly and runs in two Gradle invocations:
+The `4.1.12` adapter catalog targets KMediaVlc `0.1.0-rc.2` and normal builds resolve it from
+Maven Central. The published-adapter consumer check can still use a local composite explicitly
+while developing an unpublished KMediaVlc change; that check runs in two Gradle invocations:
 
 ```shell
 ./gradlew publishLibVlcConsumerSmokeArtifacts \
