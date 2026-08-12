@@ -4,6 +4,7 @@ import io.github.kdroidfilter.composemediaplayer.desktop.OptionalDesktopPlayback
 import io.github.kdroidfilter.composemediaplayer.desktop.loadOptionalDesktopPlaybackBackends
 import io.github.shusek.kmediavlc.runtime.desktop.VlcFrameDeliveryMode
 import io.github.shusek.kmediavlc.runtime.desktop.VlcRenderEngine
+import io.github.shusek.kmediavlc.runtime.desktop.VlcRuntimeException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -102,5 +103,17 @@ class LibVlcPlaybackOptionsTest {
         val backends = loadOptionalDesktopPlaybackBackends(OptionalDesktopPlaybackBackendOptions())
 
         assertEquals(listOf("libvlc4-texture"), backends.map { backend -> backend.info.id })
+    }
+
+    @Test
+    fun distinguishesMissingAndRejectedBundledRuntime() {
+        assertEquals(
+            LibVlcBackendUnavailableReason.RUNTIME_DEPENDENCY_MISSING,
+            unavailableBundledLibVlcBackend(VlcRuntimeException.Reason.PAYLOAD_MISSING).reason,
+        )
+        assertEquals(
+            LibVlcBackendUnavailableReason.INVALID_RUNTIME,
+            unavailableBundledLibVlcBackend(VlcRuntimeException.Reason.MANIFEST_REJECTED).reason,
+        )
     }
 }
