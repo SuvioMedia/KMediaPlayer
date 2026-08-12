@@ -1779,7 +1779,7 @@ private const val DEFAULT_ASPECT_RATIO = 16f / 9f
 private const val DOLBY_VISION_PROFILE_7 = 7
 private const val WASM_ENGINE_AUTO_VIDEO_TRACK_ID = -1
 private const val BITS_PER_KILOBIT = 1000
-internal const val WASM_ENGINE_RENDERING_BACKEND = "io.github.shusek:kmedia-wasm-engine 0.4.0-alpha.2"
+internal const val WASM_ENGINE_RENDERING_BACKEND = "io.github.shusek:kmedia-wasm-engine 0.4.0-alpha.3"
 private val WEB_SUPPORTED_URI_SCHEMES = setOf("blob", "data", "http", "https")
 
 private fun isWebPictureInPictureSupported(): Boolean =
