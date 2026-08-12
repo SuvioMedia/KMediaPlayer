@@ -7,9 +7,11 @@ import androidx.compose.ui.Modifier
 import dev.nucleusframework.application.NucleusWindow
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
+import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.rememberMpvVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.requiresProjectionRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -28,10 +30,11 @@ internal fun DesktopMpvPerformanceSelfTest(
     durationSeconds: Long,
     resultFilePath: String,
     window: NucleusWindow,
+    initialProjection: VideoProjectionSettings,
     onComplete: () -> Unit,
 ) {
     val playerState = rememberMpvVideoPlayerState()
-    LaunchedEffect(playerState, inputUri) {
+    LaunchedEffect(playerState, inputUri, initialProjection) {
         val result =
             runCatching {
                 window.show()
@@ -41,6 +44,7 @@ internal fun DesktopMpvPerformanceSelfTest(
                     while (!window.isFocused) delay(POLL_INTERVAL_MS)
                 }
                 playerState.loop = true
+                playerState.projection = initialProjection
                 playerState.openUri(inputUri, InitialPlayerState.PLAY)
                 withTimeout(START_TIMEOUT_MS) {
                     while (true) {
@@ -51,6 +55,12 @@ internal fun DesktopMpvPerformanceSelfTest(
                     }
                 }
                 delay(STABILIZATION_MS)
+
+                if (initialProjection.requiresProjectionRenderer) {
+                    check(playerState.renderingInfo.videoRenderer.orEmpty().contains("macvk")) {
+                        "MPV left macvk while rendering projection: ${playerState.renderingInfo.videoRenderer}"
+                    }
+                }
 
                 val sourceFps = playerState.metadata.frameRate?.toDouble()?.takeIf { it > 0.0 }
                 val targetFps = sourceFps ?: DEFAULT_TARGET_FPS
@@ -122,7 +132,7 @@ internal fun DesktopMpvPerformanceSelfTest(
                     Locale.US,
                     "PASS seekTargetSeconds=%.3f seekRecoverySeconds=%.3f " +
                         "before={%s} after={%s} sourceFps=%s size=%sx%s " +
-                        "maxAvSyncMs=%s renderer=%s notes=%s",
+                        "maxAvSyncMs=%s renderer=%s projection=%s notes=%s",
                     seekTarget.inWholeMilliseconds / MILLIS_PER_SECOND,
                     seekRecoverySeconds,
                     beforeSeek.describe(),
@@ -132,6 +142,7 @@ internal fun DesktopMpvPerformanceSelfTest(
                     playerState.metadata.height,
                     playerState.diagnostics.maximumAvSyncOffsetMs,
                     playerState.renderingInfo.videoRenderer,
+                    initialProjection.projectionType,
                     playerState.diagnostics.notes,
                 )
             }.getOrElse { failure ->

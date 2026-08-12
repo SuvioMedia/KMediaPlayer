@@ -13,10 +13,12 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -232,6 +234,9 @@ class MpvRuntimeTest {
         assertEquals("vulkan", options["gpu-api"])
         assertEquals("macvk", options["gpu-context"])
         assertEquals("4242", options["wid"])
+        val projectionShader = Path.of(assertNotNull(options["glsl-shaders"]))
+        assertTrue(Files.isRegularFile(projectionShader))
+        assertContains(Files.readString(projectionShader), "//!HOOK OUTPUT")
         assertEquals("no", options["terminal"])
         assertEquals("yes", options["tls-verify"])
     }
