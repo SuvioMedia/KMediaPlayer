@@ -4,11 +4,12 @@ This branch is a headless browser media engine written for Kotlin/Wasm. Its publ
 Kotlin KLIB; it does not publish a Kotlin/JS target, JavaScript compatibility facade, web component,
 or npm API.
 
-The project is maintained at [Shusek/kmedia-wasm-engine](https://github.com/Shusek/kmedia-wasm-engine) and is
-derived from the original [mrujjwalg/movi-player](https://github.com/mrujjwalg/movi-player). The
-existing FFmpeg, dav1d, and Signalsmith Emscripten runtime remains the native media foundation.
-Attribution and third-party terms are recorded in [NOTICE](NOTICE) and
-[LGPL_RELINKING.md](LGPL_RELINKING.md).
+The proprietary player is maintained in the private
+`SuvioMedia/KMediaWasmPlayer` repository and is derived from the original
+[mrujjwalg/movi-player](https://github.com/mrujjwalg/movi-player). The open runtime source remains
+at [Shusek/kmedia-wasm-engine](https://github.com/Shusek/kmedia-wasm-engine). Its FFmpeg, dav1d,
+and Signalsmith Emscripten runtime remains the native media foundation. Attribution and third-party
+terms are recorded in [NOTICE](NOTICE) and [LGPL_RELINKING.md](LGPL_RELINKING.md).
 
 ## Published artifacts
 

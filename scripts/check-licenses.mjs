@@ -75,6 +75,11 @@ if (/name\.set\("Apache License 2\.0"\)/u.test(playerBuild)) {
   );
 }
 requireMatch(
+  playerBuild,
+  /github\.com\/SuvioMedia\/KMediaWasmPlayer/u,
+  "the proprietary KLIB POM does not point to private source control",
+);
+requireMatch(
   runtimeBuild,
   /GNU Lesser General Public License, version 2\.1 or later/u,
   "the native runtime POM omits FFmpeg's LGPL license",

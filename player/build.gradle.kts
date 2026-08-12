@@ -107,11 +107,11 @@ mavenPublishing {
         name.set("KMedia Wasm Engine")
         description.set("Headless browser media engine for Kotlin/Wasm.")
         inceptionYear.set("2026")
-        url.set("https://github.com/Shusek/kmedia-wasm-engine")
+        url.set("https://github.com/SuvioMedia/KMediaWasmPlayer")
         licenses {
             license {
                 name.set("Suvio Proprietary Component License")
-                url.set("https://github.com/Shusek/kmedia-wasm-engine/blob/main/player/legal/META-INF/LICENSE")
+                url.set("https://github.com/SuvioMedia/KMediaWasmPlayer/blob/main/player/legal/META-INF/LICENSE")
                 distribution.set("repo")
             }
         }
@@ -122,9 +122,9 @@ mavenPublishing {
             }
         }
         scm {
-            connection.set("scm:git:https://github.com/Shusek/kmedia-wasm-engine.git")
-            developerConnection.set("scm:git:ssh://git@github.com/Shusek/kmedia-wasm-engine.git")
-            url.set("https://github.com/Shusek/kmedia-wasm-engine")
+            connection.set("scm:git:https://github.com/SuvioMedia/KMediaWasmPlayer.git")
+            developerConnection.set("scm:git:ssh://git@github.com/SuvioMedia/KMediaWasmPlayer.git")
+            url.set("https://github.com/SuvioMedia/KMediaWasmPlayer")
         }
     }
     publishToMavenCentral()
