@@ -3,9 +3,13 @@
 import org.gradle.api.DefaultTask
 import org.gradle.api.Project
 import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.TaskAction
+import org.gradle.jvm.tasks.Jar
+import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnLockMismatchReport
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnPlugin
 import org.jetbrains.kotlin.gradle.targets.js.yarn.YarnRootEnvSpec
@@ -17,6 +21,8 @@ import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnRootEnvSpec
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnRootExtension
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.multiplatform).apply(false)
     alias(libs.plugins.android.library).apply(false)
@@ -231,6 +237,144 @@ tasks.register("publishLibVlcConsumerSmokeArtifacts") {
         ":mediaplayer-libvlc:publishJvmPublicationToConsumerSmokeRepository",
         ":mediaplayer-libvlc:publishAndroidPublicationToConsumerSmokeRepository",
     )
+}
+
+val proprietaryPublicationProjects =
+    listOf(
+        project(":mediaplayer"),
+        project(":mediaplayer-core"),
+        project(":mediaplayer-ads-core"),
+        project(":mediaplayer-ass"),
+        project(":mediaplayer-desktop-tao"),
+        project(":mediaplayer-dolbyvision"),
+        project(":mediaplayer-extension-api"),
+        project(":mediaplayer-kmediabridge"),
+        project(":mediaplayer-libvlc"),
+        project(":mediaplayer-mpv"),
+    )
+
+val publicationLegalDirectory = rootProject.layout.projectDirectory.dir("legal/publication")
+val publicationLicense = publicationLegalDirectory.file("META-INF/LICENSE")
+val publicationNotice = publicationLegalDirectory.file("META-INF/NOTICE")
+val upstreamComposeMediaPlayerLicense =
+    publicationLegalDirectory.file("META-INF/LICENSES/UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT.txt")
+
+proprietaryPublicationProjects.forEach { publicationProject ->
+    publicationProject.plugins.withId("org.jetbrains.kotlin.multiplatform") {
+        publicationProject.extensions.configure(KotlinMultiplatformExtension::class.java) {
+            sourceSets.named("commonMain") {
+                resources.srcDir(publicationLegalDirectory)
+            }
+        }
+    }
+}
+
+proprietaryPublicationProjects.forEach { publicationProject ->
+    publicationProject.tasks
+        .withType(Jar::class.java)
+        .matching { task -> task.name.endsWith("EmptySourcesJar") }
+        .configureEach {
+            val publicationName = name.removeSuffix("EmptySourcesJar").ifBlank { "root" }
+            archiveBaseName.set("${publicationProject.name}-${publicationName}-empty")
+        }
+}
+
+val verifyClosedSourcePublications =
+    tasks.register("verifyClosedSourcePublications") {
+        group = "verification"
+        description = "Rejects Maven publications that expose proprietary KMediaPlayer sources."
+        val emptySourceJarTasks =
+            proprietaryPublicationProjects.map { publicationProject ->
+                publicationProject.tasks.matching { task -> task.name.endsWith("EmptySourcesJar") }
+            }
+        dependsOn(emptySourceJarTasks)
+        inputs.files(
+            rootProject.layout.projectDirectory.file("LICENSE"),
+            publicationLicense,
+            publicationNotice,
+            upstreamComposeMediaPlayerLicense,
+        )
+        doLast {
+            check(publicationLicense.asFile.readText() == rootProject.file("LICENSE").readText()) {
+                "The embedded proprietary license differs from the repository LICENSE."
+            }
+            check(publicationNotice.asFile.isFile) {
+                "The proprietary KMediaPlayer NOTICE is missing."
+            }
+            val upstreamLicenseText = upstreamComposeMediaPlayerLicense.asFile.readText()
+            check("MIT License" in upstreamLicenseText && "Copyright (c) 2025 Elie G." in upstreamLicenseText) {
+                "The inherited Compose Media Player MIT notice is missing or incomplete."
+            }
+            val forbiddenExtensions =
+                setOf("kt", "kts", "java", "js", "mjs", "ts", "c", "cc", "cpp", "h", "hpp")
+            proprietaryPublicationProjects.forEach { publicationProject ->
+                val placeholderJars =
+                    publicationProject.tasks
+                        .matching { task -> task.name.endsWith("EmptySourcesJar") }
+                        .flatMap { task -> task.outputs.files.files }
+                        .filter { file -> file.isFile && file.extension == "jar" }
+                        .map { file -> file.canonicalFile }
+                        .toSet()
+                check(placeholderJars.isNotEmpty()) {
+                    "No source JAR placeholders were produced for ${publicationProject.path}."
+                }
+                placeholderJars.forEach { sourceJar ->
+                    ZipFile(sourceJar).use { zip ->
+                        val leaked =
+                            zip.entries().asSequence().firstOrNull { entry ->
+                                !entry.isDirectory &&
+                                    entry.name.substringAfterLast('.', "").lowercase() in forbiddenExtensions
+                            }
+                        check(leaked == null) {
+                            "Proprietary source leaked through ${sourceJar.name}: ${leaked?.name}"
+                        }
+                    }
+                }
+                val publishing =
+                    publicationProject.extensions.findByType(PublishingExtension::class.java)
+                        ?: error("Missing publishing extension for ${publicationProject.path}.")
+                val publishedSourceArtifacts =
+                    publishing.publications
+                        .withType(MavenPublication::class.java)
+                        .flatMap { publication -> publication.artifacts }
+                        .filter { artifact -> artifact.classifier == "sources" }
+                check(publishedSourceArtifacts.isNotEmpty()) {
+                    "No source JAR placeholders are attached to ${publicationProject.path} publications."
+                }
+                val leakedPublicationArtifact =
+                    publishedSourceArtifacts.firstOrNull { artifact ->
+                        artifact.file.canonicalFile !in placeholderJars
+                    }
+                check(leakedPublicationArtifact == null) {
+                    "${publicationProject.path} exposes a non-placeholder source JAR: " +
+                        "${leakedPublicationArtifact?.file}"
+                }
+            }
+        }
+    }
+
+tasks.matching { task -> task.name == "check" }.configureEach {
+    dependsOn(verifyClosedSourcePublications)
+}
+
+tasks.named("publishConsumerSmokeArtifacts") {
+    dependsOn(verifyClosedSourcePublications)
+}
+
+tasks.named("publishLibVlcConsumerSmokeArtifacts") {
+    dependsOn(verifyClosedSourcePublications)
+}
+
+proprietaryPublicationProjects.forEach { publicationProject ->
+    publicationProject.tasks.configureEach {
+        val publishesRemoteRelease =
+            name.contains("MavenCentral", ignoreCase = true) ||
+                name.contains("ReleaseStaging", ignoreCase = true) ||
+                name == "publishAndReleaseToMavenCentral"
+        if (publishesRemoteRelease) {
+            dependsOn(verifyClosedSourcePublications)
+        }
+    }
 }
 
 tasks.register("libVlcConsumerSmokeTest") {

@@ -398,6 +398,10 @@ publishing {
 }
 
 mavenPublishing {
+    configureBasedOnAppliedPlugins(
+        javadocJar = com.vanniktech.maven.publish.JavadocJar.Empty(),
+        sourcesJar = com.vanniktech.maven.publish.SourcesJar.Empty(),
+    )
     coordinates(
         groupId = projectGroup,
         artifactId = "composemediaplayer-mpv",
@@ -418,7 +422,7 @@ mavenPublishing {
         }
         licenses {
             license {
-                name.set("Internal Use Notice and Limited License")
+                name.set("Suvio Proprietary Component License")
                 url.set("https://github.com/SuvioMedia/KMediaPlayer/blob/master/LICENSE")
                 distribution.set("repo")
             }
@@ -514,8 +518,11 @@ tasks.configureEach {
 tasks
     .withType<JvmJar>()
     .matching {
-        it.name == "sourcesJar" ||
-            (it.name.startsWith("ios", ignoreCase = true) && it.name.endsWith("SourcesJar"))
+        !it.name.endsWith("EmptySourcesJar") &&
+            (
+                it.name == "sourcesJar" ||
+                    (it.name.startsWith("ios", ignoreCase = true) && it.name.endsWith("SourcesJar"))
+            )
     }.configureEach {
         from(layout.projectDirectory.dir("src/commonMain/resources/META-INF")) {
             into("META-INF")

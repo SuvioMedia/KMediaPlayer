@@ -80,6 +80,21 @@ jobs:
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: Require private source control for proprietary releases
+        shell: bash
+        env:
+          REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: |
+          set -euo pipefail
+          stable_version="${RELEASE_VERSION%%-*}"
+          IFS=. read -r major minor patch <<< "$stable_version"
+          if (( major > 4 || (major == 4 && minor > 1) || (major == 4 && minor == 1 && patch >= 7) )); then
+            if [[ "$REPOSITORY_VISIBILITY" != "private" ]]; then
+              echo "KMediaPlayer $RELEASE_VERSION is proprietary and cannot be released from public source control." >&2
+              exit 1
+            fi
+          fi
+
       - name: Require Maven Central credentials
         shell: bash
         env:
