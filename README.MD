@@ -236,7 +236,7 @@ fun main(args: Array<String>) = nucleusApplication(args, backend = NucleusBacken
 }
 ```
 
-The current `4.1.x` desktop line is verified with the HDR fork Nucleus `2.4.0-kmp-hdr.2`
+The current `4.1.x` desktop line is verified with the HDR fork Nucleus `2.4.0-kmp-hdr.4`
 and Compose Multiplatform `1.11.1`.
 It deliberately does not initialize AWT, Swing, JAWT, or a JetBrains Runtime window toolkit.
 See [Migrating from 3.x to 4.0](docs/migration-4.0.md) for the required desktop bootstrap and API changes.
