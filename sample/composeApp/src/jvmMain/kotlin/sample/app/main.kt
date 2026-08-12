@@ -157,6 +157,7 @@ fun main(args: Array<String>) {
                     durationSeconds = mpvPerformanceSelfTestSeconds,
                     resultFilePath = mpvPerformanceSelfTestResultFile,
                     window = nucleusWindow,
+                    initialProjection = initialProjection,
                     onComplete = applicationScope::exitApplication,
                 )
             } else if (colorSelfTestSeconds != null) {

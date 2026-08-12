@@ -1,3 +1,5 @@
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.SourcesJar
 import dev.detekt.gradle.Detekt
 import org.gradle.api.tasks.testing.Test
 import org.gradle.language.jvm.tasks.ProcessResources
@@ -139,8 +141,8 @@ publishing {
 
 mavenPublishing {
     configureBasedOnAppliedPlugins(
-        javadocJar = com.vanniktech.maven.publish.JavadocJar.Empty(),
-        sourcesJar = com.vanniktech.maven.publish.SourcesJar.Empty(),
+        javadocJar = JavadocJar.Empty(),
+        sourcesJar = SourcesJar.Empty(),
     )
     coordinates(
         groupId = "io.github.shusek",

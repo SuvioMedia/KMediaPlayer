@@ -93,6 +93,7 @@ internal class MpvVideoPlayerState(
     private var nativeMacColorMode = MpvMacOutputColorMode.SDR
     private var nativeMacProjectionEnabled = false
     private var nativeMacContentScaleMode = MpvMacContentScaleMode.FIT
+    private var nativeMacGpuNextProjectionOptions: String? = null
 
     @Volatile
     private var nativeMacDecodeRoute = MpvMacDecodeRoute.HARDWARE_AUTO
@@ -519,7 +520,7 @@ internal class MpvVideoPlayerState(
         if (!disposed.get()) applyNativeMacInputGeometry()
     }
 
-    /** Pushes the public projection model into the native libmpv OpenGL post-process pass. */
+    /** Pushes the public projection model into macvk/libplacebo or the OpenGL fallback pass. */
     internal fun updateNativeMacProjection() {
         if (disposed.get()) return
         val configuration =
@@ -531,8 +532,8 @@ internal class MpvVideoPlayerState(
         nativeMacProjectionEnabled = configuration.enabled
         renderLock.withLock {
             if (disposed.get()) return@withLock
-            if (configuration.enabled && nativeMacVkActive) {
-                switchMacVkToOpenGlLocked("projection requires the OpenGL post-process pass")
+            if (nativeMacVkActive && !applyMacVkProjectionLocked(configuration)) {
+                switchMacVkToOpenGlLocked("gpu-next rejected the libplacebo projection parameters")
             }
             applyNativeMacInputGeometry()
             if (nativeMacRenderer != 0L) {
@@ -545,6 +546,21 @@ internal class MpvVideoPlayerState(
         mutateSnapshotState {
             renderingInfo.videoProjection = projection.renderingInfoLabel()
         }
+    }
+
+    private fun applyMacVkProjectionLocked(configuration: MpvMacProjectionConfiguration): Boolean {
+        if (!nativeMacVkActive || nativeMacVkHostView == 0L) return false
+        val options =
+            MpvMacGpuNextProjectionShader.options(
+                configuration = configuration,
+                contentScaleMode = nativeMacContentScaleMode,
+            )
+        if (options == nativeMacGpuNextProjectionOptions) return true
+        return runCatching {
+            engine.setProperty("glsl-shader-opts", options)
+        }.onSuccess {
+            nativeMacGpuNextProjectionOptions = options
+        }.isSuccess
     }
 
     /** Returns the Compose-owned macvk host or renderer-owned OpenGL `NSView*`. */
@@ -659,6 +675,7 @@ internal class MpvVideoPlayerState(
         val selectedVideo = suspendVideoOutputForContextSwitch()
         runCatching { engine.setProperty("vo", "libmpv") }
         nativeMacVkActive = false
+        nativeMacGpuNextProjectionOptions = null
         nativeMacBackendFallbackReason = reason
         val attached = attachOpenGlRendererLocked(hostView)
         if (attached) {
@@ -738,6 +755,7 @@ internal class MpvVideoPlayerState(
                 }
             runCatching { engine.setProperty("vo", "libmpv") }
             nativeMacVkActive = false
+            nativeMacGpuNextProjectionOptions = null
             nativeMacVkHostView = 0L
             applyNativeMacInputGeometry()
             runCatching { MpvMacNativeBridge.nDestroyMacVkHost(macVkHost) }
@@ -1192,7 +1210,7 @@ internal class MpvVideoPlayerState(
     private fun applyNativeMacInputGeometry() {
         val geometry =
             mpvMacInputGeometry(
-                projectionEnabled = nativeMacRenderer != 0L && nativeMacProjectionEnabled,
+                projectionEnabled = hasNativeMacGpuSurface && nativeMacProjectionEnabled,
                 contentScaleMode = nativeMacContentScaleMode,
             )
         runCatching { engine.setProperty("keepaspect", geometry.keepAspect) }
@@ -1467,6 +1485,7 @@ internal fun mpvInitializationOptions(
             put("gpu-context", "macvk")
             put("wid", macVkHostView.toString())
             put("target-colorspace-hint", "yes")
+            put("glsl-shaders", MpvMacGpuNextProjectionShader.pathForMpv())
         } else {
             put("vo", "libmpv")
         }

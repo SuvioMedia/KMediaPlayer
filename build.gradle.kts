@@ -3,10 +3,11 @@
 import org.gradle.api.DefaultTask
 import org.gradle.api.Project
 import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.provider.SetProperty
 import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
-import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.TaskAction
 import org.gradle.jvm.tasks.Jar
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
@@ -259,11 +260,24 @@ val publicationNotice = publicationLegalDirectory.file("META-INF/NOTICE")
 val upstreamComposeMediaPlayerLicense =
     publicationLegalDirectory.file("META-INF/LICENSES/UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT.txt")
 
+val publicationLegalResourceTasks =
+    proprietaryPublicationProjects.associateWith { publicationProject ->
+        val publicationProjectName = publicationProject.name
+        publicationProject.tasks.register<Sync>("preparePublicationLegalResources") {
+            from(publicationLegalDirectory)
+            into(publicationProject.layout.buildDirectory.dir("generated/publicationLegalResources"))
+            rename(
+                "UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT\\.txt",
+                "UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT-$publicationProjectName.txt",
+            )
+        }
+    }
+
 proprietaryPublicationProjects.forEach { publicationProject ->
     publicationProject.plugins.withId("org.jetbrains.kotlin.multiplatform") {
         publicationProject.extensions.configure(KotlinMultiplatformExtension::class.java) {
             sourceSets.named("commonMain") {
-                resources.srcDir(publicationLegalDirectory)
+                resources.srcDir(publicationLegalResourceTasks.getValue(publicationProject))
             }
         }
     }
@@ -275,7 +289,7 @@ proprietaryPublicationProjects.forEach { publicationProject ->
         .matching { task -> task.name.endsWith("EmptySourcesJar") }
         .configureEach {
             val publicationName = name.removeSuffix("EmptySourcesJar").ifBlank { "root" }
-            archiveBaseName.set("${publicationProject.name}-${publicationName}-empty")
+            archiveBaseName.set("${publicationProject.name}-$publicationName-empty")
         }
 }
 
@@ -283,11 +297,12 @@ val verifyClosedSourcePublications =
     tasks.register("verifyClosedSourcePublications") {
         group = "verification"
         description = "Rejects Maven publications that expose proprietary KMediaPlayer sources."
+        notCompatibleWithConfigurationCache("Inspects the fully configured Maven publication model.")
         val emptySourceJarTasks =
             proprietaryPublicationProjects.map { publicationProject ->
                 publicationProject.tasks.matching { task -> task.name.endsWith("EmptySourcesJar") }
             }
-        dependsOn(emptySourceJarTasks)
+        dependsOn(emptySourceJarTasks, publicationLegalResourceTasks.values)
         inputs.files(
             rootProject.layout.projectDirectory.file("LICENSE"),
             publicationLicense,
@@ -304,6 +319,20 @@ val verifyClosedSourcePublications =
             val upstreamLicenseText = upstreamComposeMediaPlayerLicense.asFile.readText()
             check("MIT License" in upstreamLicenseText && "Copyright (c) 2025 Elie G." in upstreamLicenseText) {
                 "The inherited Compose Media Player MIT notice is missing or incomplete."
+            }
+            publicationLegalResourceTasks.forEach { (publicationProject, legalResourcesTask) ->
+                val legalResourcesDirectory = legalResourcesTask.get().destinationDir
+                val licensesDirectory = legalResourcesDirectory.resolve("META-INF/LICENSES")
+                val artifactScopedUpstreamLicense =
+                    licensesDirectory.resolve(
+                        "UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT-${publicationProject.name}.txt",
+                    )
+                check(artifactScopedUpstreamLicense.readText() == upstreamLicenseText) {
+                    "The generated upstream license differs for ${publicationProject.path}."
+                }
+                check(!licensesDirectory.resolve("UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT.txt").exists()) {
+                    "The unscoped upstream license would collide in Android consumers for ${publicationProject.path}."
+                }
             }
             val forbiddenExtensions =
                 setOf("kt", "kts", "java", "js", "mjs", "ts", "c", "cc", "cpp", "h", "hpp")

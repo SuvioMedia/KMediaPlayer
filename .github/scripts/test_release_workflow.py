@@ -48,6 +48,21 @@ class ReleaseWorkflowTest(unittest.TestCase):
             consumer_job,
         )
 
+    def test_existing_tag_recovery_rechecks_green_jobs_and_shared_runtime(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        workflow = (
+            repository_root / ".github/workflows/publish-existing-tag-to-maven-central.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("runs-on: [self-hosted, macOS, ARM64, suvio-mac-vm]", workflow)
+        self.assertIn("Checkout the current recovery verifier", workflow)
+        self.assertIn(
+            "release-recovery-verifier/.github/scripts/verify_recoverable_release_jobs.py",
+            workflow,
+        )
+        self.assertIn(":androidApp:verifyAndroidArmNativeMatrix", workflow)
+        self.assertIn(":androidApp:verifyAndroidArmNativeBundle", workflow)
+
     def test_release_workflows_wait_for_maven_central(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         verifier = ".github/scripts/verify_maven_central_release.sh"

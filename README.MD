@@ -18,7 +18,7 @@
 
 This is a public, source-visible, proprietary SuvioMedia-maintained derivative used for internal projects and integrations. Repository visibility is not an open-source grant. GitHub users retain the limited platform rights required by the GitHub Terms of Service, including GitHub-hosted forking; use outside those rights is governed by [LICENSE](LICENSE). Immutable tagged artifacts are distributed only through Maven Central; GitHub Releases, GitHub Pages, and JitPack are not publication channels. Artifact availability is not an additional grant. Proprietary publications use empty source-JAR placeholders; `verifyClosedSourcePublications` blocks a release if any Maven source artifact contains implementation code. If you need a supported open-source library, use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
 
-Published binaries embed the proprietary license, the upstream Compose Media Player MIT copyright/license, and a component notice under `META-INF`. The release gate verifies that the repository and embedded copies of the proprietary license are identical before publication.
+Published binaries embed the proprietary license, an artifact-scoped upstream Compose Media Player MIT copyright/license, and a component notice under `META-INF`. The release gate verifies that the repository and embedded copies of the proprietary license are identical before publication.
 
 ## Table of Contents
 - [Project Status](#project-status)
@@ -466,10 +466,13 @@ val options = MpvPlaybackOptions(
 This is already the default, so the explicit option is needed only when making
 the renderer policy visible in application configuration. An unmarked or
 failing runtime falls back to OpenGL; stock mpv is never allowed to create a
-separate macOS window. Enabling the public projection transform also switches
-that player to OpenGL because the projection pass currently uses the libmpv
-OpenGL render API. The bundled runtime must carry MoltenVK and KMediaMpv's
-versioned macvk capability to keep the default route on Vulkan.
+separate macOS window. Public projection and texture-crop transforms stay on
+the same MoltenVK route: KMediaPlayer injects a dynamic libplacebo `OUTPUT`
+hook into `gpu-next`, so view motion, stereo windows and projection parameters
+do not rebuild or replace the Vulkan video output. OpenGL remains only the
+runtime fallback when macvk or the projection hook is rejected. The bundled
+runtime must carry MoltenVK and KMediaMpv's versioned macvk capability to keep
+the default route on Vulkan.
 
 On iOS, use the generated `ComposeMediaPlayerMpv` pod so CocoaPods embeds and
 code-signs the exact `KMediaMpv`, `KMediaFfmpegRuntime`, and `KMediaAssRuntime`

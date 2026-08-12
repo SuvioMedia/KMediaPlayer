@@ -18,10 +18,8 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, ARM64, suvio-mac-vm]
     timeout-minutes: 120
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - name: Checkout the immutable version tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -58,23 +56,39 @@ jobs:
       - name: Verify the public proprietary release policy
         run: python3 .github/scripts/verify_proprietary_release_policy.py --root .
 
-      - name: Locate the successful tagged build
+      - name: Checkout the current recovery verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: release-recovery-verifier
+          persist-credentials: false
+
+      - name: Locate the recoverable tagged build
         id: release_run
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SHA: ${{ steps.release_ref.outputs.sha }}
         run: |
           set -euo pipefail
           run_id="$(
             gh api \
-              "repos/$GITHUB_REPOSITORY/actions/workflows/publish-on-maven-central.yml/runs?event=push&status=success&per_page=100" \
-              --jq "first(.workflow_runs[] | select(.head_sha == \"$RELEASE_SHA\")) | .id"
+              "repos/$GITHUB_REPOSITORY/actions/workflows/publish-on-maven-central.yml/runs?event=push&status=completed&per_page=100" \
+              --jq "first(.workflow_runs[] | select(.head_sha == \"$RELEASE_SHA\" and .head_branch == \"$RELEASE_TAG\")) | .id"
           )"
           if [[ -z "$run_id" ]]; then
-            echo "No successful verified tagged build exists for $RELEASE_SHA." >&2
+            echo "No completed tagged build exists for $RELEASE_TAG at $RELEASE_SHA." >&2
             exit 1
           fi
+
+          jobs_json="$RUNNER_TEMP/release-jobs.json"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+            > "$jobs_json"
+          python3 \
+            release-recovery-verifier/.github/scripts/verify_recoverable_release_jobs.py \
+            "$jobs_json"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
       - name: Download the verified native libraries
@@ -162,11 +176,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -d "$DEVELOPER_DIR" || {
-            echo "Xcode 26.3 is required by the current Compose UIKit artifacts." >&2
-            exit 1
-          }
-          sdk_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          developer_dir=/Applications/Xcode_26.3.app/Contents/Developer
+          if [[ ! -d "$developer_dir" ]]; then
+            developer_dir="$(xcode-select -p)"
+          fi
+          xcode_version="$(DEVELOPER_DIR="$developer_dir" xcodebuild -version | awk 'NR == 1 { print $2 }')"
+          case "$xcode_version" in
+            26.3*) ;;
+            *) echo "Xcode 26.3 is required; selected Xcode is $xcode_version." >&2; exit 1 ;;
+          esac
+          echo "DEVELOPER_DIR=$developer_dir" >> "$GITHUB_ENV"
+          sdk_version="$(DEVELOPER_DIR="$developer_dir" xcrun --sdk iphonesimulator --show-sdk-version)"
           case "$sdk_version" in
             26.*) ;;
             *) echo "An iOS 26 Simulator SDK is required." >&2; exit 1 ;;
@@ -187,6 +207,13 @@ jobs:
         run: >-
           rustup target add armv7-linux-androideabi aarch64-linux-android
           aarch64-apple-ios aarch64-apple-ios-sim wasm32-unknown-unknown
+
+      - name: Verify the shared Android runtime graph
+        run: >-
+          ./gradlew --no-daemon
+          :androidApp:verifyAndroidArmNativeMatrix
+          :androidApp:verifyAndroidArmNativeBundle
+          --refresh-dependencies
 
       - name: Require Maven Central credentials
         shell: bash
