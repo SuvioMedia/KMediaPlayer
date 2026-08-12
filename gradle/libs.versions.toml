@@ -1,7 +1,7 @@
 [versions]
 
 androidcontextprovider = "1.0.1"
-filekit = "0.14.2"
+filekit = "0.15.0"
 graalvmNativeImage = "25.2.4"
 kotlin = "2.4.10"
 agp = "9.3.1"
