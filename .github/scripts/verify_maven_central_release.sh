@@ -49,6 +49,11 @@ artifacts=(
   composemediaplayer-kmediabridge
   composemediaplayer-kmediabridge-android
   composemediaplayer-kmediabridge-jvm
+  composemediaplayer-libvlc
+  composemediaplayer-libvlc-android
+  composemediaplayer-libvlc-iosarm64
+  composemediaplayer-libvlc-iossimulatorarm64
+  composemediaplayer-libvlc-jvm
 )
 
 pom_url() {

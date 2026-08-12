@@ -59,7 +59,8 @@ internal class AndroidLibVlcVideoPlayerState(
     private val player = VlcAndroidPlayer.create(context, options.androidDecodeMode.toRuntimeDecodeMode())
 
     private var surfaceAttached = false
-    private var attachedSurface: Surface? = null
+    private var attachedVideoSurface: Surface? = null
+    private var attachedSubtitleSurface: Surface? = null
     private var attachedSurfaceWidth = 0
     private var attachedSurfaceHeight = 0
     private var pendingOpen: PendingOpen? = null
@@ -76,8 +77,9 @@ internal class AndroidLibVlcVideoPlayerState(
             videoRenderer = ANDROID_SURFACE_RENDERER,
             audioRenderer = "libVLC Android audio output",
             notes =
-                "Bundled Android libVLC 4 runtime; direct Surface output on API 28+ ARM devices. " +
-                    "Projection and verified HDR policies fail closed.",
+                "Bundled Android libVLC 4 runtime; direct MediaCodec video Surface plus a " +
+                    "transparent subtitle Surface on API 28+ ARM devices. The automatic route " +
+                    "requests an HDR-capable window; strict color and projection policies fail closed.",
         )
 
     override val capabilities =
@@ -109,6 +111,9 @@ internal class AndroidLibVlcVideoPlayerState(
 
     internal val projectionUnsupported: Boolean
         get() = projection.requiresProjectionRenderer || !projectionTextureCrop.isDefaultTextureCrop
+
+    internal val requestsHdrWindow: Boolean
+        get() = options.androidDecodeMode.requestsAndroidLibVlcHdrWindow()
 
     init {
         projection = options.projection.normalized()
@@ -262,33 +267,56 @@ internal class AndroidLibVlcVideoPlayerState(
         }
     }
 
-    internal fun attachSurface(
-        surface: Surface,
+    internal fun attachSurfaces(
+        videoSurface: Surface,
+        subtitleSurface: Surface,
         width: Int,
         height: Int,
     ) {
-        if (disposed.get() || projectionUnsupported || !surface.isValid || width <= 0 || height <= 0) return
+        if (
+            disposed.get() ||
+            projectionUnsupported ||
+            !videoSurface.isValid ||
+            !subtitleSurface.isValid ||
+            width <= 0 ||
+            height <= 0
+        ) {
+            return
+        }
         try {
             synchronized(lifecycleLock) {
                 if (disposed.get()) return
-                if (attachedSurface !== surface || attachedSurfaceWidth != width || attachedSurfaceHeight != height) {
-                    player.attachSurface(surface, width, height)
+                if (
+                    attachedVideoSurface !== videoSurface ||
+                    attachedSubtitleSurface !== subtitleSurface ||
+                    attachedSurfaceWidth != width ||
+                    attachedSurfaceHeight != height
+                ) {
+                    player.attachSurfaces(videoSurface, subtitleSurface, width, height)
                 }
-                attachedSurface = surface
+                attachedVideoSurface = videoSurface
+                attachedSubtitleSurface = subtitleSurface
                 attachedSurfaceWidth = width
                 attachedSurfaceHeight = height
                 surfaceAttached = true
             }
             openPendingSourceIfReady()
         } catch (_: RuntimeException) {
-            publishError(VideoPlayerError.UnknownError("KMediaVlc rejected the Android video Surface."))
+            publishError(VideoPlayerError.UnknownError("KMediaVlc rejected the Android video/subtitle Surfaces."))
         }
     }
 
     internal fun detachSurface(surface: Surface? = null) {
         synchronized(lifecycleLock) {
-            if (surface != null && attachedSurface !== surface) return
-            attachedSurface = null
+            if (
+                surface != null &&
+                attachedVideoSurface !== surface &&
+                attachedSubtitleSurface !== surface
+            ) {
+                return
+            }
+            attachedVideoSurface = null
+            attachedSubtitleSurface = null
             attachedSurfaceWidth = 0
             attachedSurfaceHeight = 0
             surfaceAttached = false
@@ -320,7 +348,8 @@ internal class AndroidLibVlcVideoPlayerState(
     override fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
         synchronized(lifecycleLock) {
-            attachedSurface = null
+            attachedVideoSurface = null
+            attachedSubtitleSurface = null
             attachedSurfaceWidth = 0
             attachedSurfaceHeight = 0
             surfaceAttached = false
@@ -595,3 +624,6 @@ private fun LibVlcAndroidDecodeMode.toRuntimeDecodeMode(): VlcAndroidDecodeMode 
         LibVlcAndroidDecodeMode.AUTOMATIC -> VlcAndroidDecodeMode.AUTOMATIC
         LibVlcAndroidDecodeMode.SOFTWARE_ONLY -> VlcAndroidDecodeMode.SOFTWARE_ONLY
     }
+
+internal fun LibVlcAndroidDecodeMode.requestsAndroidLibVlcHdrWindow(): Boolean =
+    this == LibVlcAndroidDecodeMode.AUTOMATIC

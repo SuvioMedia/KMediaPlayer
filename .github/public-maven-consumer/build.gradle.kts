@@ -33,10 +33,12 @@ dependencies {
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-desktop-tao-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-mpv-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-kmediabridge-jvm:$testedVersion")
+    add(desktopBackends.name, "io.github.shusek:composemediaplayer-libvlc-jvm:$testedVersion")
     add(desktopBackends.name, "io.github.shusek:composemediaplayer-ass-jvm:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-ads-core-android:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-mpv-android:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-kmediabridge-android:$testedVersion")
+    add(androidBackends.name, "io.github.shusek:composemediaplayer-libvlc-android:$testedVersion")
     add(androidBackends.name, "io.github.shusek:composemediaplayer-ass-android:$testedVersion")
 }
 
@@ -59,16 +61,20 @@ tasks.register("verifyPublicBackends") {
         check("io.github.shusek:composemediaplayer-mpv-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-desktop-tao-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-kmediabridge-jvm:$testedVersion" in desktopComponents)
+        check("io.github.shusek:composemediaplayer-libvlc-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-ass-jvm:$testedVersion" in desktopComponents)
         check("io.github.shusek:composemediaplayer-ads-core-android:$testedVersion" in androidComponents)
         check("io.github.shusek:composemediaplayer-mpv-android:$testedVersion" in androidComponents)
         check("io.github.shusek:composemediaplayer-kmediabridge-android:$testedVersion" in androidComponents)
+        check("io.github.shusek:composemediaplayer-libvlc-android:$testedVersion" in androidComponents)
         check("io.github.shusek:composemediaplayer-ass-android:$testedVersion" in androidComponents)
 
         val desktopRuntime = desktopComponents.matching("kmedia-ffmpeg-runtime-desktop")
         val androidRuntime = androidComponents.matching("kmedia-ffmpeg-runtime-android")
         val desktopAssRuntime = desktopComponents.matching("kmedia-ass-runtime-desktop")
         val androidAssRuntime = androidComponents.matching("kmedia-ass-runtime-android")
+        val desktopVlcRuntime = desktopComponents.matching("kmedia-vlc-runtime-desktop")
+        val androidVlcRuntime = androidComponents.matching("kmedia-vlc-runtime-android")
         check(desktopRuntime.size == 1) {
             "Expected exactly one shared desktop FFmpeg runtime, got $desktopRuntime"
         }
@@ -81,6 +87,12 @@ tasks.register("verifyPublicBackends") {
         check(androidAssRuntime.size == 1) {
             "Expected exactly one shared Android ASS runtime, got $androidAssRuntime"
         }
+        check(desktopVlcRuntime.size == 1) {
+            "Expected exactly one desktop libVLC runtime, got $desktopVlcRuntime"
+        }
+        check(androidVlcRuntime.size == 1) {
+            "Expected exactly one Android libVLC runtime, got $androidVlcRuntime"
+        }
         check(desktopRuntime.single().substringAfterLast(':') == androidRuntime.single().substringAfterLast(':')) {
             "Desktop and Android resolved different shared runtime versions: $desktopRuntime vs $androidRuntime"
         }
@@ -90,6 +102,13 @@ tasks.register("verifyPublicBackends") {
         ) {
             "Desktop and Android resolved different ASS runtime versions: " +
                 "$desktopAssRuntime vs $androidAssRuntime"
+        }
+        check(
+            desktopVlcRuntime.single().substringAfterLast(':') ==
+                androidVlcRuntime.single().substringAfterLast(':'),
+        ) {
+            "Desktop and Android resolved different libVLC runtime versions: " +
+                "$desktopVlcRuntime vs $androidVlcRuntime"
         }
 
         check(desktopComponents.matching("kmedia-mpv-runtime-desktop").size == 1)
@@ -106,7 +125,7 @@ tasks.register("verifyPublicBackends") {
         androidComponents.forEach(::println)
         println(
             "Resolved ${desktopFiles.size} desktop runtime files and the Android module graph " +
-                "with one shared FFmpeg and one shared ASS runtime per platform."
+                "with one shared FFmpeg, ASS, and libVLC runtime per platform."
         )
     }
 }

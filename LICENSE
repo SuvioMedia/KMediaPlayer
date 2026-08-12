@@ -1,5 +1,5 @@
 Suvio Proprietary Component License
-Version 1.0
+Version 1.1
 
 Copyright (c) 2026 Shusek. All rights reserved.
 
@@ -16,22 +16,33 @@ projects and deployments. No standalone SDK, library, development, hosting,
 redistribution, or sublicensing right is granted to any other party. Additional
 rights require a separate written agreement with the copyright holder.
 
-2. Restrictions
+2. Public repository access
 
-Except where mandatory law or this license expressly permits otherwise, you
-may not copy, modify, publish, distribute, sublicense, sell, expose as a
-service, extract, or use the copyright holder's proprietary material outside
-an authorized Suvio distribution. Source code is not licensed or supplied.
+The source code may be publicly visible through GitHub. Public availability is
+not an offer of an open-source license. To the extent the GitHub Terms of
+Service grant GitHub users rights to view, use, display, perform, or reproduce
+this material through GitHub's service, including by using GitHub's fork
+functionality, those platform rights apply. This license grants no additional
+right to use the proprietary material merely because the repository can be
+viewed, cloned, downloaded, or forked on GitHub.
 
-3. Inherited and third-party material
+3. Restrictions
+
+Except for rights required by the GitHub Terms of Service, mandatory law, or
+this license, you may not build, execute, copy, modify, publish, distribute,
+sublicense, sell, expose as a service, extract, or use the copyright holder's
+proprietary material outside an authorized Suvio distribution.
+
+4. Inherited and third-party material
 
 This fork derives in part from Compose Media Player material distributed under
 the MIT License. That inherited material remains under MIT; its copyright and
-full license text accompany published artifacts in an artifact-scoped
-META-INF/LICENSES/UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT-*.txt resource. Other
-dependencies and native runtimes remain under their respective licenses.
+full license text accompany published artifacts under
+an artifact-scoped META-INF/LICENSES/UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT-*.txt
+resource. Other dependencies and native runtimes remain under their respective
+licenses.
 
-4. LGPL interoperability
+5. LGPL interoperability
 
 Nothing in this license restricts rights supplied by an LGPL-covered
 component. A lawful recipient may modify an installed combined work for their
@@ -40,7 +51,7 @@ modified version, and may reverse engineer the combined work solely as needed
 to debug that replacement. This permission does not grant a right to publish
 or distribute the proprietary player or its source code.
 
-5. Warranty and liability
+6. Warranty and liability
 
 This component is provided "as is", without warranties, support commitments,
 maintenance obligations, or compatibility guarantees. To the maximum extent

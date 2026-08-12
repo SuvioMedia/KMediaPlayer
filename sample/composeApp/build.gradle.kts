@@ -44,6 +44,7 @@ val desktopSampleSystemProperties =
         "sample.app.playbackBackend",
         "sample.app.sourceAdapter",
         "sample.app.kMediaBridgeRuntimeDirectory",
+        "sample.app.kMediaVlcRuntimeDirectory",
         "sample.app.mpvLibraryPath",
         "sample.app.projectionType",
         "sample.app.mpvPerformanceSelfTestSeconds",
@@ -160,6 +161,7 @@ kotlin {
             implementation(project(":mediaplayer-ass"))
             implementation(project(":mediaplayer-dolbyvision"))
             implementation(project(":mediaplayer-kmediabridge"))
+            implementation(project(":mediaplayer-libvlc"))
             implementation(project(":mediaplayer-mpv"))
         }
         jvmTest.dependencies {

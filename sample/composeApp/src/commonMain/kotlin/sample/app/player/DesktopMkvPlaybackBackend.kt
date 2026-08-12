@@ -10,7 +10,7 @@ import io.github.vinceglb.filekit.PlatformFile
 internal enum class DesktopMkvPlaybackBackend(val label: String) {
     AUTO("Auto"),
     PLATFORM("Platform"),
-    LIBVLC_NATIVE("libVLC native"),
+    LIBVLC_NATIVE("KMediaVlc TextureView"),
     MPV("MPV"),
 }
 

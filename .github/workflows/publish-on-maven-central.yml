@@ -80,20 +80,8 @@ jobs:
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Require private source control for proprietary releases
-        shell: bash
-        env:
-          REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
-        run: |
-          set -euo pipefail
-          stable_version="${RELEASE_VERSION%%-*}"
-          IFS=. read -r major minor patch <<< "$stable_version"
-          if (( major > 4 || (major == 4 && minor > 1) || (major == 4 && minor == 1 && patch >= 7) )); then
-            if [[ "$REPOSITORY_VISIBILITY" != "private" ]]; then
-              echo "KMediaPlayer $RELEASE_VERSION is proprietary and cannot be released from public source control." >&2
-              exit 1
-            fi
-          fi
+      - name: Verify the public proprietary release policy
+        run: python3 .github/scripts/verify_proprietary_release_policy.py --root .
 
       - name: Require Maven Central credentials
         shell: bash
@@ -226,9 +214,11 @@ jobs:
           :mediaplayer-ass:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-dolbyvision:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-kmediabridge:publishAllPublicationsToReleaseStagingRepository
+          :mediaplayer-libvlc:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-core:verifyJvm25Bytecode
           :mediaplayer-desktop-tao:verifyJvm25Bytecode
           :mediaplayer:verifyJvm25Bytecode
+          :mediaplayer-libvlc:verifyJvm25Bytecode
           :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion="$RELEASE_VERSION"
           -PreleaseStagingMavenRepository="$RUNNER_TEMP/maven-staging"
@@ -344,6 +334,21 @@ jobs:
             }
           done
 
+          libvlc_artifacts=(
+            composemediaplayer-libvlc
+            composemediaplayer-libvlc-android
+            composemediaplayer-libvlc-iosarm64
+            composemediaplayer-libvlc-iossimulatorarm64
+            composemediaplayer-libvlc-jvm
+          )
+          for artifact in "${libvlc_artifacts[@]}"; do
+            pom="$repository/io/github/shusek/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom"
+            test -s "$pom" || {
+              echo "Missing staged libVLC coordinate: $artifact:$RELEASE_VERSION" >&2
+              exit 1
+            }
+          done
+
       - name: Publish the verified release to Maven Central
         shell: bash
         run: >-
@@ -356,6 +361,7 @@ jobs:
           :mediaplayer-ass:publishAndReleaseToMavenCentral
           :mediaplayer-dolbyvision:publishAndReleaseToMavenCentral
           :mediaplayer-kmediabridge:publishAndReleaseToMavenCentral
+          :mediaplayer-libvlc:publishAndReleaseToMavenCentral
           -PpublicationVersion="$RELEASE_VERSION"
           -PreleaseSigningEnabled=true
           -PcomposeMediaPlayer.skipNativeBuild=true

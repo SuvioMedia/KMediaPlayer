@@ -16,9 +16,9 @@
 
 ## Project Status
 
-This is a private, standalone SuvioMedia-maintained derivative used for internal projects and integrations. Immutable tagged artifacts are distributed only through Maven Central; GitHub Releases, GitHub Pages, and JitPack are not publication channels. Artifact availability is not an additional grant beyond the permissions in [LICENSE](LICENSE). Proprietary publications use empty source-JAR placeholders; `verifyClosedSourcePublications` blocks a release if any Maven source artifact contains implementation code. If you need a supported public library, use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
+This is a public, source-visible, proprietary SuvioMedia-maintained derivative used for internal projects and integrations. Repository visibility is not an open-source grant. GitHub users retain the limited platform rights required by the GitHub Terms of Service, including GitHub-hosted forking; use outside those rights is governed by [LICENSE](LICENSE). Immutable tagged artifacts are distributed only through Maven Central; GitHub Releases, GitHub Pages, and JitPack are not publication channels. Artifact availability is not an additional grant. Proprietary publications use empty source-JAR placeholders; `verifyClosedSourcePublications` blocks a release if any Maven source artifact contains implementation code. If you need a supported open-source library, use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
 
-KMediaPlayer `4.1.7` and later require private source control. Published binaries embed the proprietary license, the upstream Compose Media Player MIT copyright/license, and a component notice under `META-INF`.
+Published binaries embed the proprietary license, an artifact-scoped upstream Compose Media Player MIT copyright/license, and a component notice under `META-INF`. The release gate verifies that the repository and embedded copies of the proprietary license are identical before publication.
 
 ## Table of Contents
 - [Project Status](#project-status)
@@ -236,7 +236,8 @@ fun main(args: Array<String>) = nucleusApplication(args, backend = NucleusBacken
 }
 ```
 
-The current `4.0.x` desktop line is verified with Nucleus `2.2.0` and Compose Multiplatform `1.11.1`.
+The current `4.1.x` desktop line is verified with the HDR fork Nucleus `2.4.0-kmp-hdr.4`
+and Compose Multiplatform `1.11.1`.
 It deliberately does not initialize AWT, Swing, JAWT, or a JetBrains Runtime window toolkit.
 See [Migrating from 3.x to 4.0](docs/migration-4.0.md) for the required desktop bootstrap and API changes.
 
@@ -525,7 +526,7 @@ D3D11 on Windows, IOSurface/OpenGL on Apple Silicon macOS, and DMA-BUF/GLES2 on 
 The adapter contains no copied KMediaVlc implementation. It uses the same
 backend-neutral `AbstractBackendVideoPlayerState` as MPV and talks to the
 separately published LGPL-2.1-or-later KMediaVlc runtime through its ISC client
-ABI. KMediaPlayer can therefore remain private without changing the runtime's
+ABI. KMediaPlayer's public repository visibility does not change the runtime's
 source, notice, replacement, or relinking rights.
 
 Projected, stereo, rotated, or cropped video currently uses the bounded RGBA8 CPU-pull route and
@@ -549,9 +550,13 @@ will be changed after creating the state, select `CPU_PULL` explicitly; a GPU pl
 recreated or allowed to display the wrong flat image.
 
 Android uses the bundled KMediaVlc AAR and libVLC's direct Surface transport on API 28+ ARM64 and
-ARMv7 devices. It accepts local paths, `file:`, `content:`, and HTTP(S) sources and exposes
-automatic or software-only decoding through `LibVlcAndroidDecodeMode`. The Android probe loads the
-native graph and checks its path-free build identity before creating a player. Explicit
+ARMv7 devices. The Compose host supplies an opaque video SurfaceView plus a transparent media-overlay
+SurfaceView for hardware-decoded subtitles. Automatic decoding requests an HDR-capable activity
+window; KMediaVlc keeps MediaCodec directly on the final video Surface so BT.2020/PQ buffer metadata
+is not lost through an intermediate layer. This HDR10 path and the two-Surface lifecycle are covered
+on physical HDR hardware. The adapter accepts local paths, `file:`, `content:`, and HTTP(S) sources
+and exposes automatic or software-only decoding through `LibVlcAndroidDecodeMode`. The Android probe
+loads the native graph and checks its path-free build identity before creating a player. Explicit
 `GPU_PUSH`/`CPU_PULL`, projected or cropped video, non-`AUTO` dynamic-range policies, and non-default
 Dolby Vision policies all fail closed because this first Surface bridge cannot render projection or verify
 the final color pipeline. Its first bounded layout contract accepts `ContentScale.Fit`; other
@@ -589,8 +594,9 @@ symlinks, dirty trees, commit mismatches, and unsupported hosts. This is determi
 consumer evidence; it is not a physical headset, display, GPU-import, or render-node acceptance
 result.
 
-Before KMediaVlc reaches a public version, its published-adapter consumer check uses the local
-composite explicitly and runs in two Gradle invocations:
+The `4.1.x` adapter catalog targets KMediaVlc `0.1.0-rc.1`. Before that coordinate is available
+from the public repository, its published-adapter consumer check uses the local composite
+explicitly and runs in two Gradle invocations:
 
 ```shell
 ./gradlew publishLibVlcConsumerSmokeArtifacts \
@@ -614,6 +620,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 
 | Library Version | Kotlin Version | Compose Version | Java | Android toolchain |
 |-----------------|----------------|-----------------|------|-------------------|
+| 4.1.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV/libVLC minSdk 28 |
 | 4.0.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV/libVLC minSdk 28 |
 | 3.0.x           | 2.4.10         | 1.12.0-beta03   | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 2.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |

@@ -2,6 +2,7 @@
 
 package sample.app
 
+import io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.MediaSourceSpec
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
@@ -30,7 +31,7 @@ class DesktopBackendSwitchIntegrationTest {
             val media = configuredWmaProMedia() ?: return@runBlocking
             val playbackOptions = VideoPlaybackOptions(extensions = desktopPipelineExtensions)
             val mpv = mpvDesktopPlaybackBackend()
-            val libVlc = libVlcDesktopPlaybackBackend(playbackOptions = playbackOptions)
+            val libVlc = libVlcDesktopPlaybackBackend(LibVlcPlaybackOptions())
             val adaptedPlatform = adaptedPlatformDesktopPlaybackBackend(playbackOptions = playbackOptions)
             val session =
                 DesktopPlaybackSession(
@@ -49,7 +50,7 @@ class DesktopBackendSwitchIntegrationTest {
                 session.notifySurfaceAttached(firstMpv)
 
                 if (libVlc.inspectAvailability() is DesktopBackendAvailability.Available) {
-                    val vlc = session.switchBackend("libvlc")
+                    val vlc = session.switchBackend("libvlc4-texture")
                     assertNotSame(firstMpv, vlc)
                     awaitPlayback(vlc, "libVLC")
                     assertTrue(vlc.currentAudioTrack != null, "libVLC did not keep an active WMA Pro audio track.")
