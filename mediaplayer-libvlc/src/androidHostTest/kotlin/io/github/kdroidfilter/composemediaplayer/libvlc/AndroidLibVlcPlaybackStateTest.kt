@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.libvlc
 
 import androidx.compose.ui.layout.ContentScale
+import io.github.kdroidfilter.composemediaplayer.LibVlcAndroidDecodeMode
 import io.github.shusek.kmediavlc.runtime.android.VlcAndroidPlaybackState
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -22,6 +23,12 @@ class AndroidLibVlcPlaybackStateTest {
         assertTrue(ContentScale.Fit.isSupportedAndroidLibVlcContentScale())
         assertFalse(ContentScale.Crop.isSupportedAndroidLibVlcContentScale())
         assertFalse(ContentScale.FillBounds.isSupportedAndroidLibVlcContentScale())
+    }
+
+    @Test
+    fun requestsAnHdrWindowOnlyForTheDirectMediaCodecRoute() {
+        assertTrue(LibVlcAndroidDecodeMode.AUTOMATIC.requestsAndroidLibVlcHdrWindow())
+        assertFalse(LibVlcAndroidDecodeMode.SOFTWARE_ONLY.requestsAndroidLibVlcHdrWindow())
     }
 
     @Test

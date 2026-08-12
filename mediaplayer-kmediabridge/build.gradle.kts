@@ -138,6 +138,10 @@ publishing {
 }
 
 mavenPublishing {
+    configureBasedOnAppliedPlugins(
+        javadocJar = com.vanniktech.maven.publish.JavadocJar.Empty(),
+        sourcesJar = com.vanniktech.maven.publish.SourcesJar.Empty(),
+    )
     coordinates(
         groupId = "io.github.shusek",
         artifactId = "composemediaplayer-kmediabridge",
@@ -156,7 +160,7 @@ mavenPublishing {
         }
         licenses {
             license {
-                name.set("Repository license; the optional FFmpeg runtime is LGPL-2.1-or-later")
+                name.set("Suvio Proprietary Component License")
                 url.set("https://github.com/SuvioMedia/KMediaPlayer/blob/master/LICENSE")
                 distribution.set("repo")
             }

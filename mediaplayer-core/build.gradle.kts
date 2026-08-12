@@ -148,6 +148,10 @@ publishing {
 }
 
 mavenPublishing {
+    configureBasedOnAppliedPlugins(
+        javadocJar = com.vanniktech.maven.publish.JavadocJar.Empty(),
+        sourcesJar = com.vanniktech.maven.publish.SourcesJar.Empty(),
+    )
     coordinates(
         groupId = projectGroup,
         artifactId = "composemediaplayer-core",
@@ -168,7 +172,7 @@ mavenPublishing {
         }
         licenses {
             license {
-                name.set("Internal Use Notice and Limited License")
+                name.set("Suvio Proprietary Component License")
                 url.set("https://github.com/SuvioMedia/KMediaPlayer/blob/master/LICENSE")
                 distribution.set("repo")
             }

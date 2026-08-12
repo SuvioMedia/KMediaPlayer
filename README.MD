@@ -12,11 +12,13 @@
 - **Media Foundation** (via JNI) for Windows
 - **AVPlayer** (via JNI) for macOS and iOS
 - **Media3** for Android
-- **kmedia-wasm-engine 0.4.0-alpha.2** for Kotlin/Wasm
+- **kmedia-wasm-engine 0.4.0-alpha.3** for Kotlin/Wasm
 
 ## Project Status
 
-This is a private, standalone SuvioMedia-maintained derivative used for internal projects and integrations. Immutable tagged artifacts are distributed only through Maven Central; GitHub Releases, GitHub Pages, and JitPack are not publication channels. Artifact availability is not an additional grant beyond the permissions in [LICENSE](LICENSE). If you need a supported public library, use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
+This is a private, standalone SuvioMedia-maintained derivative used for internal projects and integrations. Immutable tagged artifacts are distributed only through Maven Central; GitHub Releases, GitHub Pages, and JitPack are not publication channels. Artifact availability is not an additional grant beyond the permissions in [LICENSE](LICENSE). Proprietary publications use empty source-JAR placeholders; `verifyClosedSourcePublications` blocks a release if any Maven source artifact contains implementation code. If you need a supported public library, use the upstream project instead: [kdroidFilter/ComposeMediaPlayer](https://github.com/kdroidFilter/ComposeMediaPlayer).
+
+Do not release `4.1.7` while this implementation remains in a public source repository. Empty Maven source JARs prevent an artifact leak, but they cannot make a public Git tree closed source. Published binaries embed the proprietary license, the upstream Compose Media Player MIT copyright/license, and a component notice under `META-INF`.
 
 ## Table of Contents
 - [Project Status](#project-status)
@@ -88,7 +90,7 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
 ## ✨ Supported Video Formats
 | Format | Windows                                                                                                           | Linux  | macOS & iOS                                                       | Android | WASM |
 |--------|-------------------------------------------------------------------------------------------------------------------|-------------------|-----------------------------------------------------------------------------|-----------------|-------------------|
-| **Player** | [MediaFoundation](https://learn.microsoft.com/en-us/windows/win32/medfound/microsoft-media-foundation-sdk) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | [`kmedia-wasm-engine` 0.4.0-alpha.2](https://github.com/Shusek/kmedia-wasm-engine) |
+| **Player** | [MediaFoundation](https://learn.microsoft.com/en-us/windows/win32/medfound/microsoft-media-foundation-sdk) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | `kmedia-wasm-engine` 0.4.0-alpha.3 |
 | MP4 (H.264) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ✅ |
 | AVI | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ✅§ |
 | MKV | ⚠️†                                                                                                                | ✅ | ⚠️†                                                                          | ✅ | ✅§ |
@@ -104,7 +106,7 @@ This is a private, standalone SuvioMedia-maintained derivative used for internal
 
 > The Android artifact includes the matching Media3 HLS module; consumers do not need to add it separately.
 
-> § Wasm links the exact `io.github.shusek:kmedia-wasm-engine:0.4.0-alpha.2` Kotlin/Wasm KLIB. Its matching runtime-assets ZIP is packaged transitively as Compose resources, so playback does not import executable code from a CDN. The engine preserves upstream attribution and ships notices, corresponding source, build recipes and relinking instructions for its LGPL FFmpeg/Wasm payload. KMediaPlayer mounts the surface returned by the engine and never owns a parallel HTML-video playback route.
+> § Wasm links the exact proprietary `io.github.shusek:kmedia-wasm-engine:0.4.0-alpha.3` Kotlin/Wasm KLIB. Its matching runtime-assets ZIP is packaged transitively as Compose resources, so playback does not import executable code from a CDN. The separate native runtime preserves upstream attribution and ships notices, corresponding source, build recipes and relinking instructions for its LGPL FFmpeg/Wasm payload. KMediaPlayer mounts the surface returned by the engine and never owns a parallel HTML-video playback route.
 
 > † On desktop JVM, MKV/WebM can use native playback, optional in-process libVLC, or the explicitly installed `composemediaplayer-kmediabridge` extension when the platform backend cannot demux the source directly. The default player contains no KMediaBridge or FFmpeg dependency. The optional bridge uses the process-wide `KMediaFfmpegRuntime`, shared with the MPV adapter; there is no `ffmpeg`/`ffprobe` executable or system installation. Its exact runtime dependency also supplies the single shared libass, FreeType, FriBidi and HarfBuzz stack. The bridge remuxes compatible local video/audio into bounded-memory CMAF/HLS without re-encoding; the macOS runtime can also tone-map explicit HDR10/HDR10+/HLG to limited-range BT.709 for `FORCE_SDR` and burn embedded text subtitles for confirmed SDR input. Strictly validated HEVC Main 10 HDR10/HDR10+/HLG remains tagged as an HDR sample-copy route under HDR-preserving policies; the platform color pipeline still has to confirm the decoder, surface and display before reporting HDR output. Unsupported conversion requests fail closed or use an explicitly available VLC fallback. See [JVM MKV/WebM fallback support](docs/macos-mkv-webm-support/README.md).
 
@@ -234,7 +236,8 @@ fun main(args: Array<String>) = nucleusApplication(args, backend = NucleusBacken
 }
 ```
 
-The current `4.0.x` desktop line is verified with Nucleus `2.2.0` and Compose Multiplatform `1.11.1`.
+The current `4.1.x` desktop line is verified with the HDR fork Nucleus `2.4.0-kmp-hdr.2`
+and Compose Multiplatform `1.11.1`.
 It deliberately does not initialize AWT, Swing, JAWT, or a JetBrains Runtime window toolkit.
 See [Migrating from 3.x to 4.0](docs/migration-4.0.md) for the required desktop bootstrap and API changes.
 
@@ -544,9 +547,13 @@ will be changed after creating the state, select `CPU_PULL` explicitly; a GPU pl
 recreated or allowed to display the wrong flat image.
 
 Android uses the bundled KMediaVlc AAR and libVLC's direct Surface transport on API 28+ ARM64 and
-ARMv7 devices. It accepts local paths, `file:`, `content:`, and HTTP(S) sources and exposes
-automatic or software-only decoding through `LibVlcAndroidDecodeMode`. The Android probe loads the
-native graph and checks its path-free build identity before creating a player. Explicit
+ARMv7 devices. The Compose host supplies an opaque video SurfaceView plus a transparent media-overlay
+SurfaceView for hardware-decoded subtitles. Automatic decoding requests an HDR-capable activity
+window; KMediaVlc keeps MediaCodec directly on the final video Surface so BT.2020/PQ buffer metadata
+is not lost through an intermediate layer. This HDR10 path and the two-Surface lifecycle are covered
+on physical HDR hardware. The adapter accepts local paths, `file:`, `content:`, and HTTP(S) sources
+and exposes automatic or software-only decoding through `LibVlcAndroidDecodeMode`. The Android probe
+loads the native graph and checks its path-free build identity before creating a player. Explicit
 `GPU_PUSH`/`CPU_PULL`, projected or cropped video, non-`AUTO` dynamic-range policies, and non-default
 Dolby Vision policies all fail closed because this first Surface bridge cannot render projection or verify
 the final color pipeline. Its first bounded layout contract accepts `ContentScale.Fit`; other
@@ -584,8 +591,9 @@ symlinks, dirty trees, commit mismatches, and unsupported hosts. This is determi
 consumer evidence; it is not a physical headset, display, GPU-import, or render-node acceptance
 result.
 
-Before KMediaVlc reaches a public version, its published-adapter consumer check uses the local
-composite explicitly and runs in two Gradle invocations:
+The `4.1.x` adapter catalog targets KMediaVlc `0.1.0-rc.1`. Before that coordinate is available
+from the public repository, its published-adapter consumer check uses the local composite
+explicitly and runs in two Gradle invocations:
 
 ```shell
 ./gradlew publishLibVlcConsumerSmokeArtifacts \
@@ -609,6 +617,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 
 | Library Version | Kotlin Version | Compose Version | Java | Android toolchain |
 |-----------------|----------------|-----------------|------|-------------------|
+| 4.1.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV/libVLC minSdk 28 |
 | 4.0.x           | 2.4.10         | 1.11.1          | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV/libVLC minSdk 28 |
 | 3.0.x           | 2.4.10         | 1.12.0-beta03   | 25   | AGP 9.3.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
 | 2.0.x           | 2.4.0          | 1.11.1          | 25   | AGP 9.2.1 / compileSdk 37 / minSdk 23; MPV minSdk 28 |
@@ -621,7 +630,7 @@ Gradle dependency verification pins external build artifacts by SHA-256. The onl
 
 The current build records the public Kotlin ABI in version control. `checkKotlinAbi`, the published-consumer smoke project, platform tests, and the Java 25 classfile check must all pass before the release workflow publishes the GAV and native payload to Maven Central. To reproduce the isolated consumer check locally, first run `./gradlew publishConsumerSmokeArtifacts -PpublicationVersion=0.0.0-consumer.local -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache`, then run `./gradlew consumerSmokeTest -PpublicationVersion=0.0.0-consumer.local -PcomposeMediaPlayer.skipNativeBuild=true --no-configuration-cache` in a separate Gradle invocation. The split is intentional: the Maven fixtures must exist before Gradle resolves the consumer configurations.
 
-The release workflow first publishes every module into a runner-local staging repository and validates the complete coordinates and POM metadata. It then performs the irreversible Maven Central publication and waits for every expected artifact to become available. Do **not** rerun publication for a version already accepted by Maven Central.
+The release workflow first publishes every module into a runner-local staging repository and validates the complete coordinates, POM metadata, and empty proprietary source JARs. It then performs the irreversible Maven Central publication and waits for every expected artifact to become available. Do **not** rerun publication for a version already accepted by Maven Central.
 
 ## 🚀 Getting Started
 
@@ -635,9 +644,9 @@ val playerState = rememberVideoPlayerState()
 
 ### Wasm playback engine
 
-Wasm links the typed `io.github.shusek:kmedia-wasm-engine:0.4.0-alpha.2` KLIB directly. The public
-state, Compose surface, controls, overlays and fullscreen API stay in KMediaPlayer, while source
-routing, browser media elements, decoding, clocks and rendering stay in the engine. Matching
+Wasm links the proprietary typed `io.github.shusek:kmedia-wasm-engine:0.4.0-alpha.3` KLIB directly.
+The public API surface, Compose controls, overlays and fullscreen integration stay in KMediaPlayer,
+while source routing, browser media elements, decoding, clocks and rendering stay in the engine. Matching
 `kmedia-wasm.js`, `kmedia-wasm.wasm`, and `kmedia-wasm-runtime.json` files come from
 `kmedia-wasm-engine-runtime-assets` and are packaged transitively as Compose resources.
 

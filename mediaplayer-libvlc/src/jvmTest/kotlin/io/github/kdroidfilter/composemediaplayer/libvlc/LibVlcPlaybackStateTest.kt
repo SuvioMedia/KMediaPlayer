@@ -66,4 +66,27 @@ class LibVlcPlaybackStateTest {
             ),
         )
     }
+
+    @Test
+    fun frameSerialGapsBecomeDroppedFrameTelemetry() {
+        assertEquals(0L, skippedLibVlcFrameCount(previousSerial = 0L, currentSerial = 1L))
+        assertEquals(3L, skippedLibVlcFrameCount(previousSerial = 0L, currentSerial = 4L))
+        assertEquals(2L, skippedLibVlcFrameCount(previousSerial = 7L, currentSerial = 10L))
+        assertEquals(0L, skippedLibVlcFrameCount(previousSerial = 10L, currentSerial = 10L))
+        assertEquals(0L, skippedLibVlcFrameCount(previousSerial = 10L, currentSerial = 1L))
+    }
+
+    @Test
+    fun frameRateEstimatorUsesSerialAndPresentationTimestamps() {
+        val estimator = LibVlcFrameRateEstimator()
+
+        assertNull(estimator.observe(serial = 1L, ptsMicroseconds = 0L))
+        assertNull(estimator.observe(serial = 5L, ptsMicroseconds = 400_000L))
+        assertEquals(24f, estimator.observe(serial = 13L, ptsMicroseconds = 500_000L))
+
+        estimator.reset()
+        assertNull(estimator.observe(serial = 100L, ptsMicroseconds = 5_000_000L))
+        assertNull(estimator.observe(serial = 105L, ptsMicroseconds = 4_000_000L))
+        assertEquals(24f, estimator.observe(serial = 117L, ptsMicroseconds = 4_500_000L))
+    }
 }

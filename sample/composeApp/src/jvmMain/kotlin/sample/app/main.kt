@@ -11,6 +11,7 @@ import androidx.compose.ui.window.rememberWindowState
 import dev.nucleusframework.application.DecoratedWindow
 import dev.nucleusframework.application.NucleusBackend
 import dev.nucleusframework.application.nucleusApplication
+import dev.nucleusframework.window.WindowDynamicRangeMode
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
@@ -19,6 +20,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionSettings
 import io.github.kdroidfilter.composemediaplayer.VideoProjectionType
 import sample.app.player.desktopPipelineExtensions
+import sample.app.player.sampleLibVlcVideoPlayerBackend
 
 fun main(args: Array<String>) {
     val initialVideoUrl =
@@ -103,6 +105,13 @@ fun main(args: Array<String>) {
         System.getProperty("sample.app.windowLifecycleSelfTest")
             ?.toBooleanStrictOrNull()
             ?: false
+    val initialDesktopBackendName = System.getProperty("sample.app.playbackBackend")
+    val colorSelfTestBackend =
+        initialDesktopBackendName
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { colorSelfTestSeconds != null && it in kMediaVlcSampleBackendNames }
+            ?.let { sampleLibVlcVideoPlayerBackend(playbackOptions) }
 
     nucleusApplication(args = args, backend = NucleusBackend.Tao) {
         val applicationScope = this
@@ -126,7 +135,7 @@ fun main(args: Array<String>) {
             title = "Compose Media Player",
             state = windowState,
             nativePopupLayers = true,
-            macOSExtendedDynamicRange = true,
+            dynamicRangeMode = WindowDynamicRangeMode.EXTENDED_IF_AVAILABLE,
             onKeyEvent = { event ->
                 if (event.key == Key.Escape &&
                     event.type == KeyEventType.KeyDown &&
@@ -168,6 +177,7 @@ fun main(args: Array<String>) {
                     durationSeconds = colorSelfTestSeconds,
                     resultFilePath = colorSelfTestResultFile,
                     playbackOptions = playbackOptions,
+                    playerBackend = colorSelfTestBackend,
                     windowState = windowState,
                     verifyWindowLifecycle = windowLifecycleSelfTest,
                     onComplete = applicationScope::exitApplication,
@@ -182,7 +192,7 @@ fun main(args: Array<String>) {
                             ?: false,
                     playbackOptions = playbackOptions,
                     initialProjection = initialProjection,
-                    initialDesktopBackendName = System.getProperty("sample.app.playbackBackend"),
+                    initialDesktopBackendName = initialDesktopBackendName,
                     initialDesktopSourceAdapterName = System.getProperty("sample.app.sourceAdapter"),
                     initialFullscreen =
                         System.getProperty("sample.app.initialFullscreen")
@@ -197,3 +207,11 @@ fun main(args: Array<String>) {
         }
     }
 }
+
+private val kMediaVlcSampleBackendNames =
+    setOf(
+        "LIBVLC_NATIVE",
+        "LIBVLC4_TEXTURE",
+        "LIBVLC4-TEXTURE",
+        "KMEDIAVLC",
+    )

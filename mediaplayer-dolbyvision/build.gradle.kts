@@ -511,6 +511,10 @@ publishing {
 }
 
 mavenPublishing {
+    configureBasedOnAppliedPlugins(
+        javadocJar = com.vanniktech.maven.publish.JavadocJar.Empty(),
+        sourcesJar = com.vanniktech.maven.publish.SourcesJar.Empty(),
+    )
     coordinates(
         groupId = "io.github.shusek",
         artifactId = "composemediaplayer-dolbyvision",
@@ -529,7 +533,12 @@ mavenPublishing {
         }
         licenses {
             license {
-                name.set("MIT (libdovi); repository license applies to the Kotlin bridge")
+                name.set("Suvio Proprietary Component License (Kotlin bridge)")
+                url.set("https://github.com/SuvioMedia/KMediaPlayer/blob/master/LICENSE")
+                distribution.set("repo")
+            }
+            license {
+                name.set("MIT License (libdovi)")
                 url.set("https://github.com/quietvoid/dovi_tool/blob/main/LICENSE")
                 distribution.set("repo")
             }

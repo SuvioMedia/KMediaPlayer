@@ -12,18 +12,25 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import io.github.kdroidfilter.composemediaplayer.JvmMediaToolAvailability
 import io.github.kdroidfilter.composemediaplayer.JvmMediaTools
+import io.github.kdroidfilter.composemediaplayer.LibVlcBackendAvailability
+import io.github.kdroidfilter.composemediaplayer.LibVlcBackendUnavailableReason
+import io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.LibVlcRuntimeSource
 import io.github.kdroidfilter.composemediaplayer.MediaSourceSpec
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.MpvRuntimeSource
 import io.github.kdroidfilter.composemediaplayer.PreviewableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerBackend
 import io.github.kdroidfilter.composemediaplayer.adaptedPlatformDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.inspectLibVlcBackend
 import io.github.kdroidfilter.composemediaplayer.inspectMpvBackend
 import io.github.kdroidfilter.composemediaplayer.kMediaBridgeDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.kMediaBridgeRemuxDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.kMediaBridgeTranscodeDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.libVlcDesktopPlaybackBackend
+import io.github.kdroidfilter.composemediaplayer.libVlcVideoPlayerBackend
 import io.github.kdroidfilter.composemediaplayer.mpvDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.platformDesktopPlaybackBackend
 import io.github.kdroidfilter.composemediaplayer.vlcHlsDesktopPlaybackBackend
@@ -32,8 +39,15 @@ import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackSession
 import io.github.kdroidfilter.composemediaplayer.desktop.DesktopPlaybackSessionState
 import io.github.kdroidfilter.composemediaplayer.desktop.JvmHttpHlsMediaProxyFactory
 import io.github.kdroidfilter.composemediaplayer.desktop.JvmHttpSeekableMediaDataSourceFactory
+import io.github.shusek.kmediavlc.runtime.desktop.VlcDesktopRuntimeResolution
+import io.github.shusek.kmediavlc.runtime.desktop.VlcFrameDeliveryMode
+import io.github.shusek.kmediavlc.runtime.desktop.VlcRenderEngine
+import io.github.shusek.kmediavlc.runtime.desktop.VlcRuntimeCapabilities
 import io.github.vinceglb.filekit.path
 import kotlinx.coroutines.launch
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.Locale
 
 internal actual val desktopMkvPlaybackBackendSelectionAvailable: Boolean
     get() = true
@@ -42,13 +56,18 @@ internal class DesktopSamplePlaybackSurfaceHost(
     val session: DesktopPlaybackSession,
 ) : SamplePlaybackSurfaceHost
 
+private const val KMEDIAVLC_RUNTIME_DIRECTORY_PROPERTY = "sample.app.kMediaVlcRuntimeDirectory"
+private const val KMEDIAVLC_RUNTIME_ID = "sample-explicit-kmediavlc-4"
+private const val KMEDIAVLC_LIBVLC_VERSION = "4.0.0-dev"
+private const val KMEDIAVLC_LIBVLC_REVISION = "b5536cdea24b313ba9215eacfbd7fa3295d7f3ee"
 private const val MPV_LIBRARY_PATH_PROPERTY = "sample.app.mpvLibraryPath"
 
 internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackBackendOption> {
     if (!desktopMkvPlaybackBackendSelectionAvailable) return emptyList()
 
     val tools = JvmMediaTools.query(desktopPipelineExtensions)
-    val hasLibVlcNative = tools.libVlc.available
+    val libVlcAvailability = configuredLibVlcBackendAvailability()
+    val hasLibVlcNative = libVlcAvailability is LibVlcBackendAvailability.Available
     val hasKMediaBridge = tools.kMediaBridge.available && tools.kMediaBridgeProbe.available
 
     return listOf(
@@ -56,7 +75,7 @@ internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackB
             backend = DesktopMkvPlaybackBackend.AUTO,
             enabled = true,
             status =
-                "Route: platform direct → KMediaBridge remux → MPV → native libVLC → " +
+                "Route: platform direct → KMediaBridge remux → MPV → KMediaVlc TextureView → " +
                     "KMediaBridge legacy transcode. Unavailable stages are skipped.",
             installHint =
                 if (hasLibVlcNative || hasKMediaBridge) {
@@ -66,7 +85,7 @@ internal actual fun desktopMkvPlaybackBackendOptions(): List<DesktopMkvPlaybackB
                 },
         ),
         platformOption(),
-        libVlcNativeOption(tools),
+        libVlcNativeOption(libVlcAvailability),
         mpvOption(),
     )
 }
@@ -96,13 +115,14 @@ internal actual fun rememberSampleVideoPlayer(
     playbackOptions: VideoPlaybackOptions,
 ): SampleVideoPlayerHandle {
     val mpvOptions = remember { configuredMpvPlaybackOptions() }
+    val libVlcOptions = remember(playbackOptions) { configuredLibVlcPlaybackOptions(playbackOptions) }
     val backends =
-        remember(playbackOptions, mpvOptions) {
+        remember(playbackOptions, mpvOptions, libVlcOptions) {
             listOf(
                 platformDesktopPlaybackBackend(playbackOptions = playbackOptions),
                 kMediaBridgeRemuxDesktopPlaybackBackend(playbackOptions = playbackOptions),
                 mpvDesktopPlaybackBackend(mpvOptions),
-                libVlcDesktopPlaybackBackend(playbackOptions = playbackOptions),
+                libVlcDesktopPlaybackBackend(libVlcOptions),
                 kMediaBridgeTranscodeDesktopPlaybackBackend(playbackOptions = playbackOptions),
                 adaptedPlatformDesktopPlaybackBackend(playbackOptions = playbackOptions),
                 kMediaBridgeDesktopPlaybackBackend(playbackOptions = playbackOptions),
@@ -227,7 +247,7 @@ internal actual fun rememberSampleVideoPlayer(
 private fun DesktopMkvPlaybackBackend.sessionBackendId(sourceAdapter: DesktopMediaSourceAdapter): String? =
     when (this) {
         DesktopMkvPlaybackBackend.MPV -> "mpv"
-        DesktopMkvPlaybackBackend.LIBVLC_NATIVE -> "libvlc"
+        DesktopMkvPlaybackBackend.LIBVLC_NATIVE -> "libvlc4-texture"
         DesktopMkvPlaybackBackend.PLATFORM -> sourceAdapter.platformBackendId()
         DesktopMkvPlaybackBackend.AUTO ->
             when (sourceAdapter) {
@@ -254,6 +274,9 @@ internal actual fun applyDesktopPlaybackSelection(
 
 internal actual fun restoreDesktopMkvPlaybackBackend() = Unit
 
+internal fun sampleLibVlcVideoPlayerBackend(playbackOptions: VideoPlaybackOptions): VideoPlayerBackend =
+    libVlcVideoPlayerBackend(configuredLibVlcPlaybackOptions(playbackOptions))
+
 private fun platformOption(): DesktopMkvPlaybackBackendOption =
     DesktopMkvPlaybackBackendOption(
         backend = DesktopMkvPlaybackBackend.PLATFORM,
@@ -266,27 +289,28 @@ private fun platformOption(): DesktopMkvPlaybackBackendOption =
             },
     )
 
-private fun libVlcNativeOption(tools: JvmMediaToolAvailability): DesktopMkvPlaybackBackendOption {
-    val enabled = tools.libVlc.available
-    val status =
-        when {
-            enabled && isLinux() -> "Ready. VLC/libVLC detected. Uses an X11/XWayland native window, not native Wayland."
-            enabled -> "Ready. VLC/libVLC detected."
-            else -> "Requires VLC/libVLC."
-        }
-
-    return DesktopMkvPlaybackBackendOption(
-        backend = DesktopMkvPlaybackBackend.LIBVLC_NATIVE,
-        enabled = enabled,
-        status = status,
-        installHint =
-            if (enabled) {
-                "VLC: ${tools.vlc.path ?: tools.libVlc.path}. Linux direct rendering requires X11/XWayland."
-            } else {
-                "Install VLC from https://www.videolan.org/vlc/."
-            },
-    )
-}
+private fun libVlcNativeOption(availability: LibVlcBackendAvailability): DesktopMkvPlaybackBackendOption =
+    when (availability) {
+        is LibVlcBackendAvailability.Available ->
+            DesktopMkvPlaybackBackendOption(
+                backend = DesktopMkvPlaybackBackend.LIBVLC_NATIVE,
+                enabled = true,
+                status =
+                    "Ready. ${availability.backend} renders through the Nucleus TextureView " +
+                        "(${availability.deliveryMode}).",
+                installHint =
+                    System.getProperty(KMEDIAVLC_RUNTIME_DIRECTORY_PROPERTY)
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { "Explicit audited runtime: $it" },
+            )
+        is LibVlcBackendAvailability.Unavailable ->
+            DesktopMkvPlaybackBackendOption(
+                backend = DesktopMkvPlaybackBackend.LIBVLC_NATIVE,
+                enabled = false,
+                status = "KMediaVlc unavailable (${availability.reason}).",
+                installHint = availability.guidance,
+            )
+    }
 
 private fun kMediaBridgeHlsOption(tools: JvmMediaToolAvailability): DesktopMediaSourceAdapterOption {
     val enabled = tools.kMediaBridge.available && tools.kMediaBridgeProbe.available
@@ -365,6 +389,113 @@ private fun mpvOption(): DesktopMkvPlaybackBackendOption {
     }
 }
 
+private fun configuredLibVlcBackendAvailability(): LibVlcBackendAvailability =
+    runCatching { inspectLibVlcBackend(configuredLibVlcPlaybackOptions()) }
+        .getOrElse {
+            LibVlcBackendAvailability.Unavailable(
+                reason = LibVlcBackendUnavailableReason.INVALID_RUNTIME,
+                guidance =
+                    "The configured KMediaVlc runtime is invalid. Use a complete audited runtime " +
+                        "directory or the bundled desktop runtime.",
+            )
+        }
+
+private fun configuredLibVlcPlaybackOptions(): LibVlcPlaybackOptions =
+    LibVlcPlaybackOptions(runtimeSource = configuredLibVlcRuntimeSource())
+
+private fun configuredLibVlcPlaybackOptions(playbackOptions: VideoPlaybackOptions): LibVlcPlaybackOptions =
+    LibVlcPlaybackOptions(
+        runtimeSource = configuredLibVlcRuntimeSource(),
+        dynamicRangePolicy = playbackOptions.dynamicRangePolicy,
+        dolbyVisionPolicy = playbackOptions.dolbyVisionPolicy,
+        projection = playbackOptions.projection,
+        projectionView = playbackOptions.projectionView,
+        projectionViewControlMode = playbackOptions.projectionViewControlMode,
+        projectionTextureCrop = playbackOptions.projectionTextureCrop,
+        desktopVideoSurfaceMode = playbackOptions.desktopVideoSurfaceMode,
+    )
+
+private fun configuredLibVlcRuntimeSource(): LibVlcRuntimeSource {
+    val configuredDirectory =
+        System.getProperty(KMEDIAVLC_RUNTIME_DIRECTORY_PROPERTY)
+            ?.takeIf(String::isNotBlank)
+            ?: return LibVlcRuntimeSource.Bundled
+    val runtimeDirectory = Path.of(configuredDirectory).toAbsolutePath().normalize()
+    require(Files.isDirectory(runtimeDirectory) && !Files.isSymbolicLink(runtimeDirectory)) {
+        "$KMEDIAVLC_RUNTIME_DIRECTORY_PROPERTY must name a plain runtime directory."
+    }
+    val layout = currentKMediaVlcRuntimeLayout()
+    val bridge = requiredRuntimeFile(runtimeDirectory, layout.bridgePath)
+    val libVlc = requiredRuntimeFile(runtimeDirectory, layout.libVlcPath)
+    val plugins = runtimeDirectory.resolve("lib/vlc/plugins").normalize()
+    require(Files.isDirectory(plugins) && !Files.isSymbolicLink(plugins)) {
+        "The configured KMediaVlc runtime has no plain lib/vlc/plugins directory."
+    }
+    return LibVlcRuntimeSource.Resolved(
+        VlcDesktopRuntimeResolution(
+            bridge,
+            libVlc,
+            plugins,
+            KMEDIAVLC_RUNTIME_ID,
+            VlcRuntimeCapabilities(
+                4,
+                2,
+                KMEDIAVLC_LIBVLC_VERSION,
+                KMEDIAVLC_LIBVLC_REVISION,
+                setOf(VlcFrameDeliveryMode.GPU_PUSH, VlcFrameDeliveryMode.CPU_PULL),
+                setOf(layout.renderEngine),
+                layout.hdr10Metadata,
+            ),
+        ),
+    )
+}
+
+private fun currentKMediaVlcRuntimeLayout(): KMediaVlcRuntimeLayout {
+    val osName = System.getProperty("os.name", "").lowercase(Locale.ROOT)
+    return when {
+        osName.contains("windows") ->
+            KMediaVlcRuntimeLayout(
+                bridgePath = "bin/kmediavlc_bridge.dll",
+                libVlcPath = "bin/libvlc.dll",
+                renderEngine = VlcRenderEngine.D3D11,
+                hdr10Metadata = true,
+            )
+        osName.contains("mac") || osName.contains("darwin") ->
+            KMediaVlcRuntimeLayout(
+                bridgePath = "bin/libkmediavlc_bridge.dylib",
+                libVlcPath = "bin/libvlc.12.dylib",
+                renderEngine = VlcRenderEngine.OPENGL,
+                hdr10Metadata = true,
+            )
+        osName.contains("linux") ->
+            KMediaVlcRuntimeLayout(
+                bridgePath = "bin/libkmediavlc_bridge.so",
+                libVlcPath = "bin/libvlc.so.12",
+                renderEngine = VlcRenderEngine.GLES2,
+                hdr10Metadata = false,
+            )
+        else -> error("KMediaVlc does not provide a desktop runtime for this operating system.")
+    }
+}
+
+private fun requiredRuntimeFile(
+    root: Path,
+    relativePath: String,
+): Path {
+    val file = root.resolve(relativePath).normalize()
+    require(file.startsWith(root) && Files.isRegularFile(file) && !Files.isSymbolicLink(file)) {
+        "The configured KMediaVlc runtime is missing the plain file $relativePath."
+    }
+    return file
+}
+
+private data class KMediaVlcRuntimeLayout(
+    val bridgePath: String,
+    val libVlcPath: String,
+    val renderEngine: VlcRenderEngine,
+    val hdr10Metadata: Boolean,
+)
+
 private fun configuredMpvPlaybackOptions(): MpvPlaybackOptions =
     System
         .getProperty(MPV_LIBRARY_PATH_PROPERTY)
@@ -376,9 +507,4 @@ private fun configuredMpvPlaybackOptions(): MpvPlaybackOptions =
 private fun isMacOs(): Boolean {
     val osName = System.getProperty("os.name", "").lowercase()
     return osName.contains("mac") || osName.contains("darwin")
-}
-
-private fun isLinux(): Boolean {
-    val osName = System.getProperty("os.name", "").lowercase()
-    return osName.contains("linux")
 }

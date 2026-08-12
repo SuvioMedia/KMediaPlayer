@@ -3,6 +3,8 @@ package sample.app
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -11,18 +13,23 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import dev.nucleusframework.window.tao.LocalTaoWindow
 import dev.nucleusframework.window.tao.TaoWindow
+import dev.nucleusframework.window.tao.TextureViewHostDynamicRange
+import dev.nucleusframework.window.tao.TextureViewHostPresentationState
+import dev.nucleusframework.window.tao.currentTextureViewHostCapabilities
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineRenderer
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
 import io.github.kdroidfilter.composemediaplayer.DynamicMetadataHandling
+import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.RenderableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoColorPipelineStatus
 import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerBackend
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
-import io.github.kdroidfilter.composemediaplayer.rememberRenderableVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.allowComposeMediaPlayerLogging
 import io.github.kdroidfilter.composemediaplayer.util.composeMediaPlayerLogSink
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +58,9 @@ private val selfTestStartTimeoutMs =
         ?.times(1_000L)
         ?: 90_000L
 private const val STABLE_OUTPUT_WINDOW_MS = 1_500L
+private const val HDR_HOST_START_TIMEOUT_MS = 10_000L
+private const val HDR_HOST_POLL_INTERVAL_MS = 25L
+private const val HDR_HOST_SETTLING_MS = 100L
 
 @Composable
 internal fun DesktopColorPipelineSelfTest(
@@ -61,18 +71,46 @@ internal fun DesktopColorPipelineSelfTest(
     durationSeconds: Long,
     resultFilePath: String,
     playbackOptions: VideoPlaybackOptions,
+    playerBackend: VideoPlayerBackend? = null,
     windowState: WindowState,
     verifyWindowLifecycle: Boolean,
     onComplete: () -> Unit,
 ) {
     allowComposeMediaPlayerLogging = true
     composeMediaPlayerLogSink = { line -> println(line) }
-    val playerState = rememberRenderableVideoPlayerState(playbackOptions = playbackOptions)
+    val playerState =
+        if (playerBackend == null) {
+            rememberVideoPlayerState(playbackOptions = playbackOptions)
+        } else {
+            rememberVideoPlayerState(playerBackend)
+        }
     val taoWindow = LocalTaoWindow.current
+    val hostCapabilities = currentTextureViewHostCapabilities()
+    val latestHostCapabilities by rememberUpdatedState(hostCapabilities)
     LaunchedEffect(playerState, inputUri, taoWindow) {
         var lastStatus: VideoColorPipelineStatus? = null
         val outcome =
             runCatching {
+                if (playbackOptions.dynamicRangePolicy == DynamicRangePolicy.REQUIRE_HDR) {
+                    withTimeout(HDR_HOST_START_TIMEOUT_MS) {
+                        while (
+                            latestHostCapabilities.actualDynamicRange != TextureViewHostDynamicRange.HDR ||
+                            latestHostCapabilities.presentationState != TextureViewHostPresentationState.PRESENTED
+                        ) {
+                            delay(HDR_HOST_POLL_INTERVAL_MS)
+                        }
+                    }
+                    delay(HDR_HOST_SETTLING_MS)
+                }
+                println(
+                    "KMP_COLOR_SELF_TEST_HOST=" +
+                        "bounds=${taoWindow?.outerBoundsPx()?.joinToString(",")} " +
+                        "requested=${latestHostCapabilities.requestedMode} " +
+                        "actual=${latestHostCapabilities.actualDynamicRange} " +
+                        "format=${latestHostCapabilities.outputPixelFormat} " +
+                        "headroom=${latestHostCapabilities.headroom} " +
+                        "presentation=${latestHostCapabilities.presentationState}",
+                )
                 playerState.loop = true
                 playerState.openUri(inputUri, InitialPlayerState.PLAY)
                 withTimeout(selfTestStartTimeoutMs) {
@@ -159,7 +197,7 @@ internal fun DesktopColorPipelineSelfTest(
 }
 
 private suspend fun runDesktopWindowLifecycleCheck(
-    playerState: RenderableVideoPlayerState,
+    playerState: VideoPlayerState,
     windowState: WindowState,
     taoWindow: TaoWindow,
 ) {
@@ -249,13 +287,12 @@ private suspend fun runDesktopWindowLifecycleCheck(
 }
 
 private suspend fun runDesktopSustainedPlaybackCheck(
-    playerState: RenderableVideoPlayerState,
+    playerState: VideoPlayerState,
     expectedSource: VideoDynamicRange,
     expectedOutput: VideoDynamicRange,
     requireAudioSync: Boolean,
     durationSeconds: Long,
 ): DesktopSustainedPlaybackResult {
-    val frameRateThresholds = desktopFrameRateThresholds(playerState.metadata.frameRate?.toDouble())
     val started = TimeSource.Monotonic.markNow()
     val baselineRenderedFrames =
         checkNotNull(playerState.diagnostics.renderedVideoFrames) { "Rendered frame telemetry unavailable." }
@@ -305,6 +342,10 @@ private suspend fun runDesktopSustainedPlaybackCheck(
         checkNotNull(diagnostics.droppedVideoFrames) { "Dropped-frame telemetry unavailable." } -
             baselineDroppedFrames
     val maximumAvSyncOffsetMs = diagnostics.maximumAvSyncOffsetMs
+    // KMediaVlc estimates source cadence from the first stable presentation-timestamp window.
+    // Read it after the sustained run so a 24/25/30 fps source is not judged against the
+    // conservative 60 fps fallback merely because metadata was still warming up at entry.
+    val frameRateThresholds = desktopFrameRateThresholds(playerState.metadata.frameRate?.toDouble())
     val framePerformance = desktopFramePerformance(renderedFrames, droppedFrames, actualDurationSeconds)
     val sampledMinimumProcessedFps = minimumProcessedFps.takeIf(Double::isFinite) ?: 0.0
     val residentSetGrowthKib = (peakResidentSetKib - initialResidentSetKib).coerceAtLeast(0L)
