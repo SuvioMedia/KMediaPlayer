@@ -226,9 +226,11 @@ jobs:
           :mediaplayer-ass:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-dolbyvision:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-kmediabridge:publishAllPublicationsToReleaseStagingRepository
+          :mediaplayer-libvlc:publishAllPublicationsToReleaseStagingRepository
           :mediaplayer-core:verifyJvm25Bytecode
           :mediaplayer-desktop-tao:verifyJvm25Bytecode
           :mediaplayer:verifyJvm25Bytecode
+          :mediaplayer-libvlc:verifyJvm25Bytecode
           :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion="$RELEASE_VERSION"
           -PreleaseStagingMavenRepository="$RUNNER_TEMP/maven-staging"
@@ -344,6 +346,21 @@ jobs:
             }
           done
 
+          libvlc_artifacts=(
+            composemediaplayer-libvlc
+            composemediaplayer-libvlc-android
+            composemediaplayer-libvlc-iosarm64
+            composemediaplayer-libvlc-iossimulatorarm64
+            composemediaplayer-libvlc-jvm
+          )
+          for artifact in "${libvlc_artifacts[@]}"; do
+            pom="$repository/io/github/shusek/$artifact/$RELEASE_VERSION/$artifact-$RELEASE_VERSION.pom"
+            test -s "$pom" || {
+              echo "Missing staged libVLC coordinate: $artifact:$RELEASE_VERSION" >&2
+              exit 1
+            }
+          done
+
       - name: Publish the verified release to Maven Central
         shell: bash
         run: >-
@@ -356,6 +373,7 @@ jobs:
           :mediaplayer-ass:publishAndReleaseToMavenCentral
           :mediaplayer-dolbyvision:publishAndReleaseToMavenCentral
           :mediaplayer-kmediabridge:publishAndReleaseToMavenCentral
+          :mediaplayer-libvlc:publishAndReleaseToMavenCentral
           -PpublicationVersion="$RELEASE_VERSION"
           -PreleaseSigningEnabled=true
           -PcomposeMediaPlayer.skipNativeBuild=true

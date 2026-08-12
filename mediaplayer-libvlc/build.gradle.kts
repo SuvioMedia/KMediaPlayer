@@ -2,8 +2,11 @@ import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.tasks.Jar
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
+import java.io.DataInputStream
+import java.util.zip.ZipFile
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -16,6 +19,7 @@ plugins {
 }
 
 val projectVersion = providers.gradleProperty("publicationVersion").orNull ?: "dev"
+val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val releaseSigningEnabled =
     providers.gradleProperty("releaseSigningEnabled").map(String::toBoolean).getOrElse(false)
 val kmediaVlcVersion = libs.versions.kmediaVlc.get()
@@ -226,11 +230,59 @@ if (skipAppleInteropDuringIdeaSync) {
     }
 }
 
+val java25ClassFileVersion = 69
+val verifyJvm25Bytecode =
+    tasks.register("verifyJvm25Bytecode") {
+        group = "verification"
+        description = "Verifies that every libVLC adapter JVM class targets Java 25."
+
+        val jvmJar = tasks.named<Jar>("jvmJar")
+        dependsOn(jvmJar)
+        val archiveFile = jvmJar.flatMap { it.archiveFile }
+        inputs.file(archiveFile)
+        inputs.property("expectedClassFileVersion", java25ClassFileVersion)
+
+        doLast {
+            val expectedClassFileVersion = inputs.properties.getValue("expectedClassFileVersion") as Int
+            var verifiedClasses = 0
+            ZipFile(inputs.files.singleFile).use { archive ->
+                archive
+                    .entries()
+                    .asSequence()
+                    .filter { !it.isDirectory && it.name.endsWith(".class") }
+                    .forEach { entry ->
+                        DataInputStream(archive.getInputStream(entry)).use { classFile ->
+                            check(classFile.readInt() == 0xCAFEBABE.toInt()) {
+                                "Invalid classfile header in ${entry.name}"
+                            }
+                            classFile.readUnsignedShort()
+                            val majorVersion = classFile.readUnsignedShort()
+                            check(majorVersion == expectedClassFileVersion) {
+                                "${entry.name} targets classfile $majorVersion; expected $expectedClassFileVersion."
+                            }
+                            verifiedClasses++
+                        }
+                    }
+            }
+            check(verifiedClasses > 0) { "The libVLC adapter JVM publication contains no classes." }
+        }
+    }
+
+tasks.named("check") {
+    dependsOn(verifyJvm25Bytecode)
+}
+
 publishing {
     repositories {
         maven {
             name = "consumerSmoke"
             url = uri(rootProject.layout.buildDirectory.dir("consumer-repository"))
+        }
+        releaseStagingMavenRepository?.let { repositoryPath ->
+            maven {
+                name = "releaseStaging"
+                url = uri(repositoryPath)
+            }
         }
     }
 }

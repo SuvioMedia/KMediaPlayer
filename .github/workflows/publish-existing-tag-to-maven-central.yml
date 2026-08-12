@@ -232,6 +232,7 @@ jobs:
           :mediaplayer-ass:publishAndReleaseToMavenCentral
           :mediaplayer-dolbyvision:publishAndReleaseToMavenCentral
           :mediaplayer-kmediabridge:publishAndReleaseToMavenCentral
+          :mediaplayer-libvlc:publishAndReleaseToMavenCentral
           -PpublicationVersion="${{ steps.release_ref.outputs.version }}"
           -PreleaseSigningEnabled=true
           -PcomposeMediaPlayer.skipNativeBuild=true

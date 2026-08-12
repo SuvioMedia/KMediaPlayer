@@ -90,6 +90,7 @@ jobs:
           :mediaplayer-ass:verifyJvmDesktopNativeMatrix
           :mediaplayer-dolbyvision:jvmTest :mediaplayer-dolbyvision:verifyJvmMacArmNativeMatrix
           :mediaplayer-kmediabridge:jvmTest
+          :mediaplayer-libvlc:jvmTest
           :mediaplayer-mpv:jvmTest
           --project-prop composeMediaPlayer.skipNativeBuild=true
           --refresh-dependencies --no-daemon --continue
@@ -114,6 +115,8 @@ jobs:
             mediaplayer-dolbyvision/build/test-results/
             mediaplayer-kmediabridge/build/reports/tests/
             mediaplayer-kmediabridge/build/test-results/
+            mediaplayer-libvlc/build/reports/tests/
+            mediaplayer-libvlc/build/test-results/
             mediaplayer-core/build/reports/tests/
             mediaplayer-core/build/test-results/
             mediaplayer-mpv/build/reports/tests/
@@ -161,6 +164,7 @@ jobs:
           :mediaplayer-dolbyvision:testAndroidHostTest
           :mediaplayer-dolbyvision:verifyAndroidArmNativeMatrix
           :mediaplayer-kmediabridge:testAndroidHostTest
+          :mediaplayer-libvlc:compileAndroidMain :mediaplayer-libvlc:testAndroidHostTest
           :mediaplayer-mpv:compileAndroidMain :mediaplayer-mpv:testAndroidHostTest
           :androidApp:verifyAndroidArmNativeMatrix
           --refresh-dependencies --no-daemon --continue
@@ -183,6 +187,8 @@ jobs:
             mediaplayer-dolbyvision/build/test-results/
             mediaplayer-kmediabridge/build/reports/tests/
             mediaplayer-kmediabridge/build/test-results/
+            mediaplayer-libvlc/build/reports/tests/
+            mediaplayer-libvlc/build/test-results/
             mediaplayer-core/build/reports/tests/
             mediaplayer-core/build/test-results/
             mediaplayer-mpv/build/reports/tests/
@@ -258,6 +264,8 @@ jobs:
           :mediaplayer-ass:iosSimulatorArm64Test
           :mediaplayer-dolbyvision:compileKotlinIosArm64
           :mediaplayer-dolbyvision:iosSimulatorArm64Test
+          :mediaplayer-libvlc:compileKotlinIosArm64
+          :mediaplayer-libvlc:iosSimulatorArm64Test
           :sample:composeApp:linkDebugFrameworkIosArm64
           :sample:composeApp:linkDebugFrameworkIosSimulatorArm64
           -PcomposeMediaPlayer.skipAssAppleNativeBuild=true
@@ -281,6 +289,8 @@ jobs:
             mediaplayer-ass/build/test-results/
             mediaplayer-dolbyvision/build/reports/tests/
             mediaplayer-dolbyvision/build/test-results/
+            mediaplayer-libvlc/build/reports/tests/
+            mediaplayer-libvlc/build/test-results/
             mediaplayer-core/build/reports/tests/
             mediaplayer-core/build/test-results/
           if-no-files-found: warn
@@ -478,6 +488,7 @@ jobs:
           ./gradlew publishConsumerSmokeArtifacts :mediaplayer:verifyJvm25Bytecode
           :mediaplayer-core:verifyJvm25Bytecode
           :mediaplayer-desktop-tao:verifyJvm25Bytecode
+          :mediaplayer-libvlc:verifyJvm25Bytecode
           :mediaplayer-mpv:verifyJvm25Bytecode
           -PpublicationVersion=0.0.0-consumer.${{ github.sha }}
           -PcomposeMediaPlayer.skipNativeBuild=true
@@ -524,6 +535,7 @@ jobs:
           :mediaplayer-mpv:validateReleaseVersion
           :mediaplayer-ass:validateReleaseVersion
           :mediaplayer-dolbyvision:validateReleaseVersion
+          :mediaplayer-libvlc:validateReleaseVersion
           -PpublicationVersion=4.1.0
           -PcomposeMediaPlayer.skipNativeBuild=true --no-daemon
 
@@ -535,7 +547,7 @@ jobs:
           :mediaplayer-desktop-tao:ktlintCheck
           :mediaplayer:ktlintCheck :mediaplayer-mpv:ktlintCheck
           :mediaplayer-ass:ktlintCheck :mediaplayer-dolbyvision:ktlintCheck
-          :mediaplayer-kmediabridge:ktlintCheck
+          :mediaplayer-kmediabridge:ktlintCheck :mediaplayer-libvlc:ktlintCheck
           :mediaplayer-ads-core:detekt
           :mediaplayer-extension-api:detekt :mediaplayer-desktop-tao:detekt
           :mediaplayer:detekt :mediaplayer-ass:detekt
@@ -601,6 +613,7 @@ jobs:
           :mediaplayer-ass:checkKotlinAbi
           :mediaplayer-dolbyvision:checkKotlinAbi
           :mediaplayer-kmediabridge:checkKotlinAbi
+          :mediaplayer-libvlc:checkKotlinAbi
           -PcomposeMediaPlayer.skipNativeBuild=true
           -PcomposeMediaPlayer.skipMpvAppleNativeBuild=false
           -PcomposeMediaPlayer.skipLibDoviNativeBuild=false

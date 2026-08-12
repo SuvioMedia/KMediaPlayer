@@ -115,6 +115,61 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn('tasks.register("validateReleaseVersion")', ads_build)
         self.assertIn("dependsOn(validateReleaseVersion)", ads_build)
 
+    def test_libvlc_backend_is_built_published_and_verified(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        build_test = (
+            repository_root / ".github/workflows/build-test.yml"
+        ).read_text(encoding="utf-8")
+        release = (
+            repository_root / ".github/workflows/publish-on-maven-central.yml"
+        ).read_text(encoding="utf-8")
+        existing_tag = (
+            repository_root / ".github/workflows/publish-existing-tag-to-maven-central.yml"
+        ).read_text(encoding="utf-8")
+        verifier = (
+            repository_root / ".github/scripts/verify_maven_central_release.sh"
+        ).read_text(encoding="utf-8")
+        consumer = (
+            repository_root / ".github/public-maven-consumer/build.gradle.kts"
+        ).read_text(encoding="utf-8")
+        libvlc_build = (
+            repository_root / "mediaplayer-libvlc/build.gradle.kts"
+        ).read_text(encoding="utf-8")
+
+        for task in (
+            ":mediaplayer-libvlc:jvmTest",
+            ":mediaplayer-libvlc:testAndroidHostTest",
+            ":mediaplayer-libvlc:iosSimulatorArm64Test",
+            ":mediaplayer-libvlc:ktlintCheck",
+            ":mediaplayer-libvlc:checkKotlinAbi",
+            ":mediaplayer-libvlc:verifyJvm25Bytecode",
+        ):
+            self.assertIn(task, build_test)
+        self.assertIn(
+            ":mediaplayer-libvlc:publishAllPublicationsToReleaseStagingRepository",
+            release,
+        )
+        for workflow in (release, existing_tag):
+            self.assertIn(
+                ":mediaplayer-libvlc:publishAndReleaseToMavenCentral",
+                workflow,
+            )
+        for artifact in (
+            "composemediaplayer-libvlc",
+            "composemediaplayer-libvlc-android",
+            "composemediaplayer-libvlc-iosarm64",
+            "composemediaplayer-libvlc-iossimulatorarm64",
+            "composemediaplayer-libvlc-jvm",
+        ):
+            self.assertIn(artifact, release)
+            self.assertIn(artifact, verifier)
+        self.assertIn("composemediaplayer-libvlc-jvm", consumer)
+        self.assertIn("composemediaplayer-libvlc-android", consumer)
+        self.assertIn("kmedia-vlc-runtime-desktop", consumer)
+        self.assertIn("kmedia-vlc-runtime-android", consumer)
+        self.assertIn('tasks.register("verifyJvm25Bytecode")', libvlc_build)
+        self.assertIn('name = "releaseStaging"', libvlc_build)
+
     def test_all_apple_ass_consumers_restore_the_complete_build_tree(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         build_test = (
