@@ -465,10 +465,13 @@ val options = MpvPlaybackOptions(
 This is already the default, so the explicit option is needed only when making
 the renderer policy visible in application configuration. An unmarked or
 failing runtime falls back to OpenGL; stock mpv is never allowed to create a
-separate macOS window. Enabling the public projection transform also switches
-that player to OpenGL because the projection pass currently uses the libmpv
-OpenGL render API. The bundled runtime must carry MoltenVK and KMediaMpv's
-versioned macvk capability to keep the default route on Vulkan.
+separate macOS window. Public projection and texture-crop transforms stay on
+the same MoltenVK route: KMediaPlayer injects a dynamic libplacebo `OUTPUT`
+hook into `gpu-next`, so view motion, stereo windows and projection parameters
+do not rebuild or replace the Vulkan video output. OpenGL remains only the
+runtime fallback when macvk or the projection hook is rejected. The bundled
+runtime must carry MoltenVK and KMediaMpv's versioned macvk capability to keep
+the default route on Vulkan.
 
 On iOS, use the generated `ComposeMediaPlayerMpv` pod so CocoaPods embeds and
 code-signs the exact `KMediaMpv`, `KMediaFfmpegRuntime`, and `KMediaAssRuntime`

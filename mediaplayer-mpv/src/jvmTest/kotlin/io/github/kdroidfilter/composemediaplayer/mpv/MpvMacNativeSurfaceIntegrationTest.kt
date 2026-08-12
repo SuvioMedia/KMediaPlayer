@@ -113,14 +113,21 @@ class MpvMacNativeSurfaceIntegrationTest {
             )
 
             val timeBeforeProjection = player.currentTime
+            val presentationsBeforeProjection =
+                checkNotNull(telemetryLibrary.embeddedMacVkPresentedFrames(nativeView))
             player.projection =
                 VideoProjectionSettings(projectionType = VideoProjectionType.Fisheye190)
             player.updateNativeMacProjection()
-            assertContains(player.renderingInfo.videoRenderer.orEmpty(), "OpenGL")
-            assertContains(player.renderingInfo.notes.orEmpty(), "projection requires")
-            await("Playback stalled while switching macvk to the OpenGL projection pass.") {
+            assertContains(player.renderingInfo.videoRenderer.orEmpty(), "macvk")
+            await("Playback stalled after enabling the gpu-next projection hook.") {
                 player.currentTime >= timeBeforeProjection + 250.milliseconds
             }
+            await("macvk stopped presenting after enabling the gpu-next projection hook.") {
+                telemetryLibrary
+                    .embeddedMacVkPresentedFrames(nativeView)
+                    ?.let { it > presentationsBeforeProjection } == true
+            }
+            assertContains(player.renderingInfo.videoRenderer.orEmpty(), "macvk")
             assertEquals(null, player.error)
         } finally {
             player.dispose()

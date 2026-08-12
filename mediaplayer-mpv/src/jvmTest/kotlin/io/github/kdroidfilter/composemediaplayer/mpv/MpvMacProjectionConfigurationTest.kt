@@ -7,6 +7,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoProjectionViewSettings
 import io.github.kdroidfilter.composemediaplayer.VideoStereoLayout
 import io.github.kdroidfilter.composemediaplayer.VideoTextureCrop
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -122,5 +123,43 @@ class MpvMacProjectionConfigurationTest {
 
         assertTrue(configuration.enabled)
         assertContentEquals(floatArrayOf(0.1f, 0f, 1f, 1f), configuration.leftWindow)
+    }
+
+    @Test
+    fun `gpu next projection hook exposes every projection control as a dynamic parameter`() {
+        val configuration =
+            mpvMacProjectionConfiguration(
+                projection =
+                    VideoProjectionSettings(
+                        projectionType = VideoProjectionType.Equirect360,
+                        stereoLayout = VideoStereoLayout.SideBySide,
+                    ),
+                projectionView =
+                    VideoProjectionViewSettings(
+                        yawDegrees = 12f,
+                        pitchDegrees = -5f,
+                        rollDegrees = 3f,
+                        zoom = 1.25f,
+                    ),
+                textureCrop = VideoTextureCrop(left = 0.1f),
+            )
+
+        val options =
+            MpvMacGpuNextProjectionShader.options(
+                configuration = configuration,
+                contentScaleMode = MpvMacContentScaleMode.CROP,
+            )
+
+        assertEquals(MPV_MAC_PROJECTION_PARAMETER_COUNT + 1, options.split(',').size)
+        assertContains(options, "kmp_projection_enabled=1")
+        assertContains(options, "kmp_projection_type=2")
+        assertContains(options, "kmp_stereo=1")
+        assertContains(options, "kmp_left_x0=0.05")
+        assertContains(options, "kmp_yaw_degrees=12.0")
+        assertContains(options, "kmp_pitch_degrees=-5.0")
+        assertContains(options, "kmp_content_scale=1")
+        assertContains(MpvMacGpuNextProjectionShader.source, "//!HOOK OUTPUT")
+        assertContains(MpvMacGpuNextProjectionShader.source, "//!TYPE DYNAMIC float")
+        assertContains(MpvMacGpuNextProjectionShader.source, "//!WHEN kmp_projection_enabled")
     }
 }
