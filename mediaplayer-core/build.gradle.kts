@@ -1,5 +1,7 @@
 @file:OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
 
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.SourcesJar
 import org.gradle.api.tasks.bundling.Jar
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -149,8 +151,8 @@ publishing {
 
 mavenPublishing {
     configureBasedOnAppliedPlugins(
-        javadocJar = com.vanniktech.maven.publish.JavadocJar.Empty(),
-        sourcesJar = com.vanniktech.maven.publish.SourcesJar.Empty(),
+        javadocJar = JavadocJar.Empty(),
+        sourcesJar = SourcesJar.Empty(),
     )
     coordinates(
         groupId = projectGroup,

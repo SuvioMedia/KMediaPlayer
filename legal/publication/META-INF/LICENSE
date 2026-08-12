@@ -27,9 +27,9 @@ an authorized Suvio distribution. Source code is not licensed or supplied.
 
 This fork derives in part from Compose Media Player material distributed under
 the MIT License. That inherited material remains under MIT; its copyright and
-full license text accompany published artifacts under
-META-INF/LICENSES/UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT.txt. Other dependencies and
-native runtimes remain under their respective licenses.
+full license text accompany published artifacts in an artifact-scoped
+META-INF/LICENSES/UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT-*.txt resource. Other
+dependencies and native runtimes remain under their respective licenses.
 
 4. LGPL interoperability
 

@@ -1,5 +1,7 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.SourcesJar
 import dev.detekt.gradle.Detekt
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.DefaultTask
@@ -618,8 +620,8 @@ publishing {
 
 mavenPublishing {
     configureBasedOnAppliedPlugins(
-        javadocJar = com.vanniktech.maven.publish.JavadocJar.Empty(),
-        sourcesJar = com.vanniktech.maven.publish.SourcesJar.Empty(),
+        javadocJar = JavadocJar.Empty(),
+        sourcesJar = SourcesJar.Empty(),
     )
     coordinates(
         groupId = projectGroup,
