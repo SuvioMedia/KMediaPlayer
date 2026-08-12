@@ -3,6 +3,10 @@
 `0.4.0-alpha.2` starts the renamed KMedia Kotlin/Wasm-only API line. It is not source- or binary-compatible with
 the `0.3.x` npm package, `/engine` entrypoint, web component, or Kotlin/JS consumers.
 
+`0.4.0-alpha.3` starts the proprietary KLIB publication line. Earlier artifacts retain the terms
+under which they were published. The separately versioned native runtime remains open and
+replaceable for Apache/LGPL compliance.
+
 ## What changed
 
 - Link `io.github.shusek:kmedia-wasm-engine` in `wasmJsMain`; do not load an npm module.

@@ -12,12 +12,12 @@ Attribution and third-party terms are recorded in [NOTICE](NOTICE) and
 
 ## Published artifacts
 
-Version `0.4.0-alpha.2` consists of two coordinated Maven artifacts:
+Version `0.4.0-alpha.3` consists of two coordinated Maven artifacts with an explicit license boundary:
 
 | Artifact | Purpose |
 |---|---|
-| `io.github.shusek:kmedia-wasm-engine` | Kotlin/Wasm KLIB with the typed player API |
-| `io.github.shusek:kmedia-wasm-engine-runtime-assets` | ZIP containing the JS loader, Wasm binary and ABI manifest under `kmedia-wasm-runtime/` |
+| `io.github.shusek:kmedia-wasm-engine` | Proprietary Kotlin/Wasm KLIB with the typed player API |
+| `io.github.shusek:kmedia-wasm-engine-runtime-assets` | Separately licensed ZIP containing the open native shim, JS loader, FFmpeg-based Wasm binary and ABI manifest under `kmedia-wasm-runtime/` |
 
 The runtime archive is separate so a consumer can put the native payload at a stable public URL
 without importing executable JavaScript dynamically. Both artifacts must use the same version.
@@ -34,13 +34,13 @@ kotlin {
 
     sourceSets {
         wasmJsMain.dependencies {
-            implementation("io.github.shusek:kmedia-wasm-engine:0.4.0-alpha.2")
+            implementation("io.github.shusek:kmedia-wasm-engine:0.4.0-alpha.3")
         }
     }
 }
 ```
 
-Resolve `io.github.shusek:kmedia-wasm-engine-runtime-assets:0.4.0-alpha.2@zip`, unpack its
+Resolve `io.github.shusek:kmedia-wasm-engine-runtime-assets:0.4.0-alpha.3@zip`, unpack its
 `kmedia-wasm-runtime/` directory into the browser distribution, and pass its public base URL to
 `WasmRuntimeConfig`. The base URL may be relative to the application:
 
@@ -146,8 +146,20 @@ See [docs/KOTLIN_WASM_MIGRATION.md](docs/KOTLIN_WASM_MIGRATION.md) for the inten
 incompatibilities with the earlier JavaScript engine and
 [docs/engine-parity.md](docs/engine-parity.md) for the versioned acceptance matrix.
 
-## License
+## License boundary
 
-Kotlin sources are licensed under Apache License 2.0. The runtime archive contains third-party
-components under their respective terms; consult [NOTICE](NOTICE) and
-[LGPL_RELINKING.md](LGPL_RELINKING.md) before redistributing it.
+The Kotlin/Wasm player KLIB is proprietary under the
+[Suvio Proprietary Component License](player/legal/META-INF/LICENSE). Its Maven publications
+use empty source JAR placeholders and must never publish the Kotlin implementation sources.
+
+Do not release `0.4.0-alpha.3` while `player/` remains in a public source repository. Move the
+proprietary module and its publication workflow to a private repository first; keep the native
+shim, reproducible FFmpeg build, corresponding source, and runtime notices publicly available.
+Empty source JARs prevent Maven leakage but cannot make a public Git tree closed source.
+
+The historical TypeScript code and the narrow native C/C++ shim retain their inherited
+Apache-2.0 terms. They are not the Suvio player API and are not packaged in the proprietary KLIB.
+The separate runtime archive also contains FFmpeg and other components under their respective
+terms; consult [NOTICE](NOTICE) and [LGPL_RELINKING.md](LGPL_RELINKING.md) before redistributing it.
+Releases through `0.4.0-alpha.2` remain available under the terms under which they were originally
+published; the proprietary line starts at `0.4.0-alpha.3`.

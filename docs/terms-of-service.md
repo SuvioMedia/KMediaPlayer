@@ -1,6 +1,9 @@
 
 # Terms of Service
 
+> Historical upstream document. These terms describe the original Movi Player
+> service and do not license Suvio's proprietary Kotlin/Wasm player.
+
 **Last updated:** July 16, 2026
 
 **Movi Player — Web Player, Chrome Extension & Google Drive integration**
@@ -26,9 +29,9 @@ Movi Player's use of information received from Google APIs adheres to the [Googl
 
 You are responsible for the content you choose to play with Movi Player. You agree to use the service only with content that you own or are otherwise legally permitted to access and play, and only in compliance with all applicable laws. You may not use Movi Player to access, distribute, or reproduce content in violation of any third party's rights.
 
-## Open Source & License
+## Upstream Open Source & License
 
-Movi Player is open-source software released under the Apache-2.0 License. You may review, use, and modify the source code at [github.com/MrUjjwalG/movi-player](https://github.com/MrUjjwalG/movi-player) in accordance with that license.
+The original Movi Player is open-source software released under the Apache-2.0 License. You may review, use, and modify its source code at [github.com/MrUjjwalG/movi-player](https://github.com/MrUjjwalG/movi-player) in accordance with that license. This upstream grant does not apply to Suvio's proprietary Kotlin/Wasm player implementation.
 
 ## Disclaimer of Warranties
 

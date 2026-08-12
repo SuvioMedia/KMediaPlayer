@@ -37,10 +37,14 @@ jobs:
       - name: Verify publishable KLIB and runtime ZIP
         run: >-
           ./gradlew
+          :player:verifyClosedSourcePublication
           :player:publishAllPublicationsToProjectLocalRepository
           :runtime-assets:publishAllPublicationsToProjectLocalRepository
           :runtime-assets:verifyRuntimeArchive
           --no-daemon
+
+      - name: Verify license boundary
+        run: node scripts/check-licenses.mjs
 
       - uses: actions/upload-artifact@v4
         with:

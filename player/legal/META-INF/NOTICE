@@ -1,0 +1,18 @@
+KMedia Wasm Engine — proprietary Kotlin/Wasm player
+===================================================
+
+Copyright (c) 2026 Shusek
+
+This artifact contains a proprietary Kotlin/Wasm player implementation. It is
+derived in part from movi-player:
+
+  Copyright 2026 Ujjawal Kashyap
+  https://github.com/mrujjwalg/movi-player
+
+The inherited work remains subject to Apache License 2.0. A copy of that
+license, together with the repository's third-party notices, is included under
+META-INF/LICENSES/UPSTREAM-AND-THIRD-PARTY.txt.
+
+The separately distributed native runtime includes FFmpeg and other components
+under their own licenses. See the NOTICE and LGPL_RELINKING.md contained in the
+kmedia-wasm-engine-runtime-assets archive.

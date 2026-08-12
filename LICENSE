@@ -1,3 +1,12 @@
+OPEN COMPONENT SCOPE NOTICE
+
+The Apache License and third-party terms in this file apply to the historical
+TypeScript implementation, the native C/C++ shim, and the separately published
+kmedia-wasm-engine-runtime-assets archive. They do not license the proprietary
+Kotlin/Wasm KLIB under player/, whose own license is embedded in that artifact.
+
+================================================================================
+
 Apache License
 Version 2.0, January 2004
 http://www.apache.org/licenses/
@@ -211,7 +220,7 @@ Signalsmith Stretch
 
 Location: wasm/signalsmith/signalsmith-stretch/ and wasm/signalsmith/
 signalsmith-linear/ (compiled to WebAssembly and statically linked into the
-movi WASM module; used for pitch-preserving time-stretching)
+kmedia-wasm runtime module; used for pitch-preserving time-stretching)
 
 Copyright (c) 2022 Geraint Luff / Signalsmith Audio Ltd. (signalsmith-stretch)
 Copyright (c) 2025 Signalsmith Audio (signalsmith-linear)
@@ -241,8 +250,8 @@ Project: https://signalsmith-audio.co.uk/code/stretch/
 FFmpeg
 ------
 
-Location: cdn/chunks/movi.wasm in the runtime artifact (built first under
-dist/wasm/; build recipe in docker/build-ffmpeg.sh and docker/Dockerfile)
+Location: cdn/chunks/kmedia-wasm.wasm in the runtime artifact (built first
+under dist/wasm/; build recipe in docker/build-ffmpeg.sh and docker/Dockerfile)
 
 Copyright (c) the FFmpeg developers
 
@@ -308,8 +317,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Emscripten
 ----------
 
-Location: cdn/chunks/movi.js and cdn/chunks/movi.wasm in the runtime artifact
-(generated first under dist/wasm/)
+Location: cdn/chunks/kmedia-wasm.js and cdn/chunks/kmedia-wasm.wasm in the
+runtime artifact (generated first under dist/wasm/)
 
 Copyright (c) 2010-2014 Emscripten authors, see AUTHORS file.
 
@@ -368,7 +377,7 @@ Project: https://github.com/emscripten-core/emscripten
 musl libc (Emscripten system library)
 --------------------------------------
 
-Location: portions linked into cdn/chunks/movi.wasm by Emscripten
+Location: portions linked into cdn/chunks/kmedia-wasm.wasm by Emscripten
 
 Copyright (c) 2005-2020 Rich Felker, et al.
 

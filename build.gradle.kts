@@ -46,7 +46,7 @@ allprojects {
     group = "io.github.shusek"
     version =
         providers.gradleProperty("publicationVersion").orNull
-            ?: "0.4.0-alpha.2"
+            ?: "0.4.0-alpha.3"
 
     plugins.withId("maven-publish") {
         extensions.configure<PublishingExtension> {

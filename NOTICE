@@ -5,20 +5,27 @@ Original project:
   Copyright 2026 Ujjawal Kashyap
   https://github.com/mrujjwalg/movi-player
 
-Fork modifications:
+Historical fork and native shim modifications:
   Copyright 2026 KMediaPlayer contributors
   https://github.com/Shusek/kmedia-wasm-engine
 
-The project and fork modifications are distributed under Apache License 2.0.
-The complete license text and third-party notices are in LICENSE.
+The historical TypeScript player and native C/C++ shim are distributed under
+Apache License 2.0. The complete Apache license text and third-party notices
+are in LICENSE.
+
+The Kotlin/Wasm KLIB published as io.github.shusek:kmedia-wasm-engine starting
+with version 0.4.0-alpha.3 is proprietary under the Suvio Proprietary
+Component License included in that artifact. Versions published through
+0.4.0-alpha.2 retain their original Apache-2.0 terms.
 
 The distributed browser artifacts include code from FFmpeg (LGPL-2.1-or-later),
 dav1d (BSD-2-Clause), Emscripten, musl libc, Signalsmith Stretch (MIT), zlib,
 Shaka Player (Apache-2.0), hls.js (Apache-2.0), and dash.js (BSD-3-Clause).
 These components remain under their respective licenses.
 
-For the FFmpeg/WebAssembly component, the corresponding source contains the
-wrapper and build recipe under wasm/, docker/, and compose.yaml. Exact upstream
-source versions are pinned by docker/Dockerfile. The repository tag matching
-the Maven artifact version is the corresponding source snapshot and can
-rebuild/relink the WebAssembly artifact. See LGPL_RELINKING.md.
+For the FFmpeg/WebAssembly runtime, the corresponding source contains the open
+native shim and build recipe under wasm/, docker/, and compose.yaml. Exact
+upstream source versions are pinned by docker/Dockerfile. The repository tag
+matching the Maven runtime artifact version is the corresponding source
+snapshot and can rebuild/relink the WebAssembly artifact. See
+LGPL_RELINKING.md.

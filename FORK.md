@@ -4,10 +4,14 @@ This distribution is a compatibility-focused fork of
 [`mrujjwalg/movi-player`](https://github.com/mrujjwalg/movi-player).
 It is not affiliated with or endorsed by the upstream maintainer.
 
-The fork keeps the upstream Apache-2.0 license and preserves upstream
-copyright and attribution. Changes are maintained in small commits so that
-generally useful pieces can be offered upstream without coupling upstream to
-KMediaPlayer.
+The historical TypeScript fork and native C/C++ shim keep the upstream
+Apache-2.0 license and preserve upstream copyright and attribution. Changes in
+those open layers are maintained in small commits so that generally useful
+pieces can be offered upstream without coupling upstream to KMediaPlayer.
+
+The Kotlin/Wasm KLIB under `player/` is the proprietary Suvio player line
+starting with `0.4.0-alpha.3`. It is distributed under the license embedded in
+that module and is not part of the historical npm package.
 
 The `0.3.5-kmp.3` release is based directly on upstream's `develop` branch at
 commit `dfa30c95f59a8aa118b507639cff6ddb049878b8`. That history includes the

@@ -134,6 +134,11 @@ publishing {
                         url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
                         distribution.set("repo")
                     }
+                    license {
+                        name.set("GNU Lesser General Public License, version 2.1 or later")
+                        url.set("https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html")
+                        distribution.set("repo")
+                    }
                 }
                 developers {
                     developer {

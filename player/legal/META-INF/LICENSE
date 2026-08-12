@@ -1,0 +1,53 @@
+Suvio Proprietary Component License
+Version 1.0
+
+Copyright (c) 2026 Shusek. All rights reserved.
+
+This license applies to the copyright holder's original Kotlin/WebAssembly
+player implementation published as io.github.shusek:kmedia-wasm-engine,
+starting with version 0.4.0-alpha.3. It does not replace licenses that apply to
+inherited or third-party material.
+
+1. Authorized execution
+
+A lawful recipient of an authorized Suvio distribution may load and execute
+this component only as an embedded part of that distribution. No standalone
+SDK, library, development, hosting, redistribution, or sublicensing right is
+granted. Additional rights require a separate written agreement with the
+copyright holder.
+
+2. Restrictions
+
+Except where mandatory law or this license expressly permits otherwise, you
+may not copy, modify, publish, distribute, sublicense, sell, expose as a
+service, extract, or use the copyright holder's proprietary material outside
+an authorized Suvio distribution. Source code is not licensed or supplied.
+
+3. Inherited and third-party material
+
+The player is derived in part from movi-player material originally distributed
+under Apache License 2.0. That inherited material remains under Apache-2.0; the
+required license and attribution notices accompany this artifact. Adaptive
+streaming dependencies remain under their own licenses.
+
+The separately published kmedia-wasm-engine-runtime-assets archive is outside
+this proprietary license. Its native shim, FFmpeg/WebAssembly binary, and
+other third-party components remain under the terms recorded in that archive.
+
+4. LGPL interoperability
+
+Nothing in this license restricts rights supplied by an LGPL-covered
+component. A lawful recipient may modify an installed combined work for their
+own use solely to replace or relink such a component with a compatible
+modified version, and may reverse engineer the combined work solely as needed
+to debug that replacement. This permission does not grant a right to publish
+or distribute the proprietary player or its source code.
+
+5. Warranty and liability
+
+This component is provided "as is", without warranties, support commitments,
+maintenance obligations, or compatibility guarantees. To the maximum extent
+permitted by law, the copyright holder is not liable for damages arising from
+its use.
+
+All rights not expressly granted above are reserved.

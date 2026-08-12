@@ -1,6 +1,6 @@
 # Non-UI engine parity
 
-Matrix version: **2026-07-31 / Kotlin API 0.4.0-alpha.2 / runtime ABI 4**
+Matrix version: **2026-08-12 / Kotlin API 0.4.0-alpha.3 / runtime ABI 4**
 
 This is the release gate for replacing the historical TypeScript engine with the Kotlin/Wasm
 engine. “Implemented” is not enough to remove the old engine: every required row must also have a

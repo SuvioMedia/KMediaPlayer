@@ -16,15 +16,79 @@ function requireMatch(value, pattern, description) {
   }
 }
 
-const [license, notice, packageJsonText, dockerfile, buildScript] =
+const [
+  license,
+  notice,
+  packageJsonText,
+  packageLockText,
+  dockerfile,
+  buildScript,
+  playerLicense,
+  playerBuild,
+  runtimeBuild,
+  relinking,
+] =
   await Promise.all([
     text("LICENSE"),
     text("NOTICE"),
     text("package.json"),
+    text("package-lock.json"),
     text("docker/Dockerfile"),
     text("docker/build-ffmpeg.sh"),
+    text("player/legal/META-INF/LICENSE"),
+    text("player/build.gradle.kts"),
+    text("runtime-assets/build.gradle.kts"),
+    text("LGPL_RELINKING.md"),
   ]);
 const packageJson = JSON.parse(packageJsonText);
+const packageLock = JSON.parse(packageLockText);
+
+if (packageJson.private !== true) {
+  throw new Error(
+    "License audit failed: the historical Apache npm package must not be publishable",
+  );
+}
+if (packageJson.license !== "UNLICENSED") {
+  throw new Error(
+    "License audit failed: the private browser-player package must be marked UNLICENSED",
+  );
+}
+if (packageLock.packages?.[""]?.license !== "UNLICENSED") {
+  throw new Error(
+    "License audit failed: package-lock metadata still licenses the private browser player",
+  );
+}
+
+requireMatch(
+  playerLicense,
+  /Suvio Proprietary Component License/u,
+  "the Kotlin/Wasm player is not marked proprietary",
+);
+requireMatch(
+  playerBuild,
+  /sourcesJar\s*=\s*SourcesJar\.Empty\(\)/u,
+  "the proprietary KLIB publication does not use empty source JARs",
+);
+if (/name\.set\("Apache License 2\.0"\)/u.test(playerBuild)) {
+  throw new Error(
+    "License audit failed: the proprietary KLIB POM still advertises Apache-2.0",
+  );
+}
+requireMatch(
+  runtimeBuild,
+  /GNU Lesser General Public License, version 2\.1 or later/u,
+  "the native runtime POM omits FFmpeg's LGPL license",
+);
+requireMatch(
+  relinking,
+  /io\.github\.shusek:kmedia-wasm-engine-runtime-assets/u,
+  "the relinking guide names a retired runtime artifact",
+);
+requireMatch(
+  relinking,
+  /kmedia-wasm-runtime\/kmedia-wasm\.wasm/u,
+  "the relinking guide names a retired runtime path",
+);
 
 for (const heading of [
   "FFmpeg",
@@ -91,9 +155,13 @@ const expectedRuntimeLicenses = new Map([
   ["shaka-player", /Apache-2\.0/iu],
 ]);
 for (const [dependency, expected] of expectedRuntimeLicenses) {
-  const dependencyPackage = JSON.parse(
-    await text(`node_modules/${dependency}/package.json`),
-  );
+  const dependencyPackage =
+    packageLock.packages?.[`node_modules/${dependency}`];
+  if (dependencyPackage == null) {
+    throw new Error(
+      `License audit failed: package-lock.json omits ${dependency}`,
+    );
+  }
   if (!expected.test(String(dependencyPackage.license ?? ""))) {
     throw new Error(
       `License audit failed: unexpected ${dependency} license metadata`,

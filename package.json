@@ -1,6 +1,7 @@
 {
   "name": "@shusek/movi-player",
   "version": "0.3.5-kmp.3",
+  "private": true,
   "description": "Play MKV, HEVC, AV1, HDR videos in the browser. WebCodecs + FFmpeg WASM player with encrypted playback, chapters, subtitles, multi-audio tracks. No server transcoding needed.",
   "type": "module",
   "main": "dist/index.js",
@@ -160,7 +161,7 @@
   "contributors": [
     "KMediaPlayer contributors (https://github.com/Shusek/KMediaPlayer)"
   ],
-  "license": "Apache-2.0",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
     "url": "https://github.com/Shusek/movi-player.git"

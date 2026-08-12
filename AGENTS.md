@@ -14,7 +14,15 @@ If you are an AI assistant: read this top to bottom once, then refer back by sec
 - **WebCodecs API** (Chrome, Safari 18+, Firefox 130+) for hardware-accelerated decoding when available, software dav1d/de265 in WASM as fallback.
 - **Canvas/WebGL2** for presentation (the spec for `<canvas>` lets you render HDR via `display-p3` color space; native `<video>` can't expose that on most browsers).
 
-Shipped as a web component (`<movi-player>`) plus three lower-level entry points (`/player`, `/demuxer`) for programmatic use. License: Apache-2.0.
+The historical TypeScript web component and native shim remain Apache-2.0 and
+are retained for parity/runtime maintenance. The current Kotlin/Wasm KLIB under
+`player/` is proprietary starting with `0.4.0-alpha.3`; only the separate
+native runtime/shim remains open for Apache/LGPL compliance.
+
+`0.4.0-alpha.3` must not be released from a public tree containing `player/src`.
+The proprietary module belongs in private source control; the native shim,
+FFmpeg build recipe/corresponding source, and runtime legal materials remain
+publicly accessible.
 
 The same engine ships in three wrappers built on the web component: an Electron **desktop app** (`desktop/`, Win/Mac/Linux — local files, URLs, native always-on-top PiP, playlist), a **Chrome extension** (`chrome-extension/`), and a **VS Code extension** (`vscode-extension/`).
 
