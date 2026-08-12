@@ -7,7 +7,7 @@ source routing, media elements, clocks, decoding, adaptive streaming and frame r
 
 ## Versioned artifacts
 
-The `0.4.0-alpha.2` integration consumes matching artifacts:
+The proprietary `0.4.0-alpha.3` integration consumes matching artifacts:
 
 | Artifact | Purpose |
 |---|---|
@@ -129,7 +129,12 @@ Released artifacts remain covered by the checksums committed in KMediaPlayer.
 
 ## Attribution and licensing
 
-`kmedia-wasm-engine` derives from movi-player. The engine repository retains its NOTICE, Git
-history and corresponding-source/build information for bundled LGPL FFmpeg/Wasm runtime assets.
-Historical TypeScript and web-component sources are not part of KMediaPlayer's active browser
-implementation.
+`kmedia-wasm-engine` derives from movi-player. Versions through `0.4.0-alpha.2` retain the Apache
+terms under which they were published. Starting with `0.4.0-alpha.3`, the Kotlin/Wasm KLIB is
+proprietary and publishes only empty source-JAR placeholders. KMediaPlayer pins that line at
+`0.4.0-alpha.3`; publish both matching engine artifacts before releasing KMediaPlayer `4.1.7`.
+
+The separate native runtime/shim remains open and replaceable. The engine repository retains the
+Apache NOTICE plus corresponding-source/build information for its bundled LGPL FFmpeg/Wasm
+runtime assets. Historical TypeScript and web-component sources are not part of KMediaPlayer's
+active browser implementation.

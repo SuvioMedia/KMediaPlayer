@@ -1,0 +1,130 @@
+name: Release KMedia Wasm Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable engine version, for example 0.4.0-alpha.3
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kmedia-wasm-engine-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Validate release request
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_VERSION" =~ ^0\.4\.0-alpha\.[0-9]+$ ]]; then
+            echo "Engine releases must use 0.4.0-alpha.N." >&2
+            exit 1
+          fi
+          alpha_number="${RELEASE_VERSION##*.}"
+          if (( alpha_number >= 3 )) && [[ "$REPOSITORY_VISIBILITY" != "private" ]]; then
+            echo "Proprietary engine releases require private source control." >&2
+            exit 1
+          fi
+
+      - name: Require Maven Central credentials
+        shell: bash
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
+          MAVEN_SIGNING_PASSWORD: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$MAVEN_CENTRAL_USERNAME" ]] || missing+=(MAVEN_CENTRAL_USERNAME)
+          [[ -n "$MAVEN_CENTRAL_PASSWORD" ]] || missing+=(MAVEN_CENTRAL_PASSWORD)
+          [[ -n "$MAVEN_SIGNING_KEY" ]] || missing+=(MAVEN_SIGNING_KEY)
+          [[ -n "$MAVEN_SIGNING_PASSWORD" ]] || missing+=(MAVEN_SIGNING_PASSWORD)
+          if (( ${#missing[@]} > 0 )); then
+            echo "Missing required repository secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Checkout immutable engine source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: engine/${{ inputs.version }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Verify licenses and stage publications locally
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/check-licenses.mjs
+          ./gradlew \
+            :player:verifyClosedSourcePublication \
+            :runtime-assets:verifyRuntimeArchive \
+            :player:publishAllPublicationsToProjectLocalRepository \
+            :runtime-assets:publishAllPublicationsToProjectLocalRepository \
+            -PpublicationVersion="$RELEASE_VERSION" \
+            --no-configuration-cache --no-daemon
+
+      - name: Publish and release Maven Central deployments
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ./gradlew \
+            :player:publishAndReleaseToMavenCentral \
+            :runtime-assets:publishAndReleaseToMavenCentral \
+            -PpublicationVersion="$RELEASE_VERSION" \
+            -PreleaseSigningEnabled=true \
+            --no-configuration-cache --no-daemon
+
+      - name: Wait for Maven Central publication
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          repository="https://repo1.maven.org/maven2/io/github/shusek"
+          artifacts=(
+            "kmedia-wasm-engine/$RELEASE_VERSION/kmedia-wasm-engine-$RELEASE_VERSION.pom"
+            "kmedia-wasm-engine-wasm-js/$RELEASE_VERSION/kmedia-wasm-engine-wasm-js-$RELEASE_VERSION.pom"
+            "kmedia-wasm-engine-runtime-assets/$RELEASE_VERSION/kmedia-wasm-engine-runtime-assets-$RELEASE_VERSION.pom"
+          )
+          for attempt in $(seq 1 90); do
+            missing=0
+            for artifact in "${artifacts[@]}"; do
+              if ! curl --fail --silent --show-error --head "$repository/$artifact" >/dev/null; then
+                missing=1
+              fi
+            done
+            if (( missing == 0 )); then
+              echo "KMedia Wasm Engine $RELEASE_VERSION is available from Maven Central."
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Maven Central did not expose every engine artifact before the timeout." >&2
+          exit 1
