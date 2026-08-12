@@ -1,3 +1,5 @@
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.SourcesJar
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
@@ -399,8 +401,8 @@ publishing {
 
 mavenPublishing {
     configureBasedOnAppliedPlugins(
-        javadocJar = com.vanniktech.maven.publish.JavadocJar.Empty(),
-        sourcesJar = com.vanniktech.maven.publish.SourcesJar.Empty(),
+        javadocJar = JavadocJar.Empty(),
+        sourcesJar = SourcesJar.Empty(),
     )
     coordinates(
         groupId = projectGroup,

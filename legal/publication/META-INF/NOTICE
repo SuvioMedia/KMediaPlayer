@@ -11,8 +11,8 @@ This fork derives in part from Compose Media Player:
   Copyright (c) 2025 Elie G.
 
 The inherited material remains under the MIT License. Its complete copyright
-and permission notice is in
-META-INF/LICENSES/UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT.txt.
+and permission notice is in the artifact-scoped
+META-INF/LICENSES/UPSTREAM-COMPOSE-MEDIA-PLAYER-MIT-*.txt resource.
 
 Optional native backends and their dependencies carry additional notices in
 their own artifacts and META-INF resources.
