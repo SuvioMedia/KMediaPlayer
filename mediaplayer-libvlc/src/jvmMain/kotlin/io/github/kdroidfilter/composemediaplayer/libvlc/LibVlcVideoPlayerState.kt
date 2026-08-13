@@ -305,6 +305,7 @@ internal class LibVlcVideoPlayerState(
     }
 
     override fun setBackendVolume(value: Float) {
+        if (updatePendingTransport { it.volume = value }) return
         check(player.setVolume(value)) { "libVLC rejected volume." }
     }
 
@@ -313,6 +314,7 @@ internal class LibVlcVideoPlayerState(
     }
 
     override fun setBackendPlaybackSpeed(value: Float) {
+        if (updatePendingTransport { it.playbackRate = value }) return
         check(player.setRate(value)) { "libVLC rejected playback rate." }
     }
 
@@ -715,8 +717,9 @@ internal class LibVlcVideoPlayerState(
             if (nativeFrameRate != null) metadata.frameRate = nativeFrameRate
             updateAspectRatio(metadata.width, metadata.height)
         }
-        applyPendingTransport(snapshot, state)
+        val transportReady = applyPendingTransport(snapshot, state)
         if (!sourceLoadedPublished &&
+            transportReady &&
             _hasMedia &&
             state in setOf(VlcPlaybackState.PLAYING, VlcPlaybackState.PAUSED, VlcPlaybackState.BUFFERING)
         ) {
@@ -754,9 +757,13 @@ internal class LibVlcVideoPlayerState(
     private fun applyPendingTransport(
         snapshot: VlcPlayerSnapshot,
         state: VlcPlaybackState,
-    ) {
-        if (state !in PLAYABLE_VLC_STATES) return
-        val requested = synchronized(pendingOpenLock) { pendingTransport?.copy() } ?: return
+    ): Boolean {
+        if (state !in PLAYABLE_VLC_STATES) return false
+        val requested = synchronized(pendingOpenLock) { pendingTransport?.copy() } ?: return true
+        val requestedVolume = requested.volume
+        val volumeApplied = requestedVolume == null || player.setVolume(requestedVolume)
+        val requestedPlaybackRate = requested.playbackRate
+        val playbackRateApplied = requestedPlaybackRate == null || player.setRate(requestedPlaybackRate)
         val requestedSeekMicroseconds = requested.seekMicroseconds
         val seekApplied =
             when {
@@ -765,24 +772,35 @@ internal class LibVlcVideoPlayerState(
                 else -> player.seek(requestedSeekMicroseconds, false)
             }
         val playbackApplied =
-            if (requested.playWhenReady) {
+            if (!volumeApplied || !playbackRateApplied) {
+                false
+            } else if (requested.playWhenReady) {
                 state == VlcPlaybackState.PLAYING ||
                     state == VlcPlaybackState.BUFFERING ||
                     player.play()
             } else {
                 state == VlcPlaybackState.PAUSED || player.pause()
             }
-        synchronized(pendingOpenLock) {
-            val current = pendingTransport ?: return@synchronized
+        return synchronized(pendingOpenLock) {
+            val current = pendingTransport ?: return@synchronized true
+            if (volumeApplied && current.volume == requestedVolume) {
+                current.volume = null
+            }
+            if (playbackRateApplied && current.playbackRate == requestedPlaybackRate) {
+                current.playbackRate = null
+            }
             if (seekApplied && current.seekMicroseconds == requestedSeekMicroseconds) {
                 current.seekMicroseconds = null
             }
             if (playbackApplied &&
                 current.playWhenReady == requested.playWhenReady &&
+                current.volume == null &&
+                current.playbackRate == null &&
                 current.seekMicroseconds == null
             ) {
                 pendingTransport = null
             }
+            pendingTransport == null
         }
     }
 
@@ -1017,6 +1035,8 @@ internal class LibVlcVideoPlayerState(
 
     private data class PendingTransport(
         var playWhenReady: Boolean,
+        var volume: Float? = null,
+        var playbackRate: Float? = null,
         var seekMicroseconds: Long? = null,
     )
 
