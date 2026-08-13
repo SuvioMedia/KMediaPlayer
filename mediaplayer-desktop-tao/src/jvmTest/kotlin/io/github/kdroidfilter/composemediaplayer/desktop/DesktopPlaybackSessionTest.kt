@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.desktop
 
+import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.MediaSourceSpec
 import io.github.kdroidfilter.composemediaplayer.PlaybackEvent
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
@@ -173,6 +174,34 @@ class DesktopPlaybackSessionTest {
                 assertFailsWith<DesktopPlaybackOpenException> { session.switchBackend("mpv") }
                 assertSame(current, session.playerState.value)
                 assertIs<DesktopPlaybackSessionState.Failed>(session.state.value)
+            } finally {
+                session.close()
+            }
+        }
+
+    @Test
+    fun switchAppliesPlaybackSettingsAfterReplacementSourceOpens() =
+        runTest {
+            val current =
+                PreviewableVideoPlayerState(
+                    isPlaying = false,
+                    volume = 0.35f,
+                    loop = true,
+                    playbackSpeed = 1.25f,
+                )
+            val replacement = RejectsPlaybackSettingsBeforeOpenState()
+            val platform = fakeBackend("platform", DesktopBackendRoutingTier.PLATFORM_DIRECT) { current }
+            val libVlc = fakeBackend("libvlc", DesktopBackendRoutingTier.LIBVLC_NATIVE) { replacement }
+            val session = DesktopPlaybackSession(listOf(platform, libVlc), readyTimeout = 1.seconds)
+
+            try {
+                session.open(DesktopPlaybackRequest(MediaSourceSpec("file:///movie.mp4")), "platform")
+
+                assertSame(replacement, session.switchBackend("libvlc"))
+                assertEquals(listOf("open", "volume", "loop", "speed"), replacement.operations)
+                assertEquals(0.35f, replacement.volume)
+                assertTrue(replacement.loop)
+                assertEquals(1.25f, replacement.playbackSpeed)
             } finally {
                 session.close()
             }
@@ -505,5 +534,47 @@ private class SourceReplacingVideoPlayerState : VideoPlayerState by PreviewableV
 
     override fun dispose() {
         disposeCount += 1
+    }
+}
+
+private class RejectsPlaybackSettingsBeforeOpenState :
+    VideoPlayerState by PreviewableVideoPlayerState(isPlaying = false) {
+    val operations = mutableListOf<String>()
+    private var sourceOpened = false
+    private var mutableVolume = 1f
+    private var mutableLoop = false
+    private var mutablePlaybackSpeed = 1f
+
+    override var volume: Float
+        get() = mutableVolume
+        set(value) {
+            check(sourceOpened) { "volume was applied before the source opened" }
+            operations += "volume"
+            mutableVolume = value
+        }
+
+    override var loop: Boolean
+        get() = mutableLoop
+        set(value) {
+            check(sourceOpened) { "loop was applied before the source opened" }
+            operations += "loop"
+            mutableLoop = value
+        }
+
+    override var playbackSpeed: Float
+        get() = mutablePlaybackSpeed
+        set(value) {
+            check(sourceOpened) { "playback speed was applied before the source opened" }
+            operations += "speed"
+            mutablePlaybackSpeed = value
+        }
+
+    override fun openSource(
+        source: MediaSourceSpec,
+        initializePlayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
+    ) {
+        sourceOpened = true
+        operations += "open"
     }
 }

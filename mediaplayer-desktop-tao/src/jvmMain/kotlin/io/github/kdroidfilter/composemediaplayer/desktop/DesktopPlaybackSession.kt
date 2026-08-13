@@ -316,12 +316,13 @@ public class DesktopPlaybackSession(
         val preparedRequest = prepareRequestForBackend(backend, request)
         val candidate = backend.createPlayerState()
         try {
-            bookmark?.applyStaticState(candidate)
+            bookmark?.applyPreOpenState(candidate)
             candidate.openSource(
                 source = preparedRequest.request.source,
                 initializePlayerState = InitialPlayerState.PAUSE,
                 requestHeaders = preparedRequest.request.requestHeaders,
             )
+            bookmark?.applyPostOpenState(candidate)
             awaitReady(candidate)
             if (restoreMediaState) bookmark?.restoreAfterOpen(candidate)
             preparedRequest.ownedSource?.let { owned ->
@@ -729,15 +730,18 @@ private data class DesktopPlaybackBookmark(
     val projectionViewControlMode: VideoProjectionViewControlMode,
     val projectionTextureCrop: VideoTextureCrop,
 ) {
-    fun applyStaticState(player: VideoPlayerState) {
-        player.volume = volume
-        player.loop = loop
-        player.playbackSpeed = speed
-        player.subtitleOffset = subtitleOffset
+    fun applyPreOpenState(player: VideoPlayerState) {
         player.projection = projection
         player.projectionView = projectionView
         player.projectionViewControlMode = projectionViewControlMode
         player.projectionTextureCrop = projectionTextureCrop
+    }
+
+    fun applyPostOpenState(player: VideoPlayerState) {
+        player.volume = volume
+        player.loop = loop
+        player.playbackSpeed = speed
+        player.subtitleOffset = subtitleOffset
     }
 
     fun restoreAfterOpen(player: VideoPlayerState) {
