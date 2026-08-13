@@ -111,10 +111,9 @@ internal class LibVlcVideoPlayerState(
     private var outputConfigurationJob: Job? = null
     private val textureStreamController = TextureViewStreamController()
     private val cpuFrameState = mutableStateOf<ImageBitmap?>(null)
-    private val retiredCpuImages = ArrayDeque<Bitmap>()
+    private val cpuFrameLock = Any()
     private val pendingOpenLock = Any()
     private val presentationEvidenceLock = Any()
-    private var currentCpuImage: Bitmap? = null
     private val pipelineState = MutableStateFlow(initialPipelineStatus())
 
     @Volatile
@@ -641,11 +640,13 @@ internal class LibVlcVideoPlayerState(
     }
 
     private fun publishCpuFrame(frame: VlcDesktopFrame) {
+        var image: Bitmap? = null
+        var published = false
         try {
             val buffer = frame.cpuPixels().orElseThrow()
             val bytes = ByteArray(buffer.remaining())
             buffer.get(bytes)
-            val image = Bitmap()
+            image = Bitmap()
             check(
                 image.installPixels(
                     ImageInfo(frame.width(), frame.height(), ColorType.RGBA_8888, ColorAlphaType.PREMUL),
@@ -653,11 +654,11 @@ internal class LibVlcVideoPlayerState(
                     frame.stride(),
                 ),
             ) { "Skia rejected the libVLC CPU frame buffer." }
-            mutateSnapshotState {
-                currentCpuImage?.let(retiredCpuImages::addLast)
-                currentCpuImage = image
-                cpuFrameState.value = image.asComposeImageBitmap()
-                while (retiredCpuImages.size > CPU_IMAGE_GRACE_COUNT) retiredCpuImages.removeFirst().close()
+            val composeImage = image.asComposeImageBitmap()
+            synchronized(cpuFrameLock) {
+                if (disposed.get()) return
+                mutateSnapshotState { cpuFrameState.value = composeImage }
+                published = true
             }
             val source = frame.sourceDynamicRange().toVideoColorInfo()
             clearPresentationEvidence()
@@ -667,6 +668,9 @@ internal class LibVlcVideoPlayerState(
             droppedFrames.incrementAndGet()
             publishError(VideoPlayerError.UnknownError("libVLC 4 CPU frame conversion failed."))
         } finally {
+            // ImageBitmap keeps the backing Skia Bitmap reachable for as long as Compose can draw it.
+            // Closing a published Bitmap here or during teardown races an in-flight draw on the UI thread.
+            if (!published) image?.close()
             frame.close()
         }
     }
@@ -997,10 +1001,9 @@ internal class LibVlcVideoPlayerState(
     }
 
     private fun clearCpuFrame() {
-        cpuFrameState.value = null
-        currentCpuImage?.close()
-        currentCpuImage = null
-        while (retiredCpuImages.isNotEmpty()) retiredCpuImages.removeFirst().close()
+        synchronized(cpuFrameLock) {
+            mutateSnapshotState { cpuFrameState.value = null }
+        }
     }
 
     private data class SubmittedFrame(
@@ -1043,7 +1046,6 @@ internal class LibVlcVideoPlayerState(
     private companion object {
         const val POLL_INTERVAL_MS = 100L
         const val OUTPUT_RESIZE_DEBOUNCE_MS = 200L
-        const val CPU_IMAGE_GRACE_COUNT = 3
         const val DEFAULT_SDR_WHITE_NITS = 203f
         const val DEFAULT_HDR_PEAK_NITS = 1_000f
         const val GPU_RENDERER_LABEL = "libVLC 4 GPU TextureView"
