@@ -1,0 +1,227 @@
+name: Publish KMedia Wasm Engine Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable engine version, for example 0.4.0-alpha.4
+        required: true
+        type: string
+      bundle_release_tag:
+        description: KMediaPlayer release tag containing the hash-bound binary Maven repository
+        required: true
+        type: string
+      bundle_sha256:
+        description: SHA-256 of the unsigned binary Maven repository bundle
+        required: true
+        type: string
+      private_source_commit:
+        description: Forty-character private source commit represented by the bundle
+        required: true
+        type: string
+      corresponding_source_commit:
+        description: Forty-character public runtime corresponding-source commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kmedia-wasm-engine-bundle-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Validate immutable release request
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          BUNDLE_RELEASE_TAG: ${{ inputs.bundle_release_tag }}
+          BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          PRIVATE_SOURCE_COMMIT: ${{ inputs.private_source_commit }}
+          CORRESPONDING_SOURCE_COMMIT: ${{ inputs.corresponding_source_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^0\.4\.0-alpha\.[0-9]+$ ]]
+          test "$BUNDLE_RELEASE_TAG" = "kmedia-wasm-engine-bundle-$RELEASE_VERSION"
+          [[ "$BUNDLE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRIVATE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CORRESPONDING_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Require Maven Central credentials
+        shell: bash
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
+          MAVEN_SIGNING_PASSWORD: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$MAVEN_CENTRAL_USERNAME" ]] || missing+=(MAVEN_CENTRAL_USERNAME)
+          [[ -n "$MAVEN_CENTRAL_PASSWORD" ]] || missing+=(MAVEN_CENTRAL_PASSWORD)
+          [[ -n "$MAVEN_SIGNING_KEY" ]] || missing+=(MAVEN_SIGNING_KEY)
+          [[ -n "$MAVEN_SIGNING_PASSWORD" ]] || missing+=(MAVEN_SIGNING_PASSWORD)
+          if (( ${#missing[@]} > 0 )); then
+            echo "Missing required repository secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download and hash-bind the public binary bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          BUNDLE_RELEASE_TAG: ${{ inputs.bundle_release_tag }}
+          BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          PRIVATE_SOURCE_COMMIT: ${{ inputs.private_source_commit }}
+          CORRESPONDING_SOURCE_COMMIT: ${{ inputs.corresponding_source_commit }}
+        run: |
+          set -euo pipefail
+          bundle_name="kmedia-wasm-engine-$RELEASE_VERSION-maven-repository.tar.gz"
+          mkdir "$RUNNER_TEMP/download" "$RUNNER_TEMP/staging"
+          gh release download "$BUNDLE_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/download" --pattern "$bundle_name"
+          bundle="$RUNNER_TEMP/download/$bundle_name"
+          test "$BUNDLE_SHA256" = "$(sha256sum "$bundle" | awk '{print $1}')"
+
+          release_body="$(gh release view "$BUNDLE_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          grep -F "v$RELEASE_VERSION" <<<"$release_body" >/dev/null
+          grep -F "runtime-$RELEASE_VERSION" <<<"$release_body" >/dev/null
+          grep -F "$PRIVATE_SOURCE_COMMIT" <<<"$release_body" >/dev/null
+          grep -F "$CORRESPONDING_SOURCE_COMMIT" <<<"$release_body" >/dev/null
+
+          tar -xzf "$bundle" -C "$RUNNER_TEMP/staging"
+
+      - name: Verify exact coordinates and closed-source boundary
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/staging/io/github/shusek"
+          test -d "$root"
+          actual="$(find "$root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+          expected="$(printf '%s\n' kmedia-wasm-engine kmedia-wasm-engine-runtime-assets kmedia-wasm-engine-wasm-js | sort)"
+          test "$actual" = "$expected"
+
+          if find "$RUNNER_TEMP/staging" -type f \( -name 'maven-metadata*' -o -name '*.asc' -o -name '*.md5' -o -name '*.sha1' -o -name '*.sha256' -o -name '*.sha512' \) -print -quit | grep -q .; then
+            echo "The unsigned bundle contains metadata, signatures, or stale checksums." >&2
+            exit 1
+          fi
+
+          for artifact in kmedia-wasm-engine kmedia-wasm-engine-runtime-assets kmedia-wasm-engine-wasm-js; do
+            artifact_root="$root/$artifact"
+            version_root="$artifact_root/$RELEASE_VERSION"
+            test -d "$version_root"
+            test "$(find "$artifact_root" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" = 1
+            pom="$version_root/$artifact-$RELEASE_VERSION.pom"
+            test -s "$pom"
+            grep -F '<licenses>' "$pom" >/dev/null
+            grep -F '<scm>' "$pom" >/dev/null
+          done
+
+          test -s "$root/kmedia-wasm-engine/$RELEASE_VERSION/kmedia-wasm-engine-$RELEASE_VERSION.jar"
+          test -s "$root/kmedia-wasm-engine-wasm-js/$RELEASE_VERSION/kmedia-wasm-engine-wasm-js-$RELEASE_VERSION.klib"
+          test -s "$root/kmedia-wasm-engine-runtime-assets/$RELEASE_VERSION/kmedia-wasm-engine-runtime-assets-$RELEASE_VERSION.zip"
+
+          while IFS= read -r -d '' archive; do
+            if unzip -Z1 "$archive" | grep -Eq '\.(kt|kts|java)$'; then
+              echo "A published JAR contains implementation sources: $archive" >&2
+              exit 1
+            fi
+          done < <(find "$root" -type f -name '*.jar' -print0)
+
+      - name: Sign every publication artifact
+        shell: bash
+        env:
+          MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
+          MAVEN_SIGNING_PASSWORD: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          key="$RUNNER_TEMP/signing-key"
+          pass="$RUNNER_TEMP/signing-password"
+          trap 'rm -f "$key" "$pass"; rm -rf "$GNUPGHOME"' EXIT
+          printf '%s' "$MAVEN_SIGNING_KEY" > "$key"
+          printf '%s' "$MAVEN_SIGNING_PASSWORD" > "$pass"
+          unset MAVEN_SIGNING_KEY MAVEN_SIGNING_PASSWORD
+          gpg --batch --homedir "$GNUPGHOME" --import "$key" >/dev/null 2>&1
+          rm -f "$key"
+          while IFS= read -r -d '' artifact; do
+            gpg --batch --yes --homedir "$GNUPGHOME" --pinentry-mode loopback --passphrase-file "$pass" --armor --detach-sign --output "$artifact.asc" "$artifact"
+          done < <(find "$RUNNER_TEMP/staging/io/github/shusek" -type f -print0 | sort -z)
+
+      - name: Generate Central checksums and package the deployment
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/staging/io/github/shusek"
+          while IFS= read -r -d '' artifact; do
+            md5sum "$artifact" | awk '{print $1}' > "$artifact.md5"
+            sha1sum "$artifact" | awk '{print $1}' > "$artifact.sha1"
+            sha256sum "$artifact" | awk '{print $1}' > "$artifact.sha256"
+            sha512sum "$artifact" | awk '{print $1}' > "$artifact.sha512"
+          done < <(find "$root" -type f ! -name '*.md5' ! -name '*.sha1' ! -name '*.sha256' ! -name '*.sha512' -print0 | sort -z)
+
+          bundle="$RUNNER_TEMP/kmedia-wasm-engine-$RELEASE_VERSION-central.zip"
+          (
+            cd "$RUNNER_TEMP/staging"
+            zip -q -r "$bundle" io
+          )
+          unzip -tq "$bundle"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: kmedia-wasm-engine-central-${{ inputs.version }}
+          path: ${{ runner.temp }}/kmedia-wasm-engine-${{ inputs.version }}-central.zip
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Submit to Central Portal and wait for publication
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          credentials="$RUNNER_TEMP/central-credentials"
+          config="$RUNNER_TEMP/central-curl.conf"
+          trap 'rm -f "$credentials" "$config"' EXIT
+          printf '%s:%s' "$MAVEN_CENTRAL_USERNAME" "$MAVEN_CENTRAL_PASSWORD" > "$credentials"
+          unset MAVEN_CENTRAL_USERNAME MAVEN_CENTRAL_PASSWORD
+          authorization="$(base64 --wrap=0 < "$credentials")"
+          rm -f "$credentials"
+          printf 'header = "Authorization: Bearer %s"\n' "$authorization" > "$config"
+          unset authorization
+
+          bundle="$RUNNER_TEMP/kmedia-wasm-engine-$RELEASE_VERSION-central.zip"
+          response="$RUNNER_TEMP/upload-response"
+          curl --config "$config" --fail-with-body --silent --show-error --request POST --form "bundle=@$bundle;type=application/octet-stream" --output "$response" --url "https://central.sonatype.com/api/v1/publisher/upload?name=KMedia%20Wasm%20Engine%20$RELEASE_VERSION&publishingType=AUTOMATIC"
+          deployment="$(tr -d '\r\n' < "$response")"
+          [[ "$deployment" =~ ^[0-9a-fA-F-]{36}$ ]]
+
+          for attempt in {1..240}; do
+            state="$(curl --config "$config" --fail-with-body --silent --show-error --request POST --url "https://central.sonatype.com/api/v1/publisher/status?id=$deployment" | jq -r '.deploymentState')"
+            case "$state" in
+              PUBLISHED) exit 0 ;;
+              FAILED) exit 1 ;;
+              PENDING|VALIDATING|VALIDATED|PUBLISHING) ;;
+              *) exit 1 ;;
+            esac
+            sleep 10
+          done
+          exit 1
