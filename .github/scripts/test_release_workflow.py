@@ -15,13 +15,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn(
             "on:\n"
             "  workflow_call:\n"
-            "  workflow_dispatch:\n"
-            "  pull_request:\n"
-            "    branches:\n"
-            "      - master\n",
+            "  workflow_dispatch:\n",
             build_test,
         )
         self.assertNotIn("\n  push:", build_test)
+        self.assertNotIn("\n  pull_request:", build_test)
         self.assertIn("on:\n  push:\n    tags:\n      - 'v*'\n", release)
         self.assertNotIn("\n    branches:", release)
         self.assertIn(r"^4\.1\.[0-9]+", release)
