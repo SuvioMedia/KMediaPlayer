@@ -40,6 +40,21 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertNotIn("\n  pull_request:", workflow)
             self.assertNotIn("\n  schedule:", workflow)
 
+    def test_quality_fails_fast_on_ios_libvlc_configuration_cache_regressions(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        build_test = (
+            repository_root / ".github/workflows/build-test.yml"
+        ).read_text(encoding="utf-8")
+        quality = build_test.split("  quality:", 1)[1].split("\n  abi:", 1)[0]
+
+        self.assertIn("Verify the iOS libVLC task graph configuration cache", quality)
+        self.assertIn(
+            ":mediaplayer-libvlc:iosSimulatorArm64LibVlcIntegrationTest",
+            quality,
+        )
+        self.assertIn("--dry-run --configuration-cache", quality)
+        self.assertIn("--configuration-cache-problems=fail", quality)
+
     def test_shared_runtime_consumer_installs_android_native_toolchains(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         workflow = (

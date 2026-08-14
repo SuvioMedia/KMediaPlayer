@@ -147,8 +147,15 @@ def prepare(
         fail("The resolved iOS KMediaVlc Maven artifact must be a real file.")
     if expected_client_header.is_symlink() or not expected_client_header.is_file():
         fail("The pinned KMediaVlc client header must be a real file.")
-    if output.exists() or output.is_symlink() or not output.parent.is_dir():
-        fail("The iOS KMediaVlc output must be a new path with a real parent.")
+    if output.is_symlink() or not output.parent.is_dir():
+        fail("The iOS KMediaVlc output must have a real parent.")
+    if output.exists():
+        if not output.is_dir():
+            fail("The iOS KMediaVlc output must be a directory.")
+        try:
+            output.rmdir()
+        except OSError as error:
+            raise ValueError("The iOS KMediaVlc output directory must be empty.") from error
     temporary = output.with_name(f".{output.name}.tmp")
     if temporary.exists() or temporary.is_symlink():
         fail("The temporary iOS KMediaVlc output already exists.")
