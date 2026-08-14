@@ -5,7 +5,7 @@ constants from mpv's public `client.h` and `render.h` headers. mpv offers those
 headers under the ISC license so that independent clients can use them.
 
 The complete ISC notice is packaged at
-`META-INF/LICENSES/mpv-client-api-ISC.txt`.
+`META-INF/kmediaplayer/mpv/legal/LICENSES/mpv-client-api-ISC.txt`.
 
 Upstream declarations:
 

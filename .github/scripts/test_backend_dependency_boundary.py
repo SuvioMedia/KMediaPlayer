@@ -90,6 +90,21 @@ class BackendDependencyBoundaryTest(unittest.TestCase):
         self.assertIn("getTest(NativeBuildType.DEBUG).linkerOpts", source)
         self.assertIn('"-rpath"', source)
 
+    def test_mpv_adapter_scopes_auxiliary_legal_resources(self) -> None:
+        resource_root = ROOT / "mediaplayer-mpv/src/commonMain/resources/META-INF"
+        legal_root = resource_root / "kmediaplayer/mpv/legal"
+        notice = legal_root / "THIRD_PARTY_NOTICES.md"
+        license_file = legal_root / "LICENSES/mpv-client-api-ISC.txt"
+
+        self.assertTrue(notice.is_file())
+        self.assertTrue(license_file.is_file())
+        self.assertIn(
+            "META-INF/kmediaplayer/mpv/legal/LICENSES/mpv-client-api-ISC.txt",
+            notice.read_text(),
+        )
+        self.assertFalse((resource_root / "THIRD_PARTY_NOTICES.md").exists())
+        self.assertFalse((resource_root / "LICENSES/mpv-client-api-ISC.txt").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

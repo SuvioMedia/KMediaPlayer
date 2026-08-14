@@ -52,7 +52,7 @@ val projectVersion =
             ?.removePrefix("v")
         ?: "dev"
 val projectGroup = "io.github.shusek"
-val assRuntimeVersion = "0.1.0-rc.8"
+val assRuntimeVersion = "0.1.0-rc.9"
 val windowsAssRuntimeVerification =
     configurations.create("windowsAssRuntimeVerification") {
         description = "Resolves the published desktop ASS runtime for Windows DLL verification."

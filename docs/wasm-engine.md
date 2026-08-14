@@ -132,7 +132,7 @@ Released artifacts remain covered by the checksums committed in KMediaPlayer.
 `kmedia-wasm-engine` derives from movi-player. Versions through `0.4.0-alpha.2` retain the Apache
 terms under which they were published. Starting with `0.4.0-alpha.3`, the Kotlin/Wasm KLIB is
 proprietary and publishes only empty source-JAR placeholders. KMediaPlayer pins that line at
-`0.4.0-alpha.4`; publish both matching engine artifacts before releasing KMediaPlayer `4.1.15`.
+`0.4.0-alpha.4`; publish both matching engine artifacts before releasing KMediaPlayer `4.1.18`.
 
 The separate native runtime/shim remains open and replaceable. The engine repository retains the
 Apache NOTICE plus corresponding-source/build information for its bundled LGPL FFmpeg/Wasm
