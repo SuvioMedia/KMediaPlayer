@@ -2,8 +2,8 @@
 set -euo pipefail
 
 root="${1:-mediaplayer-mpv/build}"
-mpv_version="${KMEDIA_MPV_VERSION:-0.3.0-rc.13}"
-runtime_version="${KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.8}"
+mpv_version="${KMEDIA_MPV_VERSION:-0.3.0-rc.14}"
+runtime_version="${KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.9}"
 mpv="$root/kmediaMpvPod"
 ffmpeg="$root/kmediaFfmpegRuntimePod"
 ass="$root/kmediaAssRuntimePod"
