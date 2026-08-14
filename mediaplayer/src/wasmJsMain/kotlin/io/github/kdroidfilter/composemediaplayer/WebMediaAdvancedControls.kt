@@ -70,6 +70,12 @@ interface WebMediaAdvancedControls {
 
     suspend fun thumbnail(position: Duration): WebMediaSnapshot
 
+    /** Generates timeline frames in one isolated Web engine session, preserving input order. */
+    suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int = 320,
+    ): List<WebMediaSnapshot?>
+
     suspend fun prefetchSubtitleCues(): List<WebSubtitleCue>
 
     suspend fun seekToLive()

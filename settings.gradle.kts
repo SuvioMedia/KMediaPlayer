@@ -65,6 +65,10 @@ providers.gradleProperty("kmediaFfmpegRuntimeProjectDir").orNull?.let { projectD
                 .using(project(":kmedia-ass-runtime-android"))
             substitute(module("io.github.shusek:kmedia-ass-runtime-desktop"))
                 .using(project(":kmedia-ass-runtime-desktop"))
+            substitute(module("io.github.shusek:kmedia-ffmpeg-runtime-android"))
+                .using(project(":kmedia-ffmpeg-runtime-android"))
+            substitute(module("io.github.shusek:kmedia-ffmpeg-runtime-desktop"))
+                .using(project(":kmedia-ffmpeg-runtime-desktop"))
         }
     }
 }

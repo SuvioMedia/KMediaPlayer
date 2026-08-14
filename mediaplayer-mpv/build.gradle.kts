@@ -31,7 +31,7 @@ val projectVersion =
         ?: "dev"
 val projectGroup = "io.github.shusek"
 val kmediaMpvVersion = libs.versions.kmediaMpv.get()
-val kmediaFfmpegRuntimeVersion = "0.1.0-rc.7"
+val kmediaFfmpegRuntimeVersion = "0.1.0-rc.8"
 val windowsMpvRuntimeVerification =
     configurations.create("windowsMpvRuntimeVerification") {
         description = "Resolves the complete published MPV runtime graph for Windows DLL verification."
