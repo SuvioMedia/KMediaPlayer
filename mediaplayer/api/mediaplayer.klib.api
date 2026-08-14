@@ -1217,6 +1217,7 @@ abstract interface io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedCon
     abstract suspend fun setAudioOutput(kotlin/String?) // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.setAudioOutput|setAudioOutput(kotlin.String?){}[0]
     abstract suspend fun snapshot(): io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.snapshot|snapshot(){}[0]
     abstract suspend fun thumbnail(kotlin.time/Duration): io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.thumbnail|thumbnail(kotlin.time.Duration){}[0]
+    abstract suspend fun thumbnails(kotlin.collections/List<kotlin.time/Duration>, kotlin/Int = ...): kotlin.collections/List<io.github.kdroidfilter.composemediaplayer/WebMediaSnapshot?> // io.github.kdroidfilter.composemediaplayer/WebMediaAdvancedControls.thumbnails|thumbnails(kotlin.collections.List<kotlin.time.Duration>;kotlin.Int){}[0]
 }
 
 // Targets: [wasmJs]

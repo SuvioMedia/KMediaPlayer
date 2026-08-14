@@ -483,6 +483,12 @@ internal class WasmEnginePlaybackSession(
     override suspend fun thumbnail(position: Duration): WebMediaSnapshot =
         requireCurrentPlayer().thumbnail(position).toKMediaSnapshot()
 
+    override suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int,
+    ): List<WebMediaSnapshot?> =
+        requireCurrentPlayer().thumbnails(positions, maximumWidth).map { it?.toKMediaSnapshot() }
+
     override suspend fun prefetchSubtitleCues(): List<WebSubtitleCue> =
         requireCurrentPlayer().prefetchSubtitleCues().map { it.toKMediaCue() }
 

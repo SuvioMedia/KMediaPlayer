@@ -22,8 +22,8 @@ def _catalog_version(alias: str) -> str:
 
 
 EXPECTED_BACKEND_DEPENDENCIES = {
-    "composemediaplayer-ass-android": ("kmedia-ass-runtime-android", "0.1.0-rc.7"),
-    "composemediaplayer-ass-jvm": ("kmedia-ass-runtime-desktop", "0.1.0-rc.7"),
+    "composemediaplayer-ass-android": ("kmedia-ass-runtime-android", "0.1.0-rc.8"),
+    "composemediaplayer-ass-jvm": ("kmedia-ass-runtime-desktop", "0.1.0-rc.8"),
     "composemediaplayer-mpv-android": (
         "kmedia-mpv-runtime-android",
         _catalog_version("kmediaMpv"),
