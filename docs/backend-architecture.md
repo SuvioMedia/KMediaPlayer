@@ -36,11 +36,13 @@ Backend and extension implementations never depend on the default player:
   and all bundled desktop paths depend directly on the matching KMediaMpv
   runtime. On iOS, the matching KMediaMpv CocoaPod embeds the signed
   XCFramework graph at build time. Custom native runtimes remain opt-in.
-- `composemediaplayer-libvlc` owns the optional Android/JVM KMediaVlc adapter.
+- `composemediaplayer-libvlc` owns the optional Android/JVM/iOS KMediaVlc adapter.
   Android uses the runtime's direct `Surface` boundary, while JVM uses the
   shared Tao renderer for GPU TextureView output or the bounded CPU/Skia
-  projection path. Each target depends directly on its matching KMediaVlc
-  runtime artifact; this adapter never searches for a user-installed VLC.
+  projection path. iOS dynamically opens only Maven-delivered frameworks from
+  the signed application's private framework directory. Each target uses its
+  matching KMediaVlc runtime artifact; this adapter never searches for a
+  user-installed VLC.
 
 Both native adapters inherit their command normalization, observable state,
 source lifecycle, event/error handling, metadata, chapter, and track bookkeeping
@@ -176,10 +178,11 @@ platform renderer.
 An application that uses only an optional backend can omit
 `composemediaplayer` entirely and render through `BackendVideoPlayerSurface`
 from core. The isolated MPV and libVLC consumer tests are intentionally compiled
-with only their published adapter coordinate; each transitive graph contains
-core and its platform runtime, but no default-player implementation. The libVLC
-consumer remains an explicit local-composite gate until the KMediaVlc runtime is
-publication-eligible.
+with only their published adapter coordinate; each transitive Android/JVM graph
+contains core and its platform runtime, but no default-player implementation.
+The iOS libVLC integration gate resolves the separately published KMediaVlc
+runtime ZIP from Maven Central, validates its inventory and ABI header, and
+exercises real playback in a signed simulator application.
 
 ## Implementing another backend
 
@@ -251,8 +254,8 @@ Dolby Vision policies, and desktop runtime paths fail closed.
 The isolated consumer publishes core, desktop Tao, and all current libVLC
 adapter variants to a runner-local Maven repository in one Gradle invocation,
 then compiles Android and runs JVM tests in a second invocation. KMediaVlc is
-provided as an explicit composite only while its native release remains gated;
-the consumer never trusts or publishes the candidate runtime itself.
+resolved from its immutable Maven Central releases; local composites remain
+optional development overrides only.
 
 ## Distribution and licensing boundary
 
@@ -260,9 +263,9 @@ The core, extension API, default player, and adapters use this repository's lice
 no copied KMediaMpv or KMediaVlc runtime implementation. The separately published KMediaMpv
 packages contain the MPV-specific client and consume
 KMediaFfmpegRuntime as an exact dependency. The shared runtime carries FFmpeg/libass notices,
-corresponding source and recipient relinking materials. Android/desktop use Maven variants and
-Apple uses exact-version CocoaPods; none of these boundaries relicense the application-facing
-contracts.
+corresponding source and recipient relinking materials. Android, desktop, and
+Apple resolve exact Maven releases; none of these boundaries relicense the
+application-facing contracts.
 
 KMediaBridge follows the same separation: the KMediaPlayer adapter owns only the extension-facing
 API and translation layer. The separately published KMediaBridge client contains only the bridge
@@ -275,6 +278,7 @@ implemented backend-facing Kotlin adapter and uses KMediaVlc's ISC client ABI. T
 versioned, LGPL-2.1-or-later KMediaVlc repository and packages own the runtime clients, native
 bridges, pinned libVLC 4 binaries, manifests, source/relinking material, notices, and platform
 eligibility decisions. Making KMediaPlayer private does not change those public LGPL artifacts or
-their recipients' replacement and relinking rights. Android and Apple
-native payloads remain unpublished candidates until their legal and physical-device gates close;
-local source, host, emulator, or consumer-smoke success does not promote them to release artifacts.
+their recipients' replacement and relinking rights. Desktop and Android use
+KMediaVlc `0.1.0-rc.6`; Apple uses the separately published
+`kmedia-vlc-runtime-ios:0.1.0-rc.7` ZIP and embeds its selected XCFramework
+slices during the application build.

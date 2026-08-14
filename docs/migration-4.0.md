@@ -24,9 +24,10 @@ application owns its desktop bootstrap explicitly.
 
 The optional libVLC coordinate selects the bundled KMediaVlc/libVLC 4 runtime;
 it does not search for or download a user-installed VLC. Its Android variant
-requires API 28+ and an ARM64 or ARMv7 device. Until the KMediaVlc native
-payloads pass their release gates, use the local composite workflow documented
-in the README instead of treating the candidate version as published.
+requires API 28+ and an ARM64 or ARMv7 device. Desktop and Android runtimes are
+ordinary transitive Maven dependencies. On iOS, resolve the separately
+published `kmedia-vlc-runtime-ios` ZIP from Maven, select the active Xcode slice,
+and embed and sign its frameworks in the application bundle.
 
 The former `composemediaplayer-desktop-window` coordinate is not published as
 an alias. Replace it directly; the removed window APIs have no deprecated

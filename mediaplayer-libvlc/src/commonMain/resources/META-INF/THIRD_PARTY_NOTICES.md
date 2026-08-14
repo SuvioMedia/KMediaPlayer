@@ -9,7 +9,7 @@ The complete ISC notice is packaged at
 
 Upstream declaration:
 
-- https://github.com/SuvioMedia/KMediaVlc/blob/94bbfb82c27a4f3ac96f619e700dc253cc31729e/native/include/kmediavlc_client.h
+- https://github.com/SuvioMedia/KMediaVlc/blob/02393aaf3b2190407163dc33f890dfd8448074bd/native/include/kmediavlc_client.h
 
 The `composemediaplayer-libvlc` adapter does not embed or download libVLC or a
 KMediaVlc native payload. Platform dependencies supply those separately and

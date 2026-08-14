@@ -5,21 +5,22 @@ binary. The bridge accepts only explicit paths under the application's private
 `Frameworks` directory and resolves KMediaVlc stable client ABI 2. It never
 searches system paths or downloads native code.
 
-Normal local compilation uses `compile-only-kmediavlc-pod`. That placeholder
-contains no KMediaVlc or libVLC runtime and intentionally exercises the typed
-`RUNTIME_DEPENDENCY_MISSING` path. To link against an audited local candidate,
-pass its pod directory explicitly:
+Normal compilation links only KMediaPlayer's small dynamic-loader bridge. It
+does not link a placeholder or require a local KMediaVlc checkout. The real
+simulator gate resolves the immutable iOS runtime ZIP from Maven Central,
+validates all 87 framework hashes and the vendored ABI header, embeds and signs
+the selected frameworks, boots an available simulator when needed, and decodes
+a real H.264/MKV frame:
 
 ```shell
-./gradlew :mediaplayer-libvlc:linkDebugTestIosSimulatorArm64 \
-  -PkmediaVlcPodDirectory=/absolute/path/to/KMediaVlc-pod \
-  -PkmediaVlcPodVersion=0.1.0 \
-  --no-configuration-cache
+./gradlew :mediaplayer-libvlc:iosSimulatorArm64LibVlcIntegrationTest
 ```
 
-The simulator integration harness packages that test executable with a flat
-directory containing the candidate's simulator frameworks, signs the complete
-application graph ad hoc, and requires an already booted simulator:
+Applications resolve `io.github.shusek:kmedia-vlc-runtime-ios:0.1.0-rc.7@zip`
+from Maven Central during their Gradle/Xcode build, select the active device or
+simulator slice, and embed and sign the resulting frameworks in the app's
+private `Frameworks` directory. The lower-level harness remains available for
+diagnostics with a pre-extracted runtime:
 
 ```shell
 mediaplayer-libvlc/native/apple/run-ios-simulator-integration-test.sh \
@@ -29,5 +30,5 @@ mediaplayer-libvlc/native/apple/run-ios-simulator-integration-test.sh \
   BOOTED-SIMULATOR-UDID
 ```
 
-Passing this simulator test does not satisfy physical-device, signing,
-distribution, or legal release gates.
+Passing this simulator test does not satisfy physical-device or
+application-distribution validation.

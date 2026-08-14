@@ -22,20 +22,21 @@ val projectVersion = providers.gradleProperty("publicationVersion").orNull ?: "d
 val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val releaseSigningEnabled =
     providers.gradleProperty("releaseSigningEnabled").map(String::toBoolean).getOrElse(false)
-val kmediaVlcVersion = libs.versions.kmediaVlc.get()
-val kmediaVlcPodVersion =
-    providers
-        .gradleProperty("kmediaVlcPodVersion")
-        .orElse(kmediaVlcVersion.removeSuffix("-SNAPSHOT"))
-val kmediaVlcPodDirectory =
-    providers
-        .gradleProperty("kmediaVlcPodDirectory")
-        .map(rootProject::file)
-        .orElse(layout.projectDirectory.dir("native/apple/compile-only-kmediavlc-pod").asFile)
+val kmediaVlcIosVersion = libs.versions.kmediaVlcIos.get()
+val kmediaVlcIosRuntime =
+    configurations.create("kmediaVlcIosRuntime") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        isTransitive = false
+    }
 val appleVlcNativeDirectory = layout.projectDirectory.dir("native/apple")
+val prepareIosRuntimeScript = appleVlcNativeDirectory.file("prepare-ios-runtime.py")
+val runIosSimulatorIntegrationScript = appleVlcNativeDirectory.file("run-ios-simulator-maven-integration-test.sh")
 val iosArm64VlcBridge = layout.buildDirectory.dir("generated/appleVlcBridge/ios-arm64")
 val iosSimulatorArm64VlcBridge =
     layout.buildDirectory.dir("generated/appleVlcBridge/ios-simulator-arm64")
+val iosSimulatorRuntime = layout.buildDirectory.dir("kmediaVlcIosRuntime/iphonesimulator")
+val iosSimulatorIntegrationWork = layout.buildDirectory.dir("iosSimulatorLibVlcIntegration")
 val skipAppleInteropDuringIdeaSync =
     providers
         .systemProperty("idea.sync.active")
@@ -54,6 +55,10 @@ val vrAcceptanceInputs =
 val vrAcceptanceConfigured = vrAcceptanceInputs.all { it }
 require(vrAcceptanceInputs.none { it } || vrAcceptanceConfigured) {
     "The libVLC VR acceptance test requires its runtime directory, bridge, and fixture together."
+}
+
+dependencies {
+    add(kmediaVlcIosRuntime.name, "${libs.kmedia.vlc.runtime.ios.get()}@zip")
 }
 
 fun registerAppleVlcBridgeBuild(
@@ -91,6 +96,39 @@ val buildIosSimulatorArm64VlcBridge =
         outputDirectory = iosSimulatorArm64VlcBridge,
     )
 
+val prepareKMediaVlcIosSimulatorRuntime =
+    tasks.register<Exec>("prepareKMediaVlcIosSimulatorRuntime") {
+        group = "verification"
+        description = "Resolves KMediaVlc iOS from Maven Central and verifies its simulator frameworks."
+        enabled = canBuildAppleVlcBridge
+        inputs.file(prepareIosRuntimeScript)
+        inputs.file(appleVlcNativeDirectory.file("include/kmediavlc_client.h"))
+        inputs.files(kmediaVlcIosRuntime)
+        inputs.property("kmediaVlcIosVersion", kmediaVlcIosVersion)
+        outputs.dir(iosSimulatorRuntime)
+        doFirst {
+            val output = iosSimulatorRuntime.get().asFile
+            delete(output)
+            check(output.parentFile.mkdirs() || output.parentFile.isDirectory) {
+                "Cannot create the KMediaVlc iOS runtime output directory."
+            }
+            commandLine(
+                "python3",
+                prepareIosRuntimeScript.asFile.absolutePath,
+                "--archive",
+                kmediaVlcIosRuntime.singleFile.absolutePath,
+                "--platform",
+                "iphonesimulator",
+                "--expected-version",
+                kmediaVlcIosVersion,
+                "--client-header",
+                appleVlcNativeDirectory.file("include/kmediavlc_client.h").asFile.absolutePath,
+                "--output",
+                output.absolutePath,
+            )
+        }
+    }
+
 group = "io.github.shusek"
 version = projectVersion
 
@@ -103,12 +141,6 @@ kotlin {
         homepage = "https://github.com/SuvioMedia/KMediaPlayer"
         name = "ComposeMediaPlayerLibVlc"
         ios.deploymentTarget = "16.2"
-        pod(
-            name = "KMediaVlc",
-            version = kmediaVlcPodVersion.get(),
-            path = kmediaVlcPodDirectory.get(),
-            linkOnly = true,
-        )
 
         framework {
             baseName = "ComposeMediaPlayerLibVlc"
@@ -200,6 +232,35 @@ tasks.matching { it.name == "cinteropAppleVlcIosArm64" }.configureEach {
 }
 tasks.matching { it.name == "cinteropAppleVlcIosSimulatorArm64" }.configureEach {
     dependsOn(buildIosSimulatorArm64VlcBridge)
+}
+
+tasks.register<Exec>("iosSimulatorArm64LibVlcIntegrationTest") {
+    group = "verification"
+    description = "Runs real KMediaPlayer playback with the Maven-delivered KMediaVlc iOS runtime."
+    enabled = canBuildAppleVlcBridge
+    dependsOn("linkDebugTestIosSimulatorArm64", prepareKMediaVlcIosSimulatorRuntime)
+    val testExecutable = layout.buildDirectory.file("bin/iosSimulatorArm64/debugTest/test.kexe")
+    inputs.file(runIosSimulatorIntegrationScript)
+    inputs.file(appleVlcNativeDirectory.file("run-ios-simulator-integration-test.sh"))
+    inputs.file(testExecutable)
+    inputs.dir(iosSimulatorRuntime)
+    doFirst {
+        val work = iosSimulatorIntegrationWork.get().asFile
+        delete(work)
+        check(work.parentFile.mkdirs() || work.parentFile.isDirectory) {
+            "Cannot create the iOS simulator integration-test directory."
+        }
+        commandLine(
+            "bash",
+            runIosSimulatorIntegrationScript.asFile.absolutePath,
+            testExecutable.get().asFile.absolutePath,
+            iosSimulatorRuntime
+                .get()
+                .dir("Frameworks")
+                .asFile.absolutePath,
+            work.absolutePath,
+        )
+    }
 }
 
 tasks.named<Test>("jvmTest") {

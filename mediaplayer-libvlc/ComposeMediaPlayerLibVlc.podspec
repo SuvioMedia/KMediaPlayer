@@ -9,7 +9,6 @@ Pod::Spec.new do |spec|
     spec.vendored_frameworks      = 'build/cocoapods/framework/ComposeMediaPlayerLibVlc.framework'
     spec.libraries                = 'c++'
     spec.ios.deployment_target    = '16.2'
-    spec.dependency 'KMediaVlc', '0.1.0'
     if !Dir.exist?('build/cocoapods/framework/ComposeMediaPlayerLibVlc.framework') || Dir.empty?('build/cocoapods/framework/ComposeMediaPlayerLibVlc.framework')
         raise "
         Kotlin framework 'ComposeMediaPlayerLibVlc' doesn't exist yet, so a proper Xcode project can't be generated.

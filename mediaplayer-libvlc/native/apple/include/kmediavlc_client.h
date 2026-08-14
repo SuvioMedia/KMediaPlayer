@@ -137,6 +137,8 @@ typedef struct kmediavlc_player_snapshot {
     int64_t duration_microseconds;
     uint32_t video_width;
     uint32_t video_height;
+    uint32_t video_frame_rate_num;
+    uint32_t video_frame_rate_den;
     uint32_t buffered_permille;
     bool seekable;
 } kmediavlc_player_snapshot;
