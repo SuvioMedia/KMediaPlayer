@@ -175,6 +175,8 @@ internal class IosLibVlcVideoPlayerState(
         get() = projection.requiresProjectionRenderer || !projectionTextureCrop.isDefaultTextureCrop
 
     override fun setBackendVolume(value: Float) {
+        if (updatePendingTransport { it.volume = value }) return
+        if (!_hasMedia) return
         check(engine.setVolume(value)) { "KMediaVlc rejected iOS volume." }
     }
 
@@ -183,6 +185,8 @@ internal class IosLibVlcVideoPlayerState(
     }
 
     override fun setBackendPlaybackSpeed(value: Float) {
+        if (updatePendingTransport { it.playbackRate = value }) return
+        if (!_hasMedia) return
         check(engine.setRate(value)) { "KMediaVlc rejected iOS playback rate." }
     }
 
@@ -239,13 +243,12 @@ internal class IosLibVlcVideoPlayerState(
             pendingTransport =
                 PendingTransport(
                     playWhenReady = initializePlayerState == InitialPlayerState.PLAY,
+                    volume = _volume,
+                    playbackRate = _playbackSpeed,
                 )
             val request = PendingOpen(location, headers)
             val generation =
                 runCatching {
-                    check(engine.setVolume(_volume))
-                    check(engine.setRate(_playbackSpeed))
-                    check(engine.setLoop(false))
                     if (engine.open(request.location, request.requestHeaders, true)) {
                         engine.snapshot().mediaGeneration
                     } else {
@@ -338,7 +341,8 @@ internal class IosLibVlcVideoPlayerState(
         var lastSnapshotAt = 0L
         try {
             while (scope.isActive && !isDisposed()) {
-                if (_hasMedia) {
+                val hasActiveMedia = lifecycleLock.withLock { activeMediaGeneration != null }
+                if (hasActiveMedia) {
                     val now = currentTimeMillis()
                     if (now - lastSnapshotAt >= SNAPSHOT_INTERVAL_MS) {
                         refreshSnapshot()
@@ -427,6 +431,8 @@ internal class IosLibVlcVideoPlayerState(
         if (requestedSeek != null && seekApplied) {
             pendingSeekTargetMicroseconds = requestedSeek
         }
+        val volumeApplied = requested.volume?.let(engine::setVolume) ?: true
+        val playbackRateApplied = requested.playbackRate?.let(engine::setRate) ?: true
         val playbackApplied =
             if (requested.playWhenReady) {
                 state == IosLibVlcPlaybackState.PLAYING ||
@@ -438,9 +444,15 @@ internal class IosLibVlcVideoPlayerState(
         val current = pendingTransport
         if (current != null) {
             if (seekApplied && current.seekMicroseconds == requestedSeek) current.seekMicroseconds = null
+            if (volumeApplied && current.volume == requested.volume) current.volume = null
+            if (playbackRateApplied && current.playbackRate == requested.playbackRate) {
+                current.playbackRate = null
+            }
             if (playbackApplied &&
                 current.playWhenReady == requested.playWhenReady &&
-                current.seekMicroseconds == null
+                current.seekMicroseconds == null &&
+                current.volume == null &&
+                current.playbackRate == null
             ) {
                 pendingTransport = null
             }
@@ -452,9 +464,6 @@ internal class IosLibVlcVideoPlayerState(
         val request = activeMediaRequest ?: return false
         val generation =
             runCatching {
-                check(engine.setVolume(_volume))
-                check(engine.setRate(_playbackSpeed))
-                check(engine.setLoop(false))
                 if (engine.open(request.location, request.requestHeaders, true)) {
                     engine.snapshot().mediaGeneration
                 } else {
@@ -463,6 +472,12 @@ internal class IosLibVlcVideoPlayerState(
             }.getOrNull() ?: return false
         activeMediaGeneration = generation
         pendingSeekTargetMicroseconds = null
+        pendingTransport =
+            PendingTransport(
+                playWhenReady = true,
+                volume = _volume,
+                playbackRate = _playbackSpeed,
+            )
         lastFrameSerial = null
         frameState.value = null
         mutateSnapshotState {
@@ -607,6 +622,8 @@ internal class IosLibVlcVideoPlayerState(
     private data class PendingTransport(
         var playWhenReady: Boolean,
         var seekMicroseconds: Long? = null,
+        var volume: Float? = null,
+        var playbackRate: Float? = null,
     )
 
     private companion object {

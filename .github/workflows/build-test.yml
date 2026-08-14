@@ -2,6 +2,10 @@ name: Build and Test
 
 on:
   workflow_call:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: read
@@ -266,6 +270,7 @@ jobs:
           :mediaplayer-dolbyvision:iosSimulatorArm64Test
           :mediaplayer-libvlc:compileKotlinIosArm64
           :mediaplayer-libvlc:iosSimulatorArm64Test
+          :mediaplayer-libvlc:iosSimulatorArm64LibVlcIntegrationTest
           :sample:composeApp:linkDebugFrameworkIosArm64
           :sample:composeApp:linkDebugFrameworkIosSimulatorArm64
           -PcomposeMediaPlayer.skipAssAppleNativeBuild=true
@@ -485,7 +490,8 @@ jobs:
 
       - name: Publish isolated consumer fixtures
         run: >-
-          ./gradlew publishConsumerSmokeArtifacts :mediaplayer:verifyJvm25Bytecode
+          ./gradlew publishConsumerSmokeArtifacts publishLibVlcConsumerSmokeArtifacts
+          :mediaplayer:verifyJvm25Bytecode
           :mediaplayer-core:verifyJvm25Bytecode
           :mediaplayer-desktop-tao:verifyJvm25Bytecode
           :mediaplayer-libvlc:verifyJvm25Bytecode
@@ -502,7 +508,7 @@ jobs:
 
       - name: Compile and run the isolated consumer
         run: >-
-          ./gradlew consumerSmokeTest
+          ./gradlew consumerSmokeTest libVlcConsumerSmokeTest
           -PpublicationVersion=0.0.0-consumer.${{ github.sha }}
           -PcomposeMediaPlayer.skipNativeBuild=true
           --refresh-dependencies --no-configuration-cache --no-daemon --continue

@@ -3,6 +3,7 @@ package sample.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.media3.common.util.UnstableApi
 import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
 import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
@@ -19,6 +20,7 @@ import io.github.kdroidfilter.composemediaplayer.util.composeMediaPlayerLoggingL
 import io.github.vinceglb.filekit.FileKit
 import io.github.vinceglb.filekit.dialogs.init
 
+@UnstableApi
 class AppActivity : ComponentActivity() {
     private var kMediaBridgeSelfTest: AndroidKMediaBridgeSelfTest? = null
     private var colorPipelineSelfTest: AndroidColorPipelineSelfTest? = null
