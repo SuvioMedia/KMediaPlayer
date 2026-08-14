@@ -529,6 +529,12 @@ jobs:
           distribution: temurin
           cache: gradle
 
+      - name: Verify the iOS libVLC task graph configuration cache
+        run: >-
+          ./gradlew :mediaplayer-libvlc:iosSimulatorArm64LibVlcIntegrationTest
+          --dry-run --configuration-cache --configuration-cache-problems=fail
+          --no-daemon
+
       - name: Check pinned libdovi shim
         run: cargo check --locked --manifest-path mediaplayer-dolbyvision/native/libdovi/Cargo.toml
 

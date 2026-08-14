@@ -1,6 +1,9 @@
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.file.Directory
+import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.Delete
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.tasks.Jar
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -35,7 +38,9 @@ val runIosSimulatorIntegrationScript = appleVlcNativeDirectory.file("run-ios-sim
 val iosArm64VlcBridge = layout.buildDirectory.dir("generated/appleVlcBridge/ios-arm64")
 val iosSimulatorArm64VlcBridge =
     layout.buildDirectory.dir("generated/appleVlcBridge/ios-simulator-arm64")
-val iosSimulatorRuntime = layout.buildDirectory.dir("kmediaVlcIosRuntime/iphonesimulator")
+val iosSimulatorRuntimeArchiveDirectory = layout.buildDirectory.dir("kmediaVlcIosRuntimeArchive")
+val iosSimulatorRuntimeArchive = iosSimulatorRuntimeArchiveDirectory.map { it.file("runtime.zip") }
+val iosSimulatorRuntime = layout.buildDirectory.dir("kmediaVlcIosRuntimeIphoneSimulator")
 val iosSimulatorIntegrationWork = layout.buildDirectory.dir("iosSimulatorLibVlcIntegration")
 val skipAppleInteropDuringIdeaSync =
     providers
@@ -96,37 +101,49 @@ val buildIosSimulatorArm64VlcBridge =
         outputDirectory = iosSimulatorArm64VlcBridge,
     )
 
+val stageKMediaVlcIosRuntimeArchive =
+    tasks.register<Sync>("stageKMediaVlcIosRuntimeArchive") {
+        group = "verification"
+        description = "Stages the single KMediaVlc iOS Maven archive at a deterministic path."
+        enabled = canBuildAppleVlcBridge
+        from(kmediaVlcIosRuntime)
+        into(iosSimulatorRuntimeArchiveDirectory)
+        rename(".*", "runtime.zip")
+        duplicatesStrategy = DuplicatesStrategy.FAIL
+        includeEmptyDirs = false
+        outputs.file(iosSimulatorRuntimeArchive)
+    }
+
+val cleanKMediaVlcIosSimulatorRuntime =
+    tasks.register<Delete>("cleanKMediaVlcIosSimulatorRuntime") {
+        delete(iosSimulatorRuntime)
+    }
+
 val prepareKMediaVlcIosSimulatorRuntime =
     tasks.register<Exec>("prepareKMediaVlcIosSimulatorRuntime") {
         group = "verification"
         description = "Resolves KMediaVlc iOS from Maven Central and verifies its simulator frameworks."
         enabled = canBuildAppleVlcBridge
+        dependsOn(stageKMediaVlcIosRuntimeArchive, cleanKMediaVlcIosSimulatorRuntime)
         inputs.file(prepareIosRuntimeScript)
         inputs.file(appleVlcNativeDirectory.file("include/kmediavlc_client.h"))
-        inputs.files(kmediaVlcIosRuntime)
+        inputs.file(iosSimulatorRuntimeArchive)
         inputs.property("kmediaVlcIosVersion", kmediaVlcIosVersion)
         outputs.dir(iosSimulatorRuntime)
-        doFirst {
-            val output = iosSimulatorRuntime.get().asFile
-            delete(output)
-            check(output.parentFile.mkdirs() || output.parentFile.isDirectory) {
-                "Cannot create the KMediaVlc iOS runtime output directory."
-            }
-            commandLine(
-                "python3",
-                prepareIosRuntimeScript.asFile.absolutePath,
-                "--archive",
-                kmediaVlcIosRuntime.singleFile.absolutePath,
-                "--platform",
-                "iphonesimulator",
-                "--expected-version",
-                kmediaVlcIosVersion,
-                "--client-header",
-                appleVlcNativeDirectory.file("include/kmediavlc_client.h").asFile.absolutePath,
-                "--output",
-                output.absolutePath,
-            )
-        }
+        commandLine(
+            "python3",
+            prepareIosRuntimeScript.asFile.absolutePath,
+            "--archive",
+            iosSimulatorRuntimeArchive.get().asFile.absolutePath,
+            "--platform",
+            "iphonesimulator",
+            "--expected-version",
+            kmediaVlcIosVersion,
+            "--client-header",
+            appleVlcNativeDirectory.file("include/kmediavlc_client.h").asFile.absolutePath,
+            "--output",
+            iosSimulatorRuntime.get().asFile.absolutePath,
+        )
     }
 
 group = "io.github.shusek"
@@ -234,33 +251,35 @@ tasks.matching { it.name == "cinteropAppleVlcIosSimulatorArm64" }.configureEach 
     dependsOn(buildIosSimulatorArm64VlcBridge)
 }
 
+val cleanIosSimulatorLibVlcIntegration =
+    tasks.register<Delete>("cleanIosSimulatorLibVlcIntegration") {
+        delete(iosSimulatorIntegrationWork)
+    }
+
 tasks.register<Exec>("iosSimulatorArm64LibVlcIntegrationTest") {
     group = "verification"
     description = "Runs real KMediaPlayer playback with the Maven-delivered KMediaVlc iOS runtime."
     enabled = canBuildAppleVlcBridge
-    dependsOn("linkDebugTestIosSimulatorArm64", prepareKMediaVlcIosSimulatorRuntime)
+    dependsOn(
+        "linkDebugTestIosSimulatorArm64",
+        prepareKMediaVlcIosSimulatorRuntime,
+        cleanIosSimulatorLibVlcIntegration,
+    )
     val testExecutable = layout.buildDirectory.file("bin/iosSimulatorArm64/debugTest/test.kexe")
     inputs.file(runIosSimulatorIntegrationScript)
     inputs.file(appleVlcNativeDirectory.file("run-ios-simulator-integration-test.sh"))
     inputs.file(testExecutable)
     inputs.dir(iosSimulatorRuntime)
-    doFirst {
-        val work = iosSimulatorIntegrationWork.get().asFile
-        delete(work)
-        check(work.parentFile.mkdirs() || work.parentFile.isDirectory) {
-            "Cannot create the iOS simulator integration-test directory."
-        }
-        commandLine(
-            "bash",
-            runIosSimulatorIntegrationScript.asFile.absolutePath,
-            testExecutable.get().asFile.absolutePath,
-            iosSimulatorRuntime
-                .get()
-                .dir("Frameworks")
-                .asFile.absolutePath,
-            work.absolutePath,
-        )
-    }
+    commandLine(
+        "bash",
+        runIosSimulatorIntegrationScript.asFile.absolutePath,
+        testExecutable.get().asFile.absolutePath,
+        iosSimulatorRuntime
+            .get()
+            .dir("Frameworks")
+            .asFile.absolutePath,
+        iosSimulatorIntegrationWork.get().asFile.absolutePath,
+    )
 }
 
 tasks.named<Test>("jvmTest") {

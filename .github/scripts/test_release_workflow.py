@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
-    def test_automatic_builds_run_only_for_release_tags(self) -> None:
+    def test_full_verification_runs_before_tag_only_publication(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         build_test = (
             repository_root / ".github/workflows/build-test.yml"
@@ -12,9 +12,16 @@ class ReleaseWorkflowTest(unittest.TestCase):
             repository_root / ".github/workflows/publish-on-maven-central.yml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("on:\n  workflow_call:\n", build_test)
+        self.assertIn(
+            "on:\n"
+            "  workflow_call:\n"
+            "  workflow_dispatch:\n"
+            "  pull_request:\n"
+            "    branches:\n"
+            "      - master\n",
+            build_test,
+        )
         self.assertNotIn("\n  push:", build_test)
-        self.assertNotIn("\n  pull_request:", build_test)
         self.assertIn("on:\n  push:\n    tags:\n      - 'v*'\n", release)
         self.assertNotIn("\n    branches:", release)
         self.assertIn(r"^4\.1\.[0-9]+", release)
@@ -32,6 +39,21 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertNotIn("\n  push:", workflow)
             self.assertNotIn("\n  pull_request:", workflow)
             self.assertNotIn("\n  schedule:", workflow)
+
+    def test_quality_fails_fast_on_ios_libvlc_configuration_cache_regressions(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        build_test = (
+            repository_root / ".github/workflows/build-test.yml"
+        ).read_text(encoding="utf-8")
+        quality = build_test.split("  quality:", 1)[1].split("\n  abi:", 1)[0]
+
+        self.assertIn("Verify the iOS libVLC task graph configuration cache", quality)
+        self.assertIn(
+            ":mediaplayer-libvlc:iosSimulatorArm64LibVlcIntegrationTest",
+            quality,
+        )
+        self.assertIn("--dry-run --configuration-cache", quality)
+        self.assertIn("--configuration-cache-problems=fail", quality)
 
     def test_shared_runtime_consumer_installs_android_native_toolchains(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
