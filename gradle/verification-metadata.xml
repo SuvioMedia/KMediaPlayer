@@ -7489,6 +7489,14 @@
             <sha256 value="164d9f8c620062496fd0d2e9463ebbc222311d94befb2b1bffe04f36b5592705" origin="KMediaVlc v0.1.0-rc.2 Maven Central release"/>
          </artifact>
       </component>
+      <component group="io.github.shusek" name="kmedia-vlc-runtime-android" version="0.1.0-rc.6">
+         <artifact name="kmedia-vlc-runtime-android-0.1.0-rc.6.aar">
+            <sha256 value="9d8876caebfaabf7220bde516c985e7a3b1034129f664fbe334f49f45a395fa1" origin="KMediaVlc v0.1.0-rc.6 Maven Central release"/>
+         </artifact>
+         <artifact name="kmedia-vlc-runtime-android-0.1.0-rc.6.pom">
+            <sha256 value="80a690ea11e75ab9a9a09e751679ec9a07dde743e26f5adeb7906c5aaa5b5001" origin="KMediaVlc v0.1.0-rc.6 Maven Central release"/>
+         </artifact>
+      </component>
       <component group="io.github.shusek" name="kmedia-vlc-runtime-desktop" version="0.1.0-rc.1">
          <artifact name="kmedia-vlc-runtime-desktop-0.1.0-rc.1.jar">
             <sha256 value="85a2308ecb63ad7b0f0846bb07f2cadf8ad16b4a2c222fdbeae7a86e21b7f1c0" origin="KMediaVlc v0.1.0-rc.1 release"/>
@@ -7503,6 +7511,14 @@
          </artifact>
          <artifact name="kmedia-vlc-runtime-desktop-0.1.0-rc.2.pom">
             <sha256 value="1f61deed3733b7af58ce4c2504a5746bcc0a1751340ffdc47d79b1605affade4" origin="KMediaVlc v0.1.0-rc.2 Maven Central release"/>
+         </artifact>
+      </component>
+      <component group="io.github.shusek" name="kmedia-vlc-runtime-desktop" version="0.1.0-rc.6">
+         <artifact name="kmedia-vlc-runtime-desktop-0.1.0-rc.6.jar">
+            <sha256 value="1b8327115462ef99a55cd62005ed420cc0f78bbc853bb9f9930605f8a8003c8f" origin="KMediaVlc v0.1.0-rc.6 Maven Central release"/>
+         </artifact>
+         <artifact name="kmedia-vlc-runtime-desktop-0.1.0-rc.6.pom">
+            <sha256 value="d436a813d969aaf65adf20ca623745e84e4133464d517e004987f51711c7689b" origin="KMediaVlc v0.1.0-rc.6 Maven Central release"/>
          </artifact>
       </component>
       <component group="io.github.shusek" name="kmedia-wasm-engine" version="0.4.0-alpha.2">
