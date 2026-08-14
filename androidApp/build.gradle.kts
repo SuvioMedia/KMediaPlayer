@@ -43,6 +43,20 @@ android {
     compileSdk = 37
     ndkVersion = "29.0.14206865"
 
+    packaging {
+        resources {
+            // Preserve every backend's legal notices when several runtime AARs contribute them.
+            merges +=
+                setOf(
+                    "META-INF/LICENSES/ISC-libass.txt",
+                    "META-INF/LICENSES/LGPL-2.1.txt",
+                    "META-INF/LICENSES/MIT.txt",
+                    "META-INF/RELINKING.md",
+                    "META-INF/THIRD_PARTY_NOTICES.md",
+                )
+        }
+    }
+
     defaultConfig {
         // This consumer intentionally includes the optional MPV adapter, whose contract is API 28+.
         minSdk = 28
