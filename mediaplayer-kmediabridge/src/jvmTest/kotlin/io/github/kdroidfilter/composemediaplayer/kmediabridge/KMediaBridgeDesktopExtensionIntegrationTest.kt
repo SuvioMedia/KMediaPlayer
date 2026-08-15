@@ -212,8 +212,9 @@ class KMediaBridgeDesktopExtensionIntegrationTest {
     @Test
     fun transcodesLocalMediaToMpegTsHlsThroughTheSelectedRuntime() =
         runBlocking {
-            val input = Files.createTempFile("kmediaplayer-bridge-cast-test-", ".mkv")
             val extension = configuredTestExtension()
+            if (!extension.desktopCapabilities.canTranscodeVideo) return@runBlocking
+            val input = Files.createTempFile("kmediaplayer-bridge-cast-test-", ".mkv")
             var fallback: DesktopPlaybackBridgeSession? = null
             try {
                 val encoded =
