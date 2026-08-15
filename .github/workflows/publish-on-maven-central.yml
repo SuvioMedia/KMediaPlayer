@@ -18,7 +18,7 @@ jobs:
 
   shared-runtime-consumer:
     needs: verify
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,7 +53,7 @@ jobs:
 
   release:
     needs: [verify, shared-runtime-consumer]
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:

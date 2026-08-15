@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: blacksmith-4vcpu-ubuntu-2404
             label: linux
             gradle: ./gradlew
           - os: macos-15
@@ -125,7 +125,7 @@ jobs:
           if-no-files-found: warn
 
   android:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -198,7 +198,7 @@ jobs:
 
   ios:
     needs: build-natives
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
@@ -298,7 +298,7 @@ jobs:
           if-no-files-found: warn
 
   wasm-js:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -346,7 +346,7 @@ jobs:
           if-no-files-found: warn
 
   wasm-edge-smoke:
-    runs-on: windows-2025
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -393,7 +393,7 @@ jobs:
 
   wasm-firefox-smoke:
     timeout-minutes: 20
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -423,7 +423,7 @@ jobs:
 
   wasm-webkit-smoke:
     timeout-minutes: 20
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -459,7 +459,7 @@ jobs:
 
   consumer:
     needs: build-natives
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -511,7 +511,7 @@ jobs:
           --refresh-dependencies --no-configuration-cache --no-daemon --continue
 
   quality:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -566,7 +566,7 @@ jobs:
 
   abi:
     needs: build-natives
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
@@ -632,7 +632,7 @@ jobs:
     if: always()
     needs:
       [jvm, android, ios, wasm-js, wasm-edge-smoke, wasm-firefox-smoke, wasm-webkit-smoke, consumer, quality, abi]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Require every verification job
         env:
