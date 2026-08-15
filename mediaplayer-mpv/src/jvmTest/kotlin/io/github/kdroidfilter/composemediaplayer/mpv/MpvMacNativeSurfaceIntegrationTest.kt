@@ -21,6 +21,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -42,6 +43,18 @@ class MpvMacNativeSurfaceIntegrationTest {
             }
             assertEquals(null, player.error)
             assertTrue(player.hasMedia)
+            val nativeView = player.createNativeMacView()
+            assertTrue(nativeView != 0L, "The embedded macvk NSView was not created.")
+            val negotiatedColorState =
+                checkNotNull(MpvMacNativeBridge.nGetMacVkColorState(nativeView))
+            MpvMacOutputColorMode.entries.forEach { mode ->
+                MpvMacNativeBridge.nSetMacVkColorMode(nativeView, mode.nativeValue)
+                assertContentEquals(
+                    negotiatedColorState,
+                    MpvMacNativeBridge.nGetMacVkColorState(nativeView),
+                    "The macvk host overrode MoltenVK's negotiated color state for $mode.",
+                )
+            }
         } finally {
             player.dispose()
         }

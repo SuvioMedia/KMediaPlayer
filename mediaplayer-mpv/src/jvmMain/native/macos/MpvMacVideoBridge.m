@@ -702,7 +702,6 @@ static BOOL choose_pixel_format(
 
 /** Compose-owned host used by the capability-marked, windowless macvk VO. */
 @interface KMPMpvMacVkHostView : KMPMpvVideoView {
-    NSInteger _embeddedColorMode;
     KMPMpvMacVkMetalLayer* _embeddedMetalLayer;
     atomic_int_fast32_t _pixelWidth;
     atomic_int_fast32_t _pixelHeight;
@@ -1302,7 +1301,6 @@ static void renderer_update_callback(void* context) {
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        _embeddedColorMode = 0;
         atomic_init(&_pixelWidth, 2);
         atomic_init(&_pixelHeight, 2);
         atomic_init(&_displayWidth, 1);
@@ -1390,19 +1388,17 @@ static void renderer_update_callback(void* context) {
 }
 
 - (void)setEmbeddedMetalColorMode:(NSInteger)colorMode {
-    _embeddedColorMode = colorMode;
-    [self refreshEmbeddedMetalGeometry];
+    (void)colorMode;
+    // gpu-next's Vulkan swapchain is the sole owner of CAMetalLayer colorspace and EDR state.
+    // MoltenVK applies the negotiated VkColorSpaceKHR before exposing the new drawables. Changing
+    // either property here races every swapchain rebuild during resize and can briefly reinterpret
+    // a BT.709 frame in the display profile before MoltenVK restores the negotiated color space.
 }
 
 - (void)refreshEmbeddedMetalGeometry {
     NSRect bounds = [self bounds];
     CGFloat scale = [[self window] backingScaleFactor];
     if (scale <= 0.0) scale = 1.0;
-    BOOL extended_range = _embeddedColorMode != 0;
-    CGColorSpaceRef color_space = create_output_color_space_for_view(
-        self,
-        (int)_embeddedColorMode
-    );
 
     int pixel_width = MAX(2, (int)llround(bounds.size.width * scale));
     int pixel_height = MAX(2, (int)llround(bounds.size.height * scale));
@@ -1412,10 +1408,7 @@ static void renderer_update_callback(void* context) {
     [_embeddedMetalLayer setFrame:bounds];
     [_embeddedMetalLayer setContentsScale:scale];
     [_embeddedMetalLayer setDrawableSize:CGSizeMake(pixel_width, pixel_height)];
-    if (color_space) [_embeddedMetalLayer setColorspace:color_space];
-    [_embeddedMetalLayer setWantsExtendedDynamicRangeContent:extended_range];
     [CATransaction commit];
-    if (color_space) CGColorSpaceRelease(color_space);
 
     NSScreen* screen = [[self window] screen] ?: [NSScreen mainScreen];
     int display_width = 1;
@@ -1574,6 +1567,43 @@ typedef struct {
     KMPMpvMacVkHostView* view;
 } KMPMpvMacVkHostCreateContext;
 
+typedef struct {
+    KMPMpvMacVkHostView* view;
+    jint color_space;
+    jint extended_range;
+} KMPMpvMacVkColorStateContext;
+
+enum {
+    KMP_MPV_COLOR_SPACE_NONE = 0,
+    KMP_MPV_COLOR_SPACE_OTHER = 1,
+    KMP_MPV_COLOR_SPACE_BT709 = 2,
+    KMP_MPV_COLOR_SPACE_BT2100_PQ = 3,
+    KMP_MPV_COLOR_SPACE_BT2100_HLG = 4,
+    KMP_MPV_COLOR_SPACE_DISPLAY_P3 = 5,
+    KMP_MPV_COLOR_SPACE_SRGB = 6,
+};
+
+static jint classify_color_space(CGColorSpaceRef color_space) {
+    if (!color_space) return KMP_MPV_COLOR_SPACE_NONE;
+    CFStringRef name = CGColorSpaceGetName(color_space);
+    if (!name) return KMP_MPV_COLOR_SPACE_OTHER;
+    if (CFEqual(name, kCGColorSpaceITUR_709)) return KMP_MPV_COLOR_SPACE_BT709;
+    if (CFEqual(name, kCGColorSpaceITUR_2100_PQ)) return KMP_MPV_COLOR_SPACE_BT2100_PQ;
+    if (CFEqual(name, kCGColorSpaceITUR_2100_HLG)) return KMP_MPV_COLOR_SPACE_BT2100_HLG;
+    if (CFEqual(name, kCGColorSpaceDisplayP3)) return KMP_MPV_COLOR_SPACE_DISPLAY_P3;
+    if (CFEqual(name, kCGColorSpaceSRGB)) return KMP_MPV_COLOR_SPACE_SRGB;
+    return KMP_MPV_COLOR_SPACE_OTHER;
+}
+
+static void read_macvk_color_state_on_main(void* raw_context) {
+    KMPMpvMacVkColorStateContext* context = (KMPMpvMacVkColorStateContext*)raw_context;
+    if (!context || !context->view) return;
+    CAMetalLayer* layer = [context->view kmediampvMetalLayer];
+    if (!layer) return;
+    context->color_space = classify_color_space([layer colorspace]);
+    context->extended_range = [layer wantsExtendedDynamicRangeContent] ? 1 : 0;
+}
+
 static void create_macvk_host_on_main(void* raw_context) {
     KMPMpvMacVkHostCreateContext* context = (KMPMpvMacVkHostCreateContext*)raw_context;
     if (!context) return;
@@ -1720,6 +1750,28 @@ Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nSetMacVkC
             [view release];
         });
     }
+}
+
+JNIEXPORT jintArray JNICALL
+Java_io_github_kdroidfilter_composemediaplayer_mpv_MpvMacNativeBridge_nGetMacVkColorState(
+    JNIEnv* environment,
+    jclass bridge_class,
+    jlong native_view
+) {
+    (void)bridge_class;
+    KMPMpvMacVkHostView* view = (KMPMpvMacVkHostView*)(uintptr_t)native_view;
+    if (!environment || !view) return NULL;
+    KMPMpvMacVkColorStateContext context = {
+        .view = view,
+        .color_space = KMP_MPV_COLOR_SPACE_NONE,
+        .extended_range = 0,
+    };
+    run_on_appkit_main_sync(read_macvk_color_state_on_main, &context);
+    jint values[] = {context.color_space, context.extended_range};
+    jintArray result = (*environment)->NewIntArray(environment, 2);
+    if (!result) return NULL;
+    (*environment)->SetIntArrayRegion(environment, result, 0, 2, values);
+    return result;
 }
 
 static jlong create_renderer(

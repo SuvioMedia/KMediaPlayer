@@ -45,6 +45,9 @@ internal object MpvMacNativeBridge {
         colorMode: Int,
     )
 
+    /** Negotiated CAMetalLayer color-space kind followed by its EDR flag. */
+    @JvmStatic external fun nGetMacVkColorState(nativeView: Long): IntArray?
+
     /** Returns the renderer-owned `NSView*` mounted by Nucleus Tao. */
     @JvmStatic external fun nGetViewHandle(nativeRenderer: Long): Long
 
