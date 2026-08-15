@@ -217,10 +217,13 @@ public class DesktopPlaybackSession(
                             retiredPlayers += retired
                         }
                     }
-                    if (((isSameMedia && bookmark?.wasPlaying == true) ||
-                            (!isSameMedia && request.initialPlayerState == InitialPlayerState.PLAY)) &&
-                        !candidate.isPlaying
-                    ) {
+                    val shouldPlayAfterSwitch =
+                        if (isSameMedia) {
+                            bookmark?.wasPlaying == true
+                        } else {
+                            request.initialPlayerState == InitialPlayerState.PLAY
+                        }
+                    if (shouldPlayAfterSwitch && !candidate.isPlaying) {
                         candidate.play()
                     }
                     traceDesktopSession(

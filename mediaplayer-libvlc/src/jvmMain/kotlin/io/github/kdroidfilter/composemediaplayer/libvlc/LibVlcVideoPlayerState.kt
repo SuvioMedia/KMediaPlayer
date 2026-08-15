@@ -1163,7 +1163,6 @@ internal class LibVlcVideoPlayerState(
         val PLAYABLE_VLC_STATES =
             setOf(VlcPlaybackState.PLAYING, VlcPlaybackState.PAUSED, VlcPlaybackState.BUFFERING)
     }
-
 }
 
 internal data class LibVlcOutputSize(
