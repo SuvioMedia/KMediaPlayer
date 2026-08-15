@@ -7609,6 +7609,14 @@
             <sha256 value="80a690ea11e75ab9a9a09e751679ec9a07dde743e26f5adeb7906c5aaa5b5001" origin="KMediaVlc v0.1.0-rc.6 Maven Central release"/>
          </artifact>
       </component>
+      <component group="io.github.shusek" name="kmedia-vlc-runtime-android" version="0.1.0-rc.8">
+         <artifact name="kmedia-vlc-runtime-android-0.1.0-rc.8.aar">
+            <sha256 value="92e05bc446d0cb95cbcf2b8e7f91e3488096712532f2b92b46f60598787bc5ca" origin="KMediaVlc v0.1.0-rc.8 immutable release"/>
+         </artifact>
+         <artifact name="kmedia-vlc-runtime-android-0.1.0-rc.8.pom">
+            <sha256 value="42f92f62b313ddbf85dd23a86059217195f614d9c9be1d2e360c69dfec362144" origin="KMediaVlc v0.1.0-rc.8 immutable release"/>
+         </artifact>
+      </component>
       <component group="io.github.shusek" name="kmedia-vlc-runtime-desktop" version="0.1.0-rc.1">
          <artifact name="kmedia-vlc-runtime-desktop-0.1.0-rc.1.jar">
             <sha256 value="85a2308ecb63ad7b0f0846bb07f2cadf8ad16b4a2c222fdbeae7a86e21b7f1c0" origin="KMediaVlc v0.1.0-rc.1 release"/>
@@ -7631,6 +7639,14 @@
          </artifact>
          <artifact name="kmedia-vlc-runtime-desktop-0.1.0-rc.6.pom">
             <sha256 value="d436a813d969aaf65adf20ca623745e84e4133464d517e004987f51711c7689b" origin="KMediaVlc v0.1.0-rc.6 Maven Central release"/>
+         </artifact>
+      </component>
+      <component group="io.github.shusek" name="kmedia-vlc-runtime-desktop" version="0.1.0-rc.8">
+         <artifact name="kmedia-vlc-runtime-desktop-0.1.0-rc.8.jar">
+            <sha256 value="6de286ff321273095579eb4693b0af1076a9f960997d2eb4c7bdecfd9fb0f50a" origin="KMediaVlc v0.1.0-rc.8 immutable release"/>
+         </artifact>
+         <artifact name="kmedia-vlc-runtime-desktop-0.1.0-rc.8.pom">
+            <sha256 value="3651f4f8f0cda43718f55a432fcc3a4594444c1e73291b4ab7d4efb4355904ab" origin="KMediaVlc v0.1.0-rc.8 immutable release"/>
          </artifact>
       </component>
       <component group="io.github.shusek" name="kmedia-vlc-runtime-ios" version="0.1.0-rc.7">

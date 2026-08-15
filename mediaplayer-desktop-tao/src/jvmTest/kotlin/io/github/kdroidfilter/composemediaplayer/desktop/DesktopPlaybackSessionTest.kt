@@ -208,6 +208,34 @@ class DesktopPlaybackSessionTest {
         }
 
     @Test
+    fun playingSwitchPreparesLibVlcInPlayWithoutRedundantResume() =
+        runTest {
+            val platformPlayer = RecordingInitialPlaybackState()
+            val libVlcPlayer = RecordingInitialPlaybackState()
+            val platform =
+                fakeBackend("platform", DesktopBackendRoutingTier.PLATFORM_DIRECT) { platformPlayer }
+            val libVlc =
+                fakeBackend("libvlc", DesktopBackendRoutingTier.LIBVLC_NATIVE) { libVlcPlayer }
+            val session = DesktopPlaybackSession(listOf(platform, libVlc), readyTimeout = 1.seconds)
+            val request =
+                DesktopPlaybackRequest(
+                    source = MediaSourceSpec("file:///movie.mp4"),
+                    initialPlayerState = InitialPlayerState.PLAY,
+                )
+
+            try {
+                session.open(request, "platform")
+                session.switchBackend("libvlc")
+
+                assertEquals(listOf(InitialPlayerState.PLAY), libVlcPlayer.initialStates)
+                assertEquals(0, libVlcPlayer.playCommands)
+                assertTrue(libVlcPlayer.isPlaying)
+            } finally {
+                session.close()
+            }
+        }
+
+    @Test
     fun unsupportedExplicitSwitchReportsFailureAndRetainsCurrentPlayer() =
         runTest {
             val current = PreviewableVideoPlayerState(isPlaying = true)
@@ -534,6 +562,36 @@ private class SourceReplacingVideoPlayerState : VideoPlayerState by PreviewableV
 
     override fun dispose() {
         disposeCount += 1
+    }
+}
+
+private class RecordingInitialPlaybackState :
+    VideoPlayerState by PreviewableVideoPlayerState(isPlaying = false) {
+    private var playing = false
+
+    val initialStates = mutableListOf<InitialPlayerState>()
+    var playCommands = 0
+        private set
+
+    override val isPlaying: Boolean
+        get() = playing
+
+    override fun openSource(
+        source: MediaSourceSpec,
+        initializePlayerState: InitialPlayerState,
+        requestHeaders: Map<String, String>,
+    ) {
+        initialStates += initializePlayerState
+        playing = initializePlayerState == InitialPlayerState.PLAY
+    }
+
+    override fun play() {
+        playCommands += 1
+        playing = true
+    }
+
+    override fun pause() {
+        playing = false
     }
 }
 

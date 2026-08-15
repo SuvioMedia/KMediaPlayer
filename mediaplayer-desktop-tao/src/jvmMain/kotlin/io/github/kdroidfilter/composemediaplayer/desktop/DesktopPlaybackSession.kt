@@ -217,8 +217,9 @@ public class DesktopPlaybackSession(
                             retiredPlayers += retired
                         }
                     }
-                    if ((isSameMedia && bookmark?.wasPlaying == true) ||
-                        (!isSameMedia && request.initialPlayerState == InitialPlayerState.PLAY)
+                    if (((isSameMedia && bookmark?.wasPlaying == true) ||
+                            (!isSameMedia && request.initialPlayerState == InitialPlayerState.PLAY)) &&
+                        !candidate.isPlaying
                     ) {
                         candidate.play()
                     }
@@ -317,9 +318,17 @@ public class DesktopPlaybackSession(
         val candidate = backend.createPlayerState()
         try {
             bookmark?.applyPreOpenState(candidate)
+            val startDuringPreparation =
+                backend.routingTier == DesktopBackendRoutingTier.LIBVLC_NATIVE &&
+                    if (restoreMediaState) {
+                        bookmark?.wasPlaying == true
+                    } else {
+                        request.initialPlayerState == InitialPlayerState.PLAY
+                    }
             candidate.openSource(
                 source = preparedRequest.request.source,
-                initializePlayerState = InitialPlayerState.PAUSE,
+                initializePlayerState =
+                    if (startDuringPreparation) InitialPlayerState.PLAY else InitialPlayerState.PAUSE,
                 requestHeaders = preparedRequest.request.requestHeaders,
             )
             bookmark?.applyPostOpenState(candidate)
