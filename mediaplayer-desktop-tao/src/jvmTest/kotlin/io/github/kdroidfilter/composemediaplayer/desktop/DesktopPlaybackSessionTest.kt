@@ -565,8 +565,7 @@ private class SourceReplacingVideoPlayerState : VideoPlayerState by PreviewableV
     }
 }
 
-private class RecordingInitialPlaybackState :
-    VideoPlayerState by PreviewableVideoPlayerState(isPlaying = false) {
+private class RecordingInitialPlaybackState : VideoPlayerState by PreviewableVideoPlayerState(isPlaying = false) {
     private var playing = false
 
     val initialStates = mutableListOf<InitialPlayerState>()
