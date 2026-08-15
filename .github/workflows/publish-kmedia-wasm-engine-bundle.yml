@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Immutable engine version, for example 0.4.0-alpha.4
+        description: Immutable engine/runtime version, for example 0.4.0-alpha.7
         required: true
         type: string
       bundle_release_tag:
@@ -93,8 +93,9 @@ jobs:
           test "$BUNDLE_SHA256" = "$(sha256sum "$bundle" | awk '{print $1}')"
 
           release_body="$(gh release view "$BUNDLE_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
-          grep -F "v$RELEASE_VERSION" <<<"$release_body" >/dev/null
-          grep -F "runtime-$RELEASE_VERSION" <<<"$release_body" >/dev/null
+          grep -F "private source tag: v$RELEASE_VERSION" <<<"$release_body" >/dev/null
+          grep -F "runtime source: SuvioMedia/kmedia-wasm-runtime" <<<"$release_body" >/dev/null
+          grep -F "runtime source tag: v$RELEASE_VERSION" <<<"$release_body" >/dev/null
           grep -F "$PRIVATE_SOURCE_COMMIT" <<<"$release_body" >/dev/null
           grep -F "$CORRESPONDING_SOURCE_COMMIT" <<<"$release_body" >/dev/null
 
@@ -131,6 +132,25 @@ jobs:
           test -s "$root/kmedia-wasm-engine/$RELEASE_VERSION/kmedia-wasm-engine-$RELEASE_VERSION.jar"
           test -s "$root/kmedia-wasm-engine-wasm-js/$RELEASE_VERSION/kmedia-wasm-engine-wasm-js-$RELEASE_VERSION.klib"
           test -s "$root/kmedia-wasm-engine-runtime-assets/$RELEASE_VERSION/kmedia-wasm-engine-runtime-assets-$RELEASE_VERSION.zip"
+          runtime_sources="$root/kmedia-wasm-engine-runtime-assets/$RELEASE_VERSION/kmedia-wasm-engine-runtime-assets-$RELEASE_VERSION-sources.jar"
+          test -s "$runtime_sources"
+          for required in \
+            wasm/movi.c \
+            wasm/library_movi.js \
+            docker/Dockerfile \
+            docker/build-ffmpeg.sh \
+            third-party-sources/ffmpeg-9.0.1.tar.gz \
+            third-party-sources/dav1d-1.5.3.tar.gz \
+            LICENSES/LGPL-2.1.txt; do
+            unzip -Z1 "$runtime_sources" | grep -Fx "$required" >/dev/null
+          done
+          if unzip -Z1 "$runtime_sources" | grep -Eq '(^player/|\.(kt|kts|ts|tsx|wasm)$)'; then
+            echo "The public runtime sources JAR crosses the proprietary/source boundary." >&2
+            exit 1
+          fi
+          grep -F 'github.com/SuvioMedia/kmedia-wasm-runtime' \
+            "$root/kmedia-wasm-engine-runtime-assets/$RELEASE_VERSION/kmedia-wasm-engine-runtime-assets-$RELEASE_VERSION.pom" \
+            >/dev/null
 
           while IFS= read -r -d '' archive; do
             if unzip -Z1 "$archive" | grep -Eq '\.(kt|kts|java)$'; then

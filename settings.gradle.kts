@@ -52,8 +52,15 @@ providers.gradleProperty("kmediaWasmEngineProjectDir").orNull?.let { projectDire
     includeBuild(projectDirectory) {
         dependencySubstitution {
             substitute(module("io.github.shusek:kmedia-wasm-engine")).using(project(":player"))
+        }
+    }
+}
+
+providers.gradleProperty("kmediaWasmRuntimeProjectDir").orNull?.let { projectDirectory ->
+    includeBuild(projectDirectory) {
+        dependencySubstitution {
             substitute(module("io.github.shusek:kmedia-wasm-engine-runtime-assets"))
-                .using(project(":runtime-assets"))
+                .using(project(":"))
         }
     }
 }
