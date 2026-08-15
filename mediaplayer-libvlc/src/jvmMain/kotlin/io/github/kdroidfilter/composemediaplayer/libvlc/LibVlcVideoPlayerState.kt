@@ -126,12 +126,19 @@ internal class LibVlcVideoPlayerState(
     private var surfaceHeight = 0
 
     @Volatile
+    private var sourceVideoWidth = 0
+
+    @Volatile
+    private var sourceVideoHeight = 0
+
+    @Volatile
     private var lastSubmittedFrame: SubmittedFrame? = null
     private var confirmedPresentationKey: PresentationKey? = null
     private var configuredOutputTarget: VlcOutputTarget? = null
     private var pendingOpen: PendingOpen? = null
     private var activeOpen: PendingOpen? = null
     private var pendingTransport: PendingTransport? = null
+    private var desiredPlayWhenReady = false
     private var sourceLoadedPublished = false
     private var lastPlaybackState = VlcPlaybackState.IDLE
     private var gpuProjectionRejected = false
@@ -320,13 +327,43 @@ internal class LibVlcVideoPlayerState(
     override fun setBackendSubtitleOffset(value: Duration) = Unit
 
     override fun playBackend() {
-        if (updatePendingTransport { it.playWhenReady = true }) return
-        check(player.play()) { "libVLC rejected play." }
+        val shouldDispatch =
+            synchronized(pendingOpenLock) {
+                val alreadyRequested = desiredPlayWhenReady
+                desiredPlayWhenReady = true
+                pendingTransport?.let { pending ->
+                    if (!pending.playWhenReady) {
+                        pending.playWhenReady = true
+                        pending.playbackCommandIssued = false
+                    }
+                    return@synchronized false
+                }
+                !alreadyRequested
+            }
+        if (shouldDispatch && !player.play()) {
+            synchronized(pendingOpenLock) { desiredPlayWhenReady = false }
+            error("libVLC rejected play.")
+        }
     }
 
     override fun pauseBackend() {
-        if (updatePendingTransport { it.playWhenReady = false }) return
-        check(player.pause()) { "libVLC rejected pause." }
+        val shouldDispatch =
+            synchronized(pendingOpenLock) {
+                val alreadyRequested = !desiredPlayWhenReady
+                desiredPlayWhenReady = false
+                pendingTransport?.let { pending ->
+                    if (pending.playWhenReady) {
+                        pending.playWhenReady = false
+                        pending.playbackCommandIssued = false
+                    }
+                    return@synchronized false
+                }
+                !alreadyRequested
+            }
+        if (shouldDispatch && !player.pause()) {
+            synchronized(pendingOpenLock) { desiredPlayWhenReady = true }
+            error("libVLC rejected pause.")
+        }
     }
 
     override fun seekBackend(time: Duration) {
@@ -358,10 +395,12 @@ internal class LibVlcVideoPlayerState(
     ) {
         ensureOpen()
         beginSourcePreparation(uri, initializePlayerState)
+        resetSourceGeometry()
         resetFrameRateEstimator()
         sourceLoadedPublished = false
         synchronized(pendingOpenLock) {
             activeOpen = null
+            desiredPlayWhenReady = initializePlayerState == InitialPlayerState.PLAY
             pendingOpen =
                 PendingOpen(
                     uri = uri,
@@ -396,10 +435,16 @@ internal class LibVlcVideoPlayerState(
             synchronized(pendingOpenLock) {
                 activeOpen = null
                 pendingTransport = null
+                desiredPlayWhenReady = false
             }
             publishError(VideoPlayerError.SourceError("libVLC 4 rejected the media source."))
         } else {
-            synchronized(pendingOpenLock) { activeOpen = request }
+            synchronized(pendingOpenLock) {
+                activeOpen = request
+                // open(..., autoplay = true) already issued the initial PLAY.
+                // Sending PLAY again while libVLC 4 is opening/prerolling restarts the input.
+                pendingTransport?.playbackCommandIssued = pendingTransport?.playWhenReady == true
+            }
         }
     }
 
@@ -416,12 +461,14 @@ internal class LibVlcVideoPlayerState(
             activeOpen = null
             pendingOpen = null
             pendingTransport = null
+            desiredPlayWhenReady = false
         }
         runCatching { player.stop() }
         textureStreamController.clear()
         clearCpuFrame()
         clearPresentationEvidence()
         sourceLoadedPublished = false
+        resetSourceGeometry()
         resetSourceState()
     }
 
@@ -431,6 +478,7 @@ internal class LibVlcVideoPlayerState(
             activeOpen = null
             pendingOpen = null
             pendingTransport = null
+            desiredPlayWhenReady = false
         }
         frameSignals.close()
         textureStreamController.close()
@@ -438,6 +486,7 @@ internal class LibVlcVideoPlayerState(
         clearPresentationEvidence()
         player.close()
         scope.cancel()
+        resetSourceGeometry()
         resetSourceState()
     }
 
@@ -453,8 +502,7 @@ internal class LibVlcVideoPlayerState(
                     clearPresentationEvidence()
                     val configured =
                         runCatching {
-                            player.updateOutput(target) &&
-                                (target is VlcUnavailableOutputTarget || player.resize(target.width(), target.height()))
+                            player.updateOutput(target)
                         }.getOrDefault(false)
                     if (configured) {
                         configuredOutputTarget = target
@@ -486,12 +534,24 @@ internal class LibVlcVideoPlayerState(
         }
         val white = host.sdrWhiteLevelNits ?: DEFAULT_SDR_WHITE_NITS
         val peak = (host.maximumLuminanceNits ?: (white * host.headroom)).coerceAtLeast(white)
+        // libVLC's custom OpenGL output renders into the framebuffer dimensions reported by its
+        // window callback. Keep that framebuffer at the source display geometry; asking libVLC to
+        // render directly into a smaller viewport can leave the IOSurface containing only the
+        // corresponding source sub-rectangle. TextureView performs the final fit/crop scaling on
+        // the GPU, so this does not introduce a CPU copy.
+        val outputSize =
+            sourceSizedLibVlcOutputSize(
+                viewportWidth = surfaceWidth,
+                viewportHeight = surfaceHeight,
+                sourceWidth = sourceVideoWidth,
+                sourceHeight = sourceVideoHeight,
+            )
         return when (val producer = host.producerInfo) {
             is WindowsTextureViewProducerInfo ->
                 VlcWindowsOutputTarget(
                     host.generation,
-                    surfaceWidth,
-                    surfaceHeight,
+                    outputSize.width,
+                    outputSize.height,
                     hdr,
                     white,
                     peak,
@@ -500,8 +560,8 @@ internal class LibVlcVideoPlayerState(
             is MacTextureViewProducerInfo ->
                 VlcMacOutputTarget(
                     host.generation,
-                    surfaceWidth,
-                    surfaceHeight,
+                    outputSize.width,
+                    outputSize.height,
                     hdr,
                     white,
                     peak,
@@ -519,8 +579,8 @@ internal class LibVlcVideoPlayerState(
                 } else {
                     VlcLinuxOutputTarget(
                         host.generation,
-                        surfaceWidth,
-                        surfaceHeight,
+                        outputSize.width,
+                        outputSize.height,
                         hdr,
                         white,
                         peak,
@@ -566,8 +626,8 @@ internal class LibVlcVideoPlayerState(
                 TextureColorInfo.SRGB_PREMULTIPLIED
             }
         var macIOSurface: VlcMacIOSurface? = null
-        try {
-            val source =
+        val source =
+            try {
                 when (frame.handleType()) {
                     VlcNativeHandleType.D3D11_SHARED_HANDLE ->
                         nucleusD3D11SharedTextureSource(
@@ -600,43 +660,48 @@ internal class LibVlcVideoPlayerState(
                         )
                     VlcNativeHandleType.CPU_ADDRESS -> error("CPU frames use the pull-copy path.")
                 }
-            val sourceColorInfo = frame.sourceDynamicRange().toVideoColorInfo()
-            val outputDynamicRange = frame.outputDynamicRange(sourceColorInfo)
-            val submittedFrame =
-                SubmittedFrame(
-                    serial = frame.serial(),
-                    outputGeneration = frame.generation(),
-                    hostGeneration = host.generation,
-                    source = sourceColorInfo,
-                    outputDynamicRange = outputDynamicRange,
-                )
-            val previousEvidence = recordSubmittedFrame(submittedFrame)
-            try {
-                textureStreamController.submitFrame(
-                    TextureViewFrame(
-                        source = source,
-                        acquireFenceFd = frame.acquireFenceFd(),
-                        onReleased = { releaseFenceFd ->
-                            try {
-                                frame.release(releaseFenceFd)
-                            } finally {
-                                macIOSurface?.close()
-                            }
-                        },
-                    ),
-                )
-                confirmSystemPresent(hostCapabilities)
-            } catch (failure: RuntimeException) {
-                restorePresentationEvidence(submittedFrame, previousEvidence)
-                throw failure
+            } catch (_: RuntimeException) {
+                droppedFrames.incrementAndGet()
+                macIOSurface?.close()
+                frame.close()
+                return
             }
+        val sourceColorInfo = frame.sourceDynamicRange().toVideoColorInfo()
+        val outputDynamicRange = frame.outputDynamicRange(sourceColorInfo)
+        val submittedFrame =
+            SubmittedFrame(
+                serial = frame.serial(),
+                outputGeneration = frame.generation(),
+                hostGeneration = host.generation,
+                source = sourceColorInfo,
+                outputDynamicRange = outputDynamicRange,
+            )
+        val previousEvidence = recordSubmittedFrame(submittedFrame)
+        try {
+            textureStreamController.submitFrame(
+                TextureViewFrame(
+                    source = source,
+                    acquireFenceFd = frame.acquireFenceFd(),
+                    onReleased = { releaseFenceFd ->
+                        try {
+                            frame.release(releaseFenceFd)
+                        } finally {
+                            macIOSurface?.close()
+                        }
+                    },
+                ),
+            )
         } catch (_: RuntimeException) {
+            restorePresentationEvidence(submittedFrame, previousEvidence)
             droppedFrames.incrementAndGet()
             macIOSurface?.close()
             frame.close()
             return
         }
         renderedFrames.incrementAndGet()
+        // Presentation diagnostics must never revoke a frame whose ownership
+        // has already transferred to TextureViewStreamController.
+        runCatching { confirmSystemPresent(hostCapabilities) }
     }
 
     private fun publishCpuFrame(frame: VlcDesktopFrame) {
@@ -696,10 +761,25 @@ internal class LibVlcVideoPlayerState(
         frameRateEstimator.reset()
     }
 
+    private fun resetSourceGeometry() {
+        sourceVideoWidth = 0
+        sourceVideoHeight = 0
+    }
+
     private suspend fun pollSnapshotOnce() {
         if (disposed.get()) return
         val snapshot = runCatching { player.snapshot() }.getOrNull() ?: return
         val state = snapshot.state()
+        val snapshotVideoWidth = snapshot.videoWidth().takeIf { it > 0 }
+        val snapshotVideoHeight = snapshot.videoHeight().takeIf { it > 0 }
+        val sourceGeometryChanged =
+            snapshotVideoWidth != null &&
+                snapshotVideoHeight != null &&
+                (sourceVideoWidth != snapshotVideoWidth || sourceVideoHeight != snapshotVideoHeight)
+        if (sourceGeometryChanged) {
+            sourceVideoWidth = snapshotVideoWidth
+            sourceVideoHeight = snapshotVideoHeight
+        }
         val nativeFrameRate =
             snapshot
                 .videoFrameRateDenominator()
@@ -716,11 +796,12 @@ internal class LibVlcVideoPlayerState(
             seeking = if (_isSeeking && state != VlcPlaybackState.BUFFERING) false else null,
         )
         mutateSnapshotState {
-            metadata.width = snapshot.videoWidth().takeIf { it > 0 }
-            metadata.height = snapshot.videoHeight().takeIf { it > 0 }
+            metadata.width = snapshotVideoWidth
+            metadata.height = snapshotVideoHeight
             if (nativeFrameRate != null) metadata.frameRate = nativeFrameRate
             updateAspectRatio(metadata.width, metadata.height)
         }
+        if (sourceGeometryChanged) configureLatestOutput()
         val transportReady = applyPendingTransport(snapshot, state)
         if (!sourceLoadedPublished &&
             transportReady &&
@@ -746,16 +827,29 @@ internal class LibVlcVideoPlayerState(
                 if (restarted) {
                     emitPlaybackEnded(looping = true)
                 } else {
+                    clearPlaybackIntent()
                     publishError(VideoPlayerError.SourceError("libVLC 4 could not restart loop playback."))
                 }
             } else {
+                clearPlaybackIntent()
                 emitPlaybackEnded(looping = false)
             }
         }
         if (state == VlcPlaybackState.ERROR && lastPlaybackState != VlcPlaybackState.ERROR) {
+            clearPlaybackIntent()
             publishError(VideoPlayerError.UnknownError("libVLC 4 reported a playback failure."))
         }
+        if (state == VlcPlaybackState.STOPPED && lastPlaybackState in PLAYABLE_VLC_STATES) {
+            clearPlaybackIntent()
+        }
         lastPlaybackState = state
+    }
+
+    private fun clearPlaybackIntent() {
+        synchronized(pendingOpenLock) {
+            desiredPlayWhenReady = false
+            pendingTransport = null
+        }
     }
 
     private fun applyPendingTransport(
@@ -775,15 +869,23 @@ internal class LibVlcVideoPlayerState(
                 !snapshot.seekable() -> false
                 else -> player.seek(requestedSeekMicroseconds, false)
             }
+        var playbackCommandIssued = requested.playbackCommandIssued
         val playbackApplied =
             if (!volumeApplied || !playbackRateApplied) {
                 false
-            } else if (requested.playWhenReady) {
-                state == VlcPlaybackState.PLAYING ||
-                    state == VlcPlaybackState.BUFFERING ||
-                    player.play()
             } else {
-                state == VlcPlaybackState.PAUSED || player.pause()
+                when (state.pendingTransportAction(requested.playWhenReady, requested.playbackCommandIssued)) {
+                    VlcPendingTransportAction.APPLIED -> true
+                    VlcPendingTransportAction.PLAY -> {
+                        playbackCommandIssued = player.play()
+                        false
+                    }
+                    VlcPendingTransportAction.PAUSE -> {
+                        playbackCommandIssued = player.pause()
+                        false
+                    }
+                    VlcPendingTransportAction.WAIT -> false
+                }
             }
         return synchronized(pendingOpenLock) {
             val current = pendingTransport ?: return@synchronized true
@@ -795,6 +897,9 @@ internal class LibVlcVideoPlayerState(
             }
             if (seekApplied && current.seekMicroseconds == requestedSeekMicroseconds) {
                 current.seekMicroseconds = null
+            }
+            if (playbackCommandIssued && current.playWhenReady == requested.playWhenReady) {
+                current.playbackCommandIssued = true
             }
             if (playbackApplied &&
                 current.playWhenReady == requested.playWhenReady &&
@@ -1038,6 +1143,7 @@ internal class LibVlcVideoPlayerState(
 
     private data class PendingTransport(
         var playWhenReady: Boolean,
+        var playbackCommandIssued: Boolean = false,
         var volume: Float? = null,
         var playbackRate: Float? = null,
         var seekMicroseconds: Long? = null,
@@ -1057,6 +1163,29 @@ internal class LibVlcVideoPlayerState(
         val PLAYABLE_VLC_STATES =
             setOf(VlcPlaybackState.PLAYING, VlcPlaybackState.PAUSED, VlcPlaybackState.BUFFERING)
     }
+
+}
+
+internal data class LibVlcOutputSize(
+    val width: Int,
+    val height: Int,
+)
+
+internal fun sourceSizedLibVlcOutputSize(
+    viewportWidth: Int,
+    viewportHeight: Int,
+    sourceWidth: Int,
+    sourceHeight: Int,
+): LibVlcOutputSize {
+    val width = viewportWidth.coerceAtLeast(0)
+    val height = viewportHeight.coerceAtLeast(0)
+    if (width == 0 || height == 0 || sourceWidth <= 0 || sourceHeight <= 0) {
+        return LibVlcOutputSize(width, height)
+    }
+    return LibVlcOutputSize(
+        width = sourceWidth,
+        height = sourceHeight,
+    )
 }
 
 internal fun skippedLibVlcFrameCount(
@@ -1113,14 +1242,11 @@ internal class LibVlcFrameRateEstimator {
 
 private fun VlcOutputTarget.isAvailable(): Boolean = this !is VlcUnavailableOutputTarget
 
-private fun TextureViewHostCapabilities.hasSameOutputConfigurationAs(other: TextureViewHostCapabilities): Boolean =
+internal fun TextureViewHostCapabilities.hasSameOutputConfigurationAs(other: TextureViewHostCapabilities): Boolean =
     generation == other.generation &&
         actualDynamicRange == other.actualDynamicRange &&
         (presentationState == TextureViewHostPresentationState.UNAVAILABLE) ==
         (other.presentationState == TextureViewHostPresentationState.UNAVAILABLE) &&
-        sdrWhiteLevelNits == other.sdrWhiteLevelNits &&
-        maximumLuminanceNits == other.maximumLuminanceNits &&
-        headroom == other.headroom &&
         outputPixelFormat == other.outputPixelFormat &&
         producerInfo == other.producerInfo
 
@@ -1166,6 +1292,27 @@ internal fun VlcPlaybackState.playingSnapshot(): Boolean? =
         VlcPlaybackState.OPENING,
         VlcPlaybackState.BUFFERING,
         -> null
+    }
+
+internal enum class VlcPendingTransportAction {
+    APPLIED,
+    PLAY,
+    PAUSE,
+    WAIT,
+}
+
+internal fun VlcPlaybackState.pendingTransportAction(
+    playWhenReady: Boolean,
+    playbackCommandIssued: Boolean = false,
+): VlcPendingTransportAction =
+    when {
+        playWhenReady && this == VlcPlaybackState.PLAYING -> VlcPendingTransportAction.APPLIED
+        playWhenReady && playbackCommandIssued -> VlcPendingTransportAction.WAIT
+        playWhenReady && this == VlcPlaybackState.PAUSED -> VlcPendingTransportAction.PLAY
+        !playWhenReady && this == VlcPlaybackState.PAUSED -> VlcPendingTransportAction.APPLIED
+        !playWhenReady && playbackCommandIssued -> VlcPendingTransportAction.WAIT
+        !playWhenReady && this == VlcPlaybackState.PLAYING -> VlcPendingTransportAction.PAUSE
+        else -> VlcPendingTransportAction.WAIT
     }
 
 internal fun cpuPipelineFallbackReason(
