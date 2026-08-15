@@ -146,7 +146,7 @@ verify_runtime_target() {
     exit 66
 }
 require_file "$POD_ROOT/KMediaAssRuntime.podspec"
-grep -Fq "spec.version              = '0.1.0-rc.9'" \
+grep -Fq "spec.version              = '0.1.0-rc.10'" \
     "$POD_ROOT/KMediaAssRuntime.podspec" || {
         echo "The local KMediaAssRuntime podspec has another version." >&2
         exit 65

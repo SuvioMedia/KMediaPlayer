@@ -34,6 +34,8 @@ val projectVersion =
         ?: "dev"
 val releaseStagingMavenRepository = providers.gradleProperty("releaseStagingMavenRepository").orNull
 val kmediaBridgeVersion = libs.versions.kmediaBridge.get()
+val kmediaBridgeDesktopVersion =
+    providers.gradleProperty("kmediaBridgeDesktopVersion").orElse(kmediaBridgeVersion).get()
 val nativeJvmTestResources =
     providers.gradleProperty("composeMediaPlayerKMediaBridgeTestNativeResources")
 
@@ -90,11 +92,11 @@ kotlin {
             }
         }
         jvmMain.dependencies {
-            api("io.github.shusek:kmedia-bridge-api:$kmediaBridgeVersion") {
-                version { strictly(kmediaBridgeVersion) }
+            api("io.github.shusek:kmedia-bridge-api:$kmediaBridgeDesktopVersion") {
+                version { strictly(kmediaBridgeDesktopVersion) }
             }
-            api("io.github.shusek:kmedia-bridge-ffmpeg:$kmediaBridgeVersion") {
-                version { strictly(kmediaBridgeVersion) }
+            api("io.github.shusek:kmedia-bridge-ffmpeg:$kmediaBridgeDesktopVersion") {
+                version { strictly(kmediaBridgeDesktopVersion) }
             }
         }
         jvmTest.dependencies {

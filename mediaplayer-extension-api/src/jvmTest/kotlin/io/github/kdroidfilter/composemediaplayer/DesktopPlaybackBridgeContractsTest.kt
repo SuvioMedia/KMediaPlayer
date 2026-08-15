@@ -38,6 +38,12 @@ class DesktopPlaybackBridgeContractsTest {
                 forceAvFoundationCompatibility = true,
             )
         }
+        assertFailsWith<IllegalArgumentException> {
+            DesktopPlaybackBridgeRequest(
+                uri = "file:///movie.mp4",
+                segmentContainer = DesktopPlaybackBridgeSegmentContainer.MPEG2_TS,
+            )
+        }
     }
 
     @Test
@@ -76,6 +82,13 @@ class DesktopPlaybackBridgeContractsTest {
                 durationMs = null,
                 videoCopiedWithoutReencoding = true,
                 avFoundationCompatibleTranscode = true,
+            )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            DesktopPlaybackBridgeSource(
+                playlistUrl = "http://127.0.0.1/movie.m3u8",
+                durationMs = null,
+                segmentContainer = DesktopPlaybackBridgeSegmentContainer.MPEG2_TS,
             )
         }
     }

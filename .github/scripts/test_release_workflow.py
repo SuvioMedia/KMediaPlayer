@@ -251,13 +251,13 @@ class ReleaseWorkflowTest(unittest.TestCase):
             repository_root / "mediaplayer-mpv/ComposeMediaPlayerMpv.podspec"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("MPV_VERSION: 0.3.0-rc.14", build_natives)
-        self.assertIn("RUNTIME_VERSION: 0.1.0-rc.9", build_natives)
+        self.assertIn("MPV_VERSION: 0.3.0-rc.15", build_natives)
+        self.assertIn("RUNTIME_VERSION: 0.1.0-rc.10", build_natives)
         self.assertIn("KMediaMpvMoltenVK", verifier)
-        self.assertIn("KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.9", verifier)
-        self.assertIn('kmediaFfmpegRuntimeVersion = "0.1.0-rc.9"', mpv_build)
-        self.assertIn("KMediaAssRuntime', '0.1.0-rc.9'", podspec)
-        self.assertIn("KMediaFfmpegRuntime', '0.1.0-rc.9'", podspec)
+        self.assertIn("KMEDIA_FFMPEG_RUNTIME_VERSION:-0.1.0-rc.10", verifier)
+        self.assertIn('.orElse("0.1.0-rc.10")', mpv_build)
+        self.assertIn("KMediaAssRuntime', '0.1.0-rc.10'", podspec)
+        self.assertIn("KMediaFfmpegRuntime', '0.1.0-rc.10'", podspec)
 
     def test_every_native_ass_consumer_uses_one_runtime_version(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
@@ -276,7 +276,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
             for relative_path in runtime_consumers
         )
 
-        self.assertIn("0.1.0-rc.9", source)
+        self.assertIn("0.1.0-rc.10", source)
         self.assertNotIn("0.1.0-rc.3", source)
 
     def test_windows_jvm_job_verifies_packaged_dll_dependency_closure(self) -> None:

@@ -30,8 +30,10 @@ val projectVersion =
     providers.gradleProperty("publicationVersion").orNull
         ?: "dev"
 val projectGroup = "io.github.shusek"
-val kmediaMpvVersion = libs.versions.kmediaMpv.get()
-val kmediaFfmpegRuntimeVersion = "0.1.0-rc.9"
+val kmediaMpvVersion =
+    providers.gradleProperty("kmediaMpvRuntimeVersion").orElse(libs.versions.kmediaMpv).get()
+val kmediaFfmpegRuntimeVersion =
+    providers.gradleProperty("kmediaFfmpegRuntimeVersion").orElse("0.1.0-rc.10").get()
 val windowsMpvRuntimeVerification =
     configurations.create("windowsMpvRuntimeVerification") {
         description = "Resolves the complete published MPV runtime graph for Windows DLL verification."

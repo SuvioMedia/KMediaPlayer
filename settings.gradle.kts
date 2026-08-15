@@ -155,6 +155,22 @@ dependencyResolutionManagement {
                 }
             }
         }
+        providers.gradleProperty("kmediaFfmpegRuntimeMavenRepository").orNull?.let { repositoryPath ->
+            exclusiveContent {
+                forRepository {
+                    maven {
+                        name = "kmediaFfmpegRuntimeLocal"
+                        url = uri(repositoryPath)
+                    }
+                }
+                filter {
+                    includeModuleByRegex(
+                        "io\\.github\\.shusek",
+                        "kmedia-(?:ass|ffmpeg)-runtime(?:-.*)?",
+                    )
+                }
+            }
+        }
         providers.gradleProperty("kmediaMpvMavenRepository").orNull?.let { repositoryPath ->
             exclusiveContent {
                 forRepository {

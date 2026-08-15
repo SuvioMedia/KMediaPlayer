@@ -1,13 +1,16 @@
 package io.github.kdroidfilter.composemediaplayer.kmediabridge
 
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeRequest
+import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSegmentContainer
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSession
 import io.github.kdroidfilter.composemediaplayer.VideoColorMatrix
 import io.github.kdroidfilter.composemediaplayer.VideoColorPrimaries
 import io.github.kdroidfilter.composemediaplayer.VideoColorRange
 import io.github.kdroidfilter.composemediaplayer.VideoColorTransfer
 import io.github.kdroidfilter.composemediaplayer.VideoDynamicRange
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
@@ -203,6 +206,69 @@ class KMediaBridgeDesktopExtensionIntegrationTest {
                 } finally {
                     fallback?.close()
                 }
+            }
+        }
+
+    @Test
+    fun transcodesLocalMediaToMpegTsHlsThroughTheSelectedRuntime() =
+        runBlocking {
+            val input = Files.createTempFile("kmediaplayer-bridge-cast-test-", ".mkv")
+            val extension = configuredTestExtension()
+            var fallback: DesktopPlaybackBridgeSession? = null
+            try {
+                val encoded =
+                    KMediaBridgeDesktopExtensionIntegrationTest::class.java.classLoader
+                        .getResourceAsStream("kmediabridge-test.mkv.b64")!!
+                        .bufferedReader()
+                        .readText()
+                Files.write(input, Base64.getMimeDecoder().decode(encoded))
+
+                fallback =
+                    extension.open(
+                        DesktopPlaybackBridgeRequest(
+                            uri = input.toUri().toString(),
+                            forceAvFoundationCompatibility = true,
+                            segmentContainer = DesktopPlaybackBridgeSegmentContainer.MPEG2_TS,
+                        ),
+                    )
+                val source = fallback.source
+                val masterPlaylistUri = URI.create(source.playlistUrl)
+                val masterPlaylist = masterPlaylistUri.toURL().readText()
+                val mediaPlaylistReference =
+                    requireNotNull(
+                        masterPlaylist.lineSequence().firstOrNull { line ->
+                            line.isNotBlank() && !line.startsWith('#')
+                        },
+                    )
+                val mediaPlaylistUri = masterPlaylistUri.resolve(mediaPlaylistReference)
+                val (playlist, segment) =
+                    withTimeout(10_000) {
+                        while (true) {
+                            val candidate = mediaPlaylistUri.toURL().readText()
+                            candidate
+                                .lineSequence()
+                                .firstOrNull { line -> line.substringBefore('?').endsWith(".ts") }
+                                ?.let { segment -> return@withTimeout candidate to segment }
+                            delay(25)
+                        }
+                        error("Unreachable")
+                    }
+
+                assertEquals(DesktopPlaybackBridgeSegmentContainer.MPEG2_TS, source.segmentContainer)
+                assertTrue(source.avFoundationCompatibleTranscode)
+                assertFalse(source.videoCopiedWithoutReencoding)
+                assertFalse("#EXT-X-MAP" in playlist)
+                val syncByte =
+                    mediaPlaylistUri
+                        .resolve(segment)
+                        .toURL()
+                        .readBytes()
+                        .first()
+                        .toInt() and 0xff
+                assertEquals(0x47, syncByte)
+            } finally {
+                fallback?.close()
+                input.deleteIfExists()
             }
         }
 

@@ -12,6 +12,12 @@ public data class DesktopPlaybackBridgeCapabilities(
     public val canBurnSubtitles: Boolean = false,
 )
 
+/** Segment container exposed by a desktop playback bridge. */
+public enum class DesktopPlaybackBridgeSegmentContainer {
+    CMAF_FMP4,
+    MPEG2_TS,
+}
+
 /** Request passed to an optional desktop bridge when the platform cannot consume a source directly. */
 public data class DesktopPlaybackBridgeRequest(
     public val uri: String,
@@ -23,6 +29,8 @@ public data class DesktopPlaybackBridgeRequest(
     public val requireHdrCmafPassthrough: Boolean = false,
     public val forceSdrOutput: Boolean = false,
     public val forceAvFoundationCompatibility: Boolean = false,
+    public val segmentContainer: DesktopPlaybackBridgeSegmentContainer =
+        DesktopPlaybackBridgeSegmentContainer.CMAF_FMP4,
 ) {
     init {
         require(uri.isNotBlank()) { "A desktop bridge URI must not be blank." }
@@ -42,6 +50,9 @@ public data class DesktopPlaybackBridgeRequest(
         require(!forceAvFoundationCompatibility || !allowHdrCmafPassthrough) {
             "AVFoundation compatibility transcoding cannot be combined with HDR CMAF passthrough."
         }
+        require(
+            segmentContainer != DesktopPlaybackBridgeSegmentContainer.MPEG2_TS || forceAvFoundationCompatibility,
+        ) { "MPEG-TS bridge output requires AVC/AAC compatibility transcoding." }
     }
 }
 
@@ -60,6 +71,8 @@ public data class DesktopPlaybackBridgeSource(
     public val hdrCmafPassthrough: Boolean = false,
     public val videoCopiedWithoutReencoding: Boolean = false,
     public val avFoundationCompatibleTranscode: Boolean = false,
+    public val segmentContainer: DesktopPlaybackBridgeSegmentContainer =
+        DesktopPlaybackBridgeSegmentContainer.CMAF_FMP4,
     public val detail: String? = null,
 ) {
     init {
@@ -87,6 +100,9 @@ public data class DesktopPlaybackBridgeSource(
         require(!avFoundationCompatibleTranscode || !hdrCmafPassthrough) {
             "An AVFoundation compatibility source cannot also be HDR passthrough."
         }
+        require(
+            segmentContainer != DesktopPlaybackBridgeSegmentContainer.MPEG2_TS || avFoundationCompatibleTranscode,
+        ) { "MPEG-TS bridge output must be an AVC/AAC compatibility transcode." }
     }
 }
 

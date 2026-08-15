@@ -32,6 +32,11 @@ class BackendDependencyBoundaryTest(unittest.TestCase):
         self.assertEqual(3, mpv.count("linkOnly = true"))
         self.assertIn('api("io.github.shusek:kmedia-bridge-ffmpeg:', bridge)
         self.assertIn('strictly(kmediaBridgeVersion)', bridge)
+        self.assertIn(
+            'providers.gradleProperty("kmediaBridgeDesktopVersion").orElse(kmediaBridgeVersion)',
+            bridge,
+        )
+        self.assertIn('strictly(kmediaBridgeDesktopVersion)', bridge)
         self.assertNotIn("runtimeOnly", bridge)
         self.assertIn('api("io.github.shusek:kmedia-ass-runtime-android:', ass)
         self.assertIn('api("io.github.shusek:kmedia-ass-runtime-desktop:', ass)

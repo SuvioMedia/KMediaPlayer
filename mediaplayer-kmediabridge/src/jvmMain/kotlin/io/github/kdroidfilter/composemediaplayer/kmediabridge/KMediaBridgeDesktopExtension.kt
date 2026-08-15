@@ -7,6 +7,7 @@ import io.github.kdroidfilter.composemediaplayer.ColorConversionCapabilities
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeCapabilities
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeExtension
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeRequest
+import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSegmentContainer
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSession
 import io.github.kdroidfilter.composemediaplayer.DesktopPlaybackBridgeSource
 import io.github.kdroidfilter.composemediaplayer.VideoColorInfo
@@ -18,6 +19,7 @@ import io.github.shusek.kmediabridge.ffmpeg.BundledFfmpegNativeDriver
 import io.github.shusek.kmediabridge.ffmpeg.DesktopFfmpegRuntimeInspector
 import io.github.shusek.kmediabridge.ffmpeg.FfmpegCmafHdrSampleCopy
 import io.github.shusek.kmediabridge.ffmpeg.FfmpegHlsPlaybackRequest
+import io.github.shusek.kmediabridge.ffmpeg.FfmpegHlsSegmentContainer
 import io.github.shusek.kmediabridge.ffmpeg.FfmpegHlsVideoOutputPolicy
 import io.github.shusek.kmediabridge.ffmpeg.FfmpegRuntimePolicy
 import io.github.shusek.kmediabridge.ffmpeg.FfmpegRuntimeSelection
@@ -192,6 +194,7 @@ private class KMediaBridgeDesktopSession(
                                         request.forceSdrOutput -> FfmpegHlsVideoOutputPolicy.FORCE_SDR
                                         else -> FfmpegHlsVideoOutputPolicy.PRESERVE_SOURCE
                                     },
+                                segmentContainer = request.segmentContainer.toBridgeSegmentContainer(),
                                 startTimeUs = startTimeUs,
                                 // Desktop platform players can treat this growing VOD playlist as live.
                                 // Keep a deep but byte-bounded history so a selected seek position
@@ -237,9 +240,15 @@ private class KMediaBridgeDesktopSession(
                                     videoCopiedWithoutReencoding =
                                         bridgeSource.outputInfo.videoHandling == VideoHandling.COPY,
                                     avFoundationCompatibleTranscode = request.forceAvFoundationCompatibility,
+                                    segmentContainer = request.segmentContainer,
                                     detail =
                                         if (request.forceAvFoundationCompatibility) {
-                                            "KMediaBridge decoded the source to platform-compatible AVC/AAC CMAF."
+                                            when (request.segmentContainer) {
+                                                DesktopPlaybackBridgeSegmentContainer.CMAF_FMP4 ->
+                                                    "KMediaBridge decoded the source to platform-compatible AVC/AAC CMAF."
+                                                DesktopPlaybackBridgeSegmentContainer.MPEG2_TS ->
+                                                    "KMediaBridge decoded the source to platform-compatible AVC/AAC MPEG-TS HLS."
+                                            }
                                         } else {
                                             "KMediaBridge provided the desktop decoder-ready stream."
                                         },
@@ -263,6 +272,12 @@ private fun DesktopPlaybackBridgeRequest.startTimeUs(): Long =
         Math.multiplyExact(startPositionMs, MICROSECONDS_PER_MILLISECOND)
     } catch (failure: ArithmeticException) {
         throw IllegalArgumentException("The desktop bridge start position is too large.", failure)
+    }
+
+private fun DesktopPlaybackBridgeSegmentContainer.toBridgeSegmentContainer(): FfmpegHlsSegmentContainer =
+    when (this) {
+        DesktopPlaybackBridgeSegmentContainer.CMAF_FMP4 -> FfmpegHlsSegmentContainer.CMAF_FMP4
+        DesktopPlaybackBridgeSegmentContainer.MPEG2_TS -> FfmpegHlsSegmentContainer.MPEG2_TS
     }
 
 private fun requireHdrCmafPassthrough(
