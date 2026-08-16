@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Immutable engine/runtime version, for example 0.4.0-alpha.7
+        description: Immutable engine/runtime version, for example 0.4.0-alpha.8
         required: true
         type: string
       bundle_release_tag:
@@ -135,17 +135,31 @@ jobs:
           runtime_sources="$root/kmedia-wasm-engine-runtime-assets/$RELEASE_VERSION/kmedia-wasm-engine-runtime-assets-$RELEASE_VERSION-sources.jar"
           test -s "$runtime_sources"
           for required in \
-            wasm/movi.c \
-            wasm/library_movi.js \
             docker/Dockerfile \
             docker/build-ffmpeg.sh \
+            relink/objects/movi.o \
+            relink/objects/movi_decode.o \
+            relink/objects/movi_frame.o \
+            relink/objects/movi_streams.o \
+            relink/objects/movi_stretch.o \
+            relink/objects/movi_thumbnail.o \
+            relink/dav1d/lib/libdav1d.a \
+            relink/SHA256SUMS \
             third-party-sources/ffmpeg-9.0.1.tar.gz \
-            third-party-sources/dav1d-1.5.3.tar.gz \
+            LGPL_RELINKING.md \
+            RELINKING_TERMS.md \
             LICENSES/LGPL-2.1.txt; do
             unzip -Z1 "$runtime_sources" | grep -Fx "$required" >/dev/null
           done
-          if unzip -Z1 "$runtime_sources" | grep -Eq '(^player/|\.(kt|kts|ts|tsx|wasm)$)'; then
+          if unzip -Z1 "$runtime_sources" | grep -Eq '(^player/|^wasm/|^native-runtime/|^third-party-sources/dav1d-.*\.tar\.gz$|\.(c|cc|cpp|cxx|js|mjs|kt|kts|java|ts|tsx|wasm)$)'; then
             echo "The public runtime sources JAR crosses the proprietary/source boundary." >&2
+            exit 1
+          fi
+          if unzip -Z1 "$runtime_sources" \
+            | grep -E '\.(h|hh|hpp)$' \
+            | grep -Ev '^relink/dav1d/include/' \
+            | grep -q .; then
+            echo "The public runtime sources JAR contains a private native header." >&2
             exit 1
           fi
           grep -F 'github.com/SuvioMedia/kmedia-wasm-runtime' \
