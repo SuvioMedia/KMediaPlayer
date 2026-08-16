@@ -24,6 +24,22 @@ class WasmEngineBundleWorkflowTest(unittest.TestCase):
         self.assertIn("*.asc", WORKFLOW)
         self.assertIn(r"\.(kt|kts|java)$", WORKFLOW)
 
+    def test_requires_only_the_minimal_lgpl_relinking_kit(self) -> None:
+        for required in (
+            "third-party-sources/ffmpeg-9.0.1.tar.gz",
+            "relink/objects/movi.o",
+            "relink/objects/movi_thumbnail.o",
+            "relink/dav1d/lib/libdav1d.a",
+            "RELINKING_TERMS.md",
+        ):
+            self.assertIn(required, WORKFLOW)
+        for forbidden in (
+            "wasm/movi.c",
+            "wasm/library_movi.js",
+            "third-party-sources/dav1d-1.5.3.tar.gz",
+        ):
+            self.assertNotIn(forbidden, WORKFLOW)
+
     def test_signs_and_submits_only_the_expected_coordinates(self) -> None:
         for artifact in (
             "kmedia-wasm-engine",
