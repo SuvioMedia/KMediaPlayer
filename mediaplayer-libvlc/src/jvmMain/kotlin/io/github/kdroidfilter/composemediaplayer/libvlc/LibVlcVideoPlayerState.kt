@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.layout.ContentScale
 import dev.nucleusframework.window.tao.LinuxTextureViewProducerInfo
 import dev.nucleusframework.window.tao.MacTextureViewProducerInfo
@@ -29,10 +30,14 @@ import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineFallbackReason
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineRenderer
 import io.github.kdroidfilter.composemediaplayer.ColorPipelineVerification
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.DynamicMetadataHandling
 import io.github.kdroidfilter.composemediaplayer.DynamicRangePolicy
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.JvmMediaAdvancedControls
+import io.github.kdroidfilter.composemediaplayer.JvmMediaThumbnail
+import io.github.kdroidfilter.composemediaplayer.LibVlcFrameDeliveryPolicy
 import io.github.kdroidfilter.composemediaplayer.LibVlcPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.PlaybackDiagnostics
 import io.github.kdroidfilter.composemediaplayer.PlayerCapabilities
@@ -75,7 +80,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,20 +90,88 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
 import org.jetbrains.skia.ImageInfo
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.Surface
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.microseconds
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+
+private const val LIBVLC_THUMBNAIL_JPEG_QUALITY = 72
+private const val LIBVLC_THUMBNAIL_MAXIMUM_HEIGHT_MULTIPLIER = 2
+private val LIBVLC_THUMBNAIL_OPEN_TIMEOUT = 30.seconds
+private val LIBVLC_THUMBNAIL_SEEK_TIMEOUT = 10.seconds
+private val LIBVLC_THUMBNAIL_POSITION_TOLERANCE = 1.seconds
+
+private fun libVlcThumbnailHeight(
+    maximumWidth: Int,
+    aspectRatio: Float,
+): Int {
+    val normalizedAspectRatio = aspectRatio.takeIf { it.isFinite() && it > 0f } ?: (16f / 9f)
+    return (maximumWidth / normalizedAspectRatio)
+        .roundToInt()
+        .coerceIn(1, maximumWidth * LIBVLC_THUMBNAIL_MAXIMUM_HEIGHT_MULTIPLIER)
+}
+
+private fun ImageBitmap.toLibVlcMediaThumbnail(
+    timestamp: Duration,
+    maximumWidth: Int,
+): JvmMediaThumbnail? =
+    runCatching {
+        val targetWidth = width.coerceAtMost(maximumWidth)
+        val targetHeight =
+            (height.toDouble() * targetWidth / width)
+                .roundToInt()
+                .coerceAtLeast(1)
+        Image.makeFromBitmap(asSkiaBitmap()).use { source ->
+            val encodedBytes =
+                if (targetWidth == width && targetHeight == height) {
+                    source.encodeToData(EncodedImageFormat.JPEG, LIBVLC_THUMBNAIL_JPEG_QUALITY)?.use { it.bytes }
+                } else {
+                    Surface.makeRasterN32Premul(targetWidth, targetHeight).use { surface ->
+                        surface.canvas.drawImageRect(
+                            source,
+                            Rect.makeWH(targetWidth.toFloat(), targetHeight.toFloat()),
+                        )
+                        surface.makeImageSnapshot().use { scaled ->
+                            scaled
+                                .encodeToData(
+                                    EncodedImageFormat.JPEG,
+                                    LIBVLC_THUMBNAIL_JPEG_QUALITY,
+                                )?.use { it.bytes }
+                        }
+                    }
+                }
+            encodedBytes?.let { bytes ->
+                JvmMediaThumbnail(
+                    bytes = bytes,
+                    mimeType = "image/jpeg",
+                    timestamp = timestamp,
+                    width = targetWidth,
+                    height = targetHeight,
+                )
+            }
+        }
+    }.getOrNull()
 
 internal class LibVlcVideoPlayerState(
-    runtime: VlcDesktopRuntimeResolution,
+    private val runtime: VlcDesktopRuntimeResolution,
     private val options: LibVlcPlaybackOptions,
 ) : AbstractBackendVideoPlayerState(),
-    VideoPlayerSurfaceProvider {
+    VideoPlayerSurfaceProvider,
+    JvmMediaAdvancedControls {
     private val disposed = AtomicBoolean(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val outputMutex = Mutex()
@@ -293,6 +368,10 @@ internal class LibVlcVideoPlayerState(
         if (surfaceWidth == nextWidth && surfaceHeight == nextHeight) return
         surfaceWidth = nextWidth
         surfaceHeight = nextHeight
+        if (!usesGpuTexture) {
+            if (nextWidth > 0 && nextHeight > 0) runCatching { player.resize(nextWidth, nextHeight) }
+            return
+        }
         configureLatestOutput(OUTPUT_RESIZE_DEBOUNCE_MS)
     }
 
@@ -470,6 +549,84 @@ internal class LibVlcVideoPlayerState(
         sourceLoadedPublished = false
         resetSourceGeometry()
         resetSourceState()
+    }
+
+    override suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int,
+        emit: suspend (index: Int, thumbnail: JvmMediaThumbnail?) -> Unit,
+    ) {
+        require(maximumWidth > 0) { "maximumWidth must be positive." }
+        if (positions.isEmpty()) return
+
+        val request = synchronized(pendingOpenLock) { activeOpen ?: pendingOpen }
+        if (request == null) {
+            positions.indices.forEach { index -> emit(index, null) }
+            return
+        }
+        val preview =
+            LibVlcVideoPlayerState(
+                runtime = runtime,
+                options =
+                    options.copy(
+                        frameDeliveryPolicy = LibVlcFrameDeliveryPolicy.CPU_PULL,
+                        dynamicRangePolicy = DynamicRangePolicy.FORCE_SDR,
+                        desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE,
+                    ),
+            )
+        try {
+            preview.updateSurfaceSize(maximumWidth, libVlcThumbnailHeight(maximumWidth, aspectRatio))
+            preview.openUri(request.uri, InitialPlayerState.PAUSE, request.requestHeaders)
+            val opened =
+                withTimeoutOrNull(LIBVLC_THUMBNAIL_OPEN_TIMEOUT) {
+                    while (!preview.hasMedia && preview.error == null) delay(25.milliseconds)
+                    preview.hasMedia
+                } == true
+            if (!opened) {
+                positions.indices.forEach { index -> emit(index, null) }
+                return
+            }
+
+            preview.pause()
+            preview.updateSurfaceSize(maximumWidth, libVlcThumbnailHeight(maximumWidth, preview.aspectRatio))
+            positions.forEachIndexed { index, requestedPosition ->
+                currentCoroutineContext().ensureActive()
+                val maximumPosition = (preview.duration - 1.milliseconds).coerceAtLeast(Duration.ZERO)
+                val position = requestedPosition.coerceIn(Duration.ZERO, maximumPosition)
+                val previousFrame = preview.currentCpuFrame.value
+                preview.seekTo(position)
+                val frame =
+                    withTimeoutOrNull<ImageBitmap>(LIBVLC_THUMBNAIL_SEEK_TIMEOUT) {
+                        var settledFrame: ImageBitmap? = null
+                        while (settledFrame == null) {
+                            currentCoroutineContext().ensureActive()
+                            val candidate = preview.currentCpuFrame.value
+                            val positionSettled =
+                                abs((preview.currentTime - position).inWholeMilliseconds) <=
+                                    LIBVLC_THUMBNAIL_POSITION_TOLERANCE.inWholeMilliseconds
+                            if (candidate != null &&
+                                candidate !== previousFrame &&
+                                positionSettled &&
+                                !preview.isSeeking
+                            ) {
+                                settledFrame = candidate
+                            } else {
+                                delay(25.milliseconds)
+                            }
+                        }
+                        settledFrame
+                    }
+                val thumbnail =
+                    frame?.let { image ->
+                        withContext(Dispatchers.Default) {
+                            image.toLibVlcMediaThumbnail(position, maximumWidth)
+                        }
+                    }
+                emit(index, thumbnail)
+            }
+        } finally {
+            preview.dispose()
+        }
     }
 
     override fun dispose() {

@@ -50,6 +50,7 @@ import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
+import androidx.media3.exoplayer.source.ForwardingMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.video.VideoFrameMetadataListener
@@ -228,6 +229,17 @@ private class ConfiguredAndroidVideoPlayerState(
                 requestHeaders = requestHeaders,
             ),
         ) ?: super.createMediaSource(mediaItem, requestHeaders)
+
+    override fun createThumbnailMediaSource(
+        mediaItem: MediaItem,
+        requestHeaders: Map<String, String>,
+    ): MediaSource? =
+        androidMediaSourceProvider.value.createMediaSource(
+            AndroidMediaSourceRequest(
+                mediaItem = mediaItem,
+                requestHeaders = requestHeaders,
+            ),
+        ) ?: super.createThumbnailMediaSource(mediaItem, requestHeaders)
 }
 
 private object AndroidPlayerActivityRegistry {
@@ -373,7 +385,8 @@ open class DefaultVideoPlayerState(
     private val audioMode: AudioMode = AudioMode(),
     private val cacheConfig: CacheConfig = CacheConfig(),
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
-) : VideoPlayerState {
+) : VideoPlayerState,
+    AndroidMediaAdvancedControls {
     companion object {
         private const val PERCENT_SCALE = 100f
         private const val PLAYER_THREAD_DISPATCH_TIMEOUT_MS = 5_000L
@@ -562,6 +575,41 @@ open class DefaultVideoPlayerState(
     private var playerListener: Player.Listener? = null
     private var sourceGeneration = 0L
     private var currentSourceSpec: AndroidSourceSpec? = null
+
+    override suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int,
+        emit: suspend (index: Int, thumbnail: AndroidMediaThumbnail?) -> Unit,
+    ) {
+        val sourceSpec = withContext(Dispatchers.Main.immediate) { currentSourceSpec }
+        if (sourceSpec == null) {
+            positions.indices.forEach { index -> emit(index, null) }
+            return
+        }
+        val fallbackFactory =
+            buildAndroidMediaSourceFactory(
+                buildAndroidDataSourceFactory(
+                    context = context,
+                    cache = cacheLease?.cache,
+                    requestHeaders = sourceSpec.requestHeaders,
+                ),
+            )
+        val thumbnailFactory =
+            object : ForwardingMediaSourceFactory(fallbackFactory) {
+                override fun createMediaSource(mediaItem: MediaItem): MediaSource =
+                    createThumbnailMediaSource(mediaItem, sourceSpec.requestHeaders)
+                        ?: super.createMediaSource(mediaItem)
+            }
+        generateAndroidMediaThumbnails(
+            context = context,
+            mediaItem = sourceSpec.mediaItem,
+            mediaSourceFactory = thumbnailFactory,
+            positions = positions,
+            maximumWidth = maximumWidth,
+            emit = emit,
+        )
+    }
+
     private var sourceConversionJob: Job? = null
     private var hlsChapterDiscovery: AndroidHlsChapterDiscovery? = null
     private var externalAssLoadJob: Job? = null
@@ -3406,6 +3454,12 @@ open class DefaultVideoPlayerState(
             ),
         ).createMediaSource(mediaItem)
     }
+
+    /** Creates an optional custom source for an isolated thumbnail extractor. */
+    protected open fun createThumbnailMediaSource(
+        mediaItem: MediaItem,
+        requestHeaders: Map<String, String>,
+    ): MediaSource? = null
 
     private fun buildAndroidMediaSourceFactory(dataSourceFactory: DataSource.Factory): MediaSource.Factory =
         androidSubtitleBackend?.createMediaSourceFactory(dataSourceFactory)

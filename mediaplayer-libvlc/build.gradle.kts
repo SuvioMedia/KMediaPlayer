@@ -283,6 +283,9 @@ tasks.register<Exec>("iosSimulatorArm64LibVlcIntegrationTest") {
 }
 
 tasks.named<Test>("jvmTest") {
+    providers.gradleProperty("composeMediaPlayerNativeSurfaceTestMedia").orNull?.let { mediaPath ->
+        systemProperty("composemediaplayer.nativeSurfaceTestMedia", mediaPath)
+    }
     if (vrAcceptanceConfigured) {
         val runtimeDirectory = rootProject.file(vrAcceptanceRuntimeDirectory.get())
         val bridge = rootProject.file(vrAcceptanceBridge.get())

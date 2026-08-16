@@ -7,11 +7,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.AbstractBackendVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.AudioTrack
 import io.github.kdroidfilter.composemediaplayer.ExperimentalComposeMediaPlayerBackendApi
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.JvmMediaAdvancedControls
+import io.github.kdroidfilter.composemediaplayer.JvmMediaThumbnail
 import io.github.kdroidfilter.composemediaplayer.MediaChapter
 import io.github.kdroidfilter.composemediaplayer.MpvBackendAvailability
 import io.github.kdroidfilter.composemediaplayer.MpvBackendUnavailableException
@@ -39,14 +42,22 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
 import org.jetbrains.skia.ImageInfo
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.Surface
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -54,9 +65,69 @@ import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+
+private const val MPV_THUMBNAIL_JPEG_QUALITY = 72
+private const val MPV_THUMBNAIL_MAXIMUM_HEIGHT_MULTIPLIER = 2
+private val MPV_THUMBNAIL_OPEN_TIMEOUT = 30.seconds
+private val MPV_THUMBNAIL_SEEK_TIMEOUT = 10.seconds
+private val MPV_THUMBNAIL_POSITION_TOLERANCE = 1.seconds
+
+private fun mpvThumbnailHeight(
+    maximumWidth: Int,
+    aspectRatio: Float,
+): Int {
+    val normalizedAspectRatio = aspectRatio.takeIf { it.isFinite() && it > 0f } ?: (16f / 9f)
+    return (maximumWidth / normalizedAspectRatio)
+        .roundToInt()
+        .coerceIn(1, maximumWidth * MPV_THUMBNAIL_MAXIMUM_HEIGHT_MULTIPLIER)
+}
+
+private fun ImageBitmap.toMpvMediaThumbnail(
+    timestamp: Duration,
+    maximumWidth: Int,
+): JvmMediaThumbnail? =
+    runCatching {
+        val targetWidth = width.coerceAtMost(maximumWidth)
+        val targetHeight =
+            (height.toDouble() * targetWidth / width)
+                .roundToInt()
+                .coerceAtLeast(1)
+        Image.makeFromBitmap(asSkiaBitmap()).use { source ->
+            val encodedBytes =
+                if (targetWidth == width && targetHeight == height) {
+                    source.encodeToData(EncodedImageFormat.JPEG, MPV_THUMBNAIL_JPEG_QUALITY)?.use { it.bytes }
+                } else {
+                    Surface.makeRasterN32Premul(targetWidth, targetHeight).use { surface ->
+                        surface.canvas.drawImageRect(
+                            source,
+                            Rect.makeWH(targetWidth.toFloat(), targetHeight.toFloat()),
+                        )
+                        surface.makeImageSnapshot().use { scaled ->
+                            scaled
+                                .encodeToData(
+                                    EncodedImageFormat.JPEG,
+                                    MPV_THUMBNAIL_JPEG_QUALITY,
+                                )?.use { it.bytes }
+                        }
+                    }
+                }
+            encodedBytes?.let { bytes ->
+                JvmMediaThumbnail(
+                    bytes = bytes,
+                    mimeType = "image/jpeg",
+                    timestamp = timestamp,
+                    width = targetWidth,
+                    height = targetHeight,
+                )
+            }
+        }
+    }.getOrNull()
 
 @Stable
 @OptIn(ExperimentalComposeMediaPlayerBackendApi::class)
@@ -67,7 +138,8 @@ internal class MpvVideoPlayerState(
     initialMacBackendFallbackReason: String? = null,
 ) : AbstractBackendVideoPlayerState(),
     VideoPlayerSurfaceProvider,
-    TaoPlaybackSurfaceProvider {
+    TaoPlaybackSurfaceProvider,
+    JvmMediaAdvancedControls {
     private val disposed = AtomicBoolean(false)
     private val renderLock = ReentrantLock()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -88,6 +160,7 @@ internal class MpvVideoPlayerState(
     private var nativeMacBackendFallbackReason: String? = initialMacBackendFallbackReason
 
     private var currentSourceUri: String? = null
+    private var currentRequestHeaders: Map<String, String> = emptyMap()
     private var currentSourceWantsPlayback = false
     private var macVkPlaybackFallbackAttempted = false
     private var nativeMacColorMode = MpvMacOutputColorMode.SDR
@@ -361,6 +434,7 @@ internal class MpvVideoPlayerState(
         droppedVideoFrames = null
         maximumAvSyncOffsetMs = null
         currentSourceUri = normalizedUri
+        currentRequestHeaders = requestHeaders.toMap()
         currentSourceWantsPlayback = initializePlayerState == InitialPlayerState.PLAY
         macVkPlaybackFallbackAttempted = false
         beginSourcePreparation(normalizedUri, initializePlayerState)
@@ -469,6 +543,7 @@ internal class MpvVideoPlayerState(
         awaitingNativeMacDecodeRestart = false
         resumePlaybackAfterNativeSurfaceAttach = false
         currentSourceUri = null
+        currentRequestHeaders = emptyMap()
         currentSourceWantsPlayback = false
         macVkPlaybackFallbackAttempted = false
         frameState.value = null
@@ -476,6 +551,89 @@ internal class MpvVideoPlayerState(
     }
 
     internal val currentFrame: State<ImageBitmap?> get() = frameState
+
+    override suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int,
+        emit: suspend (index: Int, thumbnail: JvmMediaThumbnail?) -> Unit,
+    ) {
+        require(maximumWidth > 0) { "maximumWidth must be positive." }
+        if (positions.isEmpty()) return
+
+        val source = currentSourceUri
+        if (source == null) {
+            positions.indices.forEach { index -> emit(index, null) }
+            return
+        }
+        val headers = currentRequestHeaders.toMap()
+        val maximumHeight = maximumWidth * MPV_THUMBNAIL_MAXIMUM_HEIGHT_MULTIPLIER
+        val preview =
+            createDesktopMpvVideoPlayerState(
+                runtimeConfig.copy(
+                    macRenderer = MpvMacRenderer.OPENGL,
+                    maxRenderPixels =
+                        minOf(
+                            runtimeConfig.maxRenderPixels,
+                            maximumWidth
+                                .toLong()
+                                .times(maximumHeight)
+                                .coerceAtMost(Int.MAX_VALUE.toLong())
+                                .toInt(),
+                        ),
+                ),
+            )
+        try {
+            preview.openUri(source, InitialPlayerState.PAUSE, headers)
+            val opened =
+                withTimeoutOrNull(MPV_THUMBNAIL_OPEN_TIMEOUT) {
+                    while (!preview.hasMedia && preview.error == null) delay(25.milliseconds)
+                    preview.hasMedia
+                } == true
+            if (!opened) {
+                positions.indices.forEach { index -> emit(index, null) }
+                return
+            }
+
+            preview.pause()
+            val height = mpvThumbnailHeight(maximumWidth, preview.aspectRatio)
+            positions.forEachIndexed { index, requestedPosition ->
+                currentCoroutineContext().ensureActive()
+                val maximumPosition = (preview.duration - 1.milliseconds).coerceAtLeast(Duration.ZERO)
+                val position = requestedPosition.coerceIn(Duration.ZERO, maximumPosition)
+                val previousFrame = preview.currentFrame.value
+                preview.seekTo(position)
+                val frame =
+                    withTimeoutOrNull<ImageBitmap>(MPV_THUMBNAIL_SEEK_TIMEOUT) {
+                        var settledFrame: ImageBitmap? = null
+                        while (settledFrame == null) {
+                            currentCoroutineContext().ensureActive()
+                            val positionSettled =
+                                abs((preview.currentTime - position).inWholeMilliseconds) <=
+                                    MPV_THUMBNAIL_POSITION_TOLERANCE.inWholeMilliseconds
+                            if (positionSettled && !preview.isSeeking) {
+                                preview.renderFrame(maximumWidth, height)
+                                settledFrame =
+                                    preview.currentFrame.value
+                                        ?.takeIf { candidate -> candidate !== previousFrame }
+                            }
+                            if (settledFrame == null) {
+                                delay(25.milliseconds)
+                            }
+                        }
+                        settledFrame
+                    }
+                val thumbnail =
+                    frame?.let { image ->
+                        withContext(Dispatchers.Default) {
+                            image.toMpvMediaThumbnail(position, maximumWidth)
+                        }
+                    }
+                emit(index, thumbnail)
+            }
+        } finally {
+            preview.dispose()
+        }
+    }
 
     internal fun renderFrame(
         width: Int,

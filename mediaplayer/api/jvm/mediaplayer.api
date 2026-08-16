@@ -26,7 +26,7 @@ public final class io/github/kdroidfilter/composemediaplayer/ComposableSingleton
 	public final fun getLambda$340468173$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
 }
 
-public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState : io/github/kdroidfilter/composemediaplayer/VideoPlayerState, io/github/kdroidfilter/composemediaplayer/desktop/TaoPlaybackSurfaceProvider {
+public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState : io/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls, io/github/kdroidfilter/composemediaplayer/VideoPlayerState, io/github/kdroidfilter/composemediaplayer/desktop/TaoPlaybackSurfaceProvider {
 	public static final field $stable I
 	public fun <init> ()V
 	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)V
@@ -155,6 +155,7 @@ public class io/github/kdroidfilter/composemediaplayer/DefaultVideoPlayerState :
 	public fun setUserDragging (Z)V
 	public fun setVolume (F)V
 	public fun stop ()V
+	public fun thumbnails (Ljava/util/List;ILkotlin/jvm/functions/Function3;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun toggleFullscreen ()V
 }
 
@@ -934,7 +935,7 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/ComposableSin
 	public final fun getLambda$1167930392$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
 }
 
-public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPlayerState : io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
+public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPlayerState : io/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls, io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
 	public static final field $stable I
 	public fun <init> ()V
 	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)V
@@ -1066,6 +1067,7 @@ public final class io/github/kdroidfilter/composemediaplayer/linux/LinuxVideoPla
 	public fun setUserDragging (Z)V
 	public fun setVolume (F)V
 	public fun stop ()V
+	public fun thumbnails (Ljava/util/List;ILkotlin/jvm/functions/Function3;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun toggleFullscreen ()V
 }
 
@@ -1082,7 +1084,7 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacNativeWindow
 	public final fun setFullscreen (JZ)Z
 }
 
-public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerState : io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
+public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerState : io/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls, io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
 	public static final field $stable I
 	public fun <init> ()V
 	public fun <init> (Lio/github/kdroidfilter/composemediaplayer/VideoPlaybackOptions;)V
@@ -1214,6 +1216,7 @@ public final class io/github/kdroidfilter/composemediaplayer/mac/MacVideoPlayerS
 	public fun setUserDragging (Z)V
 	public fun setVolume (F)V
 	public fun stop ()V
+	public fun thumbnails (Ljava/util/List;ILkotlin/jvm/functions/Function3;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun toggleFullscreen ()V
 }
 
@@ -1313,7 +1316,7 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/ComposableS
 	public final fun getLambda$1751805165$io_github_shusek_mediaplayer ()Lkotlin/jvm/functions/Function2;
 }
 
-public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVideoPlayerState : io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
+public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVideoPlayerState : io/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls, io/github/kdroidfilter/composemediaplayer/VideoPlayerState {
 	public static final field $stable I
 	public static final field Companion Lio/github/kdroidfilter/composemediaplayer/windows/WindowsVideoPlayerState$Companion;
 	public fun <init> ()V
@@ -1447,6 +1450,7 @@ public final class io/github/kdroidfilter/composemediaplayer/windows/WindowsVide
 	public final fun setVideoWidth (I)V
 	public fun setVolume (F)V
 	public fun stop ()V
+	public fun thumbnails (Ljava/util/List;ILkotlin/jvm/functions/Function3;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public fun toggleFullscreen ()V
 }
 

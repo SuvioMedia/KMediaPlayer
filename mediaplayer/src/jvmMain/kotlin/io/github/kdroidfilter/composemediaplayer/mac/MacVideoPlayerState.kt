@@ -46,6 +46,8 @@ import io.github.kdroidfilter.composemediaplayer.JvmLibVlcInstallation
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcMediaProbe
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcSubtitleStream
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcTrackInfo
+import io.github.kdroidfilter.composemediaplayer.JvmMediaAdvancedControls
+import io.github.kdroidfilter.composemediaplayer.JvmMediaThumbnail
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.MediaChapter
@@ -80,6 +82,7 @@ import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.desktopCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.usesDesktopCanvasProjectionRenderer
 import io.github.kdroidfilter.composemediaplayer.explicitFallbackBackend
+import io.github.kdroidfilter.composemediaplayer.generateIsolatedJvmMediaThumbnails
 import io.github.kdroidfilter.composemediaplayer.hasPresentedTextureFrameAfter
 import io.github.kdroidfilter.composemediaplayer.isSafeForUnmanagedSdrFallback
 import io.github.kdroidfilter.composemediaplayer.jvmPlayerCapabilities
@@ -318,9 +321,11 @@ internal data class MacMetalTextureFrame(
  *
  * This implementation uses a native video player via MacNativeBridge.
  */
+@Suppress("LargeClass", "TooManyFunctions")
 class MacVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
-) : VideoPlayerState {
+) : VideoPlayerState,
+    JvmMediaAdvancedControls {
     private val platformCapabilities = jvmPlayerCapabilities(playbackOptions)
     private val colorPipelineController = VideoColorPipelineController(playbackOptions, platformCapabilities)
     override val colorPipelineStatus: StateFlow<VideoColorPipelineStatus> = colorPipelineController.status
@@ -1058,6 +1063,26 @@ class MacVideoPlayerState(
             }
         }
     }
+
+    override suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int,
+        emit: suspend (index: Int, thumbnail: JvmMediaThumbnail?) -> Unit,
+    ) = generateIsolatedJvmMediaThumbnails(
+        positions = positions,
+        maximumWidth = maximumWidth,
+        sourceUri = lastUri,
+        requestHeaders = lastRequestHeaders.toMap(),
+        initialAspectRatio = aspectRatio,
+        createPreview = {
+            MacVideoPlayerState(
+                playbackOptions.copy(desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE),
+            )
+        },
+        resizePreview = MacVideoPlayerState::onResized,
+        currentFrame = { preview -> preview.currentFrameState.value },
+        emit = emit,
+    )
 
     override fun openFile(
         file: PlatformFile,

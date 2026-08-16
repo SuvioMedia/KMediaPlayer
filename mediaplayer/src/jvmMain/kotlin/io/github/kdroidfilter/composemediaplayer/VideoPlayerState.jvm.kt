@@ -63,6 +63,7 @@ private fun createJvmPlatformPlayerState(playbackOptions: VideoPlaybackOptions):
 open class DefaultVideoPlayerState(
     playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
 ) : VideoPlayerState,
+    JvmMediaAdvancedControls,
     TaoPlaybackSurfaceProvider {
     val delegate: VideoPlayerState =
         EventingVideoPlayerState(
@@ -75,6 +76,19 @@ open class DefaultVideoPlayerState(
                 },
             ),
         )
+
+    override suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int,
+        emit: suspend (index: Int, thumbnail: JvmMediaThumbnail?) -> Unit,
+    ) {
+        val controls = delegate.jvmMediaAdvancedControls
+        if (controls == null) {
+            positions.indices.forEach { index -> emit(index, null) }
+            return
+        }
+        controls.thumbnails(positions, maximumWidth, emit)
+    }
 
     override var projection: VideoProjectionSettings
         get() = delegate.projection

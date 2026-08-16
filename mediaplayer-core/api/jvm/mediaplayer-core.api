@@ -855,6 +855,39 @@ public final class io/github/kdroidfilter/composemediaplayer/InitialPlayerState 
 	public static fun values ()[Lio/github/kdroidfilter/composemediaplayer/InitialPlayerState;
 }
 
+public abstract interface class io/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls {
+	public abstract fun thumbnails (Ljava/util/List;ILkotlin/jvm/functions/Function3;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun thumbnails$default (Lio/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls;Ljava/util/List;ILkotlin/jvm/functions/Function3;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls$DefaultImpls {
+	public static synthetic fun thumbnails$default (Lio/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls;Ljava/util/List;ILkotlin/jvm/functions/Function3;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControlsKt {
+	public static final fun getJvmMediaAdvancedControls (Lio/github/kdroidfilter/composemediaplayer/VideoPlayerState;)Lio/github/kdroidfilter/composemediaplayer/JvmMediaAdvancedControls;
+}
+
+public final class io/github/kdroidfilter/composemediaplayer/JvmMediaThumbnail {
+	public static final field $stable I
+	public synthetic fun <init> ([BLjava/lang/String;JIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()[B
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3-UwyO8pc ()J
+	public final fun component4 ()I
+	public final fun component5 ()I
+	public final fun copy-1Y68eR8 ([BLjava/lang/String;JII)Lio/github/kdroidfilter/composemediaplayer/JvmMediaThumbnail;
+	public static synthetic fun copy-1Y68eR8$default (Lio/github/kdroidfilter/composemediaplayer/JvmMediaThumbnail;[BLjava/lang/String;JIIILjava/lang/Object;)Lio/github/kdroidfilter/composemediaplayer/JvmMediaThumbnail;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBytes ()[B
+	public final fun getHeight ()I
+	public final fun getMimeType ()Ljava/lang/String;
+	public final fun getTimestamp-UwyO8pc ()J
+	public final fun getWidth ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/github/kdroidfilter/composemediaplayer/MasteringDisplayMetadata {
 	public static final field $stable I
 	public fun <init> (FFFFFFFFFF)V

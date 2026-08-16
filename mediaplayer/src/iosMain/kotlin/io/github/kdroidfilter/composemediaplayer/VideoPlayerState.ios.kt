@@ -118,7 +118,8 @@ open class DefaultVideoPlayerState(
     private val audioMode: AudioMode = AudioMode(),
     private val cacheConfig: CacheConfig = CacheConfig(),
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
-) : VideoPlayerState {
+) : VideoPlayerState,
+    IosMediaAdvancedControls {
     private val platformCapabilities = platformPlayerCapabilities()
     private val colorPipelineController = VideoColorPipelineController(playbackOptions, platformCapabilities)
 
@@ -147,6 +148,26 @@ open class DefaultVideoPlayerState(
     private var preparedPipelineOriginalColorInfo: VideoColorInfo? = null
     private var activeSourceUri: String = ""
     private var activeSourceRequestHeaders: Map<String, String> = emptyMap()
+
+    override suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int,
+        emit: suspend (index: Int, thumbnail: IosMediaThumbnail?) -> Unit,
+    ) {
+        val sourceUri = activeSourceUri
+        if (sourceUri.isBlank()) {
+            positions.indices.forEach { index -> emit(index, null) }
+            return
+        }
+        generateIosMediaThumbnails(
+            sourceUri = sourceUri,
+            requestHeaders = activeSourceRequestHeaders,
+            positions = positions,
+            maximumWidth = maximumWidth,
+            emit = emit,
+        )
+    }
+
     private var _projection by mutableStateOf(playbackOptions.projection.normalized())
     override var projection: VideoProjectionSettings
         get() = _projection

@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.mac
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.JvmMediaThumbnail
 import io.github.kdroidfilter.composemediaplayer.VideoPlaybackOptions
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
@@ -10,6 +11,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assume
 import org.junit.Before
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -17,6 +20,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Tests for the Mac implementation of VideoPlayerState
@@ -215,6 +219,61 @@ class MacVideoPlayerStateTest {
             assertNull(playerState.error)
             assertNotNull(playerState.currentFrameState.value)
             assertFalse(playerState.shouldUseHdrMetalSurface())
+        } finally {
+            playerState.dispose()
+        }
+    }
+
+    @Test
+    fun `isolated thumbnail decoding leaves the visible AVFoundation player untouched`() {
+        val configuredMedia =
+            System
+                .getProperty("composemediaplayer.test.hdrMedia")
+                ?.takeIf(String::isNotBlank)
+                ?.let(Path::of)
+                ?.takeIf(Files::isRegularFile)
+        Assume.assumeTrue(
+            "The thumbnail integration test needs -PkmediaPlayerHdrTestMedia=<MP4>.",
+            configuredMedia != null,
+        )
+        val playerState =
+            MacVideoPlayerState(
+                VideoPlaybackOptions(
+                    desktopVideoBackend = DesktopVideoBackend.PLATFORM,
+                    desktopVideoSurfaceMode = DesktopVideoSurfaceMode.PREFER_COLOR_MANAGED_TEXTURE,
+                ),
+            )
+        try {
+            val thumbnails = mutableListOf<JvmMediaThumbnail?>()
+            runBlocking {
+                playerState.openUri(checkNotNull(configuredMedia).toUri().toString(), InitialPlayerState.PAUSE)
+                withTimeout(30.seconds) {
+                    while (!playerState.hasMedia && playerState.error == null) {
+                        delay(25.milliseconds)
+                    }
+                }
+                assertNull(playerState.error)
+                assertTrue(playerState.hasMedia)
+                val positions = listOf(0.01, 0.34, 0.75).map { progress -> playerState.duration * progress }
+
+                withTimeout(90.seconds) {
+                    playerState.thumbnails(positions, maximumWidth = 240) { _, thumbnail ->
+                        thumbnails += thumbnail
+                    }
+                }
+            }
+
+            assertFalse(playerState.isPlaying)
+            assertTrue(playerState.currentTime < 1.seconds)
+            assertEquals(3, thumbnails.size)
+            thumbnails.forEach { thumbnail ->
+                val generated = assertNotNull(thumbnail)
+                assertTrue(generated.width in 1..240)
+                assertTrue(generated.height > 0)
+                assertTrue(generated.bytes.size in 4..1_048_576)
+                assertEquals(0xff.toByte(), generated.bytes[0])
+                assertEquals(0xd8.toByte(), generated.bytes[1])
+            }
         } finally {
             playerState.dispose()
         }

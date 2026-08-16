@@ -1,5 +1,6 @@
 // Klib ABI Dump
 // Targets: [iosArm64, iosSimulatorArm64, wasmJs]
+// Alias: ios => [iosArm64, iosSimulatorArm64]
 // Rendering settings:
 // - Signature version: 2
 // - Show manifest properties: true
@@ -3045,3 +3046,44 @@ final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_compo
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoTextureCrop$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoTextureCrop$stableprop_getter|io_github_kdroidfilter_composemediaplayer_VideoTextureCrop$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoTextureWindow$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_VideoTextureWindow$stableprop_getter|io_github_kdroidfilter_composemediaplayer_VideoTextureWindow$stableprop_getter(){}[0]
 final fun io.github.kdroidfilter.composemediaplayer/rememberVideoPlayerState(io.github.kdroidfilter.composemediaplayer/VideoPlayerBackend, androidx.compose.runtime/Composer?, kotlin/Int): io.github.kdroidfilter.composemediaplayer/VideoPlayerState // io.github.kdroidfilter.composemediaplayer/rememberVideoPlayerState|rememberVideoPlayerState(io.github.kdroidfilter.composemediaplayer.VideoPlayerBackend;androidx.compose.runtime.Composer?;kotlin.Int){}[0]
+
+// Targets: [ios]
+abstract interface io.github.kdroidfilter.composemediaplayer/IosMediaAdvancedControls { // io.github.kdroidfilter.composemediaplayer/IosMediaAdvancedControls|null[0]
+    abstract suspend fun thumbnails(kotlin.collections/List<kotlin.time/Duration>, kotlin/Int = ..., kotlin.coroutines/SuspendFunction2<kotlin/Int, io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail?, kotlin/Unit>) // io.github.kdroidfilter.composemediaplayer/IosMediaAdvancedControls.thumbnails|thumbnails(kotlin.collections.List<kotlin.time.Duration>;kotlin.Int;kotlin.coroutines.SuspendFunction2<kotlin.Int,io.github.kdroidfilter.composemediaplayer.IosMediaThumbnail?,kotlin.Unit>){}[0]
+}
+
+// Targets: [ios]
+final class io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail { // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail|null[0]
+    constructor <init>(kotlin/ByteArray, kotlin/String, kotlin.time/Duration, kotlin/Int, kotlin/Int) // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.<init>|<init>(kotlin.ByteArray;kotlin.String;kotlin.time.Duration;kotlin.Int;kotlin.Int){}[0]
+
+    final val bytes // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.bytes|{}bytes[0]
+        final fun <get-bytes>(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.bytes.<get-bytes>|<get-bytes>(){}[0]
+    final val height // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.height|{}height[0]
+        final fun <get-height>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.height.<get-height>|<get-height>(){}[0]
+    final val mimeType // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.mimeType|{}mimeType[0]
+        final fun <get-mimeType>(): kotlin/String // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.mimeType.<get-mimeType>|<get-mimeType>(){}[0]
+    final val timestamp // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.timestamp|{}timestamp[0]
+        final fun <get-timestamp>(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.timestamp.<get-timestamp>|<get-timestamp>(){}[0]
+    final val width // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.width|{}width[0]
+        final fun <get-width>(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.width.<get-width>|<get-width>(){}[0]
+
+    final fun component1(): kotlin/ByteArray // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.component1|component1(){}[0]
+    final fun component2(): kotlin/String // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.component2|component2(){}[0]
+    final fun component3(): kotlin.time/Duration // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.component3|component3(){}[0]
+    final fun component4(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.component4|component4(){}[0]
+    final fun component5(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.component5|component5(){}[0]
+    final fun copy(kotlin/ByteArray = ..., kotlin/String = ..., kotlin.time/Duration = ..., kotlin/Int = ..., kotlin/Int = ...): io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.copy|copy(kotlin.ByteArray;kotlin.String;kotlin.time.Duration;kotlin.Int;kotlin.Int){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kdroidfilter.composemediaplayer/IosMediaThumbnail.toString|toString(){}[0]
+}
+
+// Targets: [ios]
+final val io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_IosMediaThumbnail$stableprop // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_IosMediaThumbnail$stableprop|#static{}io_github_kdroidfilter_composemediaplayer_IosMediaThumbnail$stableprop[0]
+
+// Targets: [ios]
+final val io.github.kdroidfilter.composemediaplayer/iosMediaAdvancedControls // io.github.kdroidfilter.composemediaplayer/iosMediaAdvancedControls|@io.github.kdroidfilter.composemediaplayer.VideoPlayerState{}iosMediaAdvancedControls[0]
+    final fun (io.github.kdroidfilter.composemediaplayer/VideoPlayerState).<get-iosMediaAdvancedControls>(): io.github.kdroidfilter.composemediaplayer/IosMediaAdvancedControls? // io.github.kdroidfilter.composemediaplayer/iosMediaAdvancedControls.<get-iosMediaAdvancedControls>|<get-iosMediaAdvancedControls>@io.github.kdroidfilter.composemediaplayer.VideoPlayerState(){}[0]
+
+// Targets: [ios]
+final fun io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_IosMediaThumbnail$stableprop_getter(): kotlin/Int // io.github.kdroidfilter.composemediaplayer/io_github_kdroidfilter_composemediaplayer_IosMediaThumbnail$stableprop_getter|io_github_kdroidfilter_composemediaplayer_IosMediaThumbnail$stableprop_getter(){}[0]

@@ -24,6 +24,7 @@ import io.github.kdroidfilter.composemediaplayer.DecoderColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.DesktopMediaSourcePolicy
 import io.github.kdroidfilter.composemediaplayer.DesktopPlayerLifecycle
 import io.github.kdroidfilter.composemediaplayer.DesktopVideoBackend
+import io.github.kdroidfilter.composemediaplayer.DesktopVideoSurfaceMode
 import io.github.kdroidfilter.composemediaplayer.DisplayColorCapabilities
 import io.github.kdroidfilter.composemediaplayer.DolbyVisionPolicy
 import io.github.kdroidfilter.composemediaplayer.DynamicMetadataHandling
@@ -40,6 +41,8 @@ import io.github.kdroidfilter.composemediaplayer.JvmLibVlcInstallation
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcMediaProbe
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcSubtitleStream
 import io.github.kdroidfilter.composemediaplayer.JvmLibVlcTrackInfo
+import io.github.kdroidfilter.composemediaplayer.JvmMediaAdvancedControls
+import io.github.kdroidfilter.composemediaplayer.JvmMediaThumbnail
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_AUDIO_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.LIBVLC_CANVAS_SUBTITLE_TRACK_ID_PREFIX
 import io.github.kdroidfilter.composemediaplayer.MediaChapter
@@ -73,6 +76,7 @@ import io.github.kdroidfilter.composemediaplayer.audioTrackSelectionResult
 import io.github.kdroidfilter.composemediaplayer.desktop.tao.desktopCanvasRendererLabel
 import io.github.kdroidfilter.composemediaplayer.externalHlsTrackStreamIndex
 import io.github.kdroidfilter.composemediaplayer.forcedJvmDesktopBackend
+import io.github.kdroidfilter.composemediaplayer.generateIsolatedJvmMediaThumbnails
 import io.github.kdroidfilter.composemediaplayer.hasPresentedTextureFrameAfter
 import io.github.kdroidfilter.composemediaplayer.isExternalHlsAudioTrackId
 import io.github.kdroidfilter.composemediaplayer.isExternalHlsSubtitleTrackId
@@ -320,10 +324,11 @@ internal fun windowsConfirmedDecoderDynamicRanges(source: VideoColorInfo): Set<V
  * Windows implementation of the video player state.
  * Handles media playback using Media Foundation on Windows platform.
  */
-@Suppress("MagicNumber", "TooManyFunctions")
+@Suppress("LargeClass", "MagicNumber", "TooManyFunctions")
 class WindowsVideoPlayerState(
     private val playbackOptions: VideoPlaybackOptions = VideoPlaybackOptions(),
-) : VideoPlayerState {
+) : VideoPlayerState,
+    JvmMediaAdvancedControls {
     private val colorPipelineController =
         VideoColorPipelineController(playbackOptions, jvmPlayerCapabilities(playbackOptions))
     override val colorPipelineStatus: StateFlow<VideoColorPipelineStatus> = colorPipelineController.status
@@ -967,6 +972,26 @@ class WindowsVideoPlayerState(
             }
         }
     }
+
+    override suspend fun thumbnails(
+        positions: List<Duration>,
+        maximumWidth: Int,
+        emit: suspend (index: Int, thumbnail: JvmMediaThumbnail?) -> Unit,
+    ) = generateIsolatedJvmMediaThumbnails(
+        positions = positions,
+        maximumWidth = maximumWidth,
+        sourceUri = lastUri,
+        requestHeaders = lastRequestHeaders.toMap(),
+        initialAspectRatio = aspectRatio,
+        createPreview = {
+            WindowsVideoPlayerState(
+                playbackOptions.copy(desktopVideoSurfaceMode = DesktopVideoSurfaceMode.COMPOSE),
+            )
+        },
+        resizePreview = WindowsVideoPlayerState::onResized,
+        currentFrame = { preview -> preview.currentFrameState.value },
+        emit = emit,
+    )
 
     override fun openFile(
         file: PlatformFile,
